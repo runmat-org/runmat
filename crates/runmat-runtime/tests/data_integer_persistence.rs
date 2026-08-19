@@ -57,6 +57,7 @@ fn data_payloads_roundtrip_all_integer_classes_and_legacy_json() {
             dtype: dtype.to_string(),
             shape: vec![1, 2],
             values: values.clone(),
+            imaginary_values: None,
         };
         let bytes = serde_json::to_vec(&payload).expect("encode payload");
         let decoded: DataArrayPayload = serde_json::from_slice(&bytes).expect("decode payload");

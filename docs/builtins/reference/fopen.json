@@ -35,9 +35,9 @@
     "`fid = fopen(filename, permission, machinefmt, encoding)` records the requested machine format (`'native'`, `'ieee-le'`, `'ieee-be'`) and text encoding (defaults to UTF-8 in text mode, `binary` otherwise) for later inspection.",
     "`[fid, message] = fopen(...)` returns an empty character vector on success and the operating-system error message on failure.",
     "`[filename, permission, machinefmt, encodingOut] = fopen(fid)` queries an existing file identifier.",
-    "In `runmat` compatibility mode, `[fid_list, names, machinefmts, encodings] = fopen('all')` lists open streams and files; R2026a removed the legacy `'all'` selector in favor of `openedFiles`, so no-argument and `'all'` forms are rejected in MATLAB-compatible modes.",
+    "In `runmat` compatibility mode, `[fid_list, names, machinefmts, encodings] = fopen('all')` lists open streams and files; the compatibility target removed the legacy `'all'` selector in favor of `openedFiles`, so no-argument and `'all'` forms are rejected in MATLAB-compatible modes.",
     "In `runmat` compatibility mode, `[fid_list, names] = fopen('all', machinefmt)` additionally filters the legacy listing by recorded machine format.",
-    "R2026a documents double query identifiers. RunMat independently gates typed integer, single, and provider-resident query identifiers before gather; integer identifiers are checked exactly against the registry domain."
+    "The compatibility target documents double query identifiers. RunMat independently gates typed integer, single, and provider-resident query identifiers before gather; integer identifiers are checked exactly against the registry domain."
   ],
   "examples": [
     {
@@ -88,7 +88,7 @@
     },
     {
       "question": "Does `fopen('all')` include standard input and output?",
-      "answer": "Only in `runmat` compatibility mode. R2026a removed `fopen('all')`; RunMat preserves the legacy listing as an explicitly gated extension."
+      "answer": "Only in `runmat` compatibility mode. The compatibility target removed `fopen('all')`; RunMat preserves the legacy listing as an explicitly gated extension."
     },
     {
       "question": "Are machine formats honoured during reads and writes?",

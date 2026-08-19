@@ -2,12 +2,57 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-use super::op_common::{map_figure_error, parse_text_command};
+use super::op_common::{map_figure_error, parse_numeric_text_command};
 use super::state::set_xlabel_for_axes;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+
+pub const XLABEL_INTEGER_AXES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "xlabel-integer-axes-handle",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "Allow typed-integer aliases for encoded axes handles",
+    error_identifier: Some("RunMat:compatibility:XlabelIntegerAxesHandleExtension"),
+};
+pub const XLABEL_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [XLABEL_INTEGER_AXES_EXTENSION];
+
+const XLABEL_INTEGER_TEXT_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "txt",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes:
+            "A scalar integer label is formatted from its exact signed or unsigned decimal value.",
+    }];
+const XLABEL_INTEGER_FONT_SIZE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "FontSize",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "All eight integer classes are documented for FontSize; accepted values are positive finite practical renderer sizes.",
+    }];
+const XLABEL_INTEGER_AXES_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "ax",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer aliases for RunMat's encoded axes handles are separately gated.",
+    }];
+pub const XLABEL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor { form: "h = xlabel(integer_txt)", inputs: &XLABEL_INTEGER_TEXT_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::ScalarOnly, notes: "The exact decimal spelling becomes the stored String property; the graphics handle is returned as a double scalar." },
+    BuiltinIntegerCapabilityDescriptor { form: "h = xlabel(..., 'FontSize', integer_size)", inputs: &XLABEL_INTEGER_FONT_SIZE_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "FontSize crosses the graphics scalar boundary after shared positive finite size validation." },
+    BuiltinIntegerCapabilityDescriptor { form: "h = xlabel(integer_ax, txt, ...)", inputs: &XLABEL_INTEGER_AXES_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "RunMat mode parses the gated scalar before resolving the encoded axes handle; strict mode rejects before graphics state access." },
+];
 
 const XLABEL_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "h",
@@ -138,10 +183,23 @@ pub const XLABEL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::xlabel::XLABEL_DESCRIPTOR),
+    extensions(crate::builtins::plotting::xlabel::XLABEL_EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::xlabel::XLABEL_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::xlabel"
 )]
 pub fn xlabel_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
-    let command = parse_text_command("xlabel", &args)?;
+    if args.len() >= 2
+        && args.len().is_multiple_of(2)
+        && args
+            .first()
+            .is_some_and(crate::builtins::common::validation::value_has_native_integer_class)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &XLABEL_INTEGER_AXES_EXTENSION,
+            "xlabel",
+        )?;
+    }
+    let command = parse_numeric_text_command("xlabel", &args)?;
     set_xlabel_for_axes(
         command.target.0,
         command.target.1,
@@ -163,6 +221,7 @@ mod tests {
     };
     use runmat_plot::plots::Figure;
     use runmat_value::{CellArray, StringArray};
+    use runmat_value::{IntValue, IntegerStorage};
 
     fn setup_plot_tests() -> PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -230,6 +289,51 @@ mod tests {
         ])
         .unwrap_err();
         assert!(err.message.contains("Interpreter must be a string"));
+    }
+
+    #[test]
+    fn xlabel_formats_native_integer_scalars_exactly() {
+        let _guard = setup_plot_tests();
+        xlabel_builtin(vec![
+            Value::Tensor(
+                runmat_value::Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+                    .expect("scalar integer label"),
+            ),
+            Value::String("FontSize".into()),
+            Value::Int(IntValue::U8(14)),
+        ])
+        .expect("integer label");
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        assert_eq!(
+            fig.axes_metadata(0).unwrap().x_label.as_deref(),
+            Some("18446744073709551615")
+        );
+        assert_eq!(
+            fig.axes_metadata(0).unwrap().x_label_style.font_size,
+            Some(14.0)
+        );
+    }
+
+    #[test]
+    fn xlabel_typed_integer_axes_alias_is_gated() {
+        let _guard = setup_plot_tests();
+        let axes_handle = crate::builtins::plotting::subplot::subplot_builtin(
+            Value::Num(1.0),
+            Value::Num(1.0),
+            Value::Num(1.0),
+        )
+        .expect("axes handle") as u64;
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = xlabel_builtin(vec![
+            Value::Int(IntValue::U64(axes_handle)),
+            Value::String("Blocked".into()),
+        ])
+        .expect_err("strict mode rejects typed integer axes aliases");
+        assert_eq!(
+            error.identifier(),
+            XLABEL_INTEGER_AXES_EXTENSION.error_identifier
+        );
+        drop(strict);
     }
 
     #[test]

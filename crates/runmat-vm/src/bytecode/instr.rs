@@ -1,6 +1,7 @@
 use runmat_hir::{CallableFallbackPolicy, CallableIdentity, FunctionId};
 use runmat_runtime::call::arguments::ArgumentSpec;
 use runmat_runtime::indexing::EndExpr;
+use runmat_value::IntValue;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,6 +19,7 @@ pub enum EmitLabel {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PropertyDefaultLiteral {
     Num(f64),
+    Int(IntValue),
     Bool(bool),
     String(String),
 }
@@ -26,6 +28,7 @@ pub enum PropertyDefaultLiteral {
 pub enum Instr {
     // Constant and variable loads.
     LoadConst(f64),
+    LoadInt(IntValue),
     LoadComplex(f64, f64),
     LoadBool(bool),
     LoadString(String),
@@ -394,6 +397,7 @@ impl Instr {
 
         match self {
             Instr::LoadConst(_)
+            | Instr::LoadInt(_)
             | Instr::LoadComplex(_, _)
             | Instr::LoadBool(_)
             | Instr::LoadString(_)

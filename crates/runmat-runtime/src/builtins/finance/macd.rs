@@ -5,6 +5,11 @@ use runmat_builtins::{
     BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
     BuiltinParamType, BuiltinSignatureDescriptor, ResolveContext, Type,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, Tensor, Value};
 
@@ -27,6 +32,47 @@ const MACD_NONDOUBLE_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExten
 };
 
 pub const MACD_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [MACD_NONDOUBLE_MATRIX_EXTENSION];
+
+const MACD_INTEGER_MATRIX_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Data matrix",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents raw matrix Data as double; RunMat mode admits native integer M-by-4 matrices only when every price is exactly representable at the binary64 EMA boundary.",
+    }];
+
+const MACD_INTEGER_TABLE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "High/Low/Open/Close table variables",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented table and timetable containers impose names and vector shapes without restricting the numeric storage class of their price variables.",
+    }];
+
+pub const MACD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[MACDLine, SignalLine] = macd(integer_Data_matrix)",
+        inputs: &MACD_INTEGER_MATRIX_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The raw-matrix extension is gated before provider access, reads authoritative integer storage, rejects lossy binary64 conversion, and computes host-double column outputs.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[MACDLine, SignalLine] = macd(table_with_integer_prices)",
+        inputs: &MACD_INTEGER_TABLE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer price variables remain exact until a checked binary64 EMA boundary; outputs preserve the table or timetable container and use double Close data.",
+    },
+];
 
 const PARAM_DATA: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "Data",
@@ -121,6 +167,7 @@ fn macd_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     type_resolver(macd_type),
     descriptor(crate::builtins::finance::macd::DESCRIPTOR),
     extensions(crate::builtins::finance::macd::MACD_EXTENSIONS),
+    integer_capabilities(crate::builtins::finance::macd::MACD_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::finance::macd"
 )]
 async fn macd_builtin(data: Value) -> BuiltinResult<Value> {
@@ -167,6 +214,13 @@ struct MacdEval {
 
 impl MacdInput {
     async fn from_value(value: Value) -> BuiltinResult<Self> {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            &value,
+            &MACD_NONDOUBLE_MATRIX_EXTENSION,
+            NAME,
+            "matrix price",
+        )
+        .await?;
         let mut resident_declared_double = false;
         if let Value::GpuTensor(handle) = &value {
             resident_declared_double = runmat_accelerate_api::handle_class_name(handle)
@@ -326,6 +380,11 @@ fn validate_price_variables(object: &runmat_value::ObjectInstance) -> BuiltinRes
                 "macd: table input must contain variable '{required}'"
             )));
         };
+        if !crate::builtins::common::validation::native_integer_value_is_exact_f64(value) {
+            return Err(macd_invalid(format!(
+                "macd: table variable '{required}' integer values must be exactly representable as double"
+            )));
+        }
         let tensor = tensor_from_numeric_value(value.clone())?;
         let shape = tensor_shape_for(&tensor);
         let rows = shape
@@ -497,16 +556,57 @@ mod tests {
     }
 
     #[test]
+    fn integer_prices_reject_before_a_lossy_binary64_boundary() {
+        let wide = (1_u64 << 53) + 1;
+        let matrix = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![wide; 4]), vec![1, 4])
+                .expect("wide matrix"),
+        );
+        let error = call_with_mode(matrix, true).expect_err("lossy raw price must reject");
+        assert!(error.message().contains("exactly representable"));
+
+        let table = table_from_columns(
+            vec![
+                "High".to_string(),
+                "Low".to_string(),
+                "Open".to_string(),
+                "Close".to_string(),
+            ],
+            vec![
+                Value::Num(2.0),
+                Value::Num(1.0),
+                Value::Num(1.0),
+                Value::Tensor(
+                    Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1])
+                        .expect("wide close"),
+                ),
+            ],
+        )
+        .expect("table");
+        let error = call(table).expect_err("lossy table price must reject");
+        assert!(error.message().contains("exactly representable"));
+    }
+
+    #[test]
+    fn macd_integer_capabilities_separate_matrix_extension_and_table_data() {
+        assert_eq!(MACD_INTEGER_CAPABILITIES.len(), 2);
+        assert_eq!(
+            MACD_INTEGER_CAPABILITIES[0].inputs[0].availability,
+            BuiltinIntegerInputAvailability::RunMatOnly
+        );
+        assert_eq!(
+            MACD_INTEGER_CAPABILITIES[1].inputs[0].availability,
+            BuiltinIntegerInputAvailability::Documented
+        );
+    }
+
+    #[test]
     fn resident_nondouble_matrix_uses_the_same_compatibility_gate() {
         crate::builtins::common::test_support::with_test_provider(|provider| {
             let double = Tensor::new(vec![2.0, 1.0, 1.0, 1.0], vec![1, 4]).expect("matrix");
             let double_handle =
                 crate::builtins::common::gpu_helpers::upload_tensor(provider, &double)
                     .expect("upload");
-            runmat_accelerate_api::set_handle_precision(
-                &double_handle,
-                runmat_accelerate_api::ProviderPrecision::F32,
-            );
             runmat_accelerate_api::set_handle_class_name(&double_handle, "double");
             call_with_mode(Value::GpuTensor(double_handle), false)
                 .expect("provider precision does not change documented double class");
@@ -516,10 +616,6 @@ mod tests {
                     Tensor::from_f32(vec![2.0, 1.0, 1.0, 1.0], vec![1, 4]).expect("matrix");
                 let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &matrix)
                     .expect("upload");
-                runmat_accelerate_api::set_handle_precision(
-                    &handle,
-                    runmat_accelerate_api::ProviderPrecision::F32,
-                );
                 runmat_accelerate_api::set_handle_class_name(&handle, "single");
                 handle
             };

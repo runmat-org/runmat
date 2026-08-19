@@ -1,0 +1,11 @@
+{
+  "title": "ylim",
+  "category": "plotting",
+  "keywords": ["ylim", "axis limits", "plotting"],
+  "summary": "Query or set y-axis limits.",
+  "description": "`ylim([ymin ymax])` sets the y-axis limits, while `ylim()` returns the current limits as a double vector.",
+  "behaviors": ["The two-element limits vector may use single, double, or any native integer class.", "Native integer endpoints are ordered using their exact values before conversion to graphics coordinates.", "Endpoints must be finite, increasing, and remain distinct in the graphics coordinate domain.", "The supported text modes are `'auto'`, `'tight'`, and `'manual'`."],
+  "examples": [{"description": "Set integer limits", "input": "plot(1:10);\nylim(int16([0 12]))"}, {"description": "Query current limits", "input": "limits = ylim()"}],
+  "links": [{"label": "xlim", "url": "./xlim"}, {"label": "zlim", "url": "./zlim"}, {"label": "axis", "url": "./axis"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/plotting/ops/ylim.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/ylim.rs"}
+}

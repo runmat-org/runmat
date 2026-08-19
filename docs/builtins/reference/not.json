@@ -36,7 +36,7 @@
     "Works on scalars, vectors, matrices, and N-D tensors with MATLAB broadcasting semantics.",
     "Accepts logical, numeric, complex, and character arrays. Character code points equal to zero become `true`, all others become `false`.",
     "Returns a logical scalar when the input has exactly one element; otherwise the result is a logical array matching the input shape.",
-    "Honors gpuArray residency. If the active acceleration provider exposes `logical_not`, the entire operation runs on the GPU; otherwise RunMat falls back to the CPU path automatically.",
+    "If the active acceleration provider exposes a compatible floating `logical_not` hook, the operation runs on the GPU. Native integer handles use exact gather fallback; automatic residency may return to host, while explicit gpuArray inputs restore a logical gpuArray result.",
     "`NaN` evaluates to `true`, so `not(NaN)` produces `false`, consistent with MATLAB."
   ],
   "examples": [
@@ -77,7 +77,7 @@
     },
     {
       "question": "Can I pass a `gpuArray` to `not`?",
-      "answer": "Absolutely. If the provider implements `logical_not`, the negation runs entirely on the GPU. Otherwise the runtime gathers to the host, performs the operation, and returns a logical array."
+      "answer": "Yes. Compatible floating providers run the negation on the GPU. Exact fallback gathers automatically; explicitly requested gpuArray inputs are re-uploaded as logical gpuArrays, while internal automatic residency may remain on host."
     },
     {
       "question": "What happens with empty arrays?",

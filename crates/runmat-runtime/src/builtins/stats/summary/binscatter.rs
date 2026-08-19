@@ -1463,6 +1463,7 @@ mod tests {
             shape: vec![2, 1],
             device_id: 0,
             buffer_id: 9_369_001,
+            descriptor: Default::default(),
         });
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let err = futures::executor::block_on(binscatter_builtin(vec![

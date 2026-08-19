@@ -56,7 +56,7 @@ pub const CSVREAD_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
 const CSVREAD_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 3] = [
     BuiltinIntegerInputCapability { name: "row", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "All eight integer classes are documented for the zero-based row control and are validated from authoritative storage." },
     BuiltinIntegerInputCapability { name: "col", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "All eight integer classes are documented for the zero-based column control and are validated from authoritative storage." },
-    BuiltinIntegerInputCapability { name: "range", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The documented four-element numeric range accepts all eight integer classes without materializing a lossy double mirror." },
+    BuiltinIntegerInputCapability { name: "range", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The documented four-element numeric range accepts all eight integer classes and decodes every offset exactly." },
 ];
 pub const CSVREAD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "M = csvread(filename, integer_row, integer_col, integer_range?)", inputs: &CSVREAD_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Integer inputs control file selection only. Values are read exactly from authoritative integer storage; the CSV result remains double or complex double." }];
 
@@ -1499,6 +1499,7 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX - 396,
+            descriptor: Default::default(),
         });
         let error = csvread_builtin(Value::from("does-not-exist.csv"), vec![resident]).unwrap_err();
         assert_eq!(

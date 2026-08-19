@@ -349,7 +349,7 @@ pub const FREQZ_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = 
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Point count is decoded exactly, must be at least two, and selects response shape without an f64 mirror.",
+        notes: "Point count is decoded exactly in every supported integer class, must be at least two, and selects the response shape.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "[h,f] = freqz(b,a,n,integer_fs)",
@@ -935,6 +935,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = call(resident, Value::Num(1.0), &[], None)

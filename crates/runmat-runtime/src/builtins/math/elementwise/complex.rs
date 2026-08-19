@@ -61,7 +61,7 @@ pub const COMPLEX_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] 
         overflow: BuiltinIntegerOverflowRule::Saturate,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::SameSizeOrScalar,
-        notes: "Host complex integer storage is exact for all eight classes. Resident typed integers gather before composition because the current provider ABI has no typed-complex-integer buffer contract.",
+        notes: "Host complex integer storage is exact for all eight classes. Resident typed integers gather exactly for composition and restore paired native storage to the owning provider.",
     },
 ];
 
@@ -331,11 +331,24 @@ async fn binary_complex(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
         match try_binary_complex_gpu(&lhs, &rhs).await {
             Ok(Some(value)) => return Ok(value),
             Ok(None) => {
+                let output_source = gpu_helpers::select_resident_output_source(
+                    [&lhs, &rhs].into_iter().filter_map(|value| match value {
+                        Value::GpuTensor(handle) => Some(handle.clone()),
+                        _ => None,
+                    }),
+                    BUILTIN_NAME,
+                )?;
                 let real_value = gather_if_gpu_value(&lhs).await?;
                 let imag_value = gather_if_gpu_value(&rhs).await?;
                 let real_input = value_into_real_input(real_value)?;
                 let imag_input = value_into_real_input(imag_value)?;
-                return compose_complex(&real_input, &imag_input);
+                let result = compose_complex(&real_input, &imag_input)?;
+                return match output_source {
+                    Some(source) => {
+                        gpu_helpers::restore_class_preserving_value(&source, result, BUILTIN_NAME)
+                    }
+                    None => Ok(result),
+                };
             }
             Err(err) => return Err(err),
         }
@@ -353,8 +366,9 @@ async fn unary_complex_gpu(handle: runmat_accelerate_api::GpuTensorHandle) -> Bu
     }
 
     if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
-        let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await?;
-        return unary_complex_host(gathered);
+        let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await?;
+        let result = unary_complex_host(gathered)?;
+        return gpu_helpers::restore_class_preserving_value(&handle, result, BUILTIN_NAME);
     }
 
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
@@ -485,11 +499,6 @@ fn upload_real_tensor(
     let handle = gpu_helpers::upload_tensor(provider, tensor)
         .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INTERNAL, e))?;
     runmat_accelerate_api::set_handle_logical(&handle, false);
-    runmat_accelerate_api::set_handle_storage(
-        &handle,
-        runmat_accelerate_api::GpuTensorStorage::Real,
-    );
-    runmat_accelerate_api::set_handle_precision(&handle, provider.precision());
     Ok(handle)
 }
 
@@ -1028,7 +1037,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn complex_host_integer_with_resident_scalar_double_uses_exact_host_fallback() {
+    fn complex_host_integer_with_resident_scalar_double_restores_exact_owner_output() {
         test_support::with_test_provider(|provider| {
             let scalar = Tensor::new(vec![3.0], vec![1, 1]).expect("scalar");
             let handle = provider
@@ -1039,10 +1048,16 @@ pub(crate) mod tests {
                 .expect("upload");
             let real = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
                 .expect("integer");
-            let Value::ComplexTensor(result) =
+            let Value::GpuTensor(result) =
                 complex_call(Value::Tensor(real), vec![Value::GpuTensor(handle)]).expect("complex")
             else {
-                panic!("expected exact host fallback");
+                panic!("expected resident complex integer");
+            };
+            let Value::ComplexTensor(result) =
+                block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(result)))
+                    .expect("gather")
+            else {
+                panic!("expected complex integer tensor");
             };
             assert_eq!(
                 result.integer_storage().cloned(),
@@ -1058,14 +1073,20 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn complex_resident_integer_gathers_before_provider_hook_and_preserves_exact_class() {
+    fn complex_resident_integer_fallback_restores_exact_class_to_owner() {
         test_support::with_test_provider(|provider| {
             let real = Tensor::new_integer(IntegerStorage::U32(vec![u32::MAX]), vec![1, 1])
                 .expect("integer");
             let handle = gpu_helpers::upload_tensor(provider, &real).expect("upload");
             let result = complex_call(Value::GpuTensor(handle), Vec::new()).expect("complex");
-            let Value::ComplexTensor(result) = result else {
-                panic!("typed complex integer provider ABI is host fallback");
+            let Value::GpuTensor(result) = result else {
+                panic!("expected resident complex integer");
+            };
+            let Value::ComplexTensor(result) =
+                block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(result)))
+                    .expect("gather")
+            else {
+                panic!("expected complex integer tensor");
             };
             assert_eq!(
                 result.integer_storage().cloned(),
@@ -1463,6 +1484,48 @@ pub(crate) mod tests {
         });
     }
 
+    #[test]
+    fn complex_typed_integer_gpu_composition_stays_exact_and_resident() {
+        test_support::with_test_provider(|provider| {
+            let real = Tensor::new_integer(
+                IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+                vec![1, 2],
+            )
+            .expect("real");
+            let imaginary = Tensor::new_integer(IntegerStorage::U64(vec![7, 11]), vec![1, 2])
+                .expect("imaginary");
+            let real = gpu_helpers::upload_tensor(provider, &real).expect("upload real");
+            let imaginary =
+                gpu_helpers::upload_tensor(provider, &imaginary).expect("upload imaginary");
+            let Value::GpuTensor(output) =
+                complex_call(Value::GpuTensor(real), vec![Value::GpuTensor(imaginary)])
+                    .expect("complex")
+            else {
+                panic!("expected resident complex integer");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&output),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&output),
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            );
+            let Value::ComplexTensor(gathered) =
+                block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(output)))
+                    .expect("gather")
+            else {
+                panic!("expected complex integer tensor");
+            };
+            let storage = gathered.integer_storage().expect("integer storage");
+            assert_eq!(
+                storage.real,
+                IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX])
+            );
+            assert_eq!(storage.imag, IntegerStorage::U64(vec![7, 11]));
+        });
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn complex_empty_gpu_inputs_stay_resident() {
@@ -1594,6 +1657,44 @@ pub(crate) mod tests {
         let gathered =
             block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(out))).expect("gather");
         assert_eq!(gathered, expected);
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn complex_wgpu_typed_uint64_composition_preserves_wide_components() {
+        let _guard = test_support::accel_test_lock();
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let Some(provider) = runmat_accelerate_api::provider() else {
+            return;
+        };
+        let real = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            vec![1, 2],
+        )
+        .expect("real");
+        let imaginary =
+            Tensor::new_integer(IntegerStorage::U64(vec![13, 17]), vec![1, 2]).expect("imaginary");
+        let real = gpu_helpers::upload_tensor(provider, &real).expect("upload real");
+        let imaginary = gpu_helpers::upload_tensor(provider, &imaginary).expect("upload imaginary");
+        let Value::GpuTensor(output) =
+            complex_call(Value::GpuTensor(real), vec![Value::GpuTensor(imaginary)])
+                .expect("complex")
+        else {
+            panic!("expected resident complex integer");
+        };
+        let Value::ComplexTensor(gathered) =
+            block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(output))).expect("gather")
+        else {
+            panic!("expected complex integer");
+        };
+        let storage = gathered.integer_storage().expect("integer storage");
+        assert_eq!(
+            storage.real,
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX])
+        );
+        assert_eq!(storage.imag, IntegerStorage::U64(vec![13, 17]));
     }
 
     #[cfg(feature = "wgpu")]

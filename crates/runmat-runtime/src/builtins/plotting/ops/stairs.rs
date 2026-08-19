@@ -6,12 +6,18 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_plot::gpu::line::{
     self, LineGpuInputs as MarkerGpuInputs, LineGpuParams as MarkerGpuParams,
 };
 use runmat_plot::gpu::stairs::{StairsGpuInputs, StairsGpuParams};
 use runmat_plot::gpu::ScalarType;
+use runmat_plot::plots::NumericPlotData;
 use runmat_plot::plots::{LineMarkerAppearance, LineStyle, StairsPlot};
 use runmat_value::{Tensor, Value};
 
@@ -21,7 +27,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor as tensor_utils;
 
-use super::common::numeric_pair;
+use super::common::numeric_plot_data_pair;
 use super::gpu_helpers::gpu_xy_bounds;
 use super::op_common::line_inputs::NumericInput as StairsInput;
 use super::op_common::{apply_axes_target, split_leading_axes_handle};
@@ -289,6 +295,26 @@ pub const STAIRS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &STAIRS_ERRORS,
 };
 
+const STAIRS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X and Y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target explicitly lists all eight integer classes for both coordinate roles. Native class, shape, and exact values remain authoritative as graphics-object source data.",
+    }];
+pub const STAIRS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "h = stairs(integer_Y) or stairs(integer_X, integer_Y, ...)",
+        inputs: &STAIRS_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "XData and YData retain native storage while rendering deliberately materializes floating geometry. Floating gpuArray inputs can use the direct WGPU sink; integer resident inputs gather exactly through their owner.",
+    }];
+
 fn stairs_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl AsRef<str>,
@@ -352,6 +378,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::stairs::STAIRS_DESCRIPTOR),
+    integer_capabilities(crate::builtins::plotting::stairs::STAIRS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::stairs"
 )]
 pub fn stairs_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
@@ -434,9 +461,9 @@ pub fn stairs_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
                 .into_tensor("stairs")
                 .map_err(map_stairs_invalid_argument)?,
         );
-        let (x_vals, y_vals) =
-            numeric_pair(x_tensor, y_tensor, "stairs").map_err(map_stairs_invalid_argument)?;
-        let plot = build_stairs_plot(x_vals, y_vals, &appearance, marker_meta, &label)
+        let (x_data, y_data) = numeric_plot_data_pair(x_tensor, y_tensor, "stairs")
+            .map_err(map_stairs_invalid_argument)?;
+        let plot = build_stairs_plot(x_data, y_data, &appearance, marker_meta, &label)
             .map_err(map_stairs_invalid_argument)?;
         let plot_index = figure.add_stairs_plot_on_axes(plot, axes);
         *plot_index_slot.borrow_mut() = Some((axes, plot_index));
@@ -458,8 +485,8 @@ pub fn stairs_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
 }
 
 fn build_stairs_plot(
-    x: Vec<f64>,
-    y: Vec<f64>,
+    x: NumericPlotData,
+    y: NumericPlotData,
     appearance: &LineAppearance,
     marker_meta: Option<LineMarkerAppearance>,
     label: &str,
@@ -476,7 +503,7 @@ fn build_stairs_plot(
             "stairs: inputs must contain at least two elements",
         ));
     }
-    let mut plot = StairsPlot::new(x, y)
+    let mut plot = StairsPlot::new_with_source(x, y)
         .map_err(|e| plotting_error(BUILTIN_NAME, format!("stairs: {e}")))?
         .with_style(appearance.color, appearance.line_width)
         .with_label(label);
@@ -616,6 +643,7 @@ fn apply_stairs_marker_metadata(plot: &mut StairsPlot, marker_meta: Option<LineM
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::state::current_axes_handle_for_figure;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
     use crate::builtins::plotting::{
@@ -652,6 +680,35 @@ pub(crate) mod tests {
             panic!("expected tensor");
         };
         assert_eq!(x.materialize_f64(), vec![1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn stairs_graphics_properties_preserve_wide_integer_source_storage() {
+        let _guard = crate::builtins::plotting::tests::lock_plot_registry();
+        setup_plot_tests();
+        let wide = 9_007_199_254_740_993_u64;
+        let handle = stairs_builtin(vec![
+            cleared_int_value(IntegerStorage::U64(vec![wide, wide + 2]), vec![1, 2]),
+            cleared_int_value(IntegerStorage::I16(vec![-3, 4]), vec![2, 1]),
+        ])
+        .expect("stairs");
+        let Value::Tensor(x) =
+            get_builtin(vec![Value::Num(handle), Value::from("XData")]).expect("XData")
+        else {
+            panic!("expected XData tensor");
+        };
+        let Value::Tensor(y) =
+            get_builtin(vec![Value::Num(handle), Value::from("YData")]).expect("YData")
+        else {
+            panic!("expected YData tensor");
+        };
+        assert_eq!(
+            x.integer_storage(),
+            Some(&IntegerStorage::U64(vec![wide, wide + 2]))
+        );
+        assert_eq!(y.integer_storage(), Some(&IntegerStorage::I16(vec![-3, 4])));
+        assert_eq!(x.shape, vec![1, 2]);
+        assert_eq!(y.shape, vec![2, 1]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

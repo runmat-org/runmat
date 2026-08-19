@@ -5,11 +5,17 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
+use runmat_plot::plots::NumericPlotData;
 use runmat_plot::plots::{ColorMap, ShadingMode, SurfacePlot};
 #[cfg(test)]
-use runmat_value::Tensor;
-use runmat_value::Value;
+use runmat_value::IntegerStorage;
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -29,6 +35,43 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use std::sync::Arc;
 
 const BUILTIN_NAME: &str = "mesh";
+
+const INTEGER_X: [BuiltinIntegerInputCapability; 1] = [mesh_integer_input("X")];
+const INTEGER_Y: [BuiltinIntegerInputCapability; 1] = [mesh_integer_input("Y")];
+const INTEGER_Z: [BuiltinIntegerInputCapability; 1] = [mesh_integer_input("Z")];
+
+const fn mesh_integer_input(name: &'static str) -> BuiltinIntegerInputCapability {
+    BuiltinIntegerInputCapability {
+        name,
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes:
+            "The compatibility target explicitly lists every built-in integer class for this surface coordinate role.",
+    }
+}
+
+const fn mesh_integer_capability(
+    form: &'static str,
+    inputs: &'static [BuiltinIntegerInputCapability],
+) -> BuiltinIntegerCapabilityDescriptor {
+    BuiltinIntegerCapabilityDescriptor {
+        form,
+        inputs,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Native class, exact values, and shape remain authoritative on XData/YData/ZData and in RunMat scene persistence; rendering and client-side GPU handling are explicit floating boundaries. The documented independent C color-array form is a general unimplemented graphics gap, not an integer coercion rule.",
+    }
+}
+
+pub const MESH_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    mesh_integer_capability("s = mesh(integer_X, Y, Z, ...)", &INTEGER_X),
+    mesh_integer_capability("s = mesh(X, integer_Y, Z, ...)", &INTEGER_Y),
+    mesh_integer_capability("s = mesh(X, Y, integer_Z, ...)", &INTEGER_Z),
+];
 
 const MESH_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "h",
@@ -228,12 +271,27 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::mesh::MESH_DESCRIPTOR),
+    integer_capabilities(crate::builtins::plotting::mesh::MESH_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::mesh"
 )]
 pub async fn mesh_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let (x, y, z, rest) =
         parse_surface_call_args_matlab_xy(args, BUILTIN_NAME).map_err(map_mesh_invalid_argument)?;
+    let source_x = numeric_plot_data_from_value(&x, BUILTIN_NAME)
+        .await
+        .map_err(map_mesh_invalid_argument)?;
+    let source_y = numeric_plot_data_from_value(&y, BUILTIN_NAME)
+        .await
+        .map_err(map_mesh_invalid_argument)?;
     let z_input = SurfaceDataInput::from_value(z, "mesh").map_err(map_mesh_invalid_argument)?;
+    let source_z = match &z_input {
+        SurfaceDataInput::Host(tensor) => Some(numeric_plot_data_from_tensor(tensor)),
+        SurfaceDataInput::Gpu(handle) => Some(numeric_plot_data_from_tensor(
+            &super::common::gather_tensor_from_gpu_async(handle.clone(), BUILTIN_NAME)
+                .await
+                .map_err(map_mesh_invalid_argument)?,
+        )),
+    };
     let (rows, cols) = z_input
         .grid_shape(BUILTIN_NAME)
         .map_err(map_mesh_invalid_argument)?;
@@ -308,6 +366,7 @@ pub async fn mesh_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         .with_wireframe(true)
         .with_shading(ShadingMode::Faceted);
     style.apply_to_plot(&mut surface);
+    retain_surface_source_data(&mut surface, source_x, source_y, source_z);
 
     let mut surface_opt = Some(surface);
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -332,6 +391,51 @@ pub async fn mesh_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         return Err(map_mesh_internal(err));
     }
     Ok(handle)
+}
+
+pub(crate) fn host_numeric_plot_data(value: &Value) -> Option<NumericPlotData> {
+    let tensor = Tensor::try_from(value).ok()?;
+    Some(numeric_plot_data_from_tensor(&tensor))
+}
+
+pub(crate) async fn numeric_plot_data_from_value(
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<Option<NumericPlotData>> {
+    match value {
+        Value::GpuTensor(handle) => Ok(Some(numeric_plot_data_from_tensor(
+            &super::common::gather_tensor_from_gpu_async(handle.clone(), builtin).await?,
+        ))),
+        _ => Ok(host_numeric_plot_data(value)),
+    }
+}
+
+pub(crate) fn numeric_plot_data_from_tensor(tensor: &Tensor) -> NumericPlotData {
+    NumericPlotData::new(
+        tensor
+            .clone()
+            .into_numeric_storage()
+            .expect("surface source is numeric"),
+        tensor.shape.clone(),
+    )
+    .expect("surface source shape is validated")
+}
+
+pub(crate) fn retain_surface_source_data(
+    surface: &mut SurfacePlot,
+    source_x: Option<NumericPlotData>,
+    source_y: Option<NumericPlotData>,
+    source_z: Option<NumericPlotData>,
+) {
+    let (fallback_x, fallback_y, fallback_z) = surface.source_data();
+    let fallback_x = fallback_x.cloned();
+    let fallback_y = fallback_y.cloned();
+    let fallback_z = fallback_z.cloned();
+    surface.set_source_data(
+        source_x.or(fallback_x),
+        source_y.or(fallback_y),
+        source_z.or(fallback_z),
+    );
 }
 
 async fn build_mesh_cpu(
@@ -375,7 +479,9 @@ pub(crate) fn build_mesh_surface(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::plotting::tests::ensure_plot_test_env;
+    use crate::builtins::plotting::get::get_builtin;
+    use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
+    use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
     use runmat_builtins::{ResolveContext, Type};
 
     fn setup_plot_tests() {
@@ -426,5 +532,64 @@ pub(crate) mod tests {
         setup_plot_tests();
         let err = futures::executor::block_on(mesh_builtin(vec![])).expect_err("missing input");
         assert_eq!(err.identifier(), MESH_ERROR_INVALID_ARGUMENT.identifier);
+    }
+
+    #[test]
+    fn mesh_zdata_property_retains_wide_integer_storage() {
+        let _guard = lock_plot_registry();
+        setup_plot_tests();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        let expected = IntegerStorage::U64(vec![
+            9_007_199_254_740_993,
+            9_007_199_254_740_994,
+            9_007_199_254_740_995,
+            9_007_199_254_740_996,
+        ]);
+        let z = Tensor::new_integer(expected.clone(), vec![2, 2]).expect("integer mesh Z");
+        let handle = futures::executor::block_on(mesh_builtin(vec![Value::Tensor(z)]))
+            .expect("integer mesh");
+        let value = get_builtin(vec![Value::Num(handle), Value::String("ZData".into())])
+            .expect("mesh ZData");
+
+        assert!(
+            matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 2] && tensor.integer_storage() == Some(&expected))
+        );
+    }
+
+    #[test]
+    fn mesh_integer_capabilities_cover_all_coordinate_roles() {
+        assert_eq!(MESH_INTEGER_CAPABILITIES.len(), 3);
+        assert!(MESH_INTEGER_CAPABILITIES
+            .iter()
+            .all(|capability| capability.inputs[0].classes.len() == 8));
+    }
+
+    #[test]
+    fn mesh_resident_integer_zdata_retains_exact_host_property_authority() {
+        let _guard = lock_plot_registry();
+        setup_plot_tests();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let expected = IntegerStorage::U64(vec![
+                9_007_199_254_740_993,
+                9_007_199_254_740_994,
+                9_007_199_254_740_995,
+                9_007_199_254_740_996,
+            ]);
+            let source = Tensor::new_integer(expected.clone(), vec![2, 2]).expect("integer Z");
+            let resident = crate::builtins::common::gpu_helpers::upload_tensor(provider, &source)
+                .expect("resident integer Z");
+            let handle =
+                futures::executor::block_on(mesh_builtin(vec![Value::GpuTensor(resident)]))
+                    .expect("resident integer mesh");
+            let value = get_builtin(vec![Value::Num(handle), Value::String("ZData".into())])
+                .expect("mesh ZData");
+
+            assert!(
+                matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 2] && tensor.integer_storage() == Some(&expected))
+            );
+        });
     }
 }

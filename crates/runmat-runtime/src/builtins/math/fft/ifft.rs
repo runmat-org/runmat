@@ -318,14 +318,22 @@ const IFFT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "IFFT execution or tensor shaping fails.",
     message: "ifft: internal error",
 };
+const IFFT_ERROR_PROVIDER_INTEGRITY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IFFT.PROVIDER_INTEGRITY",
+    identifier: Some("RunMat:ifft:ProviderIntegrity"),
+    when:
+        "The provider returns ownership, shape, or physical metadata inconsistent with the request.",
+    message: "ifft: provider integrity error",
+};
 
-const IFFT_ERRORS: [BuiltinErrorDescriptor; 6] = [
+const IFFT_ERRORS: [BuiltinErrorDescriptor; 7] = [
     IFFT_ERROR_ARG_COUNT,
     IFFT_ERROR_INVALID_LENGTH,
     IFFT_ERROR_INVALID_DIMENSION,
     IFFT_ERROR_INVALID_SYMFLAG,
     IFFT_ERROR_INVALID_INPUT,
     IFFT_ERROR_INTERNAL,
+    IFFT_ERROR_PROVIDER_INTEGRITY,
 ];
 
 pub const IFFT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -377,7 +385,11 @@ fn ifft_provider_error(detail: impl AsRef<str>) -> RuntimeError {
         detail.as_ref()
     ))
     .with_builtin(BUILTIN_NAME)
-    .with_identifier("RunMat:ifft:ProviderIntegrity")
+    .with_identifier(
+        IFFT_ERROR_PROVIDER_INTEGRITY
+            .identifier
+            .expect("ifft provider-integrity descriptor identifier"),
+    )
     .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
     .build()
 }
@@ -1075,11 +1087,11 @@ pub(crate) mod tests {
                 shape: vec![4],
                 device_id: handle.device_id,
                 buffer_id: handle.buffer_id,
+                descriptor: runmat_accelerate_api::GpuTensorDescriptor {
+                    storage: Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved),
+                    ..handle.descriptor
+                },
             };
-            runmat_accelerate_api::set_handle_storage(
-                &spectrum_handle,
-                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            );
             let gpu =
                 ifft_builtin(Value::GpuTensor(spectrum_handle.clone()), Vec::new()).expect("ifft");
             let cpu_spectrum = HostComplexTensor::new(
@@ -1117,11 +1129,11 @@ pub(crate) mod tests {
                 shape: vec![4],
                 device_id: handle.device_id,
                 buffer_id: handle.buffer_id,
+                descriptor: runmat_accelerate_api::GpuTensorDescriptor {
+                    storage: Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved),
+                    ..handle.descriptor
+                },
             };
-            runmat_accelerate_api::set_handle_storage(
-                &spectrum_handle,
-                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            );
             let gpu = ifft_builtin(
                 Value::GpuTensor(spectrum_handle.clone()),
                 vec![Value::from("symmetric")],
@@ -1160,11 +1172,11 @@ pub(crate) mod tests {
                 shape: vec![4],
                 device_id: handle.device_id,
                 buffer_id: handle.buffer_id,
+                descriptor: runmat_accelerate_api::GpuTensorDescriptor {
+                    storage: Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved),
+                    ..handle.descriptor
+                },
             };
-            runmat_accelerate_api::set_handle_storage(
-                &spectrum_handle,
-                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            );
             let gpu = ifft_builtin(Value::GpuTensor(spectrum_handle.clone()), Vec::new())
                 .expect("gpu ifft");
             let cpu_spectrum = HostComplexTensor::new(
@@ -1206,10 +1218,6 @@ pub(crate) mod tests {
             let integer_handle =
                 crate::builtins::common::gpu_helpers::upload_tensor(provider, &integer)
                     .expect("upload integer");
-            runmat_accelerate_api::set_handle_integer_type(
-                &integer_handle,
-                runmat_accelerate_api::IntegerElementType::I32,
-            );
             let integer_output = ifft_builtin(Value::GpuTensor(integer_handle.clone()), Vec::new())
                 .expect("integer fallback");
             let Value::ComplexTensor(integer_output) = integer_output else {
@@ -1267,12 +1275,11 @@ pub(crate) mod tests {
                 shape: vec![4],
                 device_id: uploaded.device_id,
                 buffer_id: uploaded.buffer_id,
+                descriptor: runmat_accelerate_api::GpuTensorDescriptor {
+                    storage: Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved),
+                    ..uploaded.descriptor
+                },
             };
-            runmat_accelerate_api::set_handle_storage(
-                &input,
-                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            );
-            runmat_accelerate_api::set_handle_precision(&input, provider.precision());
             let output = ifft_builtin(
                 Value::GpuTensor(input.clone()),
                 vec![Value::from("symmetric")],

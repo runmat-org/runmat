@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum IntValue {
     I8(i8),
     I16(i16),
@@ -154,6 +154,23 @@ impl IntValue {
     }
 }
 
+impl From<&runmat_types::IntegerLiteral> for IntValue {
+    fn from(literal: &runmat_types::IntegerLiteral) -> Self {
+        use runmat_types::IntegerLiteralClass;
+
+        match literal.class() {
+            IntegerLiteralClass::Int8 => Self::I8(literal.bits() as i8),
+            IntegerLiteralClass::Int16 => Self::I16(literal.bits() as i16),
+            IntegerLiteralClass::Int32 => Self::I32(literal.bits() as i32),
+            IntegerLiteralClass::Int64 => Self::I64(literal.bits() as i64),
+            IntegerLiteralClass::UInt8 => Self::U8(literal.bits() as u8),
+            IntegerLiteralClass::UInt16 => Self::U16(literal.bits() as u16),
+            IntegerLiteralClass::UInt32 => Self::U32(literal.bits() as u32),
+            IntegerLiteralClass::UInt64 => Self::U64(literal.bits()),
+        }
+    }
+}
+
 /// One exact scalar read from or written to [`NumericStorage`].
 ///
 /// The variant is part of the value: extracting an integer does not first
@@ -235,6 +252,68 @@ impl NumericScalar {
             Self::U16(value) => value == 0,
             Self::U32(value) => value == 0,
             Self::U64(value) => value == 0,
+        }
+    }
+
+    pub fn is_nan(self) -> bool {
+        match self {
+            Self::F64(value) => value.is_nan(),
+            Self::F32(value) => value.is_nan(),
+            Self::I8(_)
+            | Self::I16(_)
+            | Self::I32(_)
+            | Self::I64(_)
+            | Self::U8(_)
+            | Self::U16(_)
+            | Self::U32(_)
+            | Self::U64(_) => false,
+        }
+    }
+
+    pub fn is_negative(self) -> bool {
+        match self {
+            Self::F64(value) => value < 0.0,
+            Self::F32(value) => value < 0.0,
+            Self::I8(value) => value < 0,
+            Self::I16(value) => value < 0,
+            Self::I32(value) => value < 0,
+            Self::I64(value) => value < 0,
+            Self::U8(_) | Self::U16(_) | Self::U32(_) | Self::U64(_) => false,
+        }
+    }
+
+    pub fn is_less_than_one(self) -> bool {
+        match self {
+            Self::F64(value) => value < 1.0,
+            Self::F32(value) => value < 1.0,
+            Self::I8(value) => value < 1,
+            Self::I16(value) => value < 1,
+            Self::I32(value) => value < 1,
+            Self::I64(value) => value < 1,
+            Self::U8(value) => value < 1,
+            Self::U16(value) => value < 1,
+            Self::U32(value) => value < 1,
+            Self::U64(value) => value < 1,
+        }
+    }
+
+    pub fn is_outside_closed_unit_interval(self, floating_tolerance: f64) -> bool {
+        match self {
+            Self::F64(value) => {
+                value < -1.0 - floating_tolerance || value > 1.0 + floating_tolerance
+            }
+            Self::F32(value) => {
+                f64::from(value) < -1.0 - floating_tolerance
+                    || f64::from(value) > 1.0 + floating_tolerance
+            }
+            Self::I8(value) => !(-1..=1).contains(&value),
+            Self::I16(value) => !(-1..=1).contains(&value),
+            Self::I32(value) => !(-1..=1).contains(&value),
+            Self::I64(value) => !(-1..=1).contains(&value),
+            Self::U8(value) => value > 1,
+            Self::U16(value) => value > 1,
+            Self::U32(value) => value > 1,
+            Self::U64(value) => value > 1,
         }
     }
 

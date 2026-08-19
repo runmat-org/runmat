@@ -3,7 +3,11 @@
 use nalgebra::{DMatrix, DVector};
 use num_complex::Complex64;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
@@ -121,6 +125,32 @@ pub const RLOCUS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &RLOCUS_ERRORS,
 };
+const RLOCUS_INTEGER_GAIN_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "rlocus-integer-gain",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "rlocus accepts a typed-integer gain vector as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RlocusIntegerGainExtension"),
+};
+const RLOCUS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [RLOCUS_INTEGER_GAIN_EXTENSION];
+const RLOCUS_INTEGER_GAIN_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "k",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The public gain surface does not document typed integer classes; RunMat mode admits them only through a checked binary64 root-locus boundary.",
+    }];
+pub const RLOCUS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "r = rlocus(sys, integer_k)",
+        inputs: &RLOCUS_INTEGER_GAIN_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Gain values are gated and checked before any provider lookup, then intentionally enter double polynomial-root computation; returned gains are double.",
+    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::rlocus")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -170,9 +200,30 @@ fn rlocus_error(
     suppress_auto_output = true,
     type_resolver(rlocus_type),
     descriptor(crate::builtins::control::rlocus::RLOCUS_DESCRIPTOR),
+    extensions(RLOCUS_EXTENSIONS),
+    integer_capabilities(RLOCUS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::control::rlocus"
 )]
 async fn rlocus_builtin(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::value_has_native_integer_class(&sys)
+        || matches!(sys, Value::GpuTensor(_))
+    {
+        return Err(rlocus_error(
+            "rlocus: expected a SISO dynamic system model",
+            &RLOCUS_ERROR_INVALID_MODEL,
+        ));
+    }
+    for value in &rest {
+        if crate::builtins::common::validation::value_has_native_integer_class(value) {
+            crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+                value,
+                &RLOCUS_INTEGER_GAIN_EXTENSION,
+                BUILTIN_NAME,
+                "gain",
+            )
+            .await?;
+        }
+    }
     if is_statement_form_call() {
         plot_root_locus_statement(sys, rest).await?;
         return Ok(Value::OutputList(Vec::new()));
@@ -1336,6 +1387,7 @@ mod tests {
 
     #[test]
     fn explicit_typed_integer_gain_returns_closed_loop_roots_and_gains() {
+        let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
         let sys = tf(vec![1.0], vec![1.0, 1.0]);
         let gains = Value::Tensor(
             Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 3]), vec![1, 3]).unwrap(),

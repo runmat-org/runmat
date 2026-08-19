@@ -4,6 +4,11 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
 
@@ -16,6 +21,25 @@ use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "plotyy";
+const PLOTYY_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X1/Y1/X2/Y2",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Both coordinate pairs accept all eight integer classes and retain native source properties on their line objects.",
+    }];
+pub const PLOTYY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[ax,h1,h2] = plotyy(integer_X1, integer_Y1, integer_X2, integer_Y2, ...)",
+        inputs: &PLOTYY_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Each delegated line retains exact native source and persisted property data; dual-axis display and rendering are explicit floating boundaries.",
+    }];
 
 const OUTPUT_AX_H1_H2: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
@@ -146,6 +170,7 @@ enum PlotSelector {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::plotyy::PLOTYY_DESCRIPTOR),
+    integer_capabilities(crate::builtins::plotting::plotyy::PLOTYY_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::plotyy"
 )]
 pub async fn plotyy_builtin(args: Vec<Value>) -> BuiltinResult<Value> {

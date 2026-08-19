@@ -1,18 +1,21 @@
 //! MATLAB-compatible `islogical` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::GpuTensorHandle;
+use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ResolveContext, Type,
 };
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
+#[cfg(test)]
+use runmat_value::{IntValue, IntegerStorage};
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+    ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -20,17 +23,16 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "islogical",
     op_kind: GpuOpKind::Custom("metadata"),
-    supported_precisions: &[ScalarType::F32, ScalarType::F64],
+    supported_precisions: &[],
     broadcast: BroadcastSemantics::None,
-    provider_hooks: &[ProviderHook::Custom("logical_islogical")],
+    provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::InheritInputs,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes:
-        "Reads provider metadata when `logical_islogical` is implemented; otherwise consults runtime residency tracking and, as a last resort, gathers once to the host.",
+    notes: "Reads coherent owning-provider and handle class metadata and returns a host logical scalar without gathering payload data.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::logical::tests::islogical")]
@@ -83,6 +85,12 @@ pub const ISLOGICAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ISLOGICAL_ERRORS,
 };
+pub const ISLOGICAL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "islogical is a universal type predicate; all eight integer classes return scalar false, including resident integer arrays, without reading payload data.",
+    };
 
 fn islogical_error_with_message(
     message: impl Into<String>,
@@ -103,6 +111,7 @@ fn islogical_error_with_message(
     accel = "metadata",
     type_resolver(bool_scalar_type),
     descriptor(crate::builtins::logical::tests::islogical::ISLOGICAL_DESCRIPTOR),
+    integer_audit(crate::builtins::logical::tests::islogical::ISLOGICAL_INTEGER_AUDIT),
     builtin_path = "crate::builtins::logical::tests::islogical"
 )]
 async fn islogical_builtin(value: Value) -> BuiltinResult<Value> {
@@ -117,23 +126,39 @@ fn bool_scalar_type(_: &[Type], _context: &ResolveContext) -> Type {
 }
 
 async fn islogical_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Ok(flag) = provider.logical_islogical(&handle) {
-            return Ok(Value::Bool(flag));
-        }
-    }
+    Ok(Value::Bool(checked_resident_is_logical(&handle)?))
+}
 
-    if runmat_accelerate_api::handle_is_logical(&handle) {
-        return Ok(Value::Bool(true));
+fn checked_resident_is_logical(handle: &GpuTensorHandle) -> BuiltinResult<bool> {
+    let owner = gpu_helpers::exact_provider_for_handle(handle).ok_or_else(|| {
+        internal_error("islogical: no acceleration provider owns the input handle")
+    })?;
+    let logical = runmat_accelerate_api::handle_is_logical(handle);
+    let integer = runmat_accelerate_api::handle_integer_type(handle);
+    let precision = runmat_accelerate_api::handle_precision(handle);
+    let storage = runmat_accelerate_api::handle_storage(handle);
+    let structurally_valid = if logical {
+        integer.is_none()
+            && precision == Some(owner.precision())
+            && storage == GpuTensorStorage::Real
+    } else if integer.is_some() {
+        precision.is_none() && storage == GpuTensorStorage::Real
+    } else {
+        precision == Some(owner.precision())
+            && matches!(
+                storage,
+                GpuTensorStorage::Real | GpuTensorStorage::ComplexInterleaved
+            )
+    };
+    if !structurally_valid
+        || !gpu_helpers::gpu_class_metadata_matches(handle, precision, integer, logical)
+    {
+        return Err(internal_error(
+            "islogical: resident class metadata contradicts physical storage metadata",
+        )
+        .into());
     }
-
-    let gpu_value = Value::GpuTensor(handle.clone());
-    let gathered = gpu_helpers::gather_value_async(&gpu_value)
-        .await
-        .map_err(|err| {
-            islogical_error_with_message(format!("islogical: {err}"), &ISLOGICAL_ERROR_INTERNAL)
-        })?;
-    islogical_host(gathered)
+    Ok(logical)
 }
 
 fn islogical_host(value: Value) -> BuiltinResult<Value> {
@@ -192,6 +217,51 @@ pub(crate) mod tests {
             run_islogical(Value::Tensor(tensor)).unwrap(),
             Value::Bool(false)
         );
+    }
+
+    #[test]
+    fn all_integer_classes_report_false_without_conversion() {
+        let scalars = [
+            IntValue::I8(-1),
+            IntValue::I16(-2),
+            IntValue::I32(-3),
+            IntValue::I64(i64::MIN),
+            IntValue::U8(1),
+            IntValue::U16(2),
+            IntValue::U32(3),
+            IntValue::U64(u64::MAX),
+        ];
+        for scalar in scalars {
+            assert_eq!(
+                run_islogical(Value::Int(scalar)).unwrap(),
+                Value::Bool(false)
+            );
+        }
+    }
+
+    #[test]
+    fn resident_integer_classes_report_false_without_gather() {
+        test_support::with_test_provider(|provider| {
+            let storages = [
+                IntegerStorage::I8(vec![-1]),
+                IntegerStorage::I16(vec![-2]),
+                IntegerStorage::I32(vec![-3]),
+                IntegerStorage::I64(vec![i64::MIN]),
+                IntegerStorage::U8(vec![1]),
+                IntegerStorage::U16(vec![2]),
+                IntegerStorage::U32(vec![3]),
+                IntegerStorage::U64(vec![u64::MAX]),
+            ];
+            for storage in storages {
+                let tensor = Tensor::new_integer(storage, vec![1, 1]).unwrap();
+                let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload integer");
+                assert_eq!(
+                    run_islogical(Value::GpuTensor(handle.clone())).unwrap(),
+                    Value::Bool(false)
+                );
+                provider.free(&handle).ok();
+            }
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

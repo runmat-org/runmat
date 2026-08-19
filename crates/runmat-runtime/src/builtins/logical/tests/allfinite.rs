@@ -16,7 +16,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "allfinite";
 
@@ -180,7 +180,7 @@ async fn allfinite_gpu(
             return Ok(None);
         }
     };
-    let host = match download_handle_async(provider, &reduced).await {
+    let host = match gpu_helpers::download_truth_values_async(provider, &reduced).await {
         Ok(host) => host,
         Err(err) => {
             let _ = provider.free(&reduced);
@@ -192,7 +192,7 @@ async fn allfinite_gpu(
     };
     let _ = provider.free(&reduced);
     let _ = provider.free(&mask);
-    let value = host.data.first().copied().unwrap_or(1.0) != 0.0;
+    let value = host.data.first().copied().unwrap_or(1) != 0;
     Ok(Some(Value::Bool(value)))
 }
 

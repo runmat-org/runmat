@@ -21,6 +21,11 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CellArray, CharArray, ComplexTensor, IntValue, LogicalArray, NumericScalar, NumericStorage,
@@ -152,6 +157,44 @@ pub const REPELEM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &REPELEM_ERRORS,
 };
+const REPELEM_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target documents all eight integer classes; authoritative elements are copied without arithmetic or floating conversion.",
+    }];
+const REPELEM_INTEGER_FACTOR_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "R1,...,RN",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed repetition controls are read exactly as nonnegative structural sizes.",
+    }];
+pub const REPELEM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = repelem(integer_A, R1,...,RN)",
+        inputs: &REPELEM_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Replication preserves native class, shape order, and exact wide values; resident inputs use owner-preserving host fallback when no provider hook exists.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = repelem(A, integer_R1,...,integer_RN)",
+        inputs: &REPELEM_INTEGER_FACTOR_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Replication counts never pass through binary64; checked size arithmetic rejects unrepresentable output geometry.",
+    },
+];
 
 fn repelem_error(
     error: &'static BuiltinErrorDescriptor,
@@ -266,6 +309,7 @@ fn repelem_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     accel = "custom",
     type_resolver(repelem_type),
     descriptor(crate::builtins::array::shape::repelem::REPELEM_DESCRIPTOR),
+    integer_capabilities(crate::builtins::array::shape::repelem::REPELEM_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::shape::repelem"
 )]
 async fn repelem_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -279,58 +323,72 @@ async fn repelem_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult
     // input array is a vector; the per-type implementations enforce this).
     let single_arg = factors.len() == 1;
 
+    if let Value::GpuTensor(handle) = value {
+        let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
+            .await
+            .map_err(|error| repelem_internal(format!("repelem: {error}")))?;
+        let output = repelem_host_value(gathered, &factors, single_arg)?;
+        return gpu_helpers::restore_class_preserving_value(&handle, output, BUILTIN_NAME);
+    }
+    repelem_host_value(value, &factors, single_arg)
+}
+
+fn repelem_host_value(
+    value: Value,
+    factors: &[RepFactor],
+    single_arg: bool,
+) -> crate::BuiltinResult<Value> {
     match value {
         Value::Tensor(t) => {
-            let out = repelem_tensor(t, &factors, single_arg)?;
+            let out = repelem_tensor(t, factors, single_arg)?;
             Ok(tensor::tensor_into_value(out))
         }
         Value::Num(_) | Value::Int(_) => {
             let tensor =
                 tensor::value_into_tensor_for("repelem", value).map_err(repelem_internal)?;
-            let out = repelem_tensor(tensor, &factors, single_arg)?;
+            let out = repelem_tensor(tensor, factors, single_arg)?;
             Ok(tensor::tensor_into_value(out))
         }
         Value::Bool(flag) => {
             let logical = LogicalArray::new(vec![if flag { 1 } else { 0 }], vec![1, 1])
                 .map_err(|e| repelem_internal(format!("repelem: {e}")))?;
-            let out = repelem_logical(&logical, &factors, single_arg)?;
+            let out = repelem_logical(&logical, factors, single_arg)?;
             Ok(Value::LogicalArray(out))
         }
         Value::LogicalArray(logical) => {
-            let out = repelem_logical(&logical, &factors, single_arg)?;
+            let out = repelem_logical(&logical, factors, single_arg)?;
             Ok(Value::LogicalArray(out))
         }
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| repelem_internal(format!("repelem: {e}")))?;
-            let out = repelem_complex_tensor(&tensor, &factors, single_arg)?;
+            let out = repelem_complex_tensor(&tensor, factors, single_arg)?;
             Ok(complex_tensor_into_value(out))
         }
         Value::ComplexTensor(ct) => {
-            let out = repelem_complex_tensor(&ct, &factors, single_arg)?;
+            let out = repelem_complex_tensor(&ct, factors, single_arg)?;
             Ok(complex_tensor_into_value(out))
         }
         Value::String(s) => {
             let array = StringArray::new(vec![s], vec![1, 1])
                 .map_err(|e| repelem_internal(format!("repelem: {e}")))?;
-            let out = repelem_string_array(&array, &factors, single_arg)?;
+            let out = repelem_string_array(&array, factors, single_arg)?;
             Ok(Value::StringArray(out))
         }
         Value::StringArray(sa) => {
-            let out = repelem_string_array(&sa, &factors, single_arg)?;
+            let out = repelem_string_array(&sa, factors, single_arg)?;
             Ok(Value::StringArray(out))
         }
         Value::CharArray(ca) => {
-            let out = repelem_char_array(&ca, &factors, single_arg)?;
+            let out = repelem_char_array(&ca, factors, single_arg)?;
             Ok(Value::CharArray(out))
         }
         Value::Cell(ca) => {
-            let out = repelem_cell_array(&ca, &factors, single_arg)?;
+            let out = repelem_cell_array(&ca, factors, single_arg)?;
             Ok(Value::Cell(out))
         }
-        Value::GpuTensor(_) => Err(repelem_invalid_factors(
-            "repelem: GPU tensors must be gathered before replication; \
-             expected a host residency hint from the planner",
+        Value::GpuTensor(_) => Err(repelem_internal(
+            "repelem: resident input reached the host replication boundary",
         )),
         other => Err(repelem_unsupported(format!(
             "repelem: unsupported input type {:?}",
@@ -936,6 +994,7 @@ fn checked_total(shape: &[usize]) -> crate::BuiltinResult<usize> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage};
 
@@ -1000,6 +1059,35 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn resident_integer_data_uses_exact_owner_fallback_and_preserves_provenance() {
+        test_support::with_test_provider(|provider| {
+            let wide = 9_007_199_254_740_993_u64;
+            let input = Tensor::new_integer(IntegerStorage::U64(vec![wide, 7]), vec![1, 2])
+                .expect("integer tensor");
+            let source = gpu_helpers::upload_tensor(provider, &input).expect("upload integer");
+            let source =
+                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let result = repelem_builtin(
+                Value::GpuTensor(source.clone()),
+                vec![Value::Int(IntValue::U8(2))],
+            )
+            .expect("resident repelem");
+            let Value::GpuTensor(output) = result else {
+                panic!("expected resident output");
+            };
+            assert!(runmat_accelerate_api::handle_is_explicit(&output));
+            assert!(gpu_helpers::exact_provider_for_handle(&source).is_some());
+            let gathered = test_support::gather(Value::GpuTensor(output.clone())).expect("gather");
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U64(vec![wide, wide, 7, 7]))
+            );
+            provider.free(&output).ok();
+            provider.free(&source).ok();
+        });
     }
 
     #[test]

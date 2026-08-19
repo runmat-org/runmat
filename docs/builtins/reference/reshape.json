@@ -36,6 +36,7 @@
     "Exactly one dimension may be specified as `[]`; RunMat infers its value from `numel(A)`.",
     "Dimensions must be nonnegative integers. Zero-sized dimensions are allowed when `numel(A) == 0`.",
     "Works on numeric, logical, complex, string, char, GPU, and cell arrays (cell/char currently support up to 2-D).",
+    "All eight integer data classes preserve authoritative native storage exactly, and typed integer dimensions are decoded structurally.",
     "Reshaping never copies data; it only reinterprets layout metadata.",
     "Scalar inputs follow MATLAB semantics: `reshape(5, 1, 1)` yields the scalar `5`, while larger shapes return dense arrays."
   ],

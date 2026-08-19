@@ -10,6 +10,7 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ResolveContext, Type,
 };
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
@@ -50,6 +51,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     type_resolver(bool_scalar_type),
     descriptor(crate::builtins::array::introspection::isempty::ISEMPTY_DESCRIPTOR),
+    integer_audit(crate::builtins::array::introspection::isempty::ISEMPTY_INTEGER_AUDIT),
     builtin_path = "crate::builtins::array::introspection::isempty"
 )]
 async fn isempty_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -91,6 +93,7 @@ pub const ISEMPTY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ISEMPTY_ERRORS,
 };
+pub const ISEMPTY_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "isempty is a universal shape predicate; integer class and values are irrelevant and resident shape metadata is read without gathering payload data." };
 
 async fn value_is_empty(value: &Value) -> crate::BuiltinResult<bool> {
     Ok(value_numel(value).await? == 0)

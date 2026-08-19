@@ -899,10 +899,11 @@ pub(crate) mod tests {
                 shape: vec![1, 1],
                 device_id: 0,
                 buffer_id: 9_306_001,
-            };
-            runmat_accelerate_api::set_handle_integer_type(
-                &resident,
-                runmat_accelerate_api::IntegerElementType::I16,
+                descriptor: Default::default(),
+            }
+            .with_numeric_descriptor(
+                runmat_accelerate_api::NumericElementType::I16,
+                runmat_accelerate_api::GpuTensorStorage::Real,
             );
             let error = db_builtin(Value::GpuTensor(resident.clone()), vec![])
                 .expect_err("MATLAB mode rejects resident integer before gather");
@@ -910,7 +911,6 @@ pub(crate) mod tests {
                 error.identifier(),
                 Some("RunMat:compatibility:DbNonfloatingInputExtension")
             );
-            runmat_accelerate_api::clear_handle_integer_type(&resident);
         }
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(true);

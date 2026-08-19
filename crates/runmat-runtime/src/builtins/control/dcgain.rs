@@ -192,6 +192,7 @@ mod tests {
 
     #[test]
     fn dcgain_rejects_integer_sys_without_conflating_integer_coefficients() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         for sys in [
             Value::Int(IntValue::I64(i64::MAX)),
             Value::Tensor(
@@ -224,10 +225,11 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX - 610,
-        };
-        runmat_accelerate_api::set_handle_integer_type(
-            &handle,
-            runmat_accelerate_api::IntegerElementType::U64,
+            descriptor: Default::default(),
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::U64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
         );
         let error = block_on(dcgain_builtin(Value::GpuTensor(handle)))
             .expect_err("resident nonobject rejection");

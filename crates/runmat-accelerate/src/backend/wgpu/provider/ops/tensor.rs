@@ -246,7 +246,7 @@ impl WgpuProvider {
         entry.storage = storage;
         let mut updated = handle.clone();
         updated.shape = new_shape.to_vec();
-        runmat_accelerate_api::set_handle_storage(&updated, storage);
+        updated.descriptor.storage = Some(storage);
         runmat_accelerate_api::clear_handle_transpose(&updated);
         Ok(updated)
     }
@@ -322,7 +322,7 @@ impl WgpuProvider {
             runmat_accelerate_api::GpuTensorStorage::Real => 1usize,
             runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved => 2usize,
         };
-        let integer_type = entry.integer_type;
+        let integer_type = entry.integer_type();
         let word_factor = integer_type.map_or(storage_factor, |element_type| match element_type {
             runmat_accelerate_api::IntegerElementType::I64
             | runmat_accelerate_api::IntegerElementType::U64 => 2,
@@ -907,7 +907,7 @@ impl WgpuProvider {
         ensure!(!order.is_empty(), "permute: order must not be empty");
         let logical_rank = order.len();
         let entry = self.get_entry(handle)?;
-        let integer_type = entry.integer_type;
+        let integer_type = entry.integer_type();
         let word_factor = integer_type.map_or(1usize, |element_type| match element_type {
             runmat_accelerate_api::IntegerElementType::I64
             | runmat_accelerate_api::IntegerElementType::U64 => 2,
@@ -1163,7 +1163,7 @@ impl WgpuProvider {
         shifts: &[isize],
     ) -> Result<GpuTensorHandle> {
         let entry = self.get_entry(handle)?;
-        let integer_type = entry.integer_type;
+        let integer_type = entry.integer_type();
         let word_factor = integer_type.map_or(1usize, |element_type| match element_type {
             runmat_accelerate_api::IntegerElementType::I64
             | runmat_accelerate_api::IntegerElementType::U64 => 2,
@@ -1672,7 +1672,7 @@ impl WgpuProvider {
         }
 
         let entry = self.get_entry(handle)?;
-        let integer_type = entry.integer_type;
+        let integer_type = entry.integer_type();
         let word_factor = integer_type.map_or(1usize, |element_type| match element_type {
             runmat_accelerate_api::IntegerElementType::I64
             | runmat_accelerate_api::IntegerElementType::U64 => 2,
@@ -1898,6 +1898,7 @@ mod tests {
     use super::*;
     use crate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use futures::executor::block_on;
+    use runmat_accelerate_api::{HostNumericDataView, HostNumericTensorView};
 
     #[test]
     fn transpose_complex_interleaved_downloads_by_logical_element() {
@@ -1908,12 +1909,12 @@ mod tests {
             1.0, 2.0, 3.0, -4.0, 5.0, 6.0, 7.0, -8.0, 9.0, 10.0, 11.0, -12.0,
         ];
         let handle = provider
-            .upload_exec(&HostTensorView {
-                data: &data,
+            .upload_numeric_exec(&HostNumericTensorView {
+                data: HostNumericDataView::F64(&data),
                 shape: &[2, 3],
+                storage: GpuTensorStorage::ComplexInterleaved,
             })
             .expect("upload");
-        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::ComplexInterleaved);
 
         let transposed = provider.transpose_exec(&handle).expect("transpose");
         assert_eq!(transposed.shape, vec![3, 2]);
@@ -1941,12 +1942,12 @@ mod tests {
             1.0, 2.0, 3.0, -4.0, 5.0, 6.0, 7.0, -8.0, 9.0, 10.0, 11.0, -12.0,
         ];
         let handle = provider
-            .upload_exec(&HostTensorView {
-                data: &data,
+            .upload_numeric_exec(&HostNumericTensorView {
+                data: HostNumericDataView::F64(&data),
                 shape: &[2, 3],
+                storage: GpuTensorStorage::ComplexInterleaved,
             })
             .expect("upload");
-        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::ComplexInterleaved);
 
         let transposed = provider.transpose_exec(&handle).expect("transpose");
         let magnitudes = provider.unary_abs_exec(&transposed).expect("abs");
@@ -2011,12 +2012,12 @@ mod tests {
             1.0, -1.0, 2.0, -2.0, 3.0, -3.0, 4.0, -4.0, 5.0, -5.0, 6.0, -6.0, 7.0, -7.0, 8.0, -8.0,
         ];
         let handle = provider
-            .upload_exec(&HostTensorView {
-                data: &data,
+            .upload_numeric_exec(&HostNumericTensorView {
+                data: HostNumericDataView::F64(&data),
                 shape: &[2, 2, 2],
+                storage: GpuTensorStorage::ComplexInterleaved,
             })
             .expect("upload");
-        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::ComplexInterleaved);
 
         let permuted = provider.permute_exec(&handle, &[1, 0, 2]).expect("permute");
         assert_eq!(permuted.shape, vec![2, 2, 2]);

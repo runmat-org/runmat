@@ -2,12 +2,65 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 use super::op_common::{map_figure_error, parse_text_command};
 use super::state::set_figure_subtitle_for_axes;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+
+pub const SUBTITLE_INTEGER_AXES_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "subtitle-integer-axes-handle",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "Allow typed-integer aliases for encoded axes handles",
+        error_identifier: Some("RunMat:compatibility:SubtitleIntegerAxesHandleExtension"),
+    };
+pub const SUBTITLE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [SUBTITLE_INTEGER_AXES_EXTENSION];
+const SUBTITLE_INTEGER_FONT_SIZE: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "FontSize",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target documents every native integer class for the FontSize property.",
+    }];
+const SUBTITLE_INTEGER_AXES: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "ax",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "RunMat graphics handles are internally encoded numeric scalars; typed-integer aliases are separately gated.",
+    }];
+pub const SUBTITLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = subtitle(..., 'FontSize', integer_size)",
+        inputs: &SUBTITLE_INTEGER_FONT_SIZE,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The documented property crosses the graphics font-size boundary after exact scalar classification; the returned text handle is a host double scalar.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = subtitle(integer_ax, txt, ...)",
+        inputs: &SUBTITLE_INTEGER_AXES,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "RunMat mode parses the gated scalar exactly before resolving the encoded axes handle; strict mode rejects before graphics state access.",
+    },
+];
 
 const SUBTITLE_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "h",
@@ -138,9 +191,21 @@ pub const SUBTITLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::subtitle::SUBTITLE_DESCRIPTOR),
+    extensions(crate::builtins::plotting::subtitle::SUBTITLE_EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::subtitle::SUBTITLE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::subtitle"
 )]
 pub fn subtitle_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+    if args.len() >= 2
+        && args
+            .first()
+            .is_some_and(crate::builtins::common::validation::value_has_native_integer_class)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SUBTITLE_INTEGER_AXES_EXTENSION,
+            "subtitle",
+        )?;
+    }
     let command = parse_text_command("subtitle", &args)?;
     set_figure_subtitle_for_axes(
         command.target.0,
@@ -160,6 +225,7 @@ mod tests {
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
     };
+    use runmat_value::IntValue;
     use runmat_value::{CellArray, Value};
 
     fn setup_plot_tests() -> crate::builtins::plotting::state::PlotTestLockGuard {
@@ -263,5 +329,67 @@ mod tests {
         ])
         .unwrap_err();
         assert!(err.message.contains("FontSize must be numeric"));
+    }
+
+    #[test]
+    fn subtitle_accepts_documented_integer_font_size() {
+        let _guard = setup_plot_tests();
+        let handle = subtitle_builtin(vec![
+            Value::String("Integer font size".into()),
+            Value::String("FontSize".into()),
+            Value::Int(IntValue::U16(14)),
+        ])
+        .expect("integer FontSize");
+        let fig = clone_figure(current_figure_handle()).expect("figure");
+        let (_, axes, _) =
+            crate::builtins::plotting::state::decode_plot_object_handle(handle).expect("handle");
+        assert_eq!(
+            fig.axes_metadata(axes)
+                .expect("axes")
+                .subtitle_style
+                .font_size,
+            Some(14.0)
+        );
+    }
+
+    #[test]
+    fn subtitle_typed_integer_axes_alias_is_explicitly_gated() {
+        let _guard = setup_plot_tests();
+        let axes_handle = crate::builtins::plotting::subplot::subplot_builtin(
+            Value::Num(1.0),
+            Value::Num(1.0),
+            Value::Num(1.0),
+        )
+        .expect("axes handle") as u64;
+        let subtitle_before = clone_figure(current_figure_handle()).and_then(|figure| {
+            figure
+                .axes_metadata(0)
+                .and_then(|metadata| metadata.subtitle.clone())
+        });
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = subtitle_builtin(vec![
+            Value::Int(IntValue::U64(axes_handle)),
+            Value::String("Blocked".into()),
+        ])
+        .expect_err("strict mode rejects typed integer axes aliases");
+        assert_eq!(
+            error.identifier(),
+            SUBTITLE_INTEGER_AXES_EXTENSION.error_identifier
+        );
+        let subtitle_after = clone_figure(current_figure_handle()).and_then(|figure| {
+            figure
+                .axes_metadata(0)
+                .and_then(|metadata| metadata.subtitle.clone())
+        });
+        assert_eq!(subtitle_after, subtitle_before);
+        drop(strict);
+
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let handle = subtitle_builtin(vec![
+            Value::Int(IntValue::U64(axes_handle)),
+            Value::String("Allowed".into()),
+        ])
+        .expect("extension mode accepts a typed integer axes alias");
+        assert!(handle.is_finite());
     }
 }

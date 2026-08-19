@@ -10,6 +10,11 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ResolveContext, Type,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, NumericStorage, SparseTensor, Tensor, Value};
 
@@ -19,10 +24,29 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::builtins::math::type_resolvers::numeric_unary_type;
-use crate::dispatcher::download_handle_async;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "realsqrt";
+
+const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "X",
+    classes: &[],
+    availability: BuiltinIntegerInputAvailability::Rejected,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "The public input classes are single and double; host, sparse, and resident integer values reject by class before domain evaluation or provider sqrt dispatch.",
+}];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = realsqrt(X)",
+        inputs: &INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "realsqrt has no integer overload; the empty accepted-class mask is intentional and prevents generic numeric coercion from admitting integers.",
+    }];
 
 const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
@@ -116,6 +140,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     type_resolver(realsqrt_type),
     descriptor(crate::builtins::math::elementwise::realsqrt::REALSQRT_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::elementwise::realsqrt::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::elementwise::realsqrt"
 )]
 async fn realsqrt_builtin(value: Value) -> BuiltinResult<Value> {
@@ -195,7 +220,7 @@ async fn gpu_has_negative_input(
         .reduce_min(handle)
         .await
         .map_err(|e| internal_error(format!("realsqrt: reduce_min failed: {e}")))?;
-    let download = download_handle_async(provider, &min_handle)
+    let download = gpu_helpers::download_native_values_async(provider, &min_handle)
         .await
         .map_err(|e| internal_error(format!("realsqrt: reduce_min download failed: {e}")));
     let _ = provider.free(&min_handle);
@@ -205,7 +230,7 @@ async fn gpu_has_negative_input(
             "realsqrt: reduce_min result contained NaN; host validation required",
         ));
     }
-    Ok(host.data.iter().any(|&value| value < 0.0))
+    Ok(host.data.iter().any(|value| value.is_negative()))
 }
 
 fn realsqrt_real(value: Value) -> BuiltinResult<Value> {

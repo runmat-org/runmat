@@ -18,7 +18,7 @@
   },
   "description": "`y = resample(x,p,q)` changes the sample rate of `x` by the rational factor `p/q`. RunMat designs a Kaiser-windowed FIR antialiasing filter by default, compensates the filter delay, and operates along the first non-singleton dimension unless `Dimension` is specified.",
   "behaviors": [
-    "Accepts numeric, logical, integer, complex, vector, matrix, N-D tensor, and GPU tensor inputs.",
+    "Signal input `X` accepts documented single and double real or complex numeric arrays; native typed-integer signal storage is rejected before provider dispatch.",
     "`p` and `q` must be finite positive integer scalars; the ratio is reduced before filter design and output sizing.",
     "The output size along the operated dimension is `ceil(size(x,dim) * p / q)`; all other dimensions are preserved.",
     "`resample(x,p,q,n)` uses a Kaiser-windowed FIR filter with `2*n*max(p,q)+1` taps after ratio reduction.",
@@ -26,6 +26,7 @@
     "`resample(x,p,q,b)` uses a caller-supplied real FIR coefficient vector.",
     "`[y,b] = resample(...)` returns the resampled signal and the FIR coefficients used.",
     "`Dimension`, `dim` resamples along an explicit one-based dimension.",
+    "Typed-integer `p`, `q`, filter-length, Kaiser-beta, filter-vector, and dimension controls are RunMat extensions. They are decoded structurally or checked for exact double representability as their role requires, and MATLAB compatibility mode rejects them before gathering.",
     "Timetable and nonuniform time-vector syntaxes are not implemented yet; use `interp1`/timetable-specific workflows before rational resampling when those forms are needed."
   ],
   "examples": [

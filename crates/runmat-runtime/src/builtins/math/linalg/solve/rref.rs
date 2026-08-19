@@ -3,7 +3,11 @@
 use num_complex::Complex64;
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
@@ -136,6 +140,61 @@ pub const RREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &RREF_ERRORS,
 };
 
+const RREF_INTEGER_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "rref-integer-matrix",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "rref accepts typed-integer matrix data as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RrefIntegerMatrixExtension"),
+};
+const RREF_INTEGER_TOLERANCE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "rref-integer-tolerance",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "rref accepts a typed-integer tolerance as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RrefIntegerToleranceExtension"),
+};
+pub const RREF_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    RREF_INTEGER_MATRIX_EXTENSION,
+    RREF_INTEGER_TOLERANCE_EXTENSION,
+];
+const RREF_INTEGER_MATRIX_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double matrices; RunMat admits typed integers only when every matrix entry is exactly representable in binary64.",
+    }];
+const RREF_INTEGER_TOLERANCE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "tol",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents a single or double tolerance; the RunMat-only typed scalar form is exactness- and range-checked before conversion.",
+    }];
+pub const RREF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[R,pivots] = rref(integer_A [, tol])",
+        inputs: &RREF_INTEGER_MATRIX_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The guarded extension crosses once into the double row-reduction algorithm; R and one-based pivot indices are double, and resident fallback restores R through the exact input owner.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[R,pivots] = rref(A, integer_tol)",
+        inputs: &RREF_INTEGER_TOLERANCE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The tolerance is a scalar floating-control boundary and never routes an inexact wide integer through binary64.",
+    },
+];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::rref")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: NAME,
@@ -223,11 +282,29 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     type_resolver(rref_type),
     descriptor(crate::builtins::math::linalg::solve::rref::RREF_DESCRIPTOR),
+    extensions(crate::builtins::math::linalg::solve::rref::RREF_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::linalg::solve::rref::RREF_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::linalg::solve::rref"
 )]
 async fn rref_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let tol = parse_tolerance_arg(NAME, &rest).map_err(argument_error)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, NAME)?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &value,
+        &RREF_INTEGER_MATRIX_EXTENSION,
+        NAME,
+        "matrix",
+    )
+    .await?;
+    if let Some(tol) = rest.first() {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            tol,
+            &RREF_INTEGER_TOLERANCE_EXTENSION,
+            NAME,
+            "tolerance",
+        )
+        .await?;
+    }
+    let tol = parse_tolerance_arg(NAME, &rest).map_err(argument_error)?;
     let eval = match value {
         Value::GpuTensor(handle) => rref_gpu(handle, tol).await?,
         other => rref_eval_from_value(other, tol)?,
@@ -236,13 +313,14 @@ async fn rref_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 async fn rref_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<RrefEval> {
+    let owner = gpu_helpers::exact_provider_for_handle(&handle);
     let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
         .await
         .map_err(map_control_flow)?;
     let mut eval = rref_eval_from_value(gathered, tol)?;
 
     if let Value::Tensor(matrix) = &eval.reduced {
-        if let Some(provider) = runmat_accelerate_api::provider() {
+        if let Some(provider) = owner {
             let uploaded = gpu_helpers::upload_tensor(provider, matrix).map_err(|err| {
                 internal_error(format!("{NAME}: failed to upload reduced matrix ({err})"))
             })?;
@@ -761,6 +839,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rref_reads_typed_integer_tensor_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![1, 2, 2, 4]), vec![2, 2]).unwrap();
 
@@ -983,6 +1062,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rref_scalars_and_logicals() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let zero = rref_builtin(Value::Bool(false), Vec::new()).expect("rref zero");
         let nonzero = rref_builtin(Value::Int(IntValue::I32(5)), Vec::new()).expect("rref int");
         match zero {

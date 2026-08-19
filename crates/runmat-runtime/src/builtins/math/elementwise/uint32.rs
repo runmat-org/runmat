@@ -4,6 +4,11 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
@@ -70,6 +75,26 @@ pub const UINT32_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const UINT32_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "X",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "Every native integer class converts directly to authoritative uint32 storage without a floating intermediate.",
+}];
+
+pub const UINT32_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = uint32(integer_X)",
+        inputs: &UINT32_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Host and resident conversion is exact and saturating. Real and paired-complex gpuArray inputs preserve native uint32 device storage, owner, and residency.",
+    }];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::uint32")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "uint32",
@@ -83,7 +108,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Real gpuArray inputs use the provider resident integer-cast hook and return native uint32 gpuArray storage. Complex gpuArray integer casts remain unsupported until typed complex integer provider storage exists.",
+    notes: "Real gpuArray inputs use the provider resident integer-cast hook. Paired-complex inputs use exact owner-resolved fallback, and both return native uint32 gpuArray storage.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::uint32")]
@@ -105,6 +130,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::elementwise::uint32::UINT32_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::elementwise::uint32::UINT32_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::elementwise::uint32"
 )]
 async fn uint32_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

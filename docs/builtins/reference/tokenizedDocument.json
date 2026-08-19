@@ -27,21 +27,21 @@
     "unit": "builtins::strings::text_analytics::documents::tests",
     "integration": null
   },
-  "description": "`tokenizedDocument(str)` tokenizes text into a lightweight RunMat `tokenizedDocument` object. This slice supports English and German Unicode-style tokenization, pre-tokenized word input through `TokenizeMethod`, `\"none\"`, and documented custom-token and regular-expression tokenization tables.",
+  "description": "`tokenizedDocument(str)` tokenizes English or German text into a `tokenizedDocument` object. It also accepts pre-tokenized words with `TokenizeMethod`, `\"none\"`, plus custom-token and regular-expression tokenization tables.",
   "behaviors": [
-    "`tokenizedDocument` with no input creates a scalar `tokenizedDocument` compatibility object containing one empty document.",
+    "`tokenizedDocument` with no input creates a scalar object containing one empty document.",
     "`str` may be a string scalar, string array, character vector, multi-row character array, or cell array of scalar text.",
     "String arrays and cell arrays preserve their document-array shape in the object's `Shape` property. Character matrices are treated as one document per row.",
     "`tokenizedDocument(str, 'TokenizeMethod', 'unicode')` tokenizes text into words and simple punctuation tokens.",
     "`tokenizedDocument(words, 'TokenizeMethod', 'none')` accepts a string array, character vector, or cell form as pre-tokenized words. A cell array of string arrays represents multiple pre-tokenized documents.",
-    "`Language` accepts `\"en\"` or `\"de\"`. Japanese and Korean require MeCab-compatible tokenization and remain tracked by the Text Analytics umbrella issue.",
+    "`Language` currently accepts `\"en\"` or `\"de\"`. Japanese, Korean, and MeCab tokenization are not implemented.",
     "`DetectPatterns` accepts `\"all\"`, `\"none\"`, or a string/cell vector containing one or more of `\"email-address\"`, `\"web-address\"`, `\"hashtag\"`, `\"at-mention\"`, and `\"emoticon\"`. RunMat only keeps enabled complex patterns as single tokens.",
     "`TopLevelDomains` accepts a character vector, string array, or cell array of character vectors and controls web-address recognition when `DetectPatterns` includes `\"web-address\"`. RunMat stores normalized TLD labels and uses custom lists for bare domains, `www.` addresses, and `http://`/`https://` addresses; with the default list, explicit `www.` and scheme URLs are accepted when the host has a valid domain shape.",
     "`CustomTokens` accepts a character vector, string scalar/vector, cell text vector, or table with a required `Token` variable and optional `Type` variable. Custom tokens are kept as single tokens, conflicting matches use the longest token, and missing or empty table `Type` values default to `\"custom\"`.",
     "`RegularExpressions` accepts a character vector, string scalar/vector, cell text vector, or table with a required `Pattern` variable and optional `Type` variable. Patterns are matched at the current tokenizer position, invalid or empty-matching patterns are rejected, conflicting regular-expression matches use the last matching pattern, and regular-expression tokens take precedence over custom tokens.",
-    "The returned object stores `Vocabulary` plus RunMat compatibility metadata properties: `Documents`, `NumDocuments`, `DocumentLengths`, `Shape`, `TokenizeMethod`, `Language`, `DetectPatterns`, and `TopLevelDomains`. When `CustomTokens` or `RegularExpressions` are used, RunMat also stores `TypeDetails` so `tokenDetails` returns the custom type labels. `tokenDetails` derives common token type and language columns from metadata; pre-tokenized `TokenizeMethod`, `\"none\"` documents need `addTypeDetails` before a `Type` column is returned.",
-    "RunMat represents a MATLAB tokenizedDocument array as one scalar object carrying document cells and shape metadata because generic first-class MATLAB object arrays are not yet available for this class.",
-    "Full MathWorks `topLevelDomains` corpus parity, exact ICU/MeCab tokenization, exact statistical sentence/part-of-speech/entity/dependency model parity, and object-array identity parity remain tracked in the broader Text Analytics compatibility issue."
+    "The returned object stores `Vocabulary`, `Documents`, `NumDocuments`, `DocumentLengths`, `Shape`, `TokenizeMethod`, `Language`, `DetectPatterns`, and `TopLevelDomains`. Custom-token and regular-expression calls also store `TypeDetails` for `tokenDetails`.",
+    "A document array is represented by one scalar object carrying document cells and `Shape` metadata. First-class object-array identity is not yet available for this class.",
+    "Native numeric arrays are not document text or valid option values and are rejected before provider access. Document counts and lengths are stored as generated double metadata."
   ],
   "examples": [
     {
@@ -78,11 +78,11 @@
   "faqs": [
     {
       "question": "Is RunMat's tokenizedDocument a full MATLAB object array?",
-      "answer": "No. It is a scalar compatibility object with document cells and a `Shape` property. First-class object-array behavior remains a runtime infrastructure gap tracked by the Text Analytics umbrella."
+      "answer": "No. It is one scalar object with document cells and a `Shape` property; first-class object-array identity is not yet available for this class."
     },
     {
       "question": "Does `tokenizedDocument` support Japanese or Korean tokenization?",
-      "answer": "No. RunMat rejects Japanese/Korean language or MeCab tokenization forms in this slice and keeps that work in the remaining Text Analytics queue."
+      "answer": "No. Japanese, Korean, and MeCab tokenization forms currently raise an unsupported-input error."
     },
     {
       "question": "Does `tokenizedDocument` execute on the GPU?",
@@ -115,11 +115,11 @@
     "example": {
       "description": "Supported forms",
       "input": "documents = tokenizedDocument\ndocuments = tokenizedDocument(str)\ndocuments = tokenizedDocument(str, 'TokenizeMethod', method)\ndocuments = tokenizedDocument(str, 'Language', language)\ndocuments = tokenizedDocument(str, 'DetectPatterns', patterns)\ndocuments = tokenizedDocument(str, 'TopLevelDomains', domains)\ndocuments = tokenizedDocument(str, 'CustomTokens', tokens)\ndocuments = tokenizedDocument(str, 'RegularExpressions', patterns)",
-      "output": "`documents` is a `tokenizedDocument` compatibility object."
+      "output": "`documents` is a `tokenizedDocument` object."
     },
     "points": [
       "`method` must be `\"unicode\"` or `\"none\"`.",
-      "`language` must be `\"en\"` or `\"de\"` in this slice.",
+      "`language` must currently be `\"en\"` or `\"de\"`.",
       "`patterns` may be `\"all\"`, `\"none\"`, or a text vector containing supported complex-token pattern names.",
       "`domains` may be a character vector, string array, or cell array of character vectors containing top-level-domain labels.",
       "`tokens` may be a text vector or table with `Token` and optional `Type` variables.",

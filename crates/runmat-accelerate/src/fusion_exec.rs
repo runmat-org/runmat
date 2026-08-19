@@ -35,7 +35,7 @@ struct PreparedInput {
     owned: Option<GpuTensorHandle>,
 }
 
-fn mark_fusion_output(handle: &GpuTensorHandle, inputs: &[Value]) {
+fn mark_fusion_output(handle: &mut GpuTensorHandle, inputs: &[Value]) {
     let explicit = inputs.iter().any(|value| {
         matches!(value, Value::GpuTensor(input) if runmat_accelerate_api::handle_is_explicit(input))
     });
@@ -148,9 +148,9 @@ fn ensure_gpu_tensor(
                 shape: &tensor.shape,
             };
             let started = Instant::now();
-            let handle = provider.upload(&view)?;
+            let mut handle = provider.upload(&view)?;
             observer.upload(started, host_f64_bytes(data.len()));
-            runmat_accelerate_api::mark_handle_automatic(&handle);
+            runmat_accelerate_api::mark_handle_automatic(&mut handle);
             Ok((handle.clone(), Some(handle)))
         }
         _ => Err(anyhow!("fusion: expected tensor input")),
@@ -606,10 +606,10 @@ fn execute_elementwise_outputs(
         observer.compile(started);
         timer.mark("generate_wgsl");
         let started = Instant::now();
-        let output = provider.fused_elementwise(&shader, &handles, &output_shape, len)?;
+        let mut output = provider.fused_elementwise(&shader, &handles, &output_shape, len)?;
         observer.queue(started);
         observer.kernel_unmeasured();
-        mark_fusion_output(&output, &request.inputs);
+        mark_fusion_output(&mut output, &request.inputs);
         outputs.insert(output_id, Value::GpuTensor(output));
     } else {
         // Multi-output path: generate one shader that writes all outputs in a single dispatch,
@@ -633,8 +633,8 @@ fn execute_elementwise_outputs(
         match multi_result {
             Ok(out_handles) => {
                 observer.kernel_unmeasured();
-                for (output_id, handle) in output_ids.iter().copied().zip(out_handles) {
-                    mark_fusion_output(&handle, &request.inputs);
+                for (output_id, mut handle) in output_ids.iter().copied().zip(out_handles) {
+                    mark_fusion_output(&mut handle, &request.inputs);
                     outputs.insert(output_id, Value::GpuTensor(handle));
                 }
             }
@@ -650,11 +650,11 @@ fn execute_elementwise_outputs(
                         })?;
                     observer.compile(started);
                     let started = Instant::now();
-                    let output =
+                    let mut output =
                         provider.fused_elementwise(&single_shader, &handles, &output_shape, len)?;
                     observer.queue(started);
                     observer.kernel_unmeasured();
-                    mark_fusion_output(&output, &request.inputs);
+                    mark_fusion_output(&mut output, &request.inputs);
                     outputs.insert(output_id, Value::GpuTensor(output));
                 }
             }
@@ -870,7 +870,7 @@ pub fn execute_reduction_with_shape(
         .reduction_flavor
         .unwrap_or(ReductionFlavor::Sum);
     let started = Instant::now();
-    let output = provider.fused_reduction(
+    let mut output = provider.fused_reduction(
         &shader,
         &handles,
         output_shape,
@@ -882,7 +882,7 @@ pub fn execute_reduction_with_shape(
     observer.queue(started);
     observer.kernel_unmeasured();
     timer.mark("dispatch");
-    mark_fusion_output(&output, &request.inputs);
+    mark_fusion_output(&mut output, &request.inputs);
 
     for input in prepared {
         if let Some(handle) = input.owned {
@@ -933,7 +933,7 @@ pub async fn execute_centered_gram(request: FusionExecutionRequest<'_>) -> Resul
     };
 
     observer.queue_unmeasured();
-    let output = provider
+    let mut output = provider
         .covariance(&matrix_handle, None, None, &options)
         .await?;
     observer.kernel_unmeasured();
@@ -942,7 +942,7 @@ pub async fn execute_centered_gram(request: FusionExecutionRequest<'_>) -> Resul
         let _ = provider.free(&temp);
     }
 
-    mark_fusion_output(&output, &request.inputs);
+    mark_fusion_output(&mut output, &request.inputs);
     selection.complete();
     Ok(Value::GpuTensor(output))
 }
@@ -992,7 +992,7 @@ pub async fn execute_power_step_normalize(request: FusionExecutionRequest<'_>) -
 
     let desc = PowerStepEpilogue { epsilon };
     observer.queue_unmeasured();
-    let output = provider
+    let mut output = provider
         .matmul_power_step(&lhs_handle, &rhs_handle, &desc)
         .await?;
     observer.kernel_unmeasured();
@@ -1004,7 +1004,7 @@ pub async fn execute_power_step_normalize(request: FusionExecutionRequest<'_>) -
         let _ = provider.free(&temp);
     }
 
-    mark_fusion_output(&output, &request.inputs);
+    mark_fusion_output(&mut output, &request.inputs);
     selection.complete();
     Ok(Value::GpuTensor(output))
 }
@@ -1131,7 +1131,7 @@ pub async fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> 
     let diag = provider.diag_extract(&product, 0)?;
     observer.queue(started);
     observer.kernel_unmeasured();
-    let diag = match diag.shape.as_slice() {
+    let mut diag = match diag.shape.as_slice() {
         [len] => provider.reshape(&diag, &[*len, 1])?,
         [_len, 1] => diag,
         _ => diag,
@@ -1158,7 +1158,7 @@ pub async fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> 
         let _ = provider.free(&temp);
     }
 
-    mark_fusion_output(&diag, &request.inputs);
+    mark_fusion_output(&mut diag, &request.inputs);
     selection.complete();
     Ok(Value::GpuTensor(diag))
 }
@@ -1256,14 +1256,14 @@ pub async fn execute_image_normalize(request: FusionExecutionRequest<'_>) -> Res
     }
 
     observer.queue_unmeasured();
-    let output = provider.image_normalize(&input_handle, &desc).await?;
+    let mut output = provider.image_normalize(&input_handle, &desc).await?;
     observer.kernel_unmeasured();
 
     if let Some(temp) = input_owned {
         provider.free(&temp).ok();
     }
 
-    mark_fusion_output(&output, &request.inputs);
+    mark_fusion_output(&mut output, &request.inputs);
     selection.complete();
     Ok(Value::GpuTensor(output))
 }
@@ -1500,13 +1500,13 @@ pub async fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Res
     }
 
     observer.queue_unmeasured();
-    let out = prov.matmul_epilogue(&a, &b, &ep).await?;
+    let mut out = prov.matmul_epilogue(&a, &b, &ep).await?;
     observer.kernel_unmeasured();
     for h in owned {
         let _ = prov.free(&h);
     }
 
-    if let Some((_, diag)) = &diag_handle {
+    if let Some((_, diag)) = &mut diag_handle {
         mark_fusion_output(diag, &request.inputs);
     }
 
@@ -1523,10 +1523,10 @@ pub async fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Res
     if free_out {
         let _ = prov.free(&out);
     } else {
-        mark_fusion_output(&out, &request.inputs);
+        mark_fusion_output(&mut out, &request.inputs);
     }
 
-    mark_fusion_output(&result, &request.inputs);
+    mark_fusion_output(&mut result, &request.inputs);
     selection.complete();
     Ok(Value::GpuTensor(result))
 }
@@ -1542,22 +1542,26 @@ mod tests {
             shape: vec![1, 1],
             device_id: 901,
             buffer_id: 1,
+            descriptor: Default::default(),
         };
-        let automatic_output = GpuTensorHandle {
+        let mut automatic_output = GpuTensorHandle {
             shape: vec![1, 1],
             device_id: 901,
             buffer_id: 2,
+            descriptor: Default::default(),
         };
-        let explicit_output = GpuTensorHandle {
+        let mut explicit_output = GpuTensorHandle {
             shape: vec![1, 1],
             device_id: 901,
             buffer_id: 3,
+            descriptor: Default::default(),
         };
-        runmat_accelerate_api::mark_handle_explicit(&explicit_input);
+        let mut explicit_input = explicit_input;
+        runmat_accelerate_api::mark_handle_explicit(&mut explicit_input);
 
-        mark_fusion_output(&automatic_output, &[Value::Num(1.0)]);
+        mark_fusion_output(&mut automatic_output, &[Value::Num(1.0)]);
         mark_fusion_output(
-            &explicit_output,
+            &mut explicit_output,
             &[Value::GpuTensor(explicit_input.clone())],
         );
 

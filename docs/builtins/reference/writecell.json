@@ -18,7 +18,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Runs on the CPU. gpuArray values inside cells are gathered automatically before serialisation."
+    "notes": "Runs on the CPU. Automatically resident values are gathered transparently; explicit `gpuArray` input requires `runmat` mode."
   },
   "fusion": {
     "elementwise": false,
@@ -39,12 +39,14 @@
   },
   "description": "`writecell(C, filename)` serializes a 2-D cell array to delimited text or an Excel-compatible spreadsheet, preserving mixed numeric, logical, text, and empty cells.",
   "behaviors": [
-    "Accepts 2-D cell arrays containing numeric scalars, logical scalars, string scalars, row character vectors, and empty numeric or logical arrays.",
+    "Accepts 2-D cell arrays containing numeric scalars, logical scalars, string scalars, row character vectors, and empty numeric or logical arrays. Scalar values from all eight native integer classes are serialized directly from native storage.",
     "Nested cell arrays, complex values, and non-scalar arrays produce descriptive errors so unsupported data is not silently flattened.",
-    "File type is inferred from the filename extension. `.xls`, `.xlsx`, `.xlsm`, `.xlsb`, and `.ods` select spreadsheet output; other extensions select delimited text unless `'FileType'` overrides the choice.",
+    "File type is inferred from the filename extension. `.xlsx` and `.xlsm` select spreadsheet output; `.xls`, `.xlsb`, and `.ods` are rejected because the current writer does not support those formats. Other extensions select delimited text unless `'FileType'` overrides the choice.",
     "Delimited text follows MATLAB-compatible delimiter defaults: comma for `.csv`, tab for `.tsv` and `.tab`, whitespace for `.txt`, `.dat`, and `.dlm`, and comma otherwise.",
     "`'Delimiter'`, `'QuoteStrings'`, `'WriteMode'`, and `'LineEnding'` control text output. `'WriteMode','append'` appends rows to text files.",
-    "Spreadsheet output writes a single worksheet and supports `'Sheet'` and `'Range'` for worksheet name/index and top-left placement. Spreadsheet append is rejected until in-place workbook mutation is supported."
+    "Spreadsheet output writes a single worksheet and supports `'Sheet'` and `'Range'` for worksheet name/index and top-left placement. A numeric `Sheet` index may use any native integer class and is decoded exactly as a positive one-based index. Spreadsheet append is rejected until in-place workbook mutation is supported.",
+    "Automatically resident cell values are gathered before host serialization. Explicit `gpuArray` input is a RunMat language extension available in `runmat` mode.",
+    "The current RunMat implementation returns the number of bytes written when an output is requested. The compatibility target documents `writecell` without an output, so code that assigns this value is RunMat-specific."
   ],
   "examples": [
     {
@@ -67,7 +69,7 @@
     },
     {
       "question": "Can `writecell` write Excel files?",
-      "answer": "Yes. RunMat writes minimal OOXML workbooks for Excel-compatible extensions and supports worksheet names and top-left ranges."
+      "answer": "Yes. RunMat writes OOXML `.xlsx` and `.xlsm` workbooks and supports worksheet names, numeric sheet indices, and top-left ranges. Legacy `.xls`, `.xlsb`, and `.ods` files are not supported by the current writer."
     },
     {
       "question": "How are strings quoted in CSV output?",
@@ -79,6 +81,10 @@
     }
   ],
   "links": [
+    {
+      "label": "MATLAB language extensions",
+      "url": "/docs/runtime/getting-started/matlab-language-extensions"
+    },
     {
       "label": "writematrix",
       "url": "./writematrix"
@@ -104,8 +110,8 @@
     "label": "`crates/runmat-runtime/src/builtins/io/tabular/writecell.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/writecell.rs"
   },
-  "gpu_residency": "`writecell` is a file-I/O sink. Any GPU-resident tensors encountered in cells are gathered before formatting so the file reflects host-visible values.",
+  "gpu_residency": "`writecell` is a host file-I/O sink. Automatically resident values are gathered transparently before formatting; explicit `gpuArray` input requires `runmat` mode.",
   "gpu_behavior": [
-    "`writecell` does not launch provider kernels. It gathers resident inputs through the active acceleration provider and performs serialization on the host."
+    "`writecell` does not launch provider kernels. It gathers automatically resident inputs through the owning provider and performs serialization on the host. Explicit device intent follows the separately gated RunMat extension policy."
   ]
 }

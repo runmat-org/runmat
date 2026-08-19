@@ -1,10 +1,15 @@
 //! MATLAB-compatible `write` builtin for TCP/IP clients in RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::NumericDType;
 use runmat_value::{IntValue, StructValue, Value};
 use std::io::{self, Write};
 use std::net::TcpStream;
@@ -61,7 +66,7 @@ const WRITE_INPUTS_CLIENT_DATA_DATATYPE: [BuiltinParamDescriptor; 3] = [
         name: "datatype",
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
-        default: Some("\"uint8\""),
+        default: Some("class(data)"),
         description: "Data type label (for example \"uint8\", \"double\", \"char\", \"string\").",
     },
 ];
@@ -143,6 +148,112 @@ pub const WRITE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &WRITE_ERRORS,
 };
 
+const WRITE_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "write-explicit-gpu-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "write with explicit gpuArray data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:WriteExplicitGpuDataExtension"),
+};
+const WRITE_NONVECTOR_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "write-nonvector-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "write with matrix or multidimensional numeric data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:WriteNonvectorDataExtension"),
+};
+const WRITE_SPARSE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "write-sparse-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "write with sparse numeric data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:WriteSparseDataExtension"),
+};
+const WRITE_LOGICAL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "write-logical-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "write with logical data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:WriteLogicalDataExtension"),
+};
+pub const WRITE_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    WRITE_EXPLICIT_GPU_EXTENSION,
+    WRITE_NONVECTOR_EXTENSION,
+    WRITE_SPARSE_EXTENSION,
+    WRITE_LOGICAL_EXTENSION,
+];
+
+const WRITE_INTEGER_VECTOR_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "data",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The public datatype table explicitly lists all eight integer classes for real row or column vectors. Without a datatype override, the native input datatype selects the wire representation.",
+    }];
+const WRITE_INTEGER_NONVECTOR_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "matrix or multidimensional data",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat can serialize nonvector integer arrays in column-major order, but the public interactive contract documents row or column vectors.",
+    }];
+const WRITE_INTEGER_SPARSE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "sparse data",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Sparse payloads are a RunMat-only host convenience and are densified from authoritative integer CSC storage before byte encoding.",
+    }];
+const WRITE_INTEGER_GPU_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "explicit gpuArray data",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The public page lists GPU code generation rather than interactive gpuArray input. RunMat gates explicit device intent before gather while leaving automatic residency transparent.",
+    }];
+pub const WRITE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "write(client, integer_vector, datatype?)",
+        inputs: &WRITE_INTEGER_VECTOR_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Same-class writes emit exact native bytes with client byte order. An explicit integer datatype performs one exact saturating cast; single/double overrides are deliberate floating wire boundaries.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "write(client, integer_matrix, datatype?)",
+        inputs: &WRITE_INTEGER_NONVECTOR_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat mode traverses nonvector payloads in column-major storage order after the independent shape gate.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "write(client, sparse_integer_data, datatype?)",
+        inputs: &WRITE_INTEGER_SPARSE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat mode expands sparse integer storage exactly before the selected wire cast; the sparse extension gate precedes socket access.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "write(client, explicit_gpu_integer_data, datatype?)",
+        inputs: &WRITE_INTEGER_GPU_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Explicit gpuArray data is available only in RunMat mode and gathers through its owner before host socket encoding.",
+    },
+];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::write")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "write",
@@ -156,7 +267,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Socket writes always execute on the host CPU; GPU providers are never consulted.",
+    notes: "Socket writes execute on the host CPU. Resident payloads gather through their owning provider before byte encoding; no provider compute kernel is launched.",
 };
 
 fn write_error_with_message(
@@ -215,6 +326,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "write,tcpclient,networking",
     type_resolver(crate::builtins::io::type_resolvers::write_type),
     descriptor(crate::builtins::io::net::write::WRITE_DESCRIPTOR),
+    extensions(crate::builtins::io::net::write::WRITE_EXTENSIONS),
+    integer_capabilities(crate::builtins::io::net::write::WRITE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::net::write"
 )]
 async fn write_builtin(
@@ -222,6 +335,7 @@ async fn write_builtin(
     data: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
+    ensure_write_extensions(&data)?;
     let client = gather_if_needed_async(&client)
         .await
         .map_err(|flow| map_write_flow(flow, &WRITE_ERROR_INVALID_CLIENT))?;
@@ -280,7 +394,10 @@ async fn write_builtin(
         ));
     }
 
-    let payload = prepare_payload(&data, datatype, byte_order)?;
+    let payload = match datatype {
+        Some(datatype) => prepare_payload(&data, datatype, byte_order)?,
+        None => prepare_default_payload(&data, byte_order)?,
+    };
     if payload.bytes.is_empty() {
         return Ok(Value::Num(0.0));
     }
@@ -301,6 +418,46 @@ async fn write_builtin(
     }
 }
 
+fn ensure_write_extensions(data: &Value) -> BuiltinResult<()> {
+    if crate::builtins::common::validation::value_contains_explicit_gpu(data) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &WRITE_EXPLICIT_GPU_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if matches!(data, Value::SparseTensor(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &WRITE_SPARSE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if matches!(data, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(data, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &WRITE_LOGICAL_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    let is_nonvector = match data {
+        Value::Tensor(tensor) => !is_vector_shape(&tensor.shape),
+        Value::SparseTensor(tensor) => !is_vector_shape(&[tensor.rows, tensor.cols]),
+        Value::GpuTensor(handle) => !is_vector_shape(&handle.shape),
+        _ => false,
+    };
+    if is_nonvector {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &WRITE_NONVECTOR_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
+}
+
+fn is_vector_shape(shape: &[usize]) -> bool {
+    shape.len() <= 2 && shape.iter().filter(|extent| **extent > 1).count() <= 1
+}
+
 #[derive(Clone, Copy)]
 enum DataType {
     UInt8,
@@ -318,10 +475,6 @@ enum DataType {
 }
 
 impl DataType {
-    fn default() -> Self {
-        DataType::UInt8
-    }
-
     fn element_size(self) -> usize {
         match self {
             DataType::UInt8 | DataType::Int8 | DataType::Char | DataType::String => 1,
@@ -358,14 +511,74 @@ impl WriteElement {
     }
 }
 
-fn parse_arguments(args: &[Value]) -> BuiltinResult<DataType> {
+fn parse_arguments(args: &[Value]) -> BuiltinResult<Option<DataType>> {
     match args.len() {
-        0 => Ok(DataType::default()),
-        1 => parse_datatype(&args[0]),
+        0 => Ok(None),
+        1 => parse_datatype(&args[0]).map(Some),
         _ => Err(write_flow(
             &WRITE_ERROR_INVALID_INPUT,
             "write: expected at most one datatype argument",
         )),
+    }
+}
+
+fn prepare_default_payload(data: &Value, order: ByteOrder) -> BuiltinResult<Payload> {
+    prepare_payload(data, default_datatype(data)?, order)
+}
+
+fn default_datatype(data: &Value) -> BuiltinResult<DataType> {
+    let dtype = match data {
+        Value::Num(_) => DataType::Double,
+        Value::Int(value) => datatype_for_int(value),
+        Value::Tensor(tensor) => datatype_for_numeric_dtype(tensor.numeric_dtype()),
+        Value::SparseTensor(tensor) if tensor.is_logical() => DataType::UInt8,
+        Value::SparseTensor(tensor) => {
+            let Some(dtype) = tensor.numeric_dtype() else {
+                return Err(write_flow(
+                    &WRITE_ERROR_INVALID_DATA,
+                    "write: unsupported sparse input type",
+                ));
+            };
+            datatype_for_numeric_dtype(dtype)
+        }
+        Value::Bool(_) | Value::LogicalArray(_) => DataType::UInt8,
+        Value::CharArray(_) => DataType::Char,
+        Value::String(_) | Value::StringArray(_) => DataType::String,
+        _ => {
+            return Err(write_flow(
+                &WRITE_ERROR_INVALID_DATA,
+                "write: unsupported input type",
+            ))
+        }
+    };
+    Ok(dtype)
+}
+
+fn datatype_for_int(value: &IntValue) -> DataType {
+    match value {
+        IntValue::I8(_) => DataType::Int8,
+        IntValue::I16(_) => DataType::Int16,
+        IntValue::I32(_) => DataType::Int32,
+        IntValue::I64(_) => DataType::Int64,
+        IntValue::U8(_) => DataType::UInt8,
+        IntValue::U16(_) => DataType::UInt16,
+        IntValue::U32(_) => DataType::UInt32,
+        IntValue::U64(_) => DataType::UInt64,
+    }
+}
+
+fn datatype_for_numeric_dtype(dtype: NumericDType) -> DataType {
+    match dtype {
+        NumericDType::F64 => DataType::Double,
+        NumericDType::F32 => DataType::Single,
+        NumericDType::I8 => DataType::Int8,
+        NumericDType::I16 => DataType::Int16,
+        NumericDType::I32 => DataType::Int32,
+        NumericDType::I64 => DataType::Int64,
+        NumericDType::U8 => DataType::UInt8,
+        NumericDType::U16 => DataType::UInt16,
+        NumericDType::U32 => DataType::UInt32,
+        NumericDType::U64 => DataType::UInt64,
     }
 }
 
@@ -1052,7 +1265,7 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn write_default_uint8_sends_bytes() {
+    fn write_default_preserves_double_datatype() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
         let port = listener.local_addr().unwrap().port();
         let handle = thread::spawn(move || {
@@ -1072,7 +1285,11 @@ pub(crate) mod tests {
         }
         remove_client_for_test(client_id(&client));
         let received = handle.join().expect("join");
-        assert_eq!(received, vec![1, 2, 3, 4]);
+        let expected = [1.0_f64, 2.0, 3.0, 4.0]
+            .into_iter()
+            .flat_map(f64::to_le_bytes)
+            .collect::<Vec<_>>();
+        assert_eq!(received, expected);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1124,6 +1341,58 @@ pub(crate) mod tests {
         extend_u64(&mut expected, u64::MAX, ByteOrder::Little);
         assert_eq!(payload.elements, 2);
         assert_eq!(payload.bytes, expected);
+    }
+
+    #[test]
+    fn write_default_payload_preserves_uint64_datatype_exactly() {
+        let wide = (1_u64 << 53) + 1;
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![wide, u64::MAX]), vec![1, 2])
+            .expect("typed integer tensor");
+
+        let payload = prepare_default_payload(&Value::Tensor(tensor), ByteOrder::Big).unwrap();
+        let expected = [wide, u64::MAX]
+            .into_iter()
+            .flat_map(u64::to_be_bytes)
+            .collect::<Vec<_>>();
+        assert_eq!(payload.elements, 2);
+        assert_eq!(payload.bytes, expected);
+    }
+
+    #[test]
+    fn write_extensions_are_gated_before_client_access() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let data = Value::Tensor(Tensor::new(vec![1.0; 4], vec![2, 2]).unwrap());
+        let error = run_write(Value::Num(0.0), data, Vec::new())
+            .expect_err("strict mode rejects nonvector data before client access");
+        assert_eq!(
+            error.identifier(),
+            WRITE_NONVECTOR_EXTENSION.error_identifier
+        );
+
+        let sparse =
+            SparseTensor::new_integer(2, 1, vec![0, 1], vec![0], IntegerStorage::U8(vec![1]))
+                .unwrap();
+        let error = run_write(Value::Num(0.0), Value::SparseTensor(sparse), Vec::new())
+            .expect_err("strict mode rejects sparse data before client access");
+        assert_eq!(error.identifier(), WRITE_SPARSE_EXTENSION.error_identifier);
+
+        let error = run_write(Value::Num(0.0), Value::Bool(true), Vec::new())
+            .expect_err("strict mode rejects logical data before client access");
+        assert_eq!(error.identifier(), WRITE_LOGICAL_EXTENSION.error_identifier);
+
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX - 469,
+            descriptor: Default::default(),
+        };
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let error = run_write(Value::Num(0.0), Value::GpuTensor(handle), Vec::new())
+            .expect_err("strict mode rejects explicit GPU data before provider access");
+        assert_eq!(
+            error.identifier(),
+            WRITE_EXPLICIT_GPU_EXTENSION.error_identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -27,6 +27,10 @@ impl WgpuProvider {
                         shape: entry.shape.clone(),
                         device_id: self.runtime_device_id,
                         buffer_id: base_id,
+                        descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
+                            entry.element_type,
+                            entry.storage,
+                        ),
                     };
                     let moments = self.reduce_moments_nd_exec(&base_handle, dims_zero_based)?;
                     if let Ok(mut cache2) = self.moments_cache.lock() {

@@ -1,5 +1,7 @@
 //! MATLAB-compatible `sortrows` builtin with GPU-aware semantics.
 
+#[cfg(test)]
+use runmat_value::IntegerComplexStorage;
 use std::cmp::Ordering;
 
 use runmat_accelerate_api::{
@@ -441,7 +443,6 @@ async fn sortrows_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
 
 /// Evaluate the `sortrows` builtin once and expose both outputs.
 pub async fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<SortRowsEvaluation> {
-    crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
     match value {
         Value::GpuTensor(handle) => sortrows_gpu(handle, rest).await,
         other => sortrows_host(other, rest),
@@ -651,8 +652,8 @@ fn sortrows_complex_tensor_with_args(
         ComplexStorage::F32(values) => {
             order.sort_by(|&a, &b| compare_complex_rows(values, rows, cols, args, a, b));
         }
-        ComplexStorage::Integer(_) => {
-            sortrows_promoted_complex_integer_order(&storage, rows, cols, args, &mut order);
+        ComplexStorage::Integer(values) => {
+            order.sort_by(|&a, &b| compare_complex_integer_rows(values, rows, cols, args, a, b));
         }
     }
 
@@ -664,15 +665,47 @@ fn sortrows_complex_tensor_with_args(
     })
 }
 
-fn sortrows_promoted_complex_integer_order(
-    storage: &ComplexStorage,
+fn compare_complex_integer_rows(
+    storage: &runmat_value::IntegerComplexStorage,
     rows: usize,
     cols: usize,
     args: &SortRowsArgs,
-    order: &mut [usize],
-) {
-    let values = storage.materialize_f64();
-    order.sort_by(|&a, &b| compare_complex_rows(&values, rows, cols, args, a, b));
+    a: usize,
+    b: usize,
+) -> Ordering {
+    for spec in &args.columns {
+        if spec.index >= cols {
+            continue;
+        }
+        let a_index = a + spec.index * rows;
+        let b_index = b + spec.index * rows;
+        let a_real = storage
+            .real
+            .value_at(a_index)
+            .expect("validated complex row index");
+        let a_imag = storage
+            .imag
+            .value_at(a_index)
+            .expect("validated complex row index");
+        let b_real = storage
+            .real
+            .value_at(b_index)
+            .expect("validated complex row index");
+        let b_imag = storage
+            .imag
+            .value_at(b_index)
+            .expect("validated complex row index");
+        let ordering = integer_order::compare_complex(
+            (&a_real, &a_imag),
+            (&b_real, &b_imag),
+            matches!(spec.direction, SortDirection::Descend),
+            matches!(args.comparison, ComparisonMethod::Real),
+        );
+        if ordering != Ordering::Equal {
+            return ordering;
+        }
+    }
+    Ordering::Equal
 }
 
 fn sortrows_char_array_with_args(
@@ -1598,6 +1631,36 @@ pub(crate) mod tests {
             sorted.integer_storage(),
             Some(&IntegerStorage::I64(vec![-1, 2, i64::MAX, i64::MIN]))
         );
+    }
+
+    #[test]
+    fn sortrows_orders_typed_complex_uint64_without_floating_projection() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX, u64::MAX - 1]),
+            IntegerStorage::U64(vec![0, 1]),
+        )
+        .unwrap();
+        let input = ComplexTensor::new_integer(storage, vec![2, 1]).unwrap();
+        let (sorted, indices) = evaluate(Value::ComplexTensor(input), &[])
+            .expect("sortrows")
+            .into_values();
+        let Value::ComplexTensor(sorted) = sorted else {
+            panic!("expected complex integer tensor");
+        };
+        assert_eq!(
+            sorted.integer_storage(),
+            Some(
+                &IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![u64::MAX - 1, u64::MAX]),
+                    IntegerStorage::U64(vec![1, 0]),
+                )
+                .unwrap()
+            )
+        );
+        let Value::Tensor(indices) = indices else {
+            panic!("expected index tensor");
+        };
+        assert_double_values(&indices, &[2.0, 1.0]);
     }
 
     #[test]

@@ -184,7 +184,13 @@ fn mir_range_starts_at_one(iterable: &MirRvalue) -> bool {
 }
 
 fn mir_operand_is_one(operand: &MirOperand) -> bool {
-    matches!(operand, MirOperand::Constant(MirConstant::Number(value)) if value == "1" || value == "1.0")
+    match operand {
+        MirOperand::Constant(MirConstant::Number(value)) => value == "1" || value == "1.0",
+        MirOperand::Constant(MirConstant::IntegerLiteral(value)) => {
+            runmat_value::IntValue::from(value).try_to_u64() == Some(1)
+        }
+        _ => false,
+    }
 }
 
 fn call_name(call: &MirCall) -> Option<&str> {
@@ -491,6 +497,9 @@ fn hir_property_default_to_value(expr: &runmat_hir::HirExpr) -> Option<PropertyD
         runmat_hir::HirExprKind::Number(text) => {
             text.parse::<f64>().ok().map(PropertyDefaultLiteral::Num)
         }
+        runmat_hir::HirExprKind::IntegerLiteral(value) => Some(PropertyDefaultLiteral::Int(
+            runmat_value::IntValue::from(value),
+        )),
         runmat_hir::HirExprKind::String(text) => {
             Some(PropertyDefaultLiteral::String(text.0.clone()))
         }
@@ -3950,6 +3959,10 @@ impl Compiler {
                         .with_identifier(IDENT_MIR_NUMBER_LITERAL_INVALID)
                 })?;
                 self.emit(Instr::LoadConst(value));
+                Ok(())
+            }
+            MirOperand::Constant(MirConstant::IntegerLiteral(value)) => {
+                self.emit(Instr::LoadInt(runmat_value::IntValue::from(value)));
                 Ok(())
             }
             MirOperand::Constant(MirConstant::String(value)) => {

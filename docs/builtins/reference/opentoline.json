@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Host-side editor navigation request. gpuArray scalar position inputs are gathered before validation."
+    "notes": "Host-side editor navigation request. Ordinary integer-valued double positions are the compatibility form; native typed-integer positions and explicitly resident positions are independently gated RunMat extensions, while automatically resident compatible values gather transparently."
   },
   "fusion": {
     "elementwise": false,
@@ -32,6 +32,8 @@
   "behaviors": [
     "`opentoline(filename,line)` accepts a string scalar, row character vector, or scalar string array filename plus a positive integer line number.",
     "`opentoline(filename,line,column)` also validates a positive integer column number.",
+    "Native typed-integer line and column spellings are RunMat extensions because the public contract establishes structural positions without enumerating native numeric classes.",
+    "Explicit `gpuArray` positions are a separate RunMat extension; automatically resident compatible scalars still gather through their owning provider in MATLAB-compatible mode.",
     "`opentoline(filename,line,column,'select')` accepts MATLAB-style selection intent as a no-op navigation option in noninteractive hosts.",
     "Command-style numeric line and column arguments passed as text, such as `opentoline file.m 10 4`, are accepted when they parse as positive integers.",
     "File names are resolved using the RunMat search path and the same general MATLAB-style file extensions used by `open`.",
@@ -85,6 +87,6 @@
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/opentoline.rs"
   },
   "gpu_behavior": [
-    "`opentoline` is a host-side editor navigation operation and does not participate in GPU fusion or provider-native execution."
+    "`opentoline` is a host-side editor navigation operation and does not participate in GPU fusion or provider-native computation; an admitted automatically resident position is downloaded through its owning provider before validation."
   ]
 }

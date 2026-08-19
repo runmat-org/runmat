@@ -29,6 +29,7 @@
   },
   "description": "`print` exports the active or specified figure to files. Device tokens, resolution options, and argument forms follow MATLAB-style `print` semantics in RunMat.",
   "behaviors": [
+    "A typed-integer numeric figure-registry alias is a RunMat-mode extension and must map exactly to the floating handle registry; resolution remains a textual option such as `'-r300'`.",
     "`print(filename, '-dpng')` writes PNG bytes to `filename`. If the name has no `.png` extension, RunMat appends one.",
     "`print(filename, '-dpng', '-rN')` scales the export dimensions from the default 800 by 600 canvas using `N` DPI relative to RunMat's 150 DPI default.",
     "`print(fig, filename, '-dpng')` exports the specified figure handle instead of the active figure.",

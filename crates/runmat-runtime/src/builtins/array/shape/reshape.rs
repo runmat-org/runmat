@@ -14,6 +14,11 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 
@@ -186,6 +191,44 @@ pub const RESHAPE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &RESHAPE_ERRORS,
 };
+const RESHAPE_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target documents all eight integer classes and preserves the input datatype.",
+    }];
+const RESHAPE_INTEGER_SIZE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "sz/m/n/dims",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed size controls are parsed exactly as nonnegative dimensions, with one optional inferred dimension.",
+    }];
+pub const RESHAPE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = reshape(integer_A, sz)",
+        inputs: &RESHAPE_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Reshape changes metadata only; authoritative integer payload and resident handle ownership remain unchanged.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = reshape(A, integer_sz) or reshape(A, integer_m,integer_n,...)",
+        inputs: &RESHAPE_INTEGER_SIZE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Size controls remain exact and checked multiplication proves element-count equality without binary64 conversion.",
+    },
+];
 
 fn reshape_rank_from_args(args: &[Type]) -> Option<usize> {
     if args.len() < 2 {
@@ -236,6 +279,7 @@ fn reshape_type(args: &[Type], ctx: &ResolveContext) -> Type {
     accel = "shape",
     type_resolver(reshape_type),
     descriptor(crate::builtins::array::shape::reshape::RESHAPE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::array::shape::reshape::RESHAPE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::shape::reshape"
 )]
 async fn reshape_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -574,8 +618,6 @@ fn finalize_dimensions(tokens: Vec<DimToken>, numel: usize) -> crate::BuiltinRes
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    #[cfg(feature = "wgpu")]
-    use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
@@ -909,9 +951,10 @@ pub(crate) mod tests {
             panic!("expected gpu tensor");
         };
         assert_eq!(reshaped.shape, vec![2, 6]);
-        let host = block_on(download_handle_async(provider, &reshaped)).expect("download");
+        let host = test_support::gather(Value::GpuTensor(reshaped.clone())).expect("gather");
         assert_eq!(host.shape, vec![2, 6]);
-        assert_eq!(host.data, tensor.materialize_f64());
+        assert_eq!(host.materialize_f64(), tensor.materialize_f64());
+        provider.free(&reshaped).expect("free reshaped tensor");
     }
 
     #[test]
@@ -951,16 +994,13 @@ pub(crate) mod tests {
             runmat_accelerate_api::handle_storage(&reshaped),
             runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
         );
-        let host = block_on(download_handle_async(provider, &reshaped)).expect("download");
+        let host = block_on(
+            crate::builtins::math::fft::common::gather_gpu_complex_tensor(&reshaped, "reshape"),
+        )
+        .expect("gather complex reshape");
         assert_eq!(host.shape, vec![3, 2]);
-        assert_eq!(
-            host.storage,
-            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
-        );
-        assert_eq!(
-            host.data,
-            vec![1.0, -1.0, 2.0, -2.0, 3.0, -3.0, 4.0, -4.0, 5.0, -5.0, 6.0, -6.0]
-        );
+        assert_eq!(host.materialize_f64(), complex.materialize_f64());
+        provider.free(&reshaped).expect("free complex reshape");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -2496,6 +2496,7 @@ mod tests {
             shape: vec![4, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let error = fitclinear_builtin(poison, vec![tensor(vec![0.0, 0.0, 1.0, 1.0], vec![4, 1])])
             .await

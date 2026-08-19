@@ -60,6 +60,12 @@ pub fn limits_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<
             format!("{builtin}: lower limit must be less than upper limit"),
         ));
     }
+    if lo >= hi {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: limits must remain distinct in the graphics coordinate domain"),
+        ));
+    }
     Ok((lo, hi))
 }
 

@@ -20,6 +20,11 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_types::MemberAccess;
 use runmat_value::{
@@ -161,6 +166,27 @@ const SETFIELD_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
         inputs: &SETFIELD_INPUTS_LEADING_INDEX,
         outputs: &SETFIELD_OUTPUT,
     },
+];
+
+const SETFIELD_INTEGER_VALUE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "value",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "An integer assigned as a new or replacement field value remains an ordinary exact MATLAB value with its native class and shape.",
+    }];
+const SETFIELD_INTEGER_INDEX_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "idx cells",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Numeric index values inside selector cells are decoded exactly and range checked before structural indexing.",
+    }];
+pub const SETFIELD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor { form: "S = setfield(S, field_or_path, integer_value)", inputs: &SETFIELD_INTEGER_VALUE_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Direct structure and object field replacement preserves authoritative integer payloads; assignment into an existing typed numeric container follows that container's documented conversion rule." },
+    BuiltinIntegerCapabilityDescriptor { form: "S = setfield(S, {integer_idx}, field_or_path, value)", inputs: &SETFIELD_INTEGER_INDEX_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Index selectors are decoded exactly in every supported integer class; host mutation gathers automatically resident values when required." },
 ];
 
 const SETFIELD_ERROR_NOT_ENOUGH_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -336,6 +362,7 @@ fn is_undefined_function(err: &RuntimeError) -> bool {
     keywords = "setfield,struct,assignment,object property",
     type_resolver(setfield_type),
     descriptor(crate::builtins::structs::core::setfield::SETFIELD_DESCRIPTOR),
+    integer_capabilities(crate::builtins::structs::core::setfield::SETFIELD_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::structs::core::setfield"
 )]
 async fn setfield_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

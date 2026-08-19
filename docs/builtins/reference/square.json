@@ -18,7 +18,7 @@
       "f64"
     ],
     "broadcasting": "elementwise",
-    "notes": "R2026a does not document interactive GPU Array support for `square`. In `runmat` compatibility mode, gpuArray arguments are accepted as a RunMat extension and gathered so the reference implementation can guarantee half-open duty-cycle semantics at the period boundary."
+    "notes": "The compatibility target does not document interactive GPU Array support for `square`. In `runmat` compatibility mode, gpuArray arguments are accepted as a RunMat extension and gathered so the reference implementation can guarantee half-open duty-cycle semantics at the period boundary."
   },
   "fusion": {
     "elementwise": false,

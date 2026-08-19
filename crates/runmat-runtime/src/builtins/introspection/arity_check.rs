@@ -2,14 +2,28 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_thread_local::runmat_thread_local;
 use runmat_types::{NARGINCHK_BUILTIN_NAME, NARGOUTCHK_BUILTIN_NAME};
 use runmat_value::Value;
+use runmat_value::{CharArray, StructValue};
 use std::cell::RefCell;
 
 use crate::builtins::common::tensor;
 
 const NO_OUTPUTS: [BuiltinParamDescriptor; 0] = [];
+
+const MESSAGE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "msg",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Legacy message text or structure.",
+}];
 
 const ARITY_CHECK_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
@@ -34,11 +48,95 @@ const NARGINCHK_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureD
     outputs: &NO_OUTPUTS,
 }];
 
-const NARGOUTCHK_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "nargoutchk(minArgs, maxArgs)",
-    inputs: &ARITY_CHECK_INPUTS,
-    outputs: &NO_OUTPUTS,
-}];
+const NARGOUTCHK_LEGACY_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "minArgs",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Minimum allowed argument count.",
+    },
+    BuiltinParamDescriptor {
+        name: "maxArgs",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Maximum allowed argument count.",
+    },
+    BuiltinParamDescriptor {
+        name: "numArgs",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Legacy explicit output count to validate.",
+    },
+];
+
+const NARGOUTCHK_LEGACY_STRUCT_INPUTS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "minArgs",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Minimum allowed argument count.",
+    },
+    BuiltinParamDescriptor {
+        name: "maxArgs",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Maximum allowed argument count.",
+    },
+    BuiltinParamDescriptor {
+        name: "numArgs",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Legacy explicit output count to validate.",
+    },
+    BuiltinParamDescriptor {
+        name: "outputType",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("struct"),
+        description: "Literal struct output selector.",
+    },
+];
+
+const NARGOUTCHK_ALL_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "nargoutchk(minArgs, maxArgs)",
+        inputs: &ARITY_CHECK_INPUTS,
+        outputs: &NO_OUTPUTS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "msgText = nargoutchk(minArgs, maxArgs, numArgs)",
+        inputs: &NARGOUTCHK_LEGACY_INPUTS,
+        outputs: &MESSAGE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "msgStruct = nargoutchk(minArgs, maxArgs, numArgs, 'struct')",
+        inputs: &NARGOUTCHK_LEGACY_STRUCT_INPUTS,
+        outputs: &MESSAGE_OUTPUT,
+    },
+];
+
+const NARGINCHK_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability { name: "minArgs", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "All eight integer classes are explicitly documented and parsed exactly as nonnegative scalar bounds." },
+    BuiltinIntegerInputCapability { name: "maxArgs", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "All eight integer classes are explicitly documented; positive floating infinity remains the documented unbounded maximum." },
+];
+pub const NARGINCHK_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor { form: "narginchk(integer_minArgs, integer_maxArgs)", inputs: &NARGINCHK_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::ScalarOnly, notes: "Bounds are compared exactly with the current host call-context count; interactive resident bounds are not documented and reject without provider access." }];
+
+const NARGOUTCHK_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 3] = [
+    BuiltinIntegerInputCapability { name: "minArgs", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "All eight integer classes are explicitly documented and parsed exactly as nonnegative scalar bounds." },
+    BuiltinIntegerInputCapability { name: "maxArgs", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "All eight integer classes are explicitly documented; positive floating infinity remains the documented unbounded maximum." },
+    BuiltinIntegerInputCapability { name: "numArgs", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The legacy explicit output count accepts all eight documented integer classes and is evaluated without floating conversion." },
+];
+pub const NARGOUTCHK_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor { form: "nargoutchk(integer_minArgs, integer_maxArgs)", inputs: &NARGINCHK_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::ScalarOnly, notes: "Bounds are compared exactly with the current host call-context output count; interactive resident bounds reject without provider access." },
+    BuiltinIntegerCapabilityDescriptor { form: "msg = nargoutchk(integer_minArgs, integer_maxArgs, integer_numArgs, 'struct'?)", inputs: &NARGOUTCHK_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::ScalarOnly, notes: "The discouraged legacy form compares three authoritative integer scalars and returns message text, a message structure, or the documented empty result without changing integer payloads." },
+];
 
 pub const NARGINCHK_ERROR_NOT_ENOUGH_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.NARGINCHK.NOT_ENOUGH_INPUTS",
@@ -134,7 +232,7 @@ pub const NARGOUTCHK_ERRORS: [BuiltinErrorDescriptor; 5] = [
 ];
 
 pub const NARGOUTCHK_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &NARGOUTCHK_SIGNATURES,
+    signatures: &NARGOUTCHK_ALL_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &NARGOUTCHK_ERRORS,
@@ -160,6 +258,10 @@ impl Drop for ArityCallCountsGuard {
 pub fn replace_call_counts(call_counts: Vec<(usize, usize)>) -> ArityCallCountsGuard {
     let previous = CALL_COUNTS.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), call_counts));
     ArityCallCountsGuard { previous }
+}
+
+pub(crate) fn current_input_count() -> Option<usize> {
+    CALL_COUNTS.with(|slot| slot.borrow().last().map(|(inputs, _)| *inputs))
 }
 
 #[derive(Clone, Copy)]
@@ -261,6 +363,61 @@ fn validate_bounds(
     Ok((min, max))
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ArityViolation {
+    TooFew,
+    TooMany,
+}
+
+fn arity_violation(actual: usize, min: usize, max: ArityBound) -> Option<ArityViolation> {
+    if actual < min {
+        Some(ArityViolation::TooFew)
+    } else if !max.permits(actual) {
+        Some(ArityViolation::TooMany)
+    } else {
+        None
+    }
+}
+
+fn scalar_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(value) => Some(value.clone()),
+        Value::StringArray(value) if value.data.len() == 1 => Some(value.data[0].clone()),
+        Value::CharArray(value) if value.rows == 1 => Some(value.data.iter().collect()),
+        _ => None,
+    }
+}
+
+fn legacy_nargout_result(violation: Option<ArityViolation>, structured: bool) -> Value {
+    let (message, identifier) = match violation {
+        Some(ArityViolation::TooFew) => (
+            "Not enough output arguments.",
+            "MATLAB:nargoutchk:notEnoughOutputs",
+        ),
+        Some(ArityViolation::TooMany) => (
+            "Too many output arguments.",
+            "MATLAB:nargoutchk:tooManyOutputs",
+        ),
+        None if structured => return Value::Struct(StructValue::new()),
+        None => {
+            return Value::CharArray(
+                CharArray::new(Vec::new(), 0, 0).expect("empty legacy nargoutchk result"),
+            )
+        }
+    };
+    if structured {
+        let mut value = StructValue::new();
+        value.insert("message", Value::CharArray(CharArray::new_row(message)));
+        value.insert(
+            "identifier",
+            Value::CharArray(CharArray::new_row(identifier)),
+        );
+        Value::Struct(value)
+    } else {
+        Value::CharArray(CharArray::new_row(message))
+    }
+}
+
 fn validate_arg_count(
     args: &[Value],
     builtin: &'static str,
@@ -303,34 +460,61 @@ pub(crate) fn dispatch_narginchk(args: Vec<Value>) -> crate::BuiltinResult<Value
     Ok(Value::Num(0.0))
 }
 
-pub(crate) fn dispatch_nargoutchk(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub fn dispatch_nargoutchk(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let builtin = NARGOUTCHK_BUILTIN_NAME;
-    validate_arg_count(
-        &args,
-        builtin,
-        &NARGOUTCHK_ERROR_NOT_ENOUGH_OUTPUTS,
-        &NARGOUTCHK_ERROR_TOO_MANY_OUTPUTS,
-    )?;
-    let (_, actual_outputs) = CALL_COUNTS
-        .with(|slot| slot.borrow().last().copied())
-        .ok_or_else(|| descriptor_error(builtin, &NARGOUTCHK_ERROR_CONTEXT_UNAVAILABLE))?;
+    if !(2..=4).contains(&args.len()) {
+        return Err(descriptor_error(
+            builtin,
+            if args.len() < 2 {
+                &NARGOUTCHK_ERROR_NOT_ENOUGH_OUTPUTS
+            } else {
+                &NARGOUTCHK_ERROR_TOO_MANY_OUTPUTS
+            },
+        ));
+    }
     let (min, max) = validate_bounds(
         &args,
         builtin,
         &NARGOUTCHK_ERROR_ARGUMENT_INVALID,
         &NARGOUTCHK_ERROR_BOUNDS_INVALID,
     )?;
-    if actual_outputs < min {
-        return Err(descriptor_error(
-            builtin,
-            &NARGOUTCHK_ERROR_NOT_ENOUGH_OUTPUTS,
+    if args.len() >= 3 {
+        let actual_outputs =
+            parse_finite_arity_bound(&args[2], builtin, &NARGOUTCHK_ERROR_ARGUMENT_INVALID)?;
+        let structured = if let Some(selector) = args.get(3) {
+            scalar_text(selector)
+                .is_some_and(|selector| selector.trim().eq_ignore_ascii_case("struct"))
+        } else {
+            false
+        };
+        if args.len() == 4 && !structured {
+            return Err(descriptor_error(
+                builtin,
+                &NARGOUTCHK_ERROR_ARGUMENT_INVALID,
+            ));
+        }
+        return Ok(legacy_nargout_result(
+            arity_violation(actual_outputs, min, max),
+            structured,
         ));
     }
-    if !max.permits(actual_outputs) {
-        return Err(descriptor_error(
-            builtin,
-            &NARGOUTCHK_ERROR_TOO_MANY_OUTPUTS,
-        ));
+    let (_, actual_outputs) = CALL_COUNTS
+        .with(|slot| slot.borrow().last().copied())
+        .ok_or_else(|| descriptor_error(builtin, &NARGOUTCHK_ERROR_CONTEXT_UNAVAILABLE))?;
+    match arity_violation(actual_outputs, min, max) {
+        Some(ArityViolation::TooFew) => {
+            return Err(descriptor_error(
+                builtin,
+                &NARGOUTCHK_ERROR_NOT_ENOUGH_OUTPUTS,
+            ))
+        }
+        Some(ArityViolation::TooMany) => {
+            return Err(descriptor_error(
+                builtin,
+                &NARGOUTCHK_ERROR_TOO_MANY_OUTPUTS,
+            ))
+        }
+        None => {}
     }
     Ok(Value::Num(0.0))
 }
@@ -342,6 +526,7 @@ pub(crate) fn dispatch_nargoutchk(args: Vec<Value>) -> crate::BuiltinResult<Valu
     sink = true,
     suppress_auto_output = true,
     descriptor(self::NARGINCHK_DESCRIPTOR),
+    integer_capabilities(self::NARGINCHK_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::introspection::arity_check"
 )]
 pub fn narginchk_builtin_registered(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -355,6 +540,7 @@ pub fn narginchk_builtin_registered(args: Vec<Value>) -> crate::BuiltinResult<Va
     sink = true,
     suppress_auto_output = true,
     descriptor(self::NARGOUTCHK_DESCRIPTOR),
+    integer_capabilities(self::NARGOUTCHK_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::introspection::arity_check"
 )]
 pub fn nargoutchk_builtin_registered(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -428,5 +614,94 @@ mod tests {
                     .is_err()
             );
         }
+    }
+
+    #[test]
+    fn arity_checks_accept_every_documented_integer_class() {
+        let _guard = replace_call_counts(vec![(1, 1)]);
+        let cases = [
+            (IntValue::I8(0), IntValue::I8(2), IntValue::I8(3)),
+            (IntValue::I16(0), IntValue::I16(2), IntValue::I16(3)),
+            (IntValue::I32(0), IntValue::I32(2), IntValue::I32(3)),
+            (IntValue::I64(0), IntValue::I64(2), IntValue::I64(3)),
+            (IntValue::U8(0), IntValue::U8(2), IntValue::U8(3)),
+            (IntValue::U16(0), IntValue::U16(2), IntValue::U16(3)),
+            (IntValue::U32(0), IntValue::U32(2), IntValue::U32(3)),
+            (IntValue::U64(0), IntValue::U64(2), IntValue::U64(3)),
+        ];
+        for (min, max, invalid_outputs) in cases {
+            assert_eq!(
+                dispatch_narginchk(vec![Value::Int(min.clone()), Value::Int(max.clone())])
+                    .expect("documented integer narginchk bounds"),
+                Value::Num(0.0)
+            );
+            assert_eq!(
+                dispatch_nargoutchk(vec![Value::Int(min.clone()), Value::Int(max.clone())])
+                    .expect("documented integer nargoutchk bounds"),
+                Value::Num(0.0)
+            );
+            let text = dispatch_nargoutchk(vec![
+                Value::Int(min.clone()),
+                Value::Int(max.clone()),
+                Value::Int(invalid_outputs.clone()),
+            ])
+            .expect("legacy text nargoutchk");
+            assert!(
+                matches!(text, Value::CharArray(array) if array.data.iter().collect::<String>().contains("Too many"))
+            );
+
+            let structured = dispatch_nargoutchk(vec![
+                Value::Int(min),
+                Value::Int(max),
+                Value::Int(invalid_outputs),
+                Value::from("struct"),
+            ])
+            .expect("legacy structured nargoutchk");
+            assert!(
+                matches!(structured, Value::Struct(value) if value.fields.contains_key("message") && value.fields.contains_key("identifier"))
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_nargoutchk_returns_documented_empty_result_classes() {
+        let text = dispatch_nargoutchk(vec![
+            Value::Int(IntValue::U8(0)),
+            Value::Int(IntValue::U8(2)),
+            Value::Int(IntValue::U8(1)),
+        ])
+        .expect("valid legacy text form");
+        assert!(
+            matches!(text, Value::CharArray(array) if array.shape == vec![0, 0] && array.data.is_empty())
+        );
+
+        let structured = dispatch_nargoutchk(vec![
+            Value::Int(IntValue::U8(0)),
+            Value::Int(IntValue::U8(2)),
+            Value::Int(IntValue::U8(1)),
+            Value::from("struct"),
+        ])
+        .expect("valid legacy structure form");
+        assert!(matches!(structured, Value::Struct(value) if value.fields.is_empty()));
+    }
+
+    #[test]
+    fn arity_checks_reject_resident_bounds_before_provider_access() {
+        let _guard = replace_call_counts(vec![(1, 1)]);
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 9_419_007,
+            descriptor: Default::default(),
+        });
+        let nargin = dispatch_narginchk(vec![resident.clone(), Value::Num(2.0)])
+            .expect_err("resident nargin bound must reject");
+        assert_eq!(nargin.identifier(), Some("RunMat:NarginchkArgumentInvalid"));
+        let nargout = dispatch_nargoutchk(vec![resident, Value::Num(2.0)])
+            .expect_err("resident nargout bound must reject");
+        assert_eq!(
+            nargout.identifier(),
+            Some("RunMat:NargoutchkArgumentInvalid")
+        );
     }
 }

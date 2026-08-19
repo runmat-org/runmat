@@ -6,6 +6,11 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, IntValue, NumericDType, Tensor, Value};
 
@@ -140,6 +145,56 @@ const LINSPACE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     },
 ];
 
+const LINSPACE_INTEGER_ENDPOINT_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "start",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Rejected,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Integer endpoints are rejected; linspace endpoints must be single or double.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "stop",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Rejected,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Integer endpoints are rejected; linspace endpoints must be single or double.",
+    },
+];
+
+const LINSPACE_INTEGER_COUNT_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "n",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "All eight integer classes are accepted as exact structural counts.",
+    }];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "x = linspace(integer_start, integer_stop[, n])",
+        inputs: &LINSPACE_INTEGER_ENDPOINT_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes:
+            "Host and resident integer endpoints are rejected before numeric sequence generation.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "x = linspace(start, stop, integer_n)",
+        inputs: &LINSPACE_INTEGER_COUNT_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The count is read exactly; output class follows the floating-point endpoints.",
+    },
+];
+
 const LINSPACE_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.LINSPACE.ARG_COUNT",
     identifier: None,
@@ -191,6 +246,7 @@ pub const LINSPACE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "array_construct",
     type_resolver(linspace_type),
     descriptor(crate::builtins::array::creation::linspace::LINSPACE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::array::creation::linspace::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::creation::linspace"
 )]
 async fn linspace_builtin(
@@ -202,8 +258,18 @@ async fn linspace_builtin(
         return Err(linspace_error(&LINSPACE_ERROR_ARG_COUNT));
     }
 
-    let (start_scalar, start_gpu) = parse_scalar("linspace", start).await?;
-    let (stop_scalar, stop_gpu) = parse_scalar("linspace", stop).await?;
+    let (start_scalar, start_source) = parse_scalar("linspace", start).await?;
+    let (stop_scalar, stop_source) = parse_scalar("linspace", stop).await?;
+    if start_source
+        .as_ref()
+        .zip(stop_source.as_ref())
+        .is_some_and(|(left, right)| left.device_id != right.device_id)
+    {
+        return Err(builtin_error(
+            "linspace: GPU endpoints must belong to the same provider",
+        ));
+    }
+    let source = start_source.as_ref().or(stop_source.as_ref());
 
     let count = if rest.is_empty() {
         Count::Length(100)
@@ -212,17 +278,30 @@ async fn linspace_builtin(
     };
     if matches!(count, Count::Nan) {
         let single = start_scalar.single || stop_scalar.single;
-        if start_gpu || stop_gpu {
-            if let Some(provider) = runmat_accelerate_api::provider().filter(|provider| {
-                !single || provider.precision() == runmat_accelerate_api::ProviderPrecision::F32
-            }) {
+        if let Some(source) = source {
+            if let Some(provider) =
+                gpu_helpers::exact_provider_for_handle(source).filter(|provider| {
+                    !single || provider.precision() == runmat_accelerate_api::ProviderPrecision::F32
+                })
+            {
                 let data = [f64::NAN];
                 let shape = [1usize, 1usize];
                 if let Ok(handle) = provider.upload(&HostTensorView {
                     data: &data,
                     shape: &shape,
                 }) {
-                    return Ok(gpu_helpers::resident_gpu_value(handle));
+                    return validated_sequence_output(
+                        source,
+                        provider,
+                        handle,
+                        vec![1, 1],
+                        if single {
+                            NumericDType::F32
+                        } else {
+                            NumericDType::F64
+                        },
+                        "linspace",
+                    );
                 }
             }
         }
@@ -238,7 +317,7 @@ async fn linspace_builtin(
         unreachable!("NaN count returned above")
     };
 
-    let residency = sequence_gpu_preference(count, SequenceIntent::Linspace, start_gpu || stop_gpu);
+    let residency = sequence_gpu_preference(count, SequenceIntent::Linspace, source.is_some());
     if log::log_enabled!(log::Level::Trace) {
         trace!(
             "linspace: len={} prefer_gpu={} reason={:?}",
@@ -248,7 +327,7 @@ async fn linspace_builtin(
         );
     }
     let prefer_gpu = residency.prefer_gpu;
-    build_sequence(start_scalar, stop_scalar, count, prefer_gpu)
+    build_sequence(start_scalar, stop_scalar, count, prefer_gpu, source)
 }
 
 #[derive(Clone, Copy)]
@@ -276,7 +355,10 @@ impl Endpoint {
     }
 }
 
-async fn parse_scalar(name: &str, value: Value) -> crate::BuiltinResult<(Endpoint, bool)> {
+async fn parse_scalar(
+    name: &str,
+    value: Value,
+) -> crate::BuiltinResult<(Endpoint, Option<runmat_accelerate_api::GpuTensorHandle>)> {
     match value {
         Value::GpuTensor(handle) => {
             if runmat_accelerate_api::handle_integer_type(&handle).is_some()
@@ -286,10 +368,14 @@ async fn parse_scalar(name: &str, value: Value) -> crate::BuiltinResult<(Endpoin
                     "{name}: endpoints must be single or double scalars"
                 )));
             }
-            match gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await? {
-                Value::Tensor(tensor) => tensor_scalar(name, &tensor).map(|scalar| (scalar, true)),
+            let provider = gpu_helpers::exact_provider_for_handle(&handle)
+                .ok_or_else(|| builtin_error(format!("{name}: no provider owns the endpoint")))?;
+            match gpu_helpers::download_value_preserving_residency_async(provider, &handle).await? {
+                Value::Tensor(tensor) => {
+                    tensor_scalar(name, &tensor).map(|scalar| (scalar, Some(handle)))
+                }
                 Value::ComplexTensor(tensor) => {
-                    complex_tensor_scalar(name, &tensor).map(|scalar| (scalar, true))
+                    complex_tensor_scalar(name, &tensor).map(|scalar| (scalar, Some(handle)))
                 }
                 _ => Err(builtin_error(format!(
                     "{name}: endpoints must be single or double scalars"
@@ -300,27 +386,30 @@ async fn parse_scalar(name: &str, value: Value) -> crate::BuiltinResult<(Endpoin
     }
 }
 
-fn parse_scalar_host(name: &str, value: Value) -> crate::BuiltinResult<(Endpoint, bool)> {
+fn parse_scalar_host(
+    name: &str,
+    value: Value,
+) -> crate::BuiltinResult<(Endpoint, Option<runmat_accelerate_api::GpuTensorHandle>)> {
     match value {
         Value::Num(n) => Ok((
             Endpoint {
                 scalar: Scalar::Real(n),
                 single: false,
             },
-            false,
+            None,
         )),
         Value::Complex(re, im) => Ok((
             Endpoint {
                 scalar: Scalar::Complex { re, im },
                 single: false,
             },
-            false,
+            None,
         )),
         Value::Int(_) | Value::Bool(_) | Value::LogicalArray(_) => Err(builtin_error(format!(
             "{name}: endpoints must be single or double scalars"
         ))),
-        Value::Tensor(t) => tensor_scalar(name, &t).map(|scalar| (scalar, false)),
-        Value::ComplexTensor(t) => complex_tensor_scalar(name, &t).map(|scalar| (scalar, false)),
+        Value::Tensor(t) => tensor_scalar(name, &t).map(|scalar| (scalar, None)),
+        Value::ComplexTensor(t) => complex_tensor_scalar(name, &t).map(|scalar| (scalar, None)),
         Value::GpuTensor(_) => unreachable!("GpuTensor handled by parse_scalar"),
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Err(builtin_error(
             format!("{name}: endpoints must be numeric scalars; received a string-like value"),
@@ -375,6 +464,9 @@ enum Count {
 async fn parse_count(value: &Value) -> crate::BuiltinResult<Count> {
     match value {
         Value::GpuTensor(handle) => {
+            if runmat_accelerate_api::handle_is_logical(handle) {
+                return Err(linspace_error(&LINSPACE_ERROR_COUNT_NOT_SCALAR));
+            }
             let tensor = gpu_helpers::gather_tensor_async(handle).await?;
             if !tensor::is_scalar_tensor(&tensor) {
                 return Err(linspace_error(&LINSPACE_ERROR_COUNT_NOT_SCALAR));
@@ -445,6 +537,7 @@ fn build_sequence(
     stop: Endpoint,
     count: usize,
     prefer_gpu: bool,
+    source: Option<&runmat_accelerate_api::GpuTensorHandle>,
 ) -> crate::BuiltinResult<Value> {
     let (start_re, start_im) = start.parts();
     let (stop_re, stop_im) = stop.parts();
@@ -464,7 +557,11 @@ fn build_sequence(
             ComplexTensor::new(data, vec![1, count])
         }
         .map_err(|e| builtin_error(format!("linspace: {e}")))?;
-        return Ok(Value::ComplexTensor(tensor));
+        let value = Value::ComplexTensor(tensor);
+        return match source {
+            Some(source) => gpu_helpers::restore_class_preserving_value(source, value, "linspace"),
+            None => Ok(value),
+        };
     }
 
     if prefer_gpu {
@@ -476,7 +573,10 @@ fn build_sequence(
                 );
             }
         }
-        if let Some(provider) = runmat_accelerate_api::provider().filter(|provider| {
+        let provider = source
+            .and_then(gpu_helpers::exact_provider_for_handle)
+            .or_else(runmat_accelerate_api::provider);
+        if let Some(provider) = provider.filter(|provider| {
             !single || provider.precision() == runmat_accelerate_api::ProviderPrecision::F32
         }) {
             if count > 0 {
@@ -491,7 +591,31 @@ fn build_sequence(
                 match provider.linspace(start_re, stop_re, count) {
                     Ok(handle) => {
                         trace!("linspace: provider.linspace succeeded");
-                        return Ok(Value::GpuTensor(handle));
+                        if let Some(source) = source {
+                            return validated_sequence_output(
+                                source,
+                                provider,
+                                handle,
+                                vec![1, count],
+                                if single {
+                                    NumericDType::F32
+                                } else {
+                                    NumericDType::F64
+                                },
+                                "linspace",
+                            );
+                        }
+                        return validated_unowned_sequence_output(
+                            provider,
+                            handle,
+                            vec![1, count],
+                            if single {
+                                NumericDType::F32
+                            } else {
+                                NumericDType::F64
+                            },
+                            "linspace",
+                        );
                     }
                     Err(err) => {
                         trace!("linspace: provider.linspace failed: {err}");
@@ -511,7 +635,10 @@ fn build_sequence(
                 );
             }
         }
-        if let Some(provider) = runmat_accelerate_api::provider().filter(|provider| {
+        let provider = source
+            .and_then(gpu_helpers::exact_provider_for_handle)
+            .or_else(runmat_accelerate_api::provider);
+        if let Some(provider) = provider.filter(|provider| {
             !single || provider.precision() == runmat_accelerate_api::ProviderPrecision::F32
         }) {
             let shape = [1usize, count];
@@ -520,7 +647,31 @@ fn build_sequence(
                 shape: &shape,
             };
             if let Ok(handle) = provider.upload(&view) {
-                return Ok(Value::GpuTensor(handle));
+                if let Some(source) = source {
+                    return validated_sequence_output(
+                        source,
+                        provider,
+                        handle,
+                        vec![1, count],
+                        if single {
+                            NumericDType::F32
+                        } else {
+                            NumericDType::F64
+                        },
+                        "linspace",
+                    );
+                }
+                return validated_unowned_sequence_output(
+                    provider,
+                    handle,
+                    vec![1, count],
+                    if single {
+                        NumericDType::F32
+                    } else {
+                        NumericDType::F64
+                    },
+                    "linspace",
+                );
             }
         }
     }
@@ -535,6 +686,72 @@ fn build_sequence(
     }
     .map_err(|e| builtin_error(format!("linspace: {e}")))?;
     Ok(Value::Tensor(tensor))
+}
+
+fn validated_sequence_output(
+    source: &runmat_accelerate_api::GpuTensorHandle,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    output: runmat_accelerate_api::GpuTensorHandle,
+    shape: Vec<usize>,
+    dtype: NumericDType,
+    builtin: &str,
+) -> crate::BuiltinResult<Value> {
+    let expected_precision = match dtype {
+        NumericDType::F32 => runmat_accelerate_api::ProviderPrecision::F32,
+        _ => runmat_accelerate_api::ProviderPrecision::F64,
+    };
+    let valid = !gpu_helpers::same_gpu_handle(source, &output)
+        && output.shape == shape
+        && output.device_id == source.device_id
+        && gpu_helpers::exact_provider_for_handle(&output)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+        && runmat_accelerate_api::handle_storage(&output)
+            == runmat_accelerate_api::GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_precision(&output) == Some(expected_precision)
+        && runmat_accelerate_api::handle_integer_type(&output).is_none()
+        && !runmat_accelerate_api::handle_is_logical(&output);
+    if !valid {
+        gpu_helpers::free_unprotected_exact_owner(&output, &[source]);
+        return Err(builtin_error(format!(
+            "{builtin}: provider returned malformed sequence output"
+        )));
+    }
+    let mut output = output;
+    runmat_accelerate_api::set_handle_provenance(
+        &mut output,
+        runmat_accelerate_api::handle_provenance(source)
+            .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
+    );
+    Ok(gpu_helpers::resident_gpu_value(output))
+}
+
+fn validated_unowned_sequence_output(
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    output: runmat_accelerate_api::GpuTensorHandle,
+    shape: Vec<usize>,
+    dtype: NumericDType,
+    builtin: &str,
+) -> crate::BuiltinResult<Value> {
+    let expected_precision = match dtype {
+        NumericDType::F32 => runmat_accelerate_api::ProviderPrecision::F32,
+        _ => runmat_accelerate_api::ProviderPrecision::F64,
+    };
+    let valid = output.shape == shape
+        && output.device_id == provider.device_id()
+        && gpu_helpers::exact_provider_for_handle(&output)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+        && runmat_accelerate_api::handle_storage(&output)
+            == runmat_accelerate_api::GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_precision(&output) == Some(expected_precision)
+        && runmat_accelerate_api::handle_integer_type(&output).is_none()
+        && !runmat_accelerate_api::handle_is_logical(&output);
+    if !valid {
+        gpu_helpers::free_unprotected_exact_owner(&output, &[]);
+        return Err(builtin_error(format!(
+            "{builtin}: provider returned malformed sequence output"
+        )));
+    }
+    Ok(gpu_helpers::resident_gpu_value(output))
 }
 
 fn generate_real_sequence(start: f64, stop: f64, count: usize) -> Vec<f64> {
@@ -910,6 +1127,27 @@ pub(crate) mod tests {
         let error = linspace_builtin(Value::Num(3.0), Value::Num(7.0), vec![Value::Bool(true)])
             .expect_err("logical count must be rejected");
         assert!(error.message().contains("scalar"));
+    }
+
+    #[test]
+    fn linspace_rejects_resident_logical_count_before_gathering() {
+        test_support::with_test_provider(|provider| {
+            let count = provider
+                .upload(&HostTensorView {
+                    data: &[3.0],
+                    shape: &[1, 1],
+                })
+                .expect("count upload");
+            runmat_accelerate_api::set_handle_logical(&count, true);
+            let error = linspace_builtin(
+                Value::Num(3.0),
+                Value::Num(7.0),
+                vec![Value::GpuTensor(count.clone())],
+            )
+            .expect_err("resident logical count must be rejected");
+            assert!(error.message().contains("scalar"));
+            provider.free(&count).ok();
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

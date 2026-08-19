@@ -197,6 +197,137 @@ pub const ISOUTLIER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const ISOUTLIER_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "isoutlier-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "isoutlier with typed-integer input data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:IsoutlierIntegerDataExtension"),
+};
+const ISOUTLIER_INTEGER_DIMENSION_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "isoutlier-integer-dimension",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "isoutlier with a typed-integer dimension is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:IsoutlierIntegerDimensionExtension"),
+    };
+const ISOUTLIER_INTEGER_WINDOW_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "isoutlier-integer-window",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "isoutlier with a typed-integer moving window is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:IsoutlierIntegerWindowExtension"),
+};
+const ISOUTLIER_INTEGER_THRESHOLD_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "isoutlier-integer-threshold",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "isoutlier with typed-integer percentile or ThresholdFactor values is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:IsoutlierIntegerThresholdExtension"),
+    };
+const ISOUTLIER_GPU_MOVMEDIAN_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "isoutlier-gpu-movmedian",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "an explicit GPU isoutlier call using movmedian is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:IsoutlierGpuMovmedianExtension"),
+};
+const ISOUTLIER_GPU_SAMPLE_POINTS_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "isoutlier-gpu-sample-points",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "an explicit GPU isoutlier call using SamplePoints is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:IsoutlierGpuSamplePointsExtension"),
+    };
+const ISOUTLIER_GPU_DATA_VARIABLES_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "isoutlier-gpu-data-variables",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "an explicit GPU isoutlier call using DataVariables is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:IsoutlierGpuDataVariablesExtension"),
+    };
+
+pub const ISOUTLIER_EXTENSIONS: [BuiltinExtensionDescriptor; 7] = [
+    ISOUTLIER_INTEGER_DATA_EXTENSION,
+    ISOUTLIER_INTEGER_DIMENSION_EXTENSION,
+    ISOUTLIER_INTEGER_WINDOW_EXTENSION,
+    ISOUTLIER_INTEGER_THRESHOLD_EXTENSION,
+    ISOUTLIER_GPU_MOVMEDIAN_EXTENSION,
+    ISOUTLIER_GPU_SAMPLE_POINTS_EXTENSION,
+    ISOUTLIER_GPU_DATA_VARIABLES_EXTENSION,
+];
+
+const ISOUTLIER_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented numeric data classes are single and double. Each RunMat-only typed value must be exactly representable at the binary64 statistics boundary.",
+    }];
+const ISOUTLIER_INTEGER_STRUCTURAL_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "dim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Public documentation specifies a positive integer value domain but does not enumerate native integer storage classes, so typed storage remains conservatively RunMat-only.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "window",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Count-form moving windows are decoded exactly; duration windows are a separate, currently unsupported surface.",
+    },
+];
+const ISOUTLIER_INTEGER_THRESHOLD_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "threshold",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed percentile bounds are not publicly class-enumerated and must be exactly representable at the floating percentile boundary.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "ThresholdFactor",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed threshold factors are not publicly class-enumerated and must be exactly representable at the floating statistics boundary.",
+    },
+];
+
+pub const ISOUTLIER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[TF, L, U, C] = isoutlier(integer_A, ...)",
+        inputs: &ISOUTLIER_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "TF is logical; threshold outputs are floating. Compatibility and exactness are checked before provider access, and the current CPU fallback may restore supported outputs to the source provider.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "isoutlier(A, ..., integer_dim/window)",
+        inputs: &ISOUTLIER_INTEGER_STRUCTURAL_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "These ambiguous public storage-class forms stay independently RunMat-gated rather than being overclaimed as documented native-integer support.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "isoutlier(A, percentiles, integer_threshold / ThresholdFactor=integer_factor)",
+        inputs: &ISOUTLIER_INTEGER_THRESHOLD_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Ambiguous typed storage is admitted only in RunMat mode and only when every value is exact in binary64.",
+    },
+];
+
 pub const FILLOUTLIERS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &FILLOUTLIERS_SIGNATURES,
     output_mode: BuiltinOutputMode::ByRequestedOutputCount,
@@ -402,13 +533,174 @@ struct DetectionResult {
     accel = "cpu",
     type_resolver(logical_type),
     descriptor(crate::builtins::stats::summary::outliers::ISOUTLIER_DESCRIPTOR),
+    extensions(crate::builtins::stats::summary::outliers::ISOUTLIER_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::stats::summary::outliers::ISOUTLIER_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::stats::summary::outliers"
 )]
 pub(crate) async fn isoutlier_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_isoutlier_extensions(&value, &rest)?;
+    ensure_isoutlier_exact_boundaries(&value, &rest).await?;
+    let output_source = isoutlier_gpu_source(&value);
     let tensor = value_to_tensor(ISOUTLIER_NAME, value).await?;
     let options = parse_detection_options(ISOUTLIER_NAME, rest).await?;
     let result = detect_outliers(&tensor, &options, ISOUTLIER_NAME)?;
-    outlier_outputs(ISOUTLIER_NAME, None, result)
+    let value = outlier_outputs(ISOUTLIER_NAME, None, result)?;
+    restore_isoutlier_value(value, output_source.as_ref())
+}
+
+fn isoutlier_gpu_source(value: &Value) -> Option<runmat_accelerate_api::GpuTensorHandle> {
+    let Value::GpuTensor(handle) = value else {
+        return None;
+    };
+    Some(handle.clone())
+}
+
+fn restore_isoutlier_value(
+    value: Value,
+    source: Option<&runmat_accelerate_api::GpuTensorHandle>,
+) -> BuiltinResult<Value> {
+    let Some(source) = source else {
+        return Ok(value);
+    };
+    match value {
+        Value::Tensor(tensor) => restore_isoutlier_array(Value::Tensor(tensor), source),
+        Value::LogicalArray(logical) => {
+            restore_isoutlier_array(Value::LogicalArray(logical), source)
+        }
+        Value::OutputList(values) => values
+            .into_iter()
+            .map(|value| restore_isoutlier_value(value, Some(source)))
+            .collect::<BuiltinResult<Vec<_>>>()
+            .map(Value::OutputList),
+        other => Ok(other),
+    }
+}
+
+fn restore_isoutlier_array(
+    value: Value,
+    source: &runmat_accelerate_api::GpuTensorHandle,
+) -> BuiltinResult<Value> {
+    let restored = crate::builtins::common::gpu_helpers::restore_class_preserving_value(
+        source,
+        value,
+        ISOUTLIER_NAME,
+    )?;
+    if runmat_accelerate_api::handle_is_explicit(source) && !matches!(restored, Value::GpuTensor(_))
+    {
+        return Err(internal_error(
+            ISOUTLIER_NAME,
+            "isoutlier: provider cannot preserve explicit gpuArray output residency",
+        ));
+    }
+    Ok(restored)
+}
+
+fn explicit_isoutlier_gpu(value: &Value) -> bool {
+    matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
+}
+
+fn ensure_isoutlier_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    if is_typed_integer_value(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ISOUTLIER_INTEGER_DATA_EXTENSION,
+            ISOUTLIER_NAME,
+        )?;
+    }
+    let explicit_gpu = explicit_isoutlier_gpu(value) || rest.iter().any(explicit_isoutlier_gpu);
+    let mut idx = 0;
+    while idx < rest.len() {
+        if let Some(keyword) = keyword_of(&rest[idx]) {
+            let keyword = keyword.to_ascii_lowercase();
+            match keyword.as_str() {
+                "movmedian" | "movmean" => {
+                    if keyword == "movmedian" && explicit_gpu {
+                        crate::compatibility::ensure_builtin_extension_enabled(
+                            &ISOUTLIER_GPU_MOVMEDIAN_EXTENSION,
+                            ISOUTLIER_NAME,
+                        )?;
+                    }
+                    if rest.get(idx + 1).is_some_and(is_typed_integer_value) {
+                        crate::compatibility::ensure_builtin_extension_enabled(
+                            &ISOUTLIER_INTEGER_WINDOW_EXTENSION,
+                            ISOUTLIER_NAME,
+                        )?;
+                    }
+                    idx += 2;
+                    continue;
+                }
+                "samplepoints" => {
+                    if explicit_gpu {
+                        crate::compatibility::ensure_builtin_extension_enabled(
+                            &ISOUTLIER_GPU_SAMPLE_POINTS_EXTENSION,
+                            ISOUTLIER_NAME,
+                        )?;
+                    }
+                    idx += 2;
+                    continue;
+                }
+                "data variables" | "datavariables" => {
+                    if explicit_gpu {
+                        crate::compatibility::ensure_builtin_extension_enabled(
+                            &ISOUTLIER_GPU_DATA_VARIABLES_EXTENSION,
+                            ISOUTLIER_NAME,
+                        )?;
+                    }
+                    idx += 2;
+                    continue;
+                }
+                "percentiles" | "thresholdfactor" => {
+                    if rest.get(idx + 1).is_some_and(is_typed_integer_value) {
+                        crate::compatibility::ensure_builtin_extension_enabled(
+                            &ISOUTLIER_INTEGER_THRESHOLD_EXTENSION,
+                            ISOUTLIER_NAME,
+                        )?;
+                    }
+                    idx += 2;
+                    continue;
+                }
+                _ => {}
+            }
+        } else if is_typed_integer_value(&rest[idx]) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &ISOUTLIER_INTEGER_DIMENSION_EXTENSION,
+                ISOUTLIER_NAME,
+            )?;
+        }
+        idx += 1;
+    }
+    Ok(())
+}
+
+async fn ensure_isoutlier_exact_boundaries(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    ensure_isoutlier_exact_f64(value, "input data").await?;
+    let mut idx = 0;
+    while idx + 1 < rest.len() {
+        if keyword_of(&rest[idx]).is_some_and(|keyword| {
+            matches!(
+                keyword.to_ascii_lowercase().as_str(),
+                "percentiles" | "thresholdfactor"
+            )
+        }) {
+            ensure_isoutlier_exact_f64(&rest[idx + 1], "threshold value").await?;
+        }
+        idx += 1;
+    }
+    Ok(())
+}
+
+async fn ensure_isoutlier_exact_f64(value: &Value, role: &str) -> BuiltinResult<()> {
+    if is_typed_integer_value(value)
+        && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(value)
+            .await?
+    {
+        return Err(invalid_argument(
+            ISOUTLIER_NAME,
+            format!("typed-integer {role} must be exactly representable as double"),
+        ));
+    }
+    Ok(())
 }
 
 #[runtime_builtin(
@@ -1394,6 +1686,47 @@ mod tests {
     }
 
     #[test]
+    fn isoutlier_documented_floating_gpu_fallback_preserves_explicit_residency() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let input = Tensor::new(vec![1.0, 2.0, 100.0, 4.0, 5.0], vec![5, 1]).unwrap();
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &input)
+                .expect("upload observations");
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let output = block_on(isoutlier_builtin(Value::GpuTensor(handle), Vec::new()))
+                .expect("documented resident isoutlier");
+            assert!(matches!(output, Value::GpuTensor(_)));
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn isoutlier_wgpu_fallback_preserves_explicit_residency() {
+        let _accel_guard = crate::builtins::common::test_support::accel_test_lock();
+        let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .expect("actual WGPU provider");
+        let input = Tensor::new(vec![1.0, 2.0, 100.0, 4.0, 5.0], vec![5, 1]).unwrap();
+        let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &input)
+            .expect("upload observations");
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let output = block_on(isoutlier_builtin(Value::GpuTensor(handle), Vec::new()))
+            .expect("documented WGPU isoutlier");
+        let Value::GpuTensor(output) = output else {
+            panic!("expected resident output");
+        };
+        assert!(runmat_accelerate_api::handle_is_explicit(&output));
+        assert_eq!(
+            output.device_id,
+            runmat_accelerate_api::AccelProvider::device_id(provider)
+        );
+        assert_eq!(output.shape, vec![5, 1]);
+        assert!(runmat_accelerate_api::handle_is_logical(&output));
+    }
+
+    #[test]
     fn outlier_numeric_parsers_read_typed_integer_storage_exactly() {
         let wide = u64::MAX - 1;
         assert_eq!(
@@ -1544,6 +1877,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let error = block_on(filloutliers_builtin(
             tensor(vec![1.0, 2.0, 100.0, 4.0, 5.0], vec![5, 1]),
@@ -1672,6 +2006,7 @@ mod tests {
 
     #[test]
     fn isoutlier_typed_integer_input_reads_exact_storage() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let value =
             poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 100, 4, 5]), vec![5, 1], 0.0);
         let out = block_on(isoutlier_builtin(value, Vec::new())).unwrap();
@@ -1683,6 +2018,7 @@ mod tests {
 
     #[test]
     fn isoutlier_moving_method_reads_typed_integer_input_and_window() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let value =
             poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 100, 4, 5]), vec![5, 1], 0.0);
         let window = poisoned_int_tensor(IntegerStorage::U8(vec![3]), vec![1, 1], 0.0);
@@ -1699,6 +2035,7 @@ mod tests {
 
     #[test]
     fn isoutlier_threshold_factor_reads_typed_integer_storage() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let value = poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 3, 9, 10]), vec![5, 1], 0.0);
         let factor = poisoned_int_tensor(IntegerStorage::U8(vec![1]), vec![1, 1], 0.0);
         let out = block_on(isoutlier_builtin(
@@ -1714,6 +2051,7 @@ mod tests {
 
     #[test]
     fn isoutlier_percentile_bounds_read_typed_integer_storage() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let value =
             poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 100, 4, 5]), vec![5, 1], 0.0);
         let bounds = poisoned_int_tensor(IntegerStorage::U8(vec![10, 90]), vec![1, 2], 0.0);
@@ -1726,6 +2064,29 @@ mod tests {
             panic!("expected logical mask");
         };
         assert_eq!(mask.data, vec![1, 0, 1, 0, 0]);
+    }
+
+    #[test]
+    fn isoutlier_integer_data_is_strictly_gated_and_capabilities_are_declared() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let value = int_tensor(IntegerStorage::I16(vec![1, 2, 3]), vec![3, 1]);
+        let error = block_on(isoutlier_builtin(value, Vec::new()))
+            .expect_err("strict mode rejects typed data");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:IsoutlierIntegerDataExtension")
+        );
+        assert_eq!(ISOUTLIER_EXTENSIONS.len(), 7);
+        assert_eq!(ISOUTLIER_INTEGER_CAPABILITIES.len(), 3);
+    }
+
+    #[test]
+    fn isoutlier_runmat_integer_data_requires_individually_exact_double_values() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let value = int_tensor(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1]);
+        let error = block_on(isoutlier_builtin(value, Vec::new()))
+            .expect_err("wide integer data cannot cross the floating boundary");
+        assert!(error.message().contains("exactly representable as double"));
     }
 
     #[test]

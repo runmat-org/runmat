@@ -1074,6 +1074,7 @@ mod tests {
 
     #[test]
     fn lqr_accepts_typed_integer_sample_time_property_on_state_space_object() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let sample_time = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).unwrap();
         let sys = block_on(crate::builtins::control::ss::ss_builtin(
             tensor(vec![1.0, 0.0, 1.0, 1.0], 2, 2),

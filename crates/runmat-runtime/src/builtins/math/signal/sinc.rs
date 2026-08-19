@@ -6,6 +6,11 @@ use runmat_builtins::{
     BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
     BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, NumericDType, NumericStorage, Tensor, Value};
 
@@ -29,6 +34,26 @@ const SINC_NONFLOATING_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExte
 };
 
 pub const SINC_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [SINC_NONFLOATING_INPUT_EXTENSION];
+
+const SINC_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer input is outside the documented single/double domain; every nonzero integer maps exactly to zero and integer zero maps exactly to one.",
+    }];
+pub const SINC_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = sinc(integer_X)",
+        inputs: &SINC_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "RunMat mode uses the exact integer identity sinc(0)=1 and sinc(n)=0 for nonzero integers, so full-width values do not require binary64 representability.",
+    }];
 
 const SINC_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
@@ -210,6 +235,7 @@ fn provider_error(err: anyhow::Error) -> RuntimeError {
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::signal::sinc::SINC_DESCRIPTOR),
     extensions(crate::builtins::math::signal::sinc::SINC_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::signal::sinc::SINC_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::signal::sinc"
 )]
 async fn sinc_builtin(value: Value) -> BuiltinResult<Value> {
@@ -267,7 +293,7 @@ async fn sinc_gpu_host_fallback(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
 ) -> BuiltinResult<Value> {
-    let host = crate::dispatcher::download_handle_async(provider, handle)
+    let host = gpu_helpers::download_floating_projection_async(provider, handle)
         .await
         .map_err(|err| sinc_error_with_detail(&SINC_ERROR_GATHER_FAILED, err.to_string()))?;
 
@@ -406,6 +432,7 @@ mod tests {
                 shape: host.shape.to_vec(),
                 device_id: self.device_id(),
                 buffer_id: 2,
+                descriptor: Default::default(),
             })
         }
 
@@ -440,6 +467,7 @@ mod tests {
                 shape: host.shape.to_vec(),
                 device_id: self.device_id(),
                 buffer_id: 1,
+                descriptor: Default::default(),
             })
         }
 
@@ -475,6 +503,7 @@ mod tests {
                 shape: host.shape.to_vec(),
                 device_id: self.device_id(),
                 buffer_id: 3,
+                descriptor: Default::default(),
             })
         }
 
@@ -692,10 +721,11 @@ mod tests {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: 9_300_005,
-        };
-        runmat_accelerate_api::set_handle_integer_type(
-            &handle,
-            runmat_accelerate_api::IntegerElementType::I16,
+            descriptor: Default::default(),
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::I16,
+            runmat_accelerate_api::GpuTensorStorage::Real,
         );
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -706,7 +736,6 @@ mod tests {
                 Some("RunMat:compatibility:SincNonfloatingInputExtension")
             );
         }
-        runmat_accelerate_api::clear_handle_integer_type(&handle);
     }
 
     #[test]
@@ -757,7 +786,12 @@ mod tests {
             shape: vec![1, 3],
             device_id: provider.device_id(),
             buffer_id: 2,
-        };
+            descriptor: Default::default(),
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::F64,
+            GpuTensorStorage::Real,
+        );
         let result = call(Value::GpuTensor(handle)).expect("sinc gpu fallback");
         match result {
             Value::Tensor(out) => {
@@ -780,6 +814,7 @@ mod tests {
             shape: vec![1, 3],
             device_id: provider.device_id(),
             buffer_id: 1,
+            descriptor: Default::default(),
         };
         let err = call(Value::GpuTensor(handle)).expect_err("provider error should surface");
         assert!(err
@@ -799,8 +834,12 @@ mod tests {
             shape: vec![2, 1],
             device_id: provider.device_id(),
             buffer_id: 3,
-        };
-        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::ComplexInterleaved);
+            descriptor: Default::default(),
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::F64,
+            GpuTensorStorage::ComplexInterleaved,
+        );
 
         let result = call(Value::GpuTensor(handle)).expect("complex sinc gpu fallback");
         match result {
@@ -822,13 +861,15 @@ mod tests {
             shape: vec![2, 1],
             device_id: provider.device_id(),
             buffer_id: 4,
-        };
-        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::ComplexInterleaved);
+            descriptor: Default::default(),
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::F64,
+            GpuTensorStorage::ComplexInterleaved,
+        );
 
         let err = call(Value::GpuTensor(handle)).expect_err("odd complex buffer should error");
-        assert!(err
-            .message()
-            .contains("sinc: malformed complex buffer, odd length"));
+        assert_eq!(err.identifier(), Some("RunMat:gather:DownloadFailed"));
     }
 
     #[test]

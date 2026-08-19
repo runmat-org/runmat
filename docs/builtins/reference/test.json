@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": ["logical"],
     "broadcasting": "none",
-    "notes": "Operates on host-side cvpartition metadata and returns logical arrays."
+    "notes": "The partition metadata is host-side. A resident index is gathered through its owning provider, and the logical mask is restored to that same provider."
   },
   "fusion": {
     "elementwise": false,
@@ -31,8 +31,10 @@
   "description": "`test(c)` returns a logical test mask for single-test-set partitions. `test(c,i)` returns masks for selected K-fold, leaveout, or custom test sets.",
   "behaviors": [
     "`test(c)` works for holdout, resubstitution, and custom partitions with one test-set column.",
-    "`test(c,i)` accepts a one-based numeric scalar or vector of test-set indices.",
+    "`test(c,i)` accepts a one-based single- or double-precision scalar or vector of test-set indices.",
     "`test(c,'all')` returns one logical mask column per test set.",
+    "RunMat mode also accepts logical and all eight typed-integer index classes. Typed integers are decoded exactly as structural indices without conversion through double.",
+    "A resident index produces a resident logical mask owned by the same acceleration provider.",
     "For resubstitution partitions, `test(c)` is all true because every observation is used for both training and testing."
   ],
   "examples": [
@@ -46,6 +48,14 @@
     {
       "question": "How do I retrieve all test masks?",
       "answer": "Use `test(c,'all')`; columns correspond to test-set indices."
+    },
+    {
+      "question": "Can `i` be an integer array?",
+      "answer": "In RunMat mode, yes. Every integer class is read exactly. MATLAB-compatible mode accepts the documented single- and double-precision index forms."
+    },
+    {
+      "question": "Does `test` preserve GPU residency?",
+      "answer": "Yes. When `i` is resident, RunMat gathers it through its owning provider and restores the logical output to that provider."
     }
   ],
   "links": [

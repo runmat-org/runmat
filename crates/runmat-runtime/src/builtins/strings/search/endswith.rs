@@ -956,6 +956,7 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let nested = Value::Cell(CellArray::new(vec![resident], 1, 1).unwrap());
         for (text, pattern) in [
@@ -974,6 +975,7 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let err = run_endswith(
             Value::String("RunMat".into()),
@@ -994,6 +996,7 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX - 1,
+            descriptor: Default::default(),
         });
         let prepared = futures::executor::block_on(runmat_accelerate::prepare_builtin_args(
             "endsWith",

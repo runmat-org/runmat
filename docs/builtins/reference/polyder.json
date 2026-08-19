@@ -34,7 +34,7 @@
   "description": "`polyder` differentiates polynomials represented by coefficient vectors. Single-input, product-rule, and rational-function forms follow MATLAB coefficient conventions and output semantics.",
   "behaviors": [
     "Accepts real or complex scalars, row vectors, column vectors, or empty vectors. Inputs with more than one non-singleton dimension raise MATLAB-compatible errors.",
-    "Logical and integer coefficients are promoted to double precision before differentiation.",
+    "Logical coefficients are promoted to double precision. Typed-integer coefficients are a RunMat-mode extension and are promoted only after every authoritative value is proved exactly representable in double.",
     "Leading zeros are removed in outputs (unless the polynomial is identically zero, in which case a single zero coefficient is returned).",
     "The orientation of the first input polynomial is preserved for the derivative of a single polynomial or a product; the denominator in the quotient rule preserves the orientation of `v`.",
     "Calling `polyder(p, a)` with a single output applies the product rule. Capturing two outputs alongside two input polynomials returns the quotient-rule numerator and denominator (`u' * v - u * v'`, `v * v`).",

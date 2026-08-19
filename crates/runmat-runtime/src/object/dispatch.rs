@@ -367,17 +367,16 @@ pub async fn call_getfield_with_indices(
     base: Value,
     field: String,
     indices: Vec<Value>,
-    requested_outputs: usize,
+    _requested_outputs: usize,
 ) -> Result<Value, RuntimeError> {
-    let mut getfield_args = Vec::with_capacity(3);
-    getfield_args.push(base);
+    let mut getfield_args = Vec::with_capacity(2);
     getfield_args.push(Value::String(field));
     if !indices.is_empty() {
         let idx_count = indices.len();
         let idx_cell = build_cell_array_with_shape(indices, 1, idx_count, "getfield idx build")?;
         getfield_args.push(Value::Cell(idx_cell));
     }
-    crate::call_builtin_async_with_outputs("getfield", &getfield_args, requested_outputs).await
+    crate::builtins::structs::core::getfield::getfield_internal(base, getfield_args).await
 }
 
 pub async fn call_object_operator_method(

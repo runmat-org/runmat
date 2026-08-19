@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
@@ -67,6 +68,68 @@ pub const CVPARTITION_EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
     CVPARTITION_INTEGER_CUSTOM_EXTENSION,
     CVPARTITION_BOOLEAN_ALIAS_EXTENSION,
 ];
+
+const TEST_INTEGER_INDEX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cvpartition-test-integer-index",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "test with typed-integer repetition indices is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CvpartitionTestIntegerIndexExtension"),
+};
+const TEST_LOGICAL_INDEX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cvpartition-test-logical-index",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "test with logical repetition indices is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CvpartitionTestLogicalIndexExtension"),
+};
+const TRAINING_INTEGER_INDEX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cvpartition-training-integer-index",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "training with typed-integer repetition indices is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CvpartitionTrainingIntegerIndexExtension"),
+};
+const TRAINING_LOGICAL_INDEX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cvpartition-training-logical-index",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "training with logical repetition indices is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CvpartitionTrainingLogicalIndexExtension"),
+};
+pub const TEST_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [TEST_INTEGER_INDEX_EXTENSION, TEST_LOGICAL_INDEX_EXTENSION];
+pub const TRAINING_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    TRAINING_INTEGER_INDEX_EXTENSION,
+    TRAINING_LOGICAL_INDEX_EXTENSION,
+];
+
+const MASK_INTEGER_INDEX_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "i",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Public repetition indices are single or double. RunMat mode additionally decodes all eight integer classes exactly as one-based structural indices.",
+    }];
+pub const TEST_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "idx = test(c, integer_i)",
+        inputs: &MASK_INTEGER_INDEX_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed repetition indices are gated before provider access, decoded without binary64 conversion, and select logical output columns.",
+    }];
+pub const TRAINING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "idx = training(c, integer_i)",
+        inputs: &MASK_INTEGER_INDEX_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The adjacent training method shares test's exact typed-index policy and returns logical mask columns.",
+    }];
 
 const INTEGER_N_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "n", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The public observation count lists single and double; all eight typed integer scalar classes are independently gated and read exactly." }];
 const INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "kOrP", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Typed KFold and integer-count Holdout controls are independently gated; documented single/double integer-valued controls remain accepted." }];
@@ -179,7 +242,9 @@ const CVPARTITION_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
     },
 ];
 
-const MASK_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+const MASK_ALL_INPUTS: [BuiltinParamDescriptor; 2] = [PARAM_C, PARAM_INDEX];
+
+const MASK_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
     BuiltinSignatureDescriptor {
         label: "mask = training(c)",
         inputs: &MASK_INPUTS_C,
@@ -190,9 +255,14 @@ const MASK_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
         inputs: &MASK_INPUTS_C_I,
         outputs: &OUTPUT_MASK,
     },
+    BuiltinSignatureDescriptor {
+        label: "mask = training(c, \"all\")",
+        inputs: &MASK_ALL_INPUTS,
+        outputs: &OUTPUT_MASK,
+    },
 ];
 
-const TEST_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+const TEST_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
     BuiltinSignatureDescriptor {
         label: "mask = test(c)",
         inputs: &MASK_INPUTS_C,
@@ -201,6 +271,11 @@ const TEST_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
         label: "mask = test(c, i)",
         inputs: &MASK_INPUTS_C_I,
+        outputs: &OUTPUT_MASK,
+    },
+    BuiltinSignatureDescriptor {
+        label: "mask = test(c, \"all\")",
+        inputs: &MASK_ALL_INPUTS,
         outputs: &OUTPUT_MASK,
     },
 ];
@@ -402,12 +477,17 @@ fn ensure_cvpartition_extensions(
     keywords = "training,cvpartition,cross validation,mask,statistics,machine learning",
     type_resolver(logical_type),
     descriptor(crate::builtins::stats::ml::cvpartition::TRAINING_DESCRIPTOR),
+    extensions(crate::builtins::stats::ml::cvpartition::TRAINING_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::ml::cvpartition::TRAINING_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::ml::cvpartition"
 )]
 async fn training_builtin(c: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_mask_extensions(&rest, true)?;
+    let output_source = mask_output_source(&rest, "training")?;
     let c = gather_value(c).await?;
     let rest = gather_values(rest).await?;
-    mask_from_partition(c, rest, true)
+    let output = mask_from_partition(c, rest, true)?;
+    restore_mask_output(output, output_source.as_ref(), "training")
 }
 
 #[runtime_builtin(
@@ -417,12 +497,75 @@ async fn training_builtin(c: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     keywords = "test,cvpartition,cross validation,mask,statistics,machine learning",
     type_resolver(logical_type),
     descriptor(crate::builtins::stats::ml::cvpartition::TEST_DESCRIPTOR),
+    extensions(crate::builtins::stats::ml::cvpartition::TEST_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::ml::cvpartition::TEST_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::ml::cvpartition"
 )]
 async fn test_builtin(c: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_mask_extensions(&rest, false)?;
+    let output_source = mask_output_source(&rest, "test")?;
     let c = gather_value(c).await?;
     let rest = gather_values(rest).await?;
-    mask_from_partition(c, rest, false)
+    let output = mask_from_partition(c, rest, false)?;
+    restore_mask_output(output, output_source.as_ref(), "test")
+}
+
+fn mask_output_source(
+    rest: &[Value],
+    builtin: &'static str,
+) -> BuiltinResult<Option<GpuTensorHandle>> {
+    crate::builtins::common::gpu_helpers::select_resident_output_source(
+        rest.iter().filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle.clone()),
+            _ => None,
+        }),
+        builtin,
+    )
+}
+
+fn restore_mask_output(
+    output: Value,
+    source: Option<&GpuTensorHandle>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    match source {
+        Some(source) => crate::builtins::common::gpu_helpers::restore_class_preserving_value(
+            source, output, builtin,
+        ),
+        None => Ok(output),
+    }
+}
+
+fn ensure_mask_extensions(rest: &[Value], training: bool) -> BuiltinResult<()> {
+    let Some(index) = rest.first() else {
+        return Ok(());
+    };
+    let (integer, logical) = if training {
+        (
+            &TRAINING_INTEGER_INDEX_EXTENSION,
+            &TRAINING_LOGICAL_INDEX_EXTENSION,
+        )
+    } else {
+        (&TEST_INTEGER_INDEX_EXTENSION, &TEST_LOGICAL_INDEX_EXTENSION)
+    };
+    if typed_integer_value(index) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            integer,
+            if training { "training" } else { "test" },
+        )?;
+    }
+    if is_logical_index(index) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            logical,
+            if training { "training" } else { "test" },
+        )?;
+    }
+    Ok(())
+}
+
+fn is_logical_index(value: &Value) -> bool {
+    matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
 }
 
 async fn gather_value(value: Value) -> BuiltinResult<Value> {
@@ -1202,6 +1345,28 @@ fn selected_indices(value: &Value, cols: usize) -> BuiltinResult<Vec<usize>> {
                 ))
             });
     }
+    if let Value::Tensor(tensor) = value {
+        if let Some(storage) = tensor.integer_storage() {
+            if storage.is_empty() {
+                return Err(invalid_argument("cvpartition: index must be nonempty"));
+            }
+            return storage
+                .exact_values()
+                .iter()
+                .map(|value| {
+                    value
+                        .try_to_usize()
+                        .filter(|index| *index >= 1 && *index <= cols)
+                        .map(|index| index - 1)
+                        .ok_or_else(|| {
+                            invalid_argument(format!(
+                                "cvpartition: index must be an integer between 1 and {cols}"
+                            ))
+                        })
+                })
+                .collect();
+        }
+    }
     let raw = match value {
         Value::Num(number) => vec![*number],
         Value::Tensor(tensor) => tensor::tensor_values_f64(tensor),
@@ -1546,6 +1711,48 @@ mod tests {
     }
 
     #[test]
+    fn test_and_training_typed_indices_follow_compatibility_mode_and_decode_exactly() {
+        let _lock = random::test_lock().lock().unwrap();
+        random::set_seed(2030).unwrap();
+        let partition = cv(
+            Value::Num(8.0),
+            Value::String("KFold".into()),
+            vec![Value::Num(4.0)],
+        );
+        let index = cleared_int_tensor(IntegerStorage::U64(vec![1, 3]), vec![1, 2]);
+
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let test_error = block_on(test_builtin(partition.clone(), vec![index.clone()]))
+                .expect_err("typed test index must be gated");
+            assert_eq!(
+                test_error.identifier(),
+                TEST_INTEGER_INDEX_EXTENSION.error_identifier
+            );
+            let training_error = block_on(training_builtin(partition.clone(), vec![index.clone()]))
+                .expect_err("typed training index must be gated");
+            assert_eq!(
+                training_error.identifier(),
+                TRAINING_INTEGER_INDEX_EXTENSION.error_identifier
+            );
+        }
+
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let test = logical_output(
+            block_on(test_builtin(partition.clone(), vec![index.clone()]))
+                .expect("typed test indices"),
+        );
+        let training = logical_output(
+            block_on(training_builtin(partition, vec![index])).expect("typed training indices"),
+        );
+        assert_eq!(test.shape, vec![8, 2]);
+        assert_eq!(training.shape, vec![8, 2]);
+        for (test, training) in test.data.iter().zip(training.data.iter()) {
+            assert_eq!(*test == 0, *training != 0);
+        }
+    }
+
+    #[test]
     fn holdout_fraction_and_stratification_work() {
         let _lock = random::test_guard();
         random::set_seed(2027).unwrap();
@@ -1779,6 +1986,7 @@ mod tests {
 
     #[test]
     fn typed_integer_partition_counts_and_indices_are_exact() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let input = PartitionInput::from_value(Value::Int(runmat_value::IntValue::U16(6))).unwrap();
         assert_eq!(input.n, 6);
         let input = PartitionInput::from_value(cleared_int_tensor(
@@ -1956,10 +2164,11 @@ mod tests {
                 shape,
                 device_id: u32::MAX,
                 buffer_id,
-            };
-            runmat_accelerate_api::set_handle_integer_type(
-                &handle,
-                runmat_accelerate_api::IntegerElementType::U64,
+                descriptor: Default::default(),
+            }
+            .with_numeric_descriptor(
+                runmat_accelerate_api::NumericElementType::U64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
             );
             Value::GpuTensor(handle)
         }

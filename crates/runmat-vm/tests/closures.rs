@@ -3,6 +3,13 @@ mod test_helpers;
 
 use test_helpers::execute_source;
 
+fn execute_source_with_extensions(
+    source: &str,
+) -> Result<Vec<runmat_value::Value>, Box<runmat_runtime::RuntimeError>> {
+    let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    execute_source(source).map_err(Box::new)
+}
+
 #[test]
 fn closure_simple_no_capture() {
     let vars = execute_source("f = @(x) x + 1; y = feval(f, 2);").unwrap();
@@ -31,7 +38,7 @@ fn nested_closures_capture_outer() {
 
 #[test]
 fn feval_with_string_handle() {
-    let vars = execute_source("r = feval('@max', 2, 5);").unwrap();
+    let vars = execute_source_with_extensions("r = feval('@max', 2, 5);").unwrap();
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
@@ -48,84 +55,89 @@ fn feval_with_string_handle_resolves_local_semantic_function() {
 
 #[test]
 fn feval_with_unresolved_string_handle_errors() {
-    let err = execute_source("r = feval('@definitely_missing_callback', 1);")
+    let err = execute_source_with_extensions("r = feval('@definitely_missing_callback', 1);")
         .expect_err("unresolved @string handle should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
 }
 
 #[test]
 fn feval_with_unresolved_string_handle_zero_output_errors() {
-    let err = execute_source("feval('@definitely_missing_callback', 1);")
+    let err = execute_source_with_extensions("feval('@definitely_missing_callback', 1);")
         .expect_err("unresolved @string handle should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
 }
 
 #[test]
 fn feval_with_unresolved_string_handle_multi_output_errors() {
-    let err = execute_source("[a,b] = feval('@definitely_missing_callback', 1);")
+    let err = execute_source_with_extensions("[a,b] = feval('@definitely_missing_callback', 1);")
         .expect_err("unresolved @string handle should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
 }
 
 #[test]
 fn feval_with_unresolved_string_handle_expand_errors() {
-    let err = execute_source("C = {1,2}; y = feval('@definitely_missing_callback', C{:});")
-        .expect_err("unresolved @string handle should fail");
+    let err = execute_source_with_extensions(
+        "C = {1,2}; y = feval('@definitely_missing_callback', C{:});",
+    )
+    .expect_err("unresolved @string handle should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
 }
 
 #[test]
 fn feval_with_unresolved_string_handle_expand_zero_output_errors() {
-    let err = execute_source("C = {1,2}; feval('@definitely_missing_callback', C{:});")
-        .expect_err("unresolved @string handle should fail");
+    let err =
+        execute_source_with_extensions("C = {1,2}; feval('@definitely_missing_callback', C{:});")
+            .expect_err("unresolved @string handle should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
 }
 
 #[test]
 fn feval_with_unresolved_string_handle_expand_multi_output_errors() {
-    let err = execute_source("C = {1,2}; [a,b] = feval('@definitely_missing_callback', C{:});")
-        .expect_err("unresolved @string handle should fail");
+    let err = execute_source_with_extensions(
+        "C = {1,2}; [a,b] = feval('@definitely_missing_callback', C{:});",
+    )
+    .expect_err("unresolved @string handle should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
 }
 
 #[test]
 fn feval_with_unresolved_qualified_string_handle_errors() {
-    let err = execute_source("r = feval('@pkg.remote_inc', 1);")
+    let err = execute_source_with_extensions("r = feval('@pkg.remote_inc', 1);")
         .expect_err("unresolved qualified @string handle should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
 }
 
 #[test]
 fn feval_with_unresolved_qualified_string_handle_zero_output_errors() {
-    let err = execute_source("feval('@pkg.remote_inc', 1);")
+    let err = execute_source_with_extensions("feval('@pkg.remote_inc', 1);")
         .expect_err("unresolved qualified @string handle should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
 }
 
 #[test]
 fn feval_with_unresolved_qualified_string_handle_multi_output_errors() {
-    let err = execute_source("[a,b] = feval('@pkg.remote_inc', 1);")
+    let err = execute_source_with_extensions("[a,b] = feval('@pkg.remote_inc', 1);")
         .expect_err("unresolved qualified @string handle should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
 }
 
 #[test]
 fn feval_with_unresolved_qualified_string_handle_expand_errors() {
-    let err = execute_source("C = {1,2}; y = feval('@pkg.remote_inc', C{:});")
+    let err = execute_source_with_extensions("C = {1,2}; y = feval('@pkg.remote_inc', C{:});")
         .expect_err("unresolved qualified @string handle should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
 }
 
 #[test]
 fn feval_with_unresolved_qualified_string_handle_expand_zero_output_errors() {
-    let err = execute_source("C = {1,2}; feval('@pkg.remote_inc', C{:});")
+    let err = execute_source_with_extensions("C = {1,2}; feval('@pkg.remote_inc', C{:});")
         .expect_err("unresolved qualified @string handle should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
 }
 
 #[test]
 fn feval_with_unresolved_qualified_string_handle_expand_multi_output_errors() {
-    let err = execute_source("C = {1,2}; [a,b] = feval('@pkg.remote_inc', C{:});")
+    let err = execute_source_with_extensions("C = {1,2}; [a,b] = feval('@pkg.remote_inc', C{:});")
         .expect_err("unresolved qualified @string handle should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
 }

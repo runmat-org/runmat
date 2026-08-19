@@ -845,6 +845,7 @@ pub(crate) mod tests {
     #[test]
     fn accept_establishes_client_connection() {
         let _guard = net_guard();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let server_value = run_tcpserver(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(0)),
@@ -853,6 +854,7 @@ pub(crate) mod tests {
         .expect("tcpserver");
         let port = match struct_field(&server_value, "ServerPort") {
             Value::Int(iv) => iv.to_i64() as u16,
+            Value::Num(value) => *value as u16,
             other => panic!("expected ServerPort int, got {other:?}"),
         };
 
@@ -887,6 +889,7 @@ pub(crate) mod tests {
     #[test]
     fn accept_times_out_when_no_client_connects() {
         let _guard = net_guard();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let server_value = run_tcpserver(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(0)),
@@ -906,6 +909,7 @@ pub(crate) mod tests {
     #[test]
     fn accept_rejects_invalid_timeout_name_value() {
         let _guard = net_guard();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let server_value = run_tcpserver(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(0)),
@@ -925,6 +929,7 @@ pub(crate) mod tests {
     #[test]
     fn accept_respects_per_call_timeout_override() {
         let _guard = net_guard();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let server_value = run_tcpserver(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(0)),
@@ -933,6 +938,7 @@ pub(crate) mod tests {
         .expect("tcpserver");
         let port = match struct_field(&server_value, "ServerPort") {
             Value::Int(iv) => iv.to_i64() as u16,
+            Value::Num(value) => *value as u16,
             other => panic!("expected ServerPort int, got {other:?}"),
         };
 

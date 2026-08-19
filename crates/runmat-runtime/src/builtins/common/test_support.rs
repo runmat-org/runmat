@@ -131,16 +131,31 @@ impl F32TestProvider {
 }
 
 impl runmat_accelerate_api::AccelProvider for F32TestProvider {
+    fn upload_numeric(
+        &self,
+        host: &runmat_accelerate_api::HostNumericTensorView,
+    ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+        self.inner.upload_numeric(host)
+    }
+
+    fn download_numeric<'a>(
+        &'a self,
+        handle: &'a runmat_accelerate_api::GpuTensorHandle,
+    ) -> runmat_accelerate_api::AccelNumericDownloadFuture<'a> {
+        self.inner.download_numeric(handle)
+    }
+
     fn upload(
         &self,
         host: &runmat_accelerate_api::HostTensorView,
     ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
-        let handle = self.inner.upload(host)?;
-        runmat_accelerate_api::set_handle_precision(
-            &handle,
-            runmat_accelerate_api::ProviderPrecision::F32,
-        );
-        Ok(handle)
+        let values: Vec<f32> = host.data.iter().map(|value| *value as f32).collect();
+        self.inner
+            .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
+                data: runmat_accelerate_api::HostNumericDataView::F32(&values),
+                shape: host.shape,
+                storage: runmat_accelerate_api::GpuTensorStorage::Real,
+            })
     }
 
     fn download<'a>(
@@ -217,16 +232,14 @@ impl RejectingNativeResultProvider {
     }
 
     fn rejected_handle(&self) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
-        let handle = self
+        let mut handle = self
             .rejected_owner
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: &[0.0],
                 shape: &[1, 1],
             })?;
-        runmat_accelerate_api::set_handle_storage(
-            &handle,
-            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-        );
+        handle.descriptor.storage =
+            Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
         Ok(handle)
     }
 }

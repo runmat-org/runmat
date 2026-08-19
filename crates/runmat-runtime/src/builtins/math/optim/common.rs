@@ -107,8 +107,14 @@ pub(crate) async fn prepare_floating_value(
     if is_typed_integer_value(&value) || is_logical_value(&value) {
         crate::compatibility::ensure_builtin_extension_enabled(numeric_extension, name)?;
     }
+    if !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(&value).await?
+    {
+        return Err(optim_error(
+            name,
+            format!("{name}: integer {role} must be exactly representable as double"),
+        ));
+    }
     let value = crate::dispatcher::gather_if_needed_async(&value).await?;
-    ensure_exact_binary64_integer(name, &value, role)?;
     Ok(value)
 }
 
@@ -612,6 +618,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: 9_408_001,
+            descriptor: Default::default(),
         });
         let error = block_on(prepare_floating_value(
             "fminunc",

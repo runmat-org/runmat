@@ -2281,10 +2281,11 @@ mod tests {
             shape: vec![2, 2],
             device_id: 0,
             buffer_id: 9_300_001,
-        };
-        runmat_accelerate_api::set_handle_integer_type(
-            &handle,
-            runmat_accelerate_api::IntegerElementType::I16,
+            descriptor: Default::default(),
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::I16,
+            runmat_accelerate_api::GpuTensorStorage::Real,
         );
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -2295,7 +2296,6 @@ mod tests {
                 Some("RunMat:compatibility:DecompositionGpuInputExtension")
             );
         }
-        runmat_accelerate_api::clear_handle_integer_type(&handle);
     }
 
     #[test]
@@ -2444,6 +2444,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX - 397,
             buffer_id: u64::MAX - 397,
+            descriptor: Default::default(),
         });
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         for error in [

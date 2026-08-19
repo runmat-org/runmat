@@ -1,6 +1,8 @@
 pub use inventory;
 mod class_declarations;
-pub use class_declarations::{standard_class_declaration, standard_class_is_subclass};
+pub use class_declarations::{
+    standard_class_declaration, standard_class_is_subclass, GPU_ARRAY_PUBLIC_METHODS,
+};
 pub mod catalog;
 pub use catalog::*;
 mod catalog_fingerprint;
@@ -717,6 +719,25 @@ pub fn suppresses_auto_output(name: &str) -> bool {
         .map(|entry| entry.suppress_auto_output)
         .or_else(|| builtin_function_by_name(name).map(|function| function.suppress_auto_output))
         .unwrap_or(false)
+}
+
+/// Whether every declared fixed signature for a builtin returns no values.
+///
+/// This is distinct from `suppresses_auto_output`: sinks such as `fprintf`
+/// may suppress implicit `ans` display while still returning a value when one
+/// is explicitly requested.
+pub fn builtin_declares_zero_outputs(name: &str) -> bool {
+    let descriptor = builtin_catalog_entry_by_name(name)
+        .map(|entry| entry.descriptor)
+        .or_else(|| builtin_function_by_name(name).and_then(|function| function.descriptor));
+    descriptor.is_some_and(|descriptor| {
+        descriptor.output_mode == BuiltinOutputMode::Fixed
+            && !descriptor.signatures.is_empty()
+            && descriptor
+                .signatures
+                .iter()
+                .all(|signature| signature.outputs.is_empty())
+    })
 }
 
 #[cfg(not(target_arch = "wasm32"))]

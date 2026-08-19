@@ -5,7 +5,11 @@ use std::path::{Path, PathBuf};
 
 use calamine::{open_workbook_auto_from_rs, Data as SpreadsheetData, Reader as SpreadsheetReader};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_filesystem::File;
@@ -37,6 +41,52 @@ const MAX_XLSWRITE_ZIP_ENTRIES: usize = 65_536;
 const MAX_XLSWRITE_OUTPUT_BYTES: usize = 512 * 1024 * 1024;
 const XLSWRITE_MARKER_PART: &str = "docProps/app.xml";
 const XLSWRITE_MARKER_TEXT: &str = "RunMat xlswrite";
+
+const XLSWRITE_NUMERIC_RANGE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "xlswrite-numeric-range",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "Use a numeric row and column vector as an xlswrite range",
+    error_identifier: Some("RunMat:compatibility:XlswriteNumericRangeExtension"),
+};
+const XLSWRITE_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "xlswrite-explicit-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "Pass explicit gpuArray input to xlswrite",
+    error_identifier: Some("RunMat:compatibility:XlswriteExplicitGpuInputExtension"),
+};
+pub const XLSWRITE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    XLSWRITE_NUMERIC_RANGE_EXTENSION,
+    XLSWRITE_EXPLICIT_GPU_EXTENSION,
+];
+const XLSWRITE_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer classes are documented for spreadsheet data and serialize from authoritative storage.",
+    }];
+const XLSWRITE_INTEGER_SHEET_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "sheet",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "All eight integer classes are documented for the one-based worksheet selector and are decoded exactly.",
+    }];
+const XLSWRITE_INTEGER_RANGE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "numeric range",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat mode accepts an integer row and column vector in place of the documented textual range.",
+    }];
+pub const XLSWRITE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor { form: "status = xlswrite(filename, integer_A, ___)", inputs: &XLSWRITE_INTEGER_DATA_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Dense, sparse, and scalar cell integer values retain their exact signed or unsigned values through spreadsheet serialization." },
+    BuiltinIntegerCapabilityDescriptor { form: "status = xlswrite(filename, A, integer_sheet, ___)", inputs: &XLSWRITE_INTEGER_SHEET_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "The exact positive selector chooses the worksheet without a floating conversion." },
+    BuiltinIntegerCapabilityDescriptor { form: "status = xlswrite(filename, A, sheet, integer_range)", inputs: &XLSWRITE_INTEGER_RANGE_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Strict mode rejects the numeric-range extension before file access; RunMat mode parses the native integer vector exactly." },
+];
 
 const XLSWRITE_OUTPUT_STATUS: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "status",
@@ -278,7 +328,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Writes spreadsheets on the host; gpuArray inputs are gathered before serialization.",
+    notes: "Writes spreadsheets on the host. Automatically resident values gather transparently; explicit gpuArray input is accepted only in RunMat mode.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::tabular::xlswrite")]
@@ -300,6 +350,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::xlswrite_type),
     descriptor(crate::builtins::io::tabular::xlswrite::XLSWRITE_DESCRIPTOR),
+    extensions(crate::builtins::io::tabular::xlswrite::XLSWRITE_EXTENSIONS),
+    integer_capabilities(crate::builtins::io::tabular::xlswrite::XLSWRITE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::tabular::xlswrite"
 )]
 async fn xlswrite_builtin(filename: Value, data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -309,12 +361,33 @@ async fn xlswrite_builtin(filename: Value, data: Value, rest: Vec<Value>) -> Bui
             "xlswrite: supports at most two output arguments",
         ));
     }
+    if crate::builtins::common::validation::value_contains_explicit_gpu(&filename)
+        || crate::builtins::common::validation::value_contains_explicit_gpu(&data)
+        || rest
+            .iter()
+            .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &XLSWRITE_EXPLICIT_GPU_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if rest.len() >= 2 && is_numeric_range_value(&rest[1]) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &XLSWRITE_NUMERIC_RANGE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
 
     match write_spreadsheet(filename, data, rest).await {
         Ok(_) => Ok(status_outputs(true, None)),
         Err(err) if captures_failure_as_outputs() => Ok(status_outputs(false, Some(&err))),
         Err(err) => Err(err),
     }
+}
+
+fn is_numeric_range_value(value: &Value) -> bool {
+    matches!(value, Value::Num(_) | Value::Int(_) | Value::Tensor(_))
 }
 
 async fn write_spreadsheet(filename: Value, data: Value, rest: Vec<Value>) -> BuiltinResult<usize> {
@@ -560,13 +633,45 @@ fn parse_range_start(value: &Value) -> BuiltinResult<RangeStart> {
         return parse_range_text(&text);
     }
     match value {
-        Value::Tensor(t) => parse_numeric_range(&tensor::tensor_values_f64(t)),
+        Value::Tensor(t) => {
+            if let Some(storage) = t.integer_storage() {
+                parse_integer_range_start(&storage.exact_values())
+            } else {
+                parse_numeric_range(&tensor::tensor_values_f64(t))
+            }
+        }
+        Value::Int(value) => parse_integer_range_start(std::slice::from_ref(value)),
         Value::Num(n) => parse_numeric_range(&[*n]),
         _ => Err(xlswrite_error_with(
             &XLSWRITE_ERROR_RANGE,
             "xlswrite: range must be an A1 string or numeric [row col] vector",
         )),
     }
+}
+
+fn parse_integer_range_start(values: &[IntValue]) -> BuiltinResult<RangeStart> {
+    if values.len() < 2 {
+        return Err(xlswrite_error_with(
+            &XLSWRITE_ERROR_RANGE,
+            "xlswrite: numeric range must contain at least row and column",
+        ));
+    }
+    let row = integer_one_based_index(&values[0], "row", MAX_EXCEL_ROW_INDEX + 1)?;
+    let col = integer_one_based_index(&values[1], "column", MAX_EXCEL_COLUMN_INDEX + 1)?;
+    Ok(RangeStart { row, col })
+}
+
+fn integer_one_based_index(value: &IntValue, label: &str, maximum: usize) -> BuiltinResult<usize> {
+    value
+        .try_to_usize()
+        .filter(|value| *value >= 1 && *value <= maximum)
+        .and_then(|value| value.checked_sub(1))
+        .ok_or_else(|| {
+            xlswrite_error_with(
+                &XLSWRITE_ERROR_RANGE,
+                format!("xlswrite: range {label} must be within worksheet limits"),
+            )
+        })
 }
 
 fn parse_numeric_range(values: &[f64]) -> BuiltinResult<RangeStart> {
@@ -1682,6 +1787,24 @@ mod tests {
             Tensor::new(vec![usize::MAX as f64, 1.0], vec![1, 2]).expect("boundary range"),
         );
         assert!(parse_range_start(&boundary).is_err());
+    }
+
+    #[test]
+    fn xlswrite_gates_numeric_range_before_file_access() {
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let range = Tensor::new_integer(IntegerStorage::U16(vec![1, 1]), vec![1, 2])
+            .expect("numeric range");
+        let error = futures::executor::block_on(xlswrite_builtin(
+            Value::from("definitely/missing/out.xlsx"),
+            Value::Num(1.0),
+            vec![Value::from("Sheet1"), Value::Tensor(range)],
+        ))
+        .expect_err("strict mode rejects numeric ranges");
+        assert_eq!(
+            error.identifier(),
+            XLSWRITE_NUMERIC_RANGE_EXTENSION.error_identifier
+        );
+        drop(strict);
     }
 
     #[test]

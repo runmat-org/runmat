@@ -10,8 +10,34 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ResolveContext, Type,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, Tensor, Value};
+
+const VERTCAT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A1,...,An",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Every real integer class participates in documented dimension-one concatenation. The leftmost integer input determines the output class when integers mix with unlike integer, floating, or logical operands.",
+    }];
+
+pub const VERTCAT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "B = vertcat(A1,...,An) with real integer data",
+        inputs: &VERTCAT_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "vertcat delegates to the settled cat(dim=1) engine, including exact wide-integer conversion, saturation, empty handling, owner validation, and typed gather/assemble/restore fallback.",
+    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::vertcat")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -266,6 +292,7 @@ pub const VERTCAT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "array_construct",
     type_resolver(vertcat_type),
     descriptor(crate::builtins::array::shape::vertcat::VERTCAT_DESCRIPTOR),
+    integer_capabilities(crate::builtins::array::shape::vertcat::VERTCAT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::shape::vertcat"
 )]
 async fn vertcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

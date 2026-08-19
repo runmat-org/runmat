@@ -82,7 +82,7 @@
     },
     {
       "question": "Can I use `and` with complex numbers?",
-      "answer": "In RunMat mode, yes: a complex value is true when either component is nonzero. Complex operands are a RunMat extension and reject in MATLAB-compatible modes because they are outside the R2026a datatype list used for compatibility."
+      "answer": "In RunMat mode, yes: a complex value is true when either component is nonzero. Complex operands are a RunMat extension and reject in MATLAB-compatible modes because they are outside the compatibility target's datatype list used for compatibility."
     },
     {
       "question": "How does `and` differ from the `&` operator?",

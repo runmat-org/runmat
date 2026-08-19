@@ -4,7 +4,11 @@ use log::debug;
 use num_complex::Complex64;
 use runmat_accelerate_api::{HostTensorView, ProviderPolyvalMu, ProviderPolyvalOptions};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
@@ -16,7 +20,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::poly::type_resolvers::polyval_type;
-use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const EPS: f64 = 1.0e-12;
 const BUILTIN_NAME: &str = "polyval";
@@ -185,6 +189,87 @@ pub const POLYVAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &POLYVAL_ERRORS,
 };
 
+const POLYVAL_INTEGER_COEFFICIENTS_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "polyval-integer-coefficients",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "polyval accepts typed-integer polynomial coefficients as a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:PolyvalIntegerCoefficientsExtension"),
+    };
+const POLYVAL_INTEGER_POINTS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "polyval-integer-points",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "polyval accepts typed-integer query points as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PolyvalIntegerPointsExtension"),
+};
+const POLYVAL_INTEGER_OPTIONS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "polyval-integer-fit-options",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "polyval accepts typed-integer S or mu data as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PolyvalIntegerFitOptionsExtension"),
+};
+pub const POLYVAL_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    POLYVAL_INTEGER_COEFFICIENTS_EXTENSION,
+    POLYVAL_INTEGER_POINTS_EXTENSION,
+    POLYVAL_INTEGER_OPTIONS_EXTENSION,
+];
+const POLYVAL_INTEGER_COEFFICIENTS_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "p",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double polynomial coefficients; RunMat admits typed integers only after exact floating conversion is proved.",
+    }];
+const POLYVAL_INTEGER_POINTS_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "x",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double query points; RunMat admits typed integers only at the checked Horner-evaluation boundary.",
+    }];
+const POLYVAL_INTEGER_OPTIONS_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "S or mu numeric fields",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented fit statistics and scaling vector are floating outputs of polyfit; native integer replacements are a checked RunMat extension.",
+    }];
+pub const POLYVAL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "y = polyval(integer_p,x,___)",
+        inputs: &POLYVAL_INTEGER_COEFFICIENTS_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer coefficients are independently gated before provider or host Horner evaluation.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "y = polyval(p,integer_x,___)",
+        inputs: &POLYVAL_INTEGER_POINTS_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer query points are independently gated before provider or host Horner evaluation.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[y,delta] = polyval(p,x,integer_S_or_mu)",
+        inputs: &POLYVAL_INTEGER_OPTIONS_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Typed integer fit metadata is independently gated and checked recursively before prediction-interval computation.",
+    },
+];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::polyval")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "polyval",
@@ -241,6 +326,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     type_resolver(polyval_type),
     descriptor(crate::builtins::math::poly::polyval::POLYVAL_DESCRIPTOR),
+    extensions(crate::builtins::math::poly::polyval::POLYVAL_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::poly::polyval::POLYVAL_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::poly::polyval"
 )]
 async fn polyval_builtin(p: Value, x: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -268,9 +355,35 @@ pub async fn evaluate(
     rest: &[Value],
     want_delta: bool,
 ) -> BuiltinResult<PolyvalEval> {
-    let options = parse_option_values(rest).await?;
     crate::builtins::common::validation::reject_typed_complex_integer(&coefficients, BUILTIN_NAME)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&points, BUILTIN_NAME)?;
+    for option in rest {
+        crate::builtins::common::validation::reject_typed_complex_integer(option, BUILTIN_NAME)?;
+    }
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &coefficients,
+        &POLYVAL_INTEGER_COEFFICIENTS_EXTENSION,
+        BUILTIN_NAME,
+        "coefficient",
+    )
+    .await?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &points,
+        &POLYVAL_INTEGER_POINTS_EXTENSION,
+        BUILTIN_NAME,
+        "query point",
+    )
+    .await?;
+    for option in rest {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            option,
+            &POLYVAL_INTEGER_OPTIONS_EXTENSION,
+            BUILTIN_NAME,
+            "fit-option",
+        )
+        .await?;
+    }
+    let options = parse_option_values(rest).await?;
 
     let coeff_clone = coefficients.clone();
     let points_clone = points.clone();
@@ -421,7 +534,8 @@ async fn try_gpu_polyval(
         return Ok(Some(Value::GpuTensor(result_handle)));
     }
 
-    let host = match download_handle_async(provider, &result_handle).await {
+    let host = match gpu_helpers::download_floating_projection_async(provider, &result_handle).await
+    {
         Ok(host) => host,
         Err(err) => {
             debug!("polyval: GPU download failed, falling back: {err}");
@@ -1245,6 +1359,7 @@ pub(crate) mod tests {
 
     #[test]
     fn polyval_typed_integer_coefficients_points_and_mu_cross_double_boundary_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let coeffs = Tensor::new_integer(IntegerStorage::I16(vec![1, 0, 0]), vec![1, 3]).unwrap();
         let points = Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 2]), vec![1, 3]).unwrap();
         let mu = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![1, 2]).unwrap();
@@ -1268,7 +1383,8 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn polyval_complex_integer_mu_reads_exact_real_storage() {
+    fn polyval_complex_integer_mu_rejects_before_conversion() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let coeffs = Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 3]).unwrap();
         let points = Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).unwrap();
         let storage = IntegerComplexStorage::new(
@@ -1278,7 +1394,7 @@ pub(crate) mod tests {
         .expect("complex integer mu");
         let mu = ComplexTensor::new_integer(storage, vec![1, 2]).expect("mu tensor");
 
-        let value = polyval_builtin(
+        let error = polyval_builtin(
             Value::Tensor(coeffs),
             Value::Tensor(points),
             vec![
@@ -1286,19 +1402,18 @@ pub(crate) mod tests {
                 Value::ComplexTensor(mu),
             ],
         )
-        .expect("polyval");
-
-        match value {
-            Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![1, 3]);
-                assert_eq!(tensor.materialize_f64(), vec![0.25, 0.0, 0.25]);
-            }
-            other => panic!("expected tensor output, got {other:?}"),
-        }
+        .expect_err("typed complex integer fit options must reject");
+        assert!(
+            error
+                .message()
+                .contains("complex numbers with integer types are not supported"),
+            "{error:?}"
+        );
     }
 
     #[test]
     fn polyval_stats_fields_read_typed_integer_storage_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let coeffs = Tensor::new(vec![1.0, -3.0, 2.0], vec![1, 3]).unwrap();
         let points = Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).unwrap();
         let mut st = StructValue::new();

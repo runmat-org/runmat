@@ -41,6 +41,7 @@ pub(crate) mod sparse;
 pub(crate) mod sparse_integer;
 pub(crate) mod sqrt;
 pub(crate) mod times;
+pub(crate) mod typecast;
 pub(crate) mod uint16;
 pub(crate) mod uint32;
 pub(crate) mod uint8;

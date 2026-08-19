@@ -14,14 +14,27 @@ use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::CharArray;
 use runmat_value::{ComplexStorage, ComplexTensor, LogicalArray, NumericStorage, Tensor, Value};
 
 const BUILTIN_NAME: &str = "triu";
+
+const TRIU_PAGED_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "triu-paged-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "triu on paged arrays is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TriuPagedInputExtension"),
+};
+pub const TRIU_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [TRIU_PAGED_INPUT_EXTENSION];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::triu")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -170,6 +183,45 @@ pub const TRIU_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &TRIU_ERRORS,
 };
 
+const TRIU_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer classes are documented matrix inputs and preserve their class when the lower triangle is replaced by typed zero.",
+    }];
+const TRIU_INTEGER_OFFSET_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "k",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The diagonal selector is an integer-valued scalar. Native integer storage is decoded exactly and must fit the runtime index range.",
+    }];
+pub const TRIU_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = triu(integer_A)",
+        inputs: &TRIU_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Host masking works directly on native storage. Resident integer input uses exact owner-aware fallback when the provider's floating kernel is not applicable.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = triu(A, integer_k)",
+        inputs: &TRIU_INTEGER_OFFSET_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The offset is classified and range-checked before masking; automatic residency gathers transparently when needed.",
+    },
+];
+
 fn triu_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     triu_error_with_message(error.message, error)
 }
@@ -193,11 +245,19 @@ fn triu_error_with_message(
     accel = "custom",
     type_resolver(preserve_matrix_type),
     descriptor(crate::builtins::array::shape::triu::TRIU_DESCRIPTOR),
+    extensions(crate::builtins::array::shape::triu::TRIU_EXTENSIONS),
+    integer_capabilities(crate::builtins::array::shape::triu::TRIU_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::shape::triu"
 )]
 async fn triu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(triu_error(&TRIU_ERROR_TOO_MANY_INPUTS));
+    }
+    if triu_value_is_paged(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TRIU_PAGED_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
     }
     let offset = parse_diagonal_offset(&rest).await?;
     match value {
@@ -228,12 +288,7 @@ async fn triu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
                 .map_err(|e| triu_error_with_message(e, &TRIU_ERROR_INTERNAL))?;
             Ok(triu_tensor(tensor, offset).map(tensor::tensor_into_value)?)
         }
-        Value::CharArray(chars) => {
-            let data: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
-            let tensor = Tensor::new(data, vec![chars.rows, chars.cols])
-                .map_err(|e| triu_error_with_message(format!("triu: {e}"), &TRIU_ERROR_INTERNAL))?;
-            Ok(triu_tensor(tensor, offset).map(tensor::tensor_into_value)?)
-        }
+        Value::CharArray(chars) => Ok(Value::CharArray(triu_char_array(chars, offset)?)),
         Value::GpuTensor(handle) => Ok(triu_gpu(handle, offset).await?),
         Value::String(_) | Value::StringArray(_) => Err(triu_error_with_message(
             "triu: string arrays are not supported",
@@ -264,6 +319,16 @@ async fn triu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         | Value::Symbolic(_)
         | Value::SymbolicArray(_)
         | Value::OutputList(_) => Err(triu_error(&TRIU_ERROR_UNSUPPORTED_INPUT)),
+    }
+}
+
+fn triu_value_is_paged(value: &Value) -> bool {
+    match value {
+        Value::Tensor(value) => value.shape.len() > 2,
+        Value::LogicalArray(value) => value.shape.len() > 2,
+        Value::ComplexTensor(value) => value.shape.len() > 2,
+        Value::GpuTensor(value) => value.shape.len() > 2,
+        _ => false,
     }
 }
 
@@ -379,6 +444,17 @@ fn triu_logical_array(
     offset: isize,
 ) -> crate::BuiltinResult<LogicalArray> {
     apply_triu_inplace(&mut array.data, &array.shape, offset, 0u8)?;
+    Ok(array)
+}
+
+fn triu_char_array(mut array: CharArray, offset: isize) -> crate::BuiltinResult<CharArray> {
+    for row in 0..array.rows {
+        for col in 0..array.cols {
+            if (row as i128) > col as i128 - offset as i128 {
+                array.data[row * array.cols + col] = '\0';
+            }
+        }
+    }
     Ok(array)
 }
 
@@ -638,6 +714,43 @@ pub(crate) mod tests {
         assert_eq!(
             result.integer_storage(),
             Some(&IntegerStorage::U64(vec![u64::MAX, 0, 7, 0]))
+        );
+    }
+
+    #[test]
+    fn triu_character_matrix_preserves_class_and_row_major_layout() {
+        let chars = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).expect("character matrix");
+        let value = triu_builtin(Value::CharArray(chars), Vec::new()).expect("triu char");
+        let Value::CharArray(result) = value else {
+            panic!("expected character result");
+        };
+        assert_eq!(result.rows, 2);
+        assert_eq!(result.cols, 2);
+        assert_eq!(result.data, vec!['a', 'b', '\0', 'd']);
+    }
+
+    #[test]
+    fn triu_paged_arrays_are_an_explicit_language_extension() {
+        let tensor =
+            Tensor::new((1..=8).map(f64::from).collect(), vec![2, 2, 2]).expect("paged tensor");
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = triu_builtin(Value::Tensor(tensor.clone()), Vec::new())
+            .expect_err("paged input must gate");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:TriuPagedInputExtension")
+        );
+        drop(_strict);
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let Value::Tensor(output) =
+            triu_builtin(Value::Tensor(tensor), Vec::new()).expect("paged triu extension")
+        else {
+            panic!("expected tensor output");
+        };
+        assert_eq!(output.shape, vec![2, 2, 2]);
+        assert_eq!(
+            output.materialize_f64(),
+            vec![1.0, 0.0, 3.0, 4.0, 5.0, 0.0, 7.0, 8.0]
         );
     }
 

@@ -63,7 +63,7 @@ const FREWIND_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents double identifiers; all eight typed integer classes are one exact, independently gated extension.",
+        notes: "The compatibility target documents double identifiers; all eight typed integer classes are one exact, independently gated extension.",
     }];
 pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor {

@@ -668,7 +668,7 @@ mod function_registry_tests {
     }
 
     #[test]
-    fn bytecode_rejects_regions_without_an_exact_resume_boundary() {
+    fn bytecode_omits_regions_without_an_exact_resume_boundary() {
         let contract = region_contract();
         let mut function = test_function(7, "region_owner", "");
         function.resume_points.insert(contract.entry, 5);
@@ -689,12 +689,18 @@ mod function_registry_tests {
             .resume_points
             .remove(&contract.exits[0]);
 
-        let error = bytecode
+        bytecode
             .install_regions(std::slice::from_ref(&contract))
-            .unwrap_err();
+            .unwrap();
 
-        assert!(error.contains("has no bytecode boundary"));
-        assert_eq!(bytecode.regions[0].id, contract.id);
+        assert!(bytecode.regions.is_empty());
+        assert!(bytecode
+            .function_registry
+            .functions
+            .get(&FunctionId(7))
+            .unwrap()
+            .regions
+            .is_empty());
     }
 }
 

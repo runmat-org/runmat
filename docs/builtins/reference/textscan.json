@@ -43,12 +43,13 @@
   "behaviors": [
     "Accepts string, string-array scalar, row character-vector, numeric file identifier, or scalar numeric tensor file identifier as the first argument.",
     "Supports optional repeat count `N` before name-value options.",
-    "Supports numeric conversions `%f`, `%e`, `%g`, `%d`, `%i`, and `%u`; text conversions `%s`, `%q`, `%c`, and character-set conversions such as `%[ABC]` and `%[^,]`.",
+    "Supports floating conversions including `%f32` and `%f64`, decimal integer conversions `%d`, `%i`, and `%u`, hexadecimal `%x`, and binary `%b`. Documented size and signedness suffixes select native `int8` through `int64` or `uint8` through `uint64`; unsuffixed decimal signed/unsigned conversions return `int32`/`uint32`, and unsuffixed hexadecimal/binary conversions return `uint64`.",
     "Supports skipped conversions with `%*` and field widths such as `%5f` or `%10s`.",
-    "Text columns return cell columns of strings. Numeric columns return column tensors. With `'CollectOutput', true`, adjacent numeric columns are grouped into one numeric matrix.",
+    "Text columns return cell columns of strings. Numeric columns retain their selected native class, including exact 64-bit integers and physical single precision. With `'CollectOutput', true`, only adjacent numeric columns of the same class are grouped into one matrix.",
     "Recognizes `Delimiter`, `MultipleDelimsAsOne`, `HeaderLines`, `TreatAsEmpty`, `CommentStyle`, `CollectOutput`, `ReturnOnError`, and `Whitespace` options.",
     "Line comments and block comments are ignored while scanning input. Blank records are skipped after header/comment processing.",
-    "`ReturnOnError` defaults to true, returning data parsed before the first incompatible token. Set it to false to raise a parse error."
+    "`ReturnOnError` defaults to true, returning data parsed before the first incompatible token. Set it to false to raise a parse error.",
+    "Typed-integer file identifiers, repeat counts, and numeric controls are RunMat-only extensions. MATLAB compatibility mode rejects them before scanning; documented integer conversion specifiers remain enabled in both modes."
   ],
   "examples": [
     {
@@ -71,7 +72,7 @@
     },
     {
       "question": "How are text outputs represented?",
-      "answer": "Text conversions return cell columns containing string values. Numeric conversions return dense double tensors."
+      "answer": "Text conversions return cell columns containing string values. Numeric conversions return dense tensors in the class selected by the format specifier; integer columns are not routed through double."
     },
     {
       "question": "When should I use `readmatrix` instead?",

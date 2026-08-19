@@ -701,6 +701,7 @@ pub struct TextAnnotationHandleState {
     pub figure: FigureHandle,
     pub axes_index: usize,
     pub annotation_index: usize,
+    pub position_source: Option<runmat_plot::plots::NumericPlotData>,
 }
 
 #[derive(Clone, Debug)]
@@ -710,6 +711,9 @@ pub struct TextScatterHandleState {
     pub annotation_indices: Vec<usize>,
     pub marker_plot_index: Option<usize>,
     pub is_3d: bool,
+    pub x_data: runmat_plot::plots::NumericPlotData,
+    pub y_data: runmat_plot::plots::NumericPlotData,
+    pub z_data: Option<runmat_plot::plots::NumericPlotData>,
     pub text_data: Vec<String>,
     pub text_density_percentage: f64,
     pub max_text_length: usize,
@@ -770,6 +774,8 @@ pub struct StackedPlotHandleState {
     pub line_labels: Vec<String>,
     pub x_data: Vec<f64>,
     pub y_data: Vec<Vec<f64>>,
+    pub x_source: Option<Tensor>,
+    pub y_sources: Vec<Tensor>,
     pub display_variables: Vec<String>,
     pub source_table: Option<StackedSourceTableSnapshot>,
     pub x_variable: Vec<String>,
@@ -1752,12 +1758,13 @@ pub fn set_zlabel_for_axes(
     Ok(object_handle)
 }
 
-pub fn add_text_annotation_for_axes(
+pub fn add_text_annotation_for_axes_with_source(
     handle: FigureHandle,
     axes_index: usize,
     position: glam::Vec3,
     text: &str,
     style: TextStyle,
+    position_source: Option<runmat_plot::plots::NumericPlotData>,
 ) -> Result<f64, FigureError> {
     let (annotation_index, figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
         state
@@ -1765,10 +1772,11 @@ pub fn add_text_annotation_for_axes(
             .add_axes_text_annotation(axes_index, position, text.to_string(), style)
     })?;
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(register_text_annotation_handle(
+    Ok(register_text_annotation_handle_with_source(
         handle,
         axes_index,
         annotation_index,
+        position_source,
     ))
 }
 
@@ -1779,8 +1787,8 @@ pub fn set_text_annotation_properties_for_axes(
     text: Option<String>,
     position: Option<glam::Vec3>,
     style: Option<TextStyle>,
-) -> Result<f64, FigureError> {
-    let (object_handle, figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
         if let Some(text) = text {
             state
                 .figure
@@ -1796,10 +1804,9 @@ pub fn set_text_annotation_properties_for_axes(
                 .figure
                 .set_axes_text_annotation_style(axes_index, annotation_index, style);
         }
-        register_text_annotation_handle(handle, axes_index, annotation_index)
     })?;
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(object_handle)
+    Ok(())
 }
 
 pub fn toggle_box() -> bool {
@@ -4154,10 +4161,11 @@ pub fn register_pie_handle(figure: FigureHandle, axes_index: usize, plot_index: 
     register_simple_plot_handle(figure, axes_index, plot_index, PlotChildHandleState::Pie)
 }
 
-pub fn register_text_annotation_handle(
+pub fn register_text_annotation_handle_with_source(
     figure: FigureHandle,
     axes_index: usize,
     annotation_index: usize,
+    position_source: Option<runmat_plot::plots::NumericPlotData>,
 ) -> f64 {
     let mut reg = registry();
     let id = reg.next_plot_child_handle;
@@ -4168,9 +4176,29 @@ pub fn register_text_annotation_handle(
             figure,
             axes_index,
             annotation_index,
+            position_source,
         }),
     );
     id as f64
+}
+
+pub fn update_text_annotation_position_source(
+    figure: FigureHandle,
+    axes_index: usize,
+    annotation_index: usize,
+    position_source: runmat_plot::plots::NumericPlotData,
+) {
+    let mut reg = registry();
+    for state in reg.plot_children.values_mut() {
+        if let PlotChildHandleState::Text(text) = state {
+            if text.figure == figure
+                && text.axes_index == axes_index
+                && text.annotation_index == annotation_index
+            {
+                text.position_source = Some(position_source.clone());
+            }
+        }
+    }
 }
 
 pub fn register_textscatter_handle(state: TextScatterHandleState) -> f64 {
@@ -4782,8 +4810,10 @@ pub fn append_points_to_animated_line(
             match z {
                 None => match plot {
                     PlotElement::Line(line) => {
-                        let mut next_x = std::mem::take(&mut line.x_data);
-                        let mut next_y = std::mem::take(&mut line.y_data);
+                        let (mut next_x, mut next_y) = line
+                            .host_xy_f64()
+                            .map_err(|err| format!("failed to read animated line: {err}"))?
+                            .ok_or_else(|| "animated line data is unavailable".to_string())?;
                         next_x.extend(x);
                         next_y.extend(y);
                         trim_oldest_xy(handle.maximum_num_points, &mut next_x, &mut next_y);
@@ -4803,8 +4833,10 @@ pub fn append_points_to_animated_line(
                             return Err("3-D animated lines do not support marker properties yet"
                                 .to_string());
                         }
-                        let mut next_x = std::mem::take(&mut line.x_data);
-                        let mut next_y = std::mem::take(&mut line.y_data);
+                        let (mut next_x, mut next_y) = line
+                            .host_xy_f64()
+                            .map_err(|err| format!("failed to read animated line: {err}"))?
+                            .ok_or_else(|| "animated line data is unavailable".to_string())?;
                         let mut next_z = vec![0.0; next_x.len()];
                         next_x.extend(x);
                         next_y.extend(y);
@@ -4826,9 +4858,10 @@ pub fn append_points_to_animated_line(
                         became_3d = true;
                     }
                     PlotElement::Line3(line) => {
-                        let mut next_x = std::mem::take(&mut line.x_data);
-                        let mut next_y = std::mem::take(&mut line.y_data);
-                        let mut next_z = std::mem::take(&mut line.z_data);
+                        let (mut next_x, mut next_y, mut next_z) = line
+                            .host_xyz_f64()
+                            .map_err(|err| format!("failed to read animated line: {err}"))?
+                            .ok_or_else(|| "animated line data is unavailable".to_string())?;
                         next_x.extend(x);
                         next_y.extend(y);
                         next_z.extend(z);
@@ -4880,16 +4913,19 @@ pub fn set_animated_line_maximum_num_points(
                 .ok_or_else(|| "invalid animated line handle".to_string())?;
             match plot {
                 PlotElement::Line(line) => {
-                    let mut x = std::mem::take(&mut line.x_data);
-                    let mut y = std::mem::take(&mut line.y_data);
+                    let (mut x, mut y) = line
+                        .host_xy_f64()
+                        .map_err(|err| format!("failed to read animated line: {err}"))?
+                        .ok_or_else(|| "animated line data is unavailable".to_string())?;
                     trim_oldest_xy(maximum_num_points, &mut x, &mut y);
                     line.update_data(x, y)
                         .map_err(|err| format!("failed to update animated line: {err}"))?;
                 }
                 PlotElement::Line3(line) => {
-                    let mut x = std::mem::take(&mut line.x_data);
-                    let mut y = std::mem::take(&mut line.y_data);
-                    let mut z = std::mem::take(&mut line.z_data);
+                    let (mut x, mut y, mut z) = line
+                        .host_xyz_f64()
+                        .map_err(|err| format!("failed to read animated line: {err}"))?
+                        .ok_or_else(|| "animated line data is unavailable".to_string())?;
                     trim_oldest_xyz(maximum_num_points, &mut x, &mut y, &mut z);
                     line.update_data(x, y, z)
                         .map_err(|err| format!("failed to update animated line: {err}"))?;

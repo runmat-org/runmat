@@ -361,6 +361,13 @@ pub(super) fn concatenate_numeric_columns(values: &[&Value]) -> BuiltinResult<Va
             .map_err(invalid_variable);
     }
     let mut data = Vec::with_capacity(rows * total_cols);
+    let output_dtype = if values.iter().any(|value| {
+        matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)
+    }) {
+        NumericDType::F32
+    } else {
+        NumericDType::F64
+    };
     for value in values {
         let Value::Tensor(tensor) = value else {
             return Err(invalid_variable("table: expected numeric variable"));
@@ -371,7 +378,7 @@ pub(super) fn concatenate_numeric_columns(values: &[&Value]) -> BuiltinResult<Va
             }
         }
     }
-    Tensor::new(data, vec![rows, total_cols])
+    Tensor::new_with_dtype(data, vec![rows, total_cols], output_dtype)
         .map(Value::Tensor)
         .map_err(invalid_variable)
 }
@@ -508,6 +515,23 @@ mod tests {
         assert_eq!(
             result.integer_storage(),
             Some(&IntegerStorage::U64(vec![large, u64::MAX, 7, 0, 9, 2]))
+        );
+    }
+
+    #[test]
+    fn concatenate_numeric_columns_uses_single_for_mixed_single_and_double() {
+        let double = Value::Tensor(Tensor::new(vec![1.5, 2.5], vec![2, 1]).unwrap());
+        let single = Value::Tensor(Tensor::from_f32(vec![3.25, 4.25], vec![2, 1]).unwrap());
+
+        let Value::Tensor(result) =
+            concatenate_numeric_columns(&[&double, &single]).expect("mixed floating columns")
+        else {
+            panic!("expected tensor result");
+        };
+        assert_eq!(result.shape, vec![2, 2]);
+        assert_eq!(
+            result.into_numeric_storage().expect("single storage"),
+            NumericStorage::F32(vec![1.5, 2.5, 3.25, 4.25])
         );
     }
 

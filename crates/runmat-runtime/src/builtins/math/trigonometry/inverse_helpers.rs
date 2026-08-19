@@ -83,18 +83,21 @@ pub(crate) fn upload_value_like_protected(
     protected: &[GpuTensorHandle],
 ) -> BuiltinResult<Value> {
     let output = upload_value_protected(provider, value, builtin, protected)?;
-    let Value::GpuTensor(handle) = &output else {
+    let Value::GpuTensor(mut handle) = output else {
         unreachable!("upload_value always returns a resident value")
     };
     if handle.device_id != prototype.device_id {
-        free_unless_protected(provider, handle, protected);
+        free_unless_protected(provider, &handle, protected);
         return Err(build_runtime_error(format!(
             "{builtin}: provider restored the result on the wrong device"
         ))
         .with_builtin(builtin)
         .build());
     }
-    Ok(output)
+    if let Some(provenance) = runmat_accelerate_api::handle_provenance(prototype) {
+        runmat_accelerate_api::set_handle_provenance(&mut handle, provenance);
+    }
+    Ok(Value::GpuTensor(handle))
 }
 
 pub(crate) fn upload_value(
@@ -246,28 +249,14 @@ fn upload_complex_without_precision_override(
         .with_builtin(builtin)
         .build());
     }
-    let mut interleaved = Vec::with_capacity(tensor.len().saturating_mul(2));
-    for &(real, imag) in tensor.materialize_f64().iter() {
-        interleaved.push(real);
-        interleaved.push(imag);
-    }
-    let handle = provider
-        .upload(&runmat_accelerate_api::HostTensorView {
-            data: &interleaved,
-            shape: &tensor.shape,
-        })
-        .map_err(|error| {
-            build_runtime_error(format!(
-                "{builtin}: failed to restore result to input provider: {error}"
-            ))
-            .with_builtin(builtin)
-            .build()
-        })?;
+    let handle = gpu_helpers::upload_complex_tensor(provider, tensor).map_err(|error| {
+        build_runtime_error(format!(
+            "{builtin}: failed to restore result to input provider: {error}"
+        ))
+        .with_builtin(builtin)
+        .build()
+    })?;
     runmat_accelerate_api::set_handle_logical(&handle, false);
-    runmat_accelerate_api::set_handle_storage(
-        &handle,
-        runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-    );
     Ok(handle)
 }
 

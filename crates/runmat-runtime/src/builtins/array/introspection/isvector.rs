@@ -1,6 +1,6 @@
 //! MATLAB-compatible `isvector` builtin with GPU-aware semantics for RunMat.
 
-use crate::builtins::common::shape::value_dimensions;
+use crate::builtins::common::shape::{effective_rank, value_dimensions};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
@@ -10,6 +10,7 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ResolveContext, Type,
 };
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
@@ -23,12 +24,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::InheritInputs,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Reads tensor metadata; falls back to gathering when providers omit shape information.",
+    notes: "Reads tensor shape metadata without provider access; an empty internal shape is normalized to scalar dimensions.",
 };
 
 #[runmat_macros::register_fusion_spec(
@@ -52,6 +53,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     type_resolver(bool_scalar_type),
     descriptor(crate::builtins::array::introspection::isvector::ISVECTOR_DESCRIPTOR),
+    integer_audit(crate::builtins::array::introspection::isvector::ISVECTOR_INTEGER_AUDIT),
     builtin_path = "crate::builtins::array::introspection::isvector"
 )]
 async fn isvector_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -92,23 +94,20 @@ pub const ISVECTOR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ISVECTOR_ERRORS,
 };
+pub const ISVECTOR_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "isvector is a universal shape predicate; integer class and values are irrelevant, trailing singleton dimensions are ignored, and resident shape metadata is read without gathering payload data.",
+};
 
 async fn value_is_vector(value: &Value) -> crate::BuiltinResult<bool> {
     let dims = value_dimensions(value).await?;
-    if dims.len() > 2 {
+    if effective_rank(&dims) > 2 {
         return Ok(false);
     }
-    let mut non_singleton_dims = 0usize;
-
-    for &dim in dims.iter() {
-        if dim != 1 {
-            non_singleton_dims += 1;
-            if non_singleton_dims > 1 {
-                return Ok(false);
-            }
-        }
-    }
-    Ok(true)
+    let rows = dims.first().copied().unwrap_or(1);
+    let cols = dims.get(1).copied().unwrap_or(1);
+    Ok(rows == 1 || cols == 1)
 }
 
 #[cfg(test)]
@@ -202,11 +201,20 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn isvector_trailing_singleton_dimensions_are_rejected() {
-        let scalar_with_extra = Tensor::new(vec![5.0], vec![1, 1, 1]).unwrap();
-        let result =
-            isvector_builtin(Value::Tensor(scalar_with_extra)).expect("isvector trailing ones");
-        assert_eq!(result, Value::Bool(false));
+    fn isvector_ignores_trailing_singletons_but_rejects_effective_higher_rank() {
+        for shape in [vec![1, 1, 1], vec![3, 1, 1], vec![1, 3, 1, 1]] {
+            let total = shape.iter().product();
+            let tensor = Tensor::new(vec![1.0; total], shape).unwrap();
+            assert_eq!(
+                isvector_builtin(Value::Tensor(tensor)).expect("isvector"),
+                Value::Bool(true)
+            );
+        }
+        let tensor = Tensor::new(vec![1.0; 3], vec![1, 1, 3, 1]).unwrap();
+        assert_eq!(
+            isvector_builtin(Value::Tensor(tensor)).expect("isvector"),
+            Value::Bool(false)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

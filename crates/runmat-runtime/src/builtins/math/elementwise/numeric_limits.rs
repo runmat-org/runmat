@@ -4,6 +4,11 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericDType, Value,
@@ -140,12 +145,48 @@ pub const INTMAX_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const INTEGER_LIMIT_LIKE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "prototype",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The prototype selects one of the eight integer classes and may be real or structurally complex.",
+    }];
+
+pub const INTMAX_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "value = intmax('like', integer_prototype)",
+        inputs: &INTEGER_LIMIT_LIKE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Returns the exact maximum of the prototype class as a scalar and preserves prototype complexity and documented gpuArray residency where the provider representation supports it.",
+    }];
+
+pub const INTMIN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "value = intmin('like', integer_prototype)",
+        inputs: &INTEGER_LIMIT_LIKE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Returns the exact minimum of the prototype class as a scalar and preserves prototype complexity and documented gpuArray residency where the provider representation supports it.",
+    }];
+
 #[runtime_builtin(
     name = "intmax",
     category = "math/elementwise",
     summary = "Return the largest value of an integer class.",
     keywords = "intmax,integer,limits",
     descriptor(crate::builtins::math::elementwise::numeric_limits::INTMAX_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::math::elementwise::numeric_limits::INTMAX_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::math::elementwise::numeric_limits"
 )]
 fn intmax_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -158,6 +199,9 @@ fn intmax_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
     summary = "Return the smallest value of an integer class.",
     keywords = "intmin,integer,limits",
     descriptor(crate::builtins::math::elementwise::numeric_limits::INTMIN_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::math::elementwise::numeric_limits::INTMIN_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::math::elementwise::numeric_limits"
 )]
 fn intmin_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -308,6 +352,17 @@ fn integer_limit_like(
                 return Err(invalid_integer_prototype(builtin));
             };
             if runmat_accelerate_api::handle_storage(handle)
+                != runmat_accelerate_api::GpuTensorStorage::Real
+                || runmat_accelerate_api::handle_precision(handle).is_some()
+                || runmat_accelerate_api::handle_is_logical(handle)
+                || !gpu_helpers::gpu_class_metadata_matches(handle, None, Some(element_type), false)
+            {
+                return Err(limit_error(
+                    builtin,
+                    "integer gpuArray prototype has contradictory class metadata",
+                ));
+            }
+            if runmat_accelerate_api::handle_storage(handle)
                 == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
             {
                 return Err(limit_error(
@@ -319,18 +374,46 @@ fn integer_limit_like(
             let storage = IntegerStorage::from_scalar(limit_scalar(dtype, kind));
             let shape = [1usize, 1usize];
             let view = integer_tensor_view(&storage, &shape);
-            let provider = runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
+            let provider = gpu_helpers::exact_provider_for_handle(handle).ok_or_else(|| {
                 limit_error(
                     builtin,
                     "integer gpuArray prototype has no registered provider",
                 )
             })?;
-            provider
-                .upload_integer(&view)
-                .map(gpu_helpers::resident_gpu_value)
-                .map_err(|error| {
-                    limit_error(builtin, format!("GPU limit creation failed: {error}"))
-                })
+            let provenance = runmat_accelerate_api::handle_provenance(handle)
+                .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let input_metadata = gpu_helpers::snapshot_handle_metadata(handle);
+            let output = provider.upload_integer(&view);
+            gpu_helpers::restore_handle_metadata(handle, &input_metadata);
+            let output = output.map_err(|error| {
+                limit_error(builtin, format!("GPU limit creation failed: {error}"))
+            })?;
+            let valid = output.shape == shape
+                && output.device_id == handle.device_id
+                && !gpu_helpers::same_gpu_handle(handle, &output)
+                && gpu_helpers::exact_provider_for_handle(&output)
+                    .is_some_and(|owner| std::ptr::eq(owner, provider))
+                && runmat_accelerate_api::handle_storage(&output)
+                    == runmat_accelerate_api::GpuTensorStorage::Real
+                && runmat_accelerate_api::handle_integer_type(&output) == Some(element_type)
+                && runmat_accelerate_api::handle_precision(&output).is_none()
+                && !runmat_accelerate_api::handle_is_logical(&output)
+                && gpu_helpers::gpu_class_metadata_matches(
+                    &output,
+                    None,
+                    Some(element_type),
+                    false,
+                );
+            if !valid {
+                gpu_helpers::free_unprotected_exact_owner(&output, &[handle]);
+                return Err(limit_error(
+                    builtin,
+                    "GPU limit creation returned an invalid provider result",
+                ));
+            }
+            let mut output = output;
+            runmat_accelerate_api::set_handle_provenance(&mut output, provenance);
+            Ok(gpu_helpers::resident_gpu_value(output))
         }
         _ => Err(invalid_integer_prototype(builtin)),
     }
@@ -583,6 +666,26 @@ mod tests {
             assert_eq!(downloaded.shape, vec![1, 1]);
             provider.free(&prototype).ok();
             provider.free(&output).ok();
+        });
+    }
+
+    #[test]
+    fn integer_limit_like_rejects_contradictory_resident_class_metadata() {
+        test_support::with_test_provider(|provider| {
+            let prototype = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&[1]),
+                    shape: &[1, 1],
+                })
+                .expect("integer prototype upload");
+            runmat_accelerate_api::set_handle_class_name(&prototype, "double");
+            let error = intmax_builtin(vec![
+                Value::from("like"),
+                Value::GpuTensor(prototype.clone()),
+            ])
+            .expect_err("contradictory resident prototype must reject");
+            assert!(error.message().contains("contradictory class metadata"));
+            provider.free(&prototype).ok();
         });
     }
 

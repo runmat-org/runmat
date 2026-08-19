@@ -8,6 +8,7 @@ use runmat_filesystem::{
     DirEntry, FileHandle, FsMetadata, FsProvider, NativeFsProvider, OpenFlags, SandboxFsProvider,
 };
 use runmat_time::unix_timestamp_ms;
+use runmat_value::IntValue;
 use runmat_value::IntegerStorage;
 use std::fs;
 #[cfg(not(target_arch = "wasm32"))]
@@ -737,6 +738,119 @@ fn spreadsheet_import_options_registers_public_descriptor() {
         .collect::<Vec<_>>();
     assert!(labels.contains(&"opts = spreadsheetImportOptions()"));
     assert!(labels.contains(&"opts = spreadsheetImportOptions(nameValuePairs...)"));
+    assert_eq!(SPREADSHEET_IMPORT_OPTIONS_INTEGER_CAPABILITIES.len(), 2);
+    assert_eq!(SPREADSHEET_IMPORT_OPTIONS_EXTENSIONS.len(), 1);
+}
+
+#[test]
+fn table_import_integer_control_gates_match_documented_forms() {
+    let missing = Value::from("definitely-missing-table-import.csv");
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+
+    let readtable_error = block_on(readtable_builtin(
+        missing.clone(),
+        vec![
+            Value::from("NumHeaderLines"),
+            Value::Int(runmat_value::IntValue::U8(1)),
+        ],
+    ))
+    .expect_err("typed readtable NumHeaderLines must be gated before file access");
+    assert_eq!(
+        readtable_error.identifier(),
+        READTABLE_TYPED_INTEGER_CONTROL_EXTENSION.error_identifier
+    );
+
+    let readcell_error = block_on(readcell_builtin(
+        missing.clone(),
+        vec![
+            Value::from("Range"),
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U16(vec![1, 1]), vec![1, 2]).unwrap(),
+            ),
+        ],
+    ))
+    .expect_err("typed readcell Range must be gated before file access");
+    assert_eq!(
+        readcell_error.identifier(),
+        READCELL_TYPED_INTEGER_CONTROL_EXTENSION.error_identifier
+    );
+
+    let readtimetable_error = block_on(readtimetable_builtin(
+        missing,
+        vec![
+            Value::from("Sheet"),
+            Value::Int(runmat_value::IntValue::U8(1)),
+        ],
+    ))
+    .expect_err("typed readtimetable Sheet must be gated before file access");
+    assert_eq!(
+        readtimetable_error.identifier(),
+        READTIMETABLE_TYPED_INTEGER_CONTROL_EXTENSION.error_identifier
+    );
+
+    let spreadsheet_error = block_on(spreadsheet_import_options_builtin(vec![
+        Value::from("DataRange"),
+        Value::Int(runmat_value::IntValue::U8(2)),
+    ]))
+    .expect_err("typed spreadsheet location must be gated before option construction");
+    assert_eq!(
+        spreadsheet_error.identifier(),
+        SPREADSHEET_OPTIONS_TYPED_INTEGER_CONTROL_EXTENSION.error_identifier
+    );
+}
+
+#[test]
+fn documented_table_import_integer_controls_remain_enabled_in_matlab_mode() {
+    let path = unique_path("table_import_documented_integer_controls");
+    fs::write(&path, "ignored\nA\n9007199254740993\n").expect("write sample");
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+
+    let table = object(
+        block_on(readtable_builtin(
+            Value::from(path.to_string_lossy().to_string()),
+            vec![
+                Value::from("VariableNamesLine"),
+                Value::Int(runmat_value::IntValue::U8(2)),
+                Value::from("VariableTypes"),
+                Value::StringArray(StringArray::new(vec!["uint64".into()], vec![1, 1]).unwrap()),
+            ],
+        ))
+        .expect("documented readtable integer line"),
+    );
+    let Value::Tensor(column) = table_member_get(&table, &Value::from("A")).unwrap() else {
+        panic!("expected integer table variable");
+    };
+    assert_eq!(
+        column.integer_storage(),
+        Some(&IntegerStorage::U64(vec![9_007_199_254_740_993]))
+    );
+
+    let cells = block_on(readcell_builtin(
+        Value::from(path.to_string_lossy().to_string()),
+        vec![
+            Value::from("NumHeaderLines"),
+            Value::Int(runmat_value::IntValue::U8(1)),
+        ],
+    ))
+    .expect("documented readcell integer header count");
+    let Value::Cell(cells) = cells else {
+        panic!("expected cell output");
+    };
+    assert_eq!(
+        cells.get(0, 0).expect("first imported cell"),
+        Value::from("A")
+    );
+
+    let options = block_on(spreadsheet_import_options_builtin(vec![
+        Value::from("NumVariables"),
+        Value::Int(runmat_value::IntValue::U8(2)),
+    ]))
+    .expect("documented integer NumVariables");
+    let Value::Struct(options) = options else {
+        panic!("expected options structure");
+    };
+    assert_eq!(options.fields.get("NumVariables"), Some(&Value::Num(2.0)));
+    let _ = fs::remove_file(path);
 }
 
 #[test]
@@ -775,6 +889,7 @@ fn detect_import_options_rejects_nested_resident_input_before_provider_access() 
         shape: vec![1, 1],
         device_id: u32::MAX,
         buffer_id: u64::MAX,
+        descriptor: Default::default(),
     });
     let mut options = runmat_value::StructValue::new();
     options.fields.insert("Range".to_string(), resident);
@@ -2264,7 +2379,11 @@ fn array2timetable_preserves_every_integer_storage_class_exactly() {
         .unwrap();
         assert_array2timetable_duration_row_times(&timetable, &[0.0, 1.0]);
         let Value::Tensor(round_trip) = block_on(table2array_builtin(
-            block_on(timetable2table_builtin(timetable, Vec::new())).unwrap(),
+            block_on(timetable2table_builtin(
+                timetable,
+                vec![Value::from("ConvertRowTimes"), Value::Bool(false)],
+            ))
+            .unwrap(),
         ))
         .unwrap() else {
             panic!("expected typed integer array");
@@ -2451,7 +2570,11 @@ fn array2timetable_resident_integer_input_is_mode_gated_and_gathers_exactly() {
                 ))
                 .unwrap();
                 let Value::Tensor(round_trip) = block_on(table2array_builtin(
-                    block_on(timetable2table_builtin(timetable, Vec::new())).unwrap(),
+                    block_on(timetable2table_builtin(
+                        timetable,
+                        vec![Value::from("ConvertRowTimes"), Value::Bool(false)],
+                    ))
+                    .unwrap(),
                 ))
                 .unwrap() else {
                     panic!("expected typed integer array");
@@ -2493,7 +2616,11 @@ fn array2timetable_wgpu_gathers_every_resident_integer_class_exactly() {
         ))
         .unwrap();
         let Value::Tensor(round_trip) = block_on(table2array_builtin(
-            block_on(timetable2table_builtin(timetable, Vec::new())).unwrap(),
+            block_on(timetable2table_builtin(
+                timetable,
+                vec![Value::from("ConvertRowTimes"), Value::Bool(false)],
+            ))
+            .unwrap(),
         ))
         .unwrap() else {
             panic!("expected typed integer array");
@@ -2550,6 +2677,7 @@ fn explicit_variable_names_reject_duplicates_and_accept_current_identifiers() {
 
 #[test]
 fn timetable_conversion_predicates_and_head_work() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let values = Value::Tensor(Tensor::new(vec![10.0, 20.0, 30.0], vec![3, 1]).unwrap());
     let times = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
     let timetable = block_on(timetable_builtin(vec![
@@ -2768,6 +2896,7 @@ fn head_strict_gpu_row_count_extension_rejects_before_provider_access() {
         shape: vec![2, 2],
         device_id: u32::MAX,
         buffer_id: u64::MAX,
+        descriptor: Default::default(),
     });
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
     let count_error = block_on(head_builtin(Value::Num(1.0), vec![resident]))
@@ -2881,6 +3010,7 @@ fn height_reads_resident_shape_without_provider_or_data_access() {
         shape: vec![13, 4],
         device_id: u32::MAX,
         buffer_id: u64::MAX,
+        descriptor: Default::default(),
     };
     assert!(matches!(
         block_on(height_builtin(Value::GpuTensor(handle))).unwrap(),
@@ -2890,6 +3020,7 @@ fn height_reads_resident_shape_without_provider_or_data_access() {
 
 #[test]
 fn categorical_dictionary_and_selector_objects_materialize() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let categorical = block_on(categorical_builtin(vec![Value::StringArray(
         StringArray::new(vec!["red".into(), "blue".into(), "red".into()], vec![3, 1]).unwrap(),
     )]))
@@ -2958,6 +3089,7 @@ fn dictionary_declares_integer_capabilities_and_gates_resident_input_before_gath
         shape: vec![1, 1],
         device_id: u32::MAX,
         buffer_id: u64::MAX,
+        descriptor: Default::default(),
     });
     let nested = crate::make_cell(vec![resident], 1, 1).unwrap();
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -3117,6 +3249,57 @@ fn array_datastore_resident_integer_input_is_mode_gated_and_gathers_exactly() {
 }
 
 #[test]
+fn parquet_datastore_rejects_typed_integer_arguments_before_gather() {
+    assert_eq!(PARQUET_DATASTORE_INTEGER_CAPABILITIES.len(), 1);
+    for value in [
+        Value::Int(runmat_value::IntValue::I8(1)),
+        Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                .unwrap(),
+        ),
+    ] {
+        let error = block_on(parquet_datastore_builtin(vec![
+            Value::from("sample.parquet"),
+            Value::from("ReadSize"),
+            value,
+        ]))
+        .expect_err("typed integer parquet constructor control must reject");
+        assert!(error.message().contains("typed-integer"));
+    }
+}
+
+#[test]
+fn parquet_datastore_records_supported_double_controls_and_rejects_unknown_options() {
+    let datastore = block_on(parquet_datastore_builtin(vec![
+        Value::from("sample.parquet"),
+        Value::from("ReadSize"),
+        Value::Num(32.0),
+        Value::from("BlockSize"),
+        Value::Num(1_000_000.0),
+    ]))
+    .expect("parquet datastore");
+    let Value::Object(datastore) = datastore else {
+        panic!("expected parquet datastore object");
+    };
+    assert_eq!(
+        datastore.properties.get("ReadSize"),
+        Some(&Value::Num(32.0))
+    );
+    assert_eq!(
+        datastore.properties.get("BlockSize"),
+        Some(&Value::Num(1_000_000.0))
+    );
+
+    let error = block_on(parquet_datastore_builtin(vec![
+        Value::from("sample.parquet"),
+        Value::from("Unknown"),
+        Value::Num(1.0),
+    ]))
+    .expect_err("unknown option must not be ignored");
+    assert!(error.message().contains("unsupported option"));
+}
+
+#[test]
 #[cfg(feature = "wgpu")]
 fn array_datastore_wgpu_gathers_every_resident_integer_class_exactly() {
     let _guard = crate::builtins::common::test_support::accel_test_lock();
@@ -3266,6 +3449,13 @@ fn ordinal_constructor_sets_ordered_categorical_semantics() {
             )
             .unwrap(),
         ),
+        Value::StringArray(
+            StringArray::new(
+                vec!["low".into(), "medium".into(), "high".into()],
+                vec![1, 3],
+            )
+            .unwrap(),
+        ),
     ]))
     .unwrap();
     assert!(matches!(
@@ -3378,6 +3568,90 @@ fn ordinal_constructor_sets_ordered_categorical_semantics() {
 }
 
 #[test]
+fn ordinal_constructor_preserves_adjacent_wide_integer_levels() {
+    let lower = (1_u64 << 53) + 1;
+    let upper = lower + 1;
+    let source = Value::Tensor(
+        Tensor::new_integer(IntegerStorage::U64(vec![upper, lower, upper]), vec![3, 1]).unwrap(),
+    );
+    let labels = Value::StringArray(
+        StringArray::new(vec!["lower".into(), "upper".into()], vec![1, 2]).unwrap(),
+    );
+    let levels = Value::Tensor(
+        Tensor::new_integer(IntegerStorage::U64(vec![lower, upper]), vec![1, 2]).unwrap(),
+    );
+    let Value::Object(ordinal) =
+        block_on(ordinal_builtin(vec![source, labels, levels])).expect("ordinal")
+    else {
+        panic!("ordinal object")
+    };
+    let categories = match ordinal.properties.get("Categories") {
+        Some(Value::StringArray(array)) => array.data.clone(),
+        other => panic!("categories {other:?}"),
+    };
+    assert_eq!(categories, vec!["lower", "upper"]);
+    assert_eq!(
+        crate::builtins::table::categorical_labels(&Value::Object(ordinal)).unwrap(),
+        vec!["upper", "lower", "upper"]
+    );
+}
+
+#[test]
+fn ordinal_constructor_accepts_every_integer_level_class() {
+    for storage in [
+        IntegerStorage::I8(vec![2, 1]),
+        IntegerStorage::I16(vec![2, 1]),
+        IntegerStorage::I32(vec![2, 1]),
+        IntegerStorage::I64(vec![2, 1]),
+        IntegerStorage::U8(vec![2, 1]),
+        IntegerStorage::U16(vec![2, 1]),
+        IntegerStorage::U32(vec![2, 1]),
+        IntegerStorage::U64(vec![2, 1]),
+    ] {
+        let source = Value::Tensor(Tensor::new_integer(storage.clone(), vec![2, 1]).unwrap());
+        let levels = Value::Tensor(Tensor::new_integer(storage, vec![1, 2]).unwrap());
+        let labels = Value::StringArray(
+            StringArray::new(vec!["second".into(), "first".into()], vec![1, 2]).unwrap(),
+        );
+        let Value::Object(ordinal) =
+            block_on(ordinal_builtin(vec![source, labels, levels])).expect("ordinal")
+        else {
+            panic!("ordinal object")
+        };
+        assert_eq!(
+            crate::builtins::table::categorical_labels(&Value::Object(ordinal)).unwrap(),
+            vec!["second", "first"]
+        );
+    }
+}
+
+#[test]
+fn ordinal_constructor_bins_adjacent_wide_integer_edges_exactly() {
+    let lower = (1_u64 << 53) + 1;
+    let middle = lower + 1;
+    let upper = middle + 1;
+    let source = Value::Tensor(
+        Tensor::new_integer(IntegerStorage::U64(vec![lower, middle, upper]), vec![3, 1]).unwrap(),
+    );
+    let labels = Value::StringArray(
+        StringArray::new(vec!["first".into(), "second".into()], vec![1, 2]).unwrap(),
+    );
+    let empty = Value::Tensor(Tensor::new(Vec::<f64>::new(), vec![0, 0]).unwrap());
+    let edges = Value::Tensor(
+        Tensor::new_integer(IntegerStorage::U64(vec![lower, middle, upper]), vec![1, 3]).unwrap(),
+    );
+    let Value::Object(ordinal) =
+        block_on(ordinal_builtin(vec![source, labels, empty, edges])).expect("ordinal")
+    else {
+        panic!("ordinal object")
+    };
+    assert_eq!(
+        crate::builtins::table::categorical_labels(&Value::Object(ordinal)).unwrap(),
+        vec!["first", "second", "second"]
+    );
+}
+
+#[test]
 fn categorical_compatibility_edges_match_matlab_surface() {
     let option_word_category = block_on(categorical_builtin(vec![
         Value::from("Ordinal"),
@@ -3477,12 +3751,18 @@ fn categorical_compatibility_edges_match_matlab_surface() {
         Value::StringArray(
             StringArray::new(vec!["low".into(), "high".into()], vec![1, 2]).unwrap(),
         ),
+        Value::StringArray(
+            StringArray::new(vec!["low".into(), "high".into()], vec![1, 2]).unwrap(),
+        ),
     ]))
     .unwrap();
     let high_low = block_on(ordinal_builtin(vec![
         Value::from("low"),
         Value::StringArray(
             StringArray::new(vec!["high".into(), "low".into()], vec![1, 2]).unwrap(),
+        ),
+        Value::StringArray(
+            StringArray::new(vec!["low".into(), "high".into()], vec![1, 2]).unwrap(),
         ),
     ]))
     .unwrap();
@@ -3756,6 +4036,7 @@ fn ordinal_min_max_preserve_categorical_results_for_missing_dims_and_indices() {
     let ordinal_with_missing = block_on(ordinal_builtin(vec![
         Value::StringArray(StringArray::new(vec!["x".into(), "z".into()], vec![2, 1]).unwrap()),
         Value::StringArray(StringArray::new(vec!["x".into(), "y".into()], vec![1, 2]).unwrap()),
+        Value::StringArray(StringArray::new(vec!["x".into(), "y".into()], vec![1, 2]).unwrap()),
     ]))
     .unwrap();
     let default_max = block_on(crate::call_builtin_async(
@@ -3811,6 +4092,13 @@ fn ordinal_min_max_preserve_categorical_results_for_missing_dims_and_indices() {
             StringArray::new(
                 vec!["low".into(), "high".into(), "medium".into(), "low".into()],
                 vec![2, 2],
+            )
+            .unwrap(),
+        ),
+        Value::StringArray(
+            StringArray::new(
+                vec!["low".into(), "medium".into(), "high".into()],
+                vec![1, 3],
             )
             .unwrap(),
         ),
@@ -3884,6 +4172,7 @@ fn writetable_and_readcell_cover_delimited_interop() {
 
 #[test]
 fn timetable_rowtimes_option_keeps_all_variables_and_table2timetable_does_not_drop_data() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let a = Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![2, 1]).unwrap());
     let b = Value::Tensor(Tensor::new(vec![30.0, 40.0], vec![2, 1]).unwrap());
     let times = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());
@@ -3941,6 +4230,7 @@ fn timetable_rowtimes_option_keeps_all_variables_and_table2timetable_does_not_dr
 
 #[test]
 fn table_selector_objects_filter_rows_and_variables() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let t = table_from_columns(
         vec!["A".into(), "Name".into()],
         vec![
@@ -3996,7 +4286,7 @@ fn table_selector_objects_filter_rows_and_variables() {
         .unwrap(),
     );
     assert_eq!(ranged.class_name, TIMETABLE_CLASS);
-    assert_eq!(table_height(&ranged).unwrap(), 2);
+    assert_eq!(table_height(&ranged).unwrap(), 1);
 
     let open_left = block_on(timerange_builtin(vec![
         Value::Num(2.0),
@@ -4064,6 +4354,160 @@ fn table_selector_objects_filter_rows_and_variables() {
         Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![20.0]),
         other => panic!("expected datetime row-time selection, got {other:?}"),
     }
+}
+
+#[test]
+fn vartype_accepts_text_and_rejects_integer_or_resident_values_before_gather() {
+    assert_eq!(
+        VARTYPE_INTEGER_AUDIT.kind,
+        runmat_builtins::BuiltinIntegerAuditKind::NotApplicable
+    );
+    let Value::Object(selector) = block_on(vartype_builtin(Value::from("integer"))).unwrap() else {
+        panic!("expected vartype selector");
+    };
+    assert_eq!(
+        selector.properties.get("Type"),
+        Some(&Value::from("integer"))
+    );
+
+    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+        shape: vec![1, 1],
+        device_id: u32::MAX,
+        buffer_id: u64::MAX,
+        descriptor: Default::default(),
+    });
+    for invalid in [Value::Int(IntValue::U64(u64::MAX)), resident] {
+        let error = block_on(vartype_builtin(invalid)).expect_err("invalid vartype input");
+        assert!(error
+            .message()
+            .contains("host string scalar or character vector"));
+        assert!(!error.message().to_ascii_lowercase().contains("provider"));
+    }
+}
+
+#[test]
+fn timerange_defaults_to_half_open_and_orders_wide_integer_row_times_exactly() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let base = 1_u64 << 53;
+    let tt = block_on(timetable_builtin(vec![
+        Value::Tensor(
+            Tensor::new_integer(
+                IntegerStorage::U64(vec![base, base + 1, base + 2]),
+                vec![3, 1],
+            )
+            .unwrap(),
+        ),
+        Value::Tensor(Tensor::new(vec![10.0, 20.0, 30.0], vec![3, 1]).unwrap()),
+        Value::from("VariableNames"),
+        Value::Cell(CellArray::new(vec![Value::from("X")], 1, 1).unwrap()),
+    ]))
+    .unwrap();
+    let selector = block_on(timerange_builtin(vec![
+        Value::Int(IntValue::U64(base + 1)),
+        Value::Int(IntValue::U64(base + 2)),
+    ]))
+    .unwrap();
+    let selected = object(
+        table_paren_get(
+            &object(tt),
+            &Value::Cell(CellArray::new(vec![selector, Value::from(":")], 1, 2).unwrap()),
+        )
+        .unwrap(),
+    );
+    match table_member_get(&selected, &Value::from("X")).unwrap() {
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![20.0]),
+        other => panic!("expected exact half-open range result, got {other:?}"),
+    }
+}
+
+#[test]
+fn timetable_preallocation_and_default_conversion_preserve_integer_variables() {
+    let tt = block_on(timetable_builtin(vec![
+        Value::from("Size"),
+        Value::Tensor(Tensor::new_integer(IntegerStorage::U16(vec![2, 1]), vec![1, 2]).unwrap()),
+        Value::from("VariableTypes"),
+        Value::StringArray(StringArray::new(vec!["uint64".into()], vec![1, 1]).unwrap()),
+        Value::from("SampleRate"),
+        Value::Int(IntValue::U16(2)),
+        Value::from("VariableNames"),
+        Value::Cell(CellArray::new(vec![Value::from("Count")], 1, 1).unwrap()),
+    ]))
+    .expect("preallocated timetable");
+    let tt_object = object(tt.clone());
+    let variables = table_variables(&tt_object).unwrap();
+    let Value::Tensor(counts) = variables.fields.get("Count").unwrap() else {
+        panic!("expected integer Count variable")
+    };
+    assert_eq!(counts.numeric_dtype(), runmat_value::NumericDType::U64);
+
+    let table = object(block_on(timetable2table_builtin(tt, Vec::new())).unwrap());
+    assert_eq!(
+        table_variable_names_from_object(&table).unwrap(),
+        vec!["Time".to_string(), "Count".to_string()]
+    );
+    let variables = table_variables(&table).unwrap();
+    let Value::Tensor(counts) = variables.fields.get("Count").unwrap() else {
+        panic!("expected converted integer Count variable")
+    };
+    assert_eq!(counts.numeric_dtype(), runmat_value::NumericDType::U64);
+}
+
+#[test]
+fn timetable_extensions_gate_numeric_times_and_integer_conversion_flags() {
+    {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let numeric_times = block_on(timetable_builtin(vec![
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+            Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![2, 1]).unwrap()),
+        ]))
+        .expect_err("numeric row times must gate");
+        assert_eq!(
+            numeric_times.identifier(),
+            TIMETABLE_NUMERIC_ROW_TIMES_EXTENSION.error_identifier
+        );
+        let numeric_range = block_on(timerange_builtin(vec![
+            Value::Int(IntValue::U8(1)),
+            Value::Int(IntValue::U8(2)),
+        ]))
+        .expect_err("numeric timerange must gate");
+        assert_eq!(
+            numeric_range.identifier(),
+            TIMERANGE_NUMERIC_BOUNDS_EXTENSION.error_identifier
+        );
+    }
+
+    let row_times = array2timetable_duration_row_times(vec![0.0]);
+    let tt = block_on(timetable_builtin(vec![
+        row_times,
+        Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap(),
+        ),
+    ]))
+    .unwrap();
+    {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(timetable2table_builtin(
+            tt.clone(),
+            vec![Value::from("ConvertRowTimes"), Value::Int(IntValue::U8(0))],
+        ))
+        .expect_err("typed integer option must gate");
+        assert_eq!(
+            error.identifier(),
+            TIMETABLE2TABLE_INTEGER_OPTION_EXTENSION.error_identifier
+        );
+    }
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let table = object(
+        block_on(timetable2table_builtin(
+            tt,
+            vec![Value::from("ConvertRowTimes"), Value::Int(IntValue::U8(0))],
+        ))
+        .unwrap(),
+    );
+    assert_eq!(
+        table_variable_names_from_object(&table).unwrap(),
+        vec!["Var1".to_string()]
+    );
 }
 
 #[test]
@@ -4159,4 +4603,28 @@ fn categorical_categories_and_dictionary_lookup_have_semantics() {
     ))
     .unwrap();
     assert_eq!(value, Value::Num(20.0));
+}
+
+#[test]
+fn uitable_data_property_preserves_wide_integer_class_and_values() {
+    let data = Value::Tensor(
+        Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            vec![1, 2],
+        )
+        .expect("integer table data"),
+    );
+    let output =
+        block_on(uitable_builtin(vec![Value::from("Data"), data])).expect("uitable construction");
+    let Value::Object(object) = output else {
+        panic!("expected uitable object");
+    };
+    let Value::Tensor(stored) = object.properties.get("Data").expect("Data property") else {
+        panic!("expected numeric Data property");
+    };
+    assert_eq!(
+        stored.integer_storage(),
+        Some(&IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]))
+    );
+    assert_eq!(stored.shape, vec![1, 2]);
 }

@@ -1,6 +1,10 @@
 //! Word embedding compatibility objects and lookup helpers.
 use runmat_types::MemberAccess;
 
+use runmat_builtins::{
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
+    BuiltinIntegerAuditKind,
+};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::io::{Cursor, Read, Write};
@@ -19,6 +23,7 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, ObjectInstance, StringArray, Tensor, Value};
 
 use crate::builtins::common::tensor as tensor_utils;
+use crate::builtins::strings::common::contains_numeric_or_resident_text_input;
 use crate::builtins::strings::core::compat::scalar_text;
 use crate::builtins::strings::text_analytics::documents::{
     document_shape_from_object, documents_from_object, TOKENIZED_DOCUMENT_CLASS,
@@ -363,6 +368,13 @@ pub const READ_WORD_EMBEDDING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor 
     errors: &READ_ERRORS,
 };
 
+pub const READ_WORD_EMBEDDING_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "readWordEmbedding accepts a host string scalar, character vector, or one-cell character-vector filename and returns a wordEmbedding object. Numeric, logical, symbolic, and provider-resident filename values reject before gather, provider access, or filesystem access.",
+    };
+
 pub const WRITE_WORD_EMBEDDING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &[BuiltinSignatureDescriptor {
         label: "writeWordEmbedding(emb, filename)",
@@ -373,6 +385,12 @@ pub const WRITE_WORD_EMBEDDING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &WRITE_ERRORS,
 };
+pub const WRITE_WORD_EMBEDDING_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "writeWordEmbedding accepts a wordEmbedding object and a host text filename. Numeric and resident filename values are invalid and reject before provider or filesystem access; numeric vector properties inside the embedding object are model data, not public numeric inputs.",
+    };
 
 pub const FASTTEXT_WORD_EMBEDDING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &[BuiltinSignatureDescriptor {
@@ -402,6 +420,11 @@ pub const WORD2VEC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &WORD2VEC_ERRORS,
 };
+pub const WORD2VEC_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "word2vec accepts a wordEmbedding object, textual words, and a logical IgnoreCase option and returns floating embedding rows. Integer and resident numeric word/control inputs are invalid and reject before provider access.",
+};
 
 pub const VEC2WORD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &[
@@ -420,6 +443,63 @@ pub const VEC2WORD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &VEC2WORD_ERRORS,
 };
+
+pub const VEC2WORD_INTEGER_MATRIX_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "vec2word-integer-vectors",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "vec2word with typed-integer embedding vectors is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:Vec2wordIntegerVectorsExtension"),
+    };
+pub const VEC2WORD_INTEGER_K_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "vec2word-integer-k",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "vec2word with a typed-integer neighbor count is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Vec2wordIntegerKExtension"),
+};
+pub const VEC2WORD_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    VEC2WORD_INTEGER_MATRIX_EXTENSION,
+    VEC2WORD_INTEGER_K_EXTENSION,
+];
+
+const VEC2WORD_INTEGER_MATRIX_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "M",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat mode accepts typed-integer query vectors only when every value is exactly representable at the binary64 distance boundary.",
+    }];
+const VEC2WORD_INTEGER_K_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "k",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The typed neighbor count is decoded exactly as a positive platform-sized structural value; it does not enter distance arithmetic.",
+    }];
+pub const VEC2WORD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "words = vec2word(emb, integer_M, ___)",
+        inputs: &VEC2WORD_INTEGER_MATRIX_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The gated integer matrix crosses one checked binary64 cosine or Euclidean distance boundary. Words are strings and optional distances are double.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "words = vec2word(emb, M, integer_k, ___)",
+        inputs: &VEC2WORD_INTEGER_K_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The gated typed k selects an exact result count and never enters floating distance computation.",
+    },
+];
 
 pub const DOC2SEQUENCE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &[
@@ -455,14 +535,14 @@ const DOC2SEQUENCE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents every built-in integer class and integer-valued single/double scalars; typed storage is validated exactly before conversion to a platform length.",
+        notes: "The compatibility target documents every built-in integer class and integer-valued single/double scalars; typed storage is validated exactly before conversion to a platform length.",
     },
     BuiltinIntegerInputCapability {
         name: "PaddingValue",
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents every built-in integer class for the scalar padding value; it is converted at the floating sequence-output boundary.",
+        notes: "The compatibility target documents every built-in integer class for the scalar padding value; it is converted at the floating sequence-output boundary.",
     },
 ];
 
@@ -501,6 +581,48 @@ pub const TRAIN_WORD_EMBEDDING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor
     errors: &TRAIN_ERRORS,
 };
 
+const TRAIN_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "train-word-embedding-native-integer-controls",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "trainWordEmbedding accepts native integer option values",
+    error_identifier: Some("RunMat:compatibility:TrainWordEmbeddingIntegerControlExtension"),
+};
+pub const TRAIN_WORD_EMBEDDING_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [TRAIN_INTEGER_CONTROL_EXTENSION];
+
+const TRAIN_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 10] = [
+    train_integer_control("Dimension"),
+    train_integer_control("Window"),
+    train_integer_control("DiscardFactor"),
+    train_integer_control("NumNegativeSamples"),
+    train_integer_control("NumEpochs"),
+    train_integer_control("MinCount"),
+    train_integer_control("NGramRange"),
+    train_integer_control("InitialLearnRate"),
+    train_integer_control("UpdateRate"),
+    train_integer_control("Verbose"),
+];
+const fn train_integer_control(name: &'static str) -> BuiltinIntegerInputCapability {
+    BuiltinIntegerInputCapability {
+        name,
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public option is integer-valued numeric data without a documented native-integer class surface; native integer storage is admitted only in RunMat mode and validated exactly for its role.",
+    }
+}
+pub const TRAIN_WORD_EMBEDDING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "emb = trainWordEmbedding(source, Name, native_integer_value, ...)",
+        inputs: &TRAIN_INTEGER_CONTROL_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Counts, sizes, ranges, and boolean controls decode exactly in every supported integer class. Floating training-rate options require exact binary64 representation. Automatic residency gathers transparently; explicit gpuArray option intent is unsupported.",
+    }];
+
 #[runtime_builtin(
     name = "fastTextWordEmbedding",
     category = "strings/text_analytics",
@@ -533,9 +655,18 @@ async fn fast_text_word_embedding_builtin(args: Vec<Value>) -> BuiltinResult<Val
     descriptor(
         crate::builtins::strings::text_analytics::embeddings::READ_WORD_EMBEDDING_DESCRIPTOR
     ),
+    integer_audit(
+        crate::builtins::strings::text_analytics::embeddings::READ_WORD_EMBEDDING_INTEGER_AUDIT
+    ),
     builtin_path = "crate::builtins::strings::text_analytics::embeddings"
 )]
 async fn read_word_embedding_builtin(filename: Value) -> BuiltinResult<Value> {
+    if contains_numeric_or_resident_text_input(&filename) {
+        return Err(embedding_error(
+            "readWordEmbedding",
+            "readWordEmbedding: filename must be a host text scalar",
+        ));
+    }
     let filename = gather_if_needed_async(&filename)
         .await
         .map_err(|err| embedding_error("readWordEmbedding", err.to_string()))?;
@@ -566,9 +697,18 @@ async fn read_word_embedding_builtin(filename: Value) -> BuiltinResult<Value> {
     descriptor(
         crate::builtins::strings::text_analytics::embeddings::WRITE_WORD_EMBEDDING_DESCRIPTOR
     ),
+    integer_audit(
+        crate::builtins::strings::text_analytics::embeddings::WRITE_WORD_EMBEDDING_INTEGER_AUDIT
+    ),
     builtin_path = "crate::builtins::strings::text_analytics::embeddings"
 )]
 async fn write_word_embedding_builtin(emb: Value, filename: Value) -> BuiltinResult<Value> {
+    if contains_numeric_or_resident_text_input(&filename) {
+        return Err(embedding_error(
+            "writeWordEmbedding",
+            "writeWordEmbedding: filename must be a host text scalar",
+        ));
+    }
     let emb = gather_if_needed_async(&emb)
         .await
         .map_err(|err| embedding_error("writeWordEmbedding", err.to_string()))?;
@@ -617,9 +757,16 @@ async fn write_word_embedding_builtin(emb: Value, filename: Value) -> BuiltinRes
     descriptor(
         crate::builtins::strings::text_analytics::embeddings::TRAIN_WORD_EMBEDDING_DESCRIPTOR
     ),
+    extensions(
+        crate::builtins::strings::text_analytics::embeddings::TRAIN_WORD_EMBEDDING_EXTENSIONS
+    ),
+    integer_capabilities(
+        crate::builtins::strings::text_analytics::embeddings::TRAIN_WORD_EMBEDDING_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::strings::text_analytics::embeddings"
 )]
 async fn train_word_embedding_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_train_word_embedding_input_policy(&args)?;
     let gathered = gather_args(args, "trainWordEmbedding").await?;
     let (source, options) = parse_train_word_embedding_args(gathered)?;
     let documents = match source {
@@ -636,6 +783,39 @@ async fn train_word_embedding_builtin(args: Vec<Value>) -> BuiltinResult<Value> 
         }
     };
     embedding_object(train_embedding_model(documents, options)?)
+}
+
+fn ensure_train_word_embedding_input_policy(args: &[Value]) -> BuiltinResult<()> {
+    if let Some(source) = args.first() {
+        if crate::value_contains_gpu(source) {
+            return Err(embedding_error(
+                "trainWordEmbedding",
+                "trainWordEmbedding: source must be a host filename or tokenizedDocument object",
+            ));
+        }
+    }
+    for value in args.iter().skip(2).step_by(2) {
+        if matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
+        {
+            return Err(embedding_error(
+                "trainWordEmbedding",
+                "trainWordEmbedding: explicit gpuArray option values are not supported",
+            ));
+        }
+        if is_typed_integer_value(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &TRAIN_INTEGER_CONTROL_EXTENSION,
+                "trainWordEmbedding",
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn is_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
 }
 
 #[runtime_builtin(
@@ -685,9 +865,19 @@ async fn doc2sequence_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::embeddings::WORD2VEC_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::text_analytics::embeddings::WORD2VEC_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::text_analytics::embeddings"
 )]
 async fn word2vec_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args.iter().skip(1).any(|value| {
+        crate::builtins::common::validation::value_contains_native_integer_class(value)
+            || crate::value_contains_gpu(value)
+    }) {
+        return Err(embedding_error(
+            "word2vec",
+            "word2vec: words and option names must be host text and IgnoreCase must be logical",
+        ));
+    }
     let gathered = gather_args(args, "word2vec").await?;
     let (object, words, options) = parse_word2vec_args(gathered)?;
     let embedding = embedding_from_object(&object, "word2vec")?;
@@ -726,9 +916,14 @@ async fn word2vec_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::embeddings::VEC2WORD_DESCRIPTOR),
+    extensions(crate::builtins::strings::text_analytics::embeddings::VEC2WORD_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::strings::text_analytics::embeddings::VEC2WORD_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::strings::text_analytics::embeddings"
 )]
 async fn vec2word_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    enforce_vec2word_integer_policy(&args).await?;
     let gathered = gather_args(args, "vec2word").await?;
     let (object, matrix, options) = parse_vec2word_args(gathered)?;
     let embedding = embedding_from_object(&object, "vec2word")?;
@@ -801,6 +996,28 @@ async fn vec2word_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             .map_err(|err| embedding_error("vec2word", err))?,
     );
     Ok(Value::OutputList(vec![words, dist]))
+}
+
+async fn enforce_vec2word_integer_policy(args: &[Value]) -> BuiltinResult<()> {
+    if let Some(matrix) = args.get(1) {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            matrix,
+            &VEC2WORD_INTEGER_MATRIX_EXTENSION,
+            "vec2word",
+            "embedding vector",
+        )
+        .await?;
+    }
+    if args
+        .get(2)
+        .is_some_and(crate::builtins::common::validation::value_has_native_integer_class)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &VEC2WORD_INTEGER_K_EXTENSION,
+            "vec2word",
+        )?;
+    }
+    Ok(())
 }
 
 async fn gather_args(args: Vec<Value>, fn_name: &str) -> BuiltinResult<Vec<Value>> {
@@ -1793,6 +2010,9 @@ fn normalize_vector(row: &mut [f64]) {
 }
 
 fn parse_nonnegative_integer(value: &Value, fn_name: &str, option: &str) -> BuiltinResult<usize> {
+    if let Some(value) = exact_nonnegative_usize(value) {
+        return Ok(value);
+    }
     let n = numeric_scalar(value, fn_name, option)?;
     if !n.is_finite() || n < 0.0 || n.fract() != 0.0 {
         return Err(embedding_error(
@@ -1815,6 +2035,21 @@ fn parse_positive_scalar(value: &Value, fn_name: &str, option: &str) -> BuiltinR
 }
 
 fn parse_ngram_range(value: &Value) -> BuiltinResult<(usize, usize)> {
+    if let Value::Tensor(tensor) = value {
+        if tensor_utils::tensor_element_len(tensor) == 2 {
+            if let Some(storage) = tensor.integer_storage() {
+                let min = storage.value_at(0).and_then(|value| value.try_to_usize());
+                let max = storage.value_at(1).and_then(|value| value.try_to_usize());
+                return match (min, max) {
+                    (Some(min), Some(max)) if min <= max => Ok((min, max)),
+                    _ => Err(embedding_error(
+                        "trainWordEmbedding",
+                        "trainWordEmbedding: NGramRange must contain two nonnegative integers with min <= max",
+                    )),
+                };
+            }
+        }
+    }
     let values = match value {
         Value::Tensor(tensor) if tensor_utils::tensor_element_len(tensor) == 2 => {
             tensor_utils::tensor_values_f64(tensor)
@@ -1847,14 +2082,62 @@ fn parse_ngram_range(value: &Value) -> BuiltinResult<(usize, usize)> {
 fn numeric_scalar(value: &Value, fn_name: &str, option: &str) -> BuiltinResult<f64> {
     match value {
         Value::Num(value) => Ok(*value),
+        Value::Int(value) => exact_integer_f64(value).ok_or_else(|| {
+            embedding_error(
+                fn_name,
+                format!(
+                    "{fn_name}: {option} integer value must be exactly representable as double"
+                ),
+            )
+        }),
         Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
-            Ok(tensor_utils::tensor_value_f64(tensor, 0))
+            if let Some(value) = tensor
+                .integer_storage()
+                .and_then(|storage| storage.value_at(0))
+            {
+                exact_integer_f64(&value).ok_or_else(|| {
+                    embedding_error(
+                        fn_name,
+                        format!("{fn_name}: {option} integer value must be exactly representable as double"),
+                    )
+                })
+            } else {
+                Ok(tensor_utils::tensor_value_f64(tensor, 0))
+            }
         }
         other => Err(embedding_error(
             fn_name,
             format!("{fn_name}: {option} must be a numeric scalar, got {other:?}"),
         )),
     }
+}
+
+fn exact_nonnegative_usize(value: &Value) -> Option<usize> {
+    match value {
+        Value::Int(value) => value.try_to_usize(),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0))
+            .and_then(|value| value.try_to_usize()),
+        _ => None,
+    }
+}
+
+fn exact_integer_f64(value: &runmat_value::IntValue) -> Option<f64> {
+    const MAX_EXACT: i128 = 1_i128 << 53;
+    let exact = match value {
+        runmat_value::IntValue::I8(value) => i128::from(*value),
+        runmat_value::IntValue::I16(value) => i128::from(*value),
+        runmat_value::IntValue::I32(value) => i128::from(*value),
+        runmat_value::IntValue::I64(value) => i128::from(*value),
+        runmat_value::IntValue::U8(value) => i128::from(*value),
+        runmat_value::IntValue::U16(value) => i128::from(*value),
+        runmat_value::IntValue::U32(value) => i128::from(*value),
+        runmat_value::IntValue::U64(value) => i128::from(*value),
+    };
+    (-MAX_EXACT..=MAX_EXACT)
+        .contains(&exact)
+        .then_some(exact as f64)
 }
 
 fn checked_train_dense_size(
@@ -2512,6 +2795,14 @@ fn parse_bool_scalar(value: &Value, fn_name: &str) -> BuiltinResult<bool> {
     match value {
         Value::Bool(value) => Ok(*value),
         Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
+        Value::Int(value) => match value.try_to_u64() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(embedding_error(
+                fn_name,
+                format!("{fn_name}: logical scalar option must be true or false, got {value:?}"),
+            )),
+        },
         Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
             if let Some(value) = tensor
                 .integer_storage()
@@ -2582,7 +2873,7 @@ fn parse_positive_integer(value: &Value, fn_name: &str) -> BuiltinResult<usize> 
 }
 
 fn is_numeric_scalar(value: &Value) -> bool {
-    matches!(value, Value::Num(_))
+    matches!(value, Value::Num(_) | Value::Int(_))
         || matches!(value, Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor))
 }
 
@@ -2641,6 +2932,7 @@ fn embedding_error_with_source(
 mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use runmat_value::IntValue;
     use runmat_value::{CellArray, IntegerStorage};
     use std::fs::File as StdFile;
     use std::io::Write;
@@ -3399,6 +3691,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let error =
             doc2sequence_builtin(vec![emb, documents, Value::from("Length"), resident_length])
@@ -3477,6 +3770,37 @@ mod tests {
         assert!(err.to_string().contains("no vocabulary words"), "{err}");
     }
 
+    #[test]
+    fn train_word_embedding_native_integer_controls_are_gated_and_exact() {
+        let args = vec![
+            Value::String("training.txt".into()),
+            Value::String("Dimension".into()),
+            Value::Int(runmat_value::IntValue::U16(32)),
+        ];
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = ensure_train_word_embedding_input_policy(&args).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            TRAIN_INTEGER_CONTROL_EXTENSION.error_identifier
+        );
+        drop(_strict);
+
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        ensure_train_word_embedding_input_policy(&args).unwrap();
+        let (_, options) = parse_train_word_embedding_args(args).unwrap();
+        assert_eq!(options.dimension, 32);
+
+        let range =
+            Tensor::new_integer(runmat_value::IntegerStorage::U64(vec![3, 6]), vec![1, 2]).unwrap();
+        assert_eq!(parse_ngram_range(&Value::Tensor(range)).unwrap(), (3, 6));
+        assert!(numeric_scalar(
+            &Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_993)),
+            "trainWordEmbedding",
+            "InitialLearnRate"
+        )
+        .is_err());
+    }
+
     #[tokio::test]
     async fn word2vec_returns_rows_and_nan_for_missing_words() {
         let model = EmbeddingModel {
@@ -3523,6 +3847,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn word2vec_rejects_integer_words_before_object_validation() {
+        let error = word2vec_builtin(vec![
+            Value::String("not an object".into()),
+            Value::Int(IntValue::U8(1)),
+        ])
+        .await
+        .expect_err("integer words are outside the text-only surface");
+        assert!(error.message().contains("must be host text"));
+    }
+
+    #[tokio::test]
+    async fn write_word_embedding_rejects_integer_filename_before_object_validation() {
+        let error = write_word_embedding_builtin(
+            Value::String("not an object".into()),
+            Value::Int(IntValue::U8(1)),
+        )
+        .await
+        .expect_err("integer filename is outside the text-only surface");
+        assert!(error
+            .message()
+            .contains("filename must be a host text scalar"));
+    }
+
+    #[tokio::test]
     async fn vec2word_returns_words_and_distances() {
         let model = EmbeddingModel {
             vocabulary: vec!["east".into(), "north".into(), "mix".into()],
@@ -3552,6 +3900,61 @@ mod tests {
             panic!("expected distances");
         };
         assert!(dist.materialize_f64()[0] < dist.materialize_f64()[1]);
+    }
+
+    #[tokio::test]
+    async fn vec2word_gates_typed_vectors_and_neighbor_count_independently() {
+        let model = || EmbeddingModel {
+            vocabulary: vec!["east".into(), "north".into()],
+            vectors: vec![1.0, 0.0, 0.0, 1.0],
+            dimension: 2,
+        };
+        let matrix = || {
+            Value::Tensor(Tensor::new_integer(IntegerStorage::I16(vec![1, 0]), vec![1, 2]).unwrap())
+        };
+
+        let compatibility = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = vec2word_builtin(vec![embedding_object(model()).unwrap(), matrix()])
+            .await
+            .expect_err("typed vectors must be gated");
+        assert_eq!(
+            error.identifier(),
+            VEC2WORD_INTEGER_MATRIX_EXTENSION.error_identifier
+        );
+        let error = vec2word_builtin(vec![
+            embedding_object(model()).unwrap(),
+            Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap()),
+            Value::Int(runmat_value::IntValue::U8(1)),
+        ])
+        .await
+        .expect_err("typed k must be gated");
+        assert_eq!(
+            error.identifier(),
+            VEC2WORD_INTEGER_K_EXTENSION.error_identifier
+        );
+        drop(compatibility);
+
+        let extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let result = vec2word_builtin(vec![
+            embedding_object(model()).unwrap(),
+            matrix(),
+            Value::Int(runmat_value::IntValue::U8(1)),
+        ])
+        .await
+        .expect("RunMat typed vec2word forms");
+        assert!(matches!(result, Value::OutputList(_)));
+        let wide = Value::Tensor(
+            Tensor::new_integer(
+                IntegerStorage::U64(vec![9_007_199_254_740_993, 0]),
+                vec![1, 2],
+            )
+            .unwrap(),
+        );
+        let error = vec2word_builtin(vec![embedding_object(model()).unwrap(), wide])
+            .await
+            .expect_err("lossy integer vector must reject");
+        assert!(error.message().contains("exactly representable as double"));
+        drop(extensions);
     }
 
     #[tokio::test]

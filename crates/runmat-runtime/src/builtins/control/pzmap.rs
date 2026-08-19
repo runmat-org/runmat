@@ -5,6 +5,11 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
 
@@ -103,6 +108,24 @@ pub const PZMAP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &PZMAP_ERRORS,
 };
+const PZMAP_INTEGER_SYS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "sys",
+    classes: &[],
+    availability: BuiltinIntegerInputAvailability::Rejected,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "pzmap accepts a dynamic-system object. Integer coefficient support belongs to the tf/ss constructors and does not make an integer array a valid sys input.",
+}];
+pub const PZMAP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[p,z] = pzmap(integer_sys)",
+        inputs: &PZMAP_INTEGER_SYS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer input is inapplicable at the dynamic-system object boundary and rejects before provider access. Model coefficients have already crossed their constructor's model-numeric boundary.",
+    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::pzmap")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -140,6 +163,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     type_resolver(pzmap_type),
     descriptor(crate::builtins::control::pzmap::PZMAP_DESCRIPTOR),
+    integer_capabilities(crate::builtins::control::pzmap::PZMAP_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::control::pzmap"
 )]
 async fn pzmap_builtin(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -452,6 +476,11 @@ mod tests {
         assert!(labels.contains(&"pzmap(sys)"));
         assert!(labels.contains(&"p = pzmap(sys)"));
         assert!(labels.contains(&"[p,z] = pzmap(sys)"));
+        assert_eq!(PZMAP_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(
+            PZMAP_INTEGER_CAPABILITIES[0].inputs[0].availability,
+            BuiltinIntegerInputAvailability::Rejected
+        );
     }
 
     #[test]

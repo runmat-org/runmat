@@ -131,7 +131,7 @@ DataTransaction.set_attr(tx, "lastBatch", 3);
 commit(tx);
 ```
 
-Transaction writes, fills, resizes, and array creation accept the same eight integer classes for values, slices, shapes, and chunk shapes as their direct dataset counterparts. Native integer payloads and exact structural controls remain queued without an `f64` mirror and are converted, validated, and serialized only when the transaction commits. `DataTransaction.set_attr` and integer scalar fields passed to `DataTransaction.set_attrs` are persisted as exact JSON integers, including `int64` and `uint64` values outside the exactly representable `f64` range.
+Transaction writes, fills, resizes, and array creation accept the same eight integer classes for values, slices, shapes, and chunk shapes as their direct dataset counterparts. Native integer payloads and exact structural controls remain queued and are converted, validated, and serialized only when the transaction commits. `DataTransaction.set_attr` and integer scalar fields passed to `DataTransaction.set_attrs` are persisted as exact JSON integers, including `int64` and `uint64` values outside the exactly representable `f64` range.
 
 At commit time, RunMat checks that the dataset has not changed since the transaction began. If another writer committed first, the commit fails with a manifest conflict instead of overwriting newer state.
 

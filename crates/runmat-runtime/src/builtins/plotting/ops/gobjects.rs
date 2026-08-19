@@ -64,7 +64,7 @@ const GOBJECTS_INTEGER_SIZE_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents all eight integer classes plus integral single and double sizes. Negative signed dimensions are treated as zero.",
+        notes: "The compatibility target documents all eight integer classes plus integral single and double sizes. Negative signed dimensions are treated as zero.",
     }];
 pub const GOBJECTS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor {
@@ -379,6 +379,7 @@ mod tests {
                 shape: vec![1, 1],
                 device_id: 999_991,
                 buffer_id: 999_991,
+                descriptor: Default::default(),
             }),
         ] {
             let error = block_on(gobjects_builtin(vec![value])).unwrap_err();

@@ -5,10 +5,15 @@ use runmat_accelerate_api::{
     ProviderSpectralFrameMode, ProviderSpectralRange, ProviderSpectralRequest,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::NumericDType;
 use runmat_value::{Tensor, Value};
 use rustfft::FftPlanner;
 
@@ -213,6 +218,90 @@ pub const PWELCH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &PWELCH_ERRORS,
 };
 
+const PWELCH_INTEGER_SIGNAL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pwelch-integer-signal",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pwelch accepts a typed-integer input signal as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PwelchIntegerSignalExtension"),
+};
+const PWELCH_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pwelch-integer-numeric-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pwelch accepts typed-integer window, overlap, frequency, DFT-length, or sample-rate controls as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PwelchIntegerNumericControlExtension"),
+};
+const PWELCH_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pwelch-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pwelch accepts logical signal or numeric-control input as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PwelchLogicalInputExtension"),
+};
+pub const PWELCH_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    PWELCH_INTEGER_SIGNAL_EXTENSION,
+    PWELCH_INTEGER_CONTROL_EXTENSION,
+    PWELCH_LOGICAL_INPUT_EXTENSION,
+];
+const PWELCH_INTEGER_SIGNAL_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "x",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double signals. RunMat gates typed-integer signals before provider dispatch and admits only values exactly representable as binary64.",
+    }];
+const PWELCH_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 4] = [
+    BuiltinIntegerInputCapability {
+        name: "window",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "A scalar is decoded as an exact structural window length; a vector crosses a checked floating window boundary.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "noverlap",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The overlap count is an exact structural nonnegative integer.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "freqSpec/nfft",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "A scalar is decoded as an exact structural DFT length; a vector crosses a checked floating frequency-grid boundary.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "Fs",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed sample rates enter frequency scaling only after exact binary64 representability is proved.",
+    },
+];
+pub const PWELCH_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[pxx,f] = pwelch(integer_x, ...)",
+        inputs: &PWELCH_INTEGER_SIGNAL_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Typed signals are a RunMat-only extension; authoritative storage is checked before FFT conversion, resident integers bypass floating provider kernels, and eligible outputs restore through the exact owner.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "pwelch(x, integer_window_or_numeric_controls)",
+        inputs: &PWELCH_INTEGER_CONTROL_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Typed controls are independently gated; scalar lengths and overlap are structural while vector windows, frequency grids, and sample rates cross checked binary64 boundaries.",
+    },
+];
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FrequencyRange {
     Onesided,
@@ -232,6 +321,7 @@ struct SignalColumns {
     rows: usize,
     cols: usize,
     is_complex: bool,
+    output_dtype: NumericDType,
 }
 
 #[derive(Clone, Debug)]
@@ -286,6 +376,8 @@ fn pwelch_error_with_message(
     keywords = "pwelch,welch,periodogram,psd,spectral density,signal processing",
     type_resolver(pwelch_type),
     descriptor(crate::builtins::math::signal::pwelch::PWELCH_DESCRIPTOR),
+    extensions(crate::builtins::math::signal::pwelch::PWELCH_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::signal::pwelch::PWELCH_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::signal::pwelch"
 )]
 async fn pwelch_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -300,7 +392,28 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
     for value in rest {
         crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
     }
-    if let Value::GpuTensor(handle) = &x {
+    ensure_pwelch_integer_boundary(
+        &x,
+        &PWELCH_INTEGER_SIGNAL_EXTENSION,
+        "signal",
+        &PWELCH_ERROR_INVALID_SIGNAL,
+    )
+    .await?;
+    for (index, value) in rest.iter().take(4).enumerate() {
+        let (role, error) = match index {
+            0 => ("window", &PWELCH_ERROR_INVALID_WINDOW),
+            1 => ("overlap", &PWELCH_ERROR_INVALID_OVERLAP),
+            2 => ("frequency or DFT-length", &PWELCH_ERROR_INVALID_NFFT),
+            _ => ("sample-rate", &PWELCH_ERROR_INVALID_FS),
+        };
+        ensure_pwelch_integer_boundary(value, &PWELCH_INTEGER_CONTROL_EXTENSION, role, error)
+            .await?;
+    }
+    let source_handle = match &x {
+        Value::GpuTensor(handle) => Some(handle.clone()),
+        _ => None,
+    };
+    if let Some(handle) = source_handle.as_ref() {
         let (rows, cols) = gpu_matrix_shape(BUILTIN_NAME, "x", handle)
             .map_err(|err| pwelch_error_with_detail(&PWELCH_ERROR_INVALID_SIGNAL, err.message()))?;
         let complex_input = runmat_accelerate_api::handle_storage(handle)
@@ -316,15 +429,94 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
     }
     let options = parse_options(rest, input.rows, input.is_complex).await?;
     let eval = compute_pwelch(&input.columns, &options)?;
-    output_eval(eval)
+    let output = output_eval(eval, input.output_dtype)?;
+    match source_handle.as_ref() {
+        Some(source) => restore_pwelch_output(source, output),
+        None => Ok(output),
+    }
 }
 
-fn output_eval(eval: PwelchEvaluation) -> BuiltinResult<Value> {
+fn restore_pwelch_output(
+    source: &runmat_accelerate_api::GpuTensorHandle,
+    output: Value,
+) -> BuiltinResult<Value> {
+    fn restore_one(
+        source: &runmat_accelerate_api::GpuTensorHandle,
+        value: Value,
+    ) -> BuiltinResult<Value> {
+        let numeric_output = matches!(
+            value,
+            Value::Tensor(_) | Value::ComplexTensor(_) | Value::LogicalArray(_)
+        );
+        let restored = crate::builtins::common::gpu_helpers::restore_class_preserving_value(
+            source,
+            value,
+            BUILTIN_NAME,
+        )?;
+        if numeric_output
+            && runmat_accelerate_api::handle_is_explicit(source)
+            && !matches!(restored, Value::GpuTensor(_))
+        {
+            return Err(pwelch_error_with_detail(
+                &PWELCH_ERROR_INTERNAL,
+                "provider cannot preserve explicit gpuArray output residency and required floating class",
+            ));
+        }
+        Ok(restored)
+    }
+
+    match output {
+        Value::OutputList(values) => values
+            .into_iter()
+            .map(|value| restore_one(source, value))
+            .collect::<BuiltinResult<Vec<_>>>()
+            .map(Value::OutputList),
+        value => restore_one(source, value),
+    }
+}
+
+async fn ensure_pwelch_integer_boundary(
+    value: &Value,
+    extension: &'static BuiltinExtensionDescriptor,
+    role: &str,
+    error: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<()> {
+    use crate::builtins::common::validation::{
+        native_integer_value_is_exact_f64_async, value_has_logical_class,
+        value_has_native_integer_class,
+    };
+    if value_has_logical_class(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &PWELCH_LOGICAL_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if !value_has_native_integer_class(value) {
+        return Ok(());
+    }
+    crate::compatibility::ensure_builtin_extension_enabled(extension, BUILTIN_NAME)?;
+    if !native_integer_value_is_exact_f64_async(value).await? {
+        return Err(pwelch_error_with_detail(
+            error,
+            format!("integer {role} values must be exactly representable as double"),
+        ));
+    }
+    Ok(())
+}
+
+fn output_eval(eval: PwelchEvaluation, output_dtype: NumericDType) -> BuiltinResult<Value> {
     let freq_len = eval.f.len();
-    let pxx = Tensor::new(eval.pxx, vec![freq_len, eval.columns])
+    let tensor = |values: Vec<f64>, shape: Vec<usize>| match output_dtype {
+        NumericDType::F32 => Tensor::from_f32(
+            values.into_iter().map(|value| value as f32).collect(),
+            shape,
+        ),
+        _ => Tensor::new(values, shape),
+    };
+    let pxx = tensor(eval.pxx, vec![freq_len, eval.columns])
         .map(Value::Tensor)
         .map_err(|e| pwelch_error_with_detail(&PWELCH_ERROR_INTERNAL, e))?;
-    let f = Tensor::new(eval.f, vec![freq_len, 1])
+    let f = tensor(eval.f, vec![freq_len, 1])
         .map(Value::Tensor)
         .map_err(|e| pwelch_error_with_detail(&PWELCH_ERROR_INTERNAL, e))?;
     if let Some(out_count) = crate::output_count::current_output_count() {
@@ -512,24 +704,28 @@ async fn value_to_signal_columns(value: Value) -> BuiltinResult<SignalColumns> {
             rows: 1,
             cols: 1,
             is_complex: false,
+            output_dtype: NumericDType::F64,
         }),
         Value::Int(i) => Ok(SignalColumns {
             columns: vec![vec![Complex::new(i.to_f64(), 0.0)]],
             rows: 1,
             cols: 1,
             is_complex: false,
+            output_dtype: NumericDType::F64,
         }),
         Value::Bool(b) => Ok(SignalColumns {
             columns: vec![vec![Complex::new(if b { 1.0 } else { 0.0 }, 0.0)]],
             rows: 1,
             cols: 1,
             is_complex: false,
+            output_dtype: NumericDType::F64,
         }),
         Value::Complex(re, im) => Ok(SignalColumns {
             columns: vec![vec![Complex::new(re, im)]],
             rows: 1,
             cols: 1,
             is_complex: im.abs() > EPS,
+            output_dtype: NumericDType::F64,
         }),
         other => Err(pwelch_error_with_detail(
             &PWELCH_ERROR_INVALID_SIGNAL,
@@ -547,6 +743,11 @@ fn tensor_to_signal_columns(tensor: Tensor) -> BuiltinResult<SignalColumns> {
     }
     let rows = tensor.rows();
     let cols = tensor.cols();
+    let output_dtype = if tensor.numeric_dtype() == NumericDType::F32 {
+        NumericDType::F32
+    } else {
+        NumericDType::F64
+    };
     if rows == 1 || cols == 1 {
         let values = tensor_utils::tensor_into_values_f64(tensor);
         return Ok(SignalColumns {
@@ -557,6 +758,7 @@ fn tensor_to_signal_columns(tensor: Tensor) -> BuiltinResult<SignalColumns> {
             rows: rows.max(cols),
             cols: 1,
             is_complex: false,
+            output_dtype,
         });
     }
     let mut columns = Vec::with_capacity(cols);
@@ -575,6 +777,7 @@ fn tensor_to_signal_columns(tensor: Tensor) -> BuiltinResult<SignalColumns> {
         rows,
         cols,
         is_complex: false,
+        output_dtype,
     })
 }
 
@@ -589,6 +792,11 @@ fn complex_tensor_to_signal_columns(
     }
     let rows = tensor.rows;
     let cols = tensor.cols;
+    let output_dtype = if tensor.numeric_dtype() == NumericDType::F32 {
+        NumericDType::F32
+    } else {
+        NumericDType::F64
+    };
     let is_complex = tensor
         .materialize_f64()
         .iter()
@@ -603,6 +811,7 @@ fn complex_tensor_to_signal_columns(
             rows: rows.max(cols),
             cols: 1,
             is_complex,
+            output_dtype,
         });
     }
     let mut columns = Vec::with_capacity(cols);
@@ -619,6 +828,7 @@ fn complex_tensor_to_signal_columns(
         rows,
         cols,
         is_complex,
+        output_dtype,
     })
 }
 
@@ -1092,6 +1302,7 @@ fn keyword(value: &Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::{gpu_helpers, test_support};
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
@@ -1199,6 +1410,7 @@ mod tests {
 
     #[test]
     fn pwelch_reads_typed_integer_vector_storage_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let out = call(
             Value::Tensor(integer_tensor(
                 vec![0, 1, 0, -1, 0, 1, 0, -1, 0, 1, 0, -1, 0, 1, 0, -1],
@@ -1225,6 +1437,7 @@ mod tests {
 
     #[test]
     fn pwelch_scalar_window_reads_typed_integer_storage_length_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let window =
             Tensor::new_integer(IntegerStorage::I16(vec![8]), vec![1, 1]).expect("window length");
 
@@ -1339,7 +1552,28 @@ mod tests {
     }
 
     #[test]
+    fn pwelch_preserves_single_output_class() {
+        let signal = Tensor::from_f32(vec![1.0; 8], vec![1, 8]).expect("single signal");
+        let output = call(
+            Value::Tensor(signal),
+            &[Value::Num(8.0), Value::Num(0.0), Value::Num(8.0)],
+            Some(2),
+        )
+        .expect("pwelch");
+        let Value::OutputList(outputs) = output else {
+            panic!("expected two outputs")
+        };
+        for output in outputs {
+            let Value::Tensor(output) = output else {
+                panic!("expected tensor output")
+            };
+            assert_eq!(output.numeric_dtype(), NumericDType::F32);
+        }
+    }
+
+    #[test]
     fn pwelch_reads_typed_integer_matrix_storage_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let data = vec![
             1, 1, 1, 1, 0, 0, 0, 0, //
             0, 1, 0, -1, 0, 1, 0, -1,
@@ -1355,6 +1589,111 @@ mod tests {
         assert_eq!(pxx.len(), 10);
         assert_eq!(f.len(), 5);
         assert!(pxx[0] > pxx[5]);
+    }
+
+    #[test]
+    fn pwelch_integer_extensions_are_gated_and_inexact_values_reject() {
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let signal = Tensor::new_integer(IntegerStorage::I16(vec![1; 8]), vec![1, 8])
+            .expect("integer signal");
+        let error = call(Value::Tensor(signal), &[], Some(1))
+            .expect_err("strict mode rejects integer signal extension");
+        assert_eq!(
+            error.identifier(),
+            PWELCH_INTEGER_SIGNAL_EXTENSION.error_identifier
+        );
+        drop(strict);
+
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let window =
+            Tensor::new_integer(IntegerStorage::I16(vec![8]), vec![1, 1]).expect("integer window");
+        let error = call(
+            Value::Tensor(Tensor::new(vec![1.0; 8], vec![1, 8]).unwrap()),
+            &[Value::Tensor(window)],
+            Some(1),
+        )
+        .expect_err("strict mode rejects integer control extension");
+        assert_eq!(
+            error.identifier(),
+            PWELCH_INTEGER_CONTROL_EXTENSION.error_identifier
+        );
+        drop(strict);
+
+        let extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let wide = Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 53) + 1; 8]), vec![1, 8])
+            .expect("wide integer signal");
+        let error = call(Value::Tensor(wide), &[], Some(1))
+            .expect_err("inexact integer signal rejects at floating boundary");
+        assert!(error.message().contains("exactly representable as double"));
+        drop(extensions);
+    }
+
+    #[test]
+    fn pwelch_logical_input_is_a_gated_extension() {
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = call(Value::Bool(true), &[], Some(1))
+            .expect_err("strict mode rejects logical signal extension");
+        assert_eq!(
+            error.identifier(),
+            PWELCH_LOGICAL_INPUT_EXTENSION.error_identifier
+        );
+        drop(strict);
+
+        let extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let output = call(
+            Value::Tensor(Tensor::new(vec![1.0; 8], vec![1, 8]).unwrap()),
+            &[Value::Bool(true)],
+            Some(1),
+        );
+        assert!(
+            output.is_ok(),
+            "RunMat mode retains logical control admission"
+        );
+        drop(extensions);
+    }
+
+    #[test]
+    fn pwelch_automatic_integer_residency_restores_floating_outputs_to_exact_owner() {
+        test_support::with_test_provider(|provider| {
+            let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+            let signal = Tensor::new_integer(
+                IntegerStorage::I16(vec![0, 1, 0, -1, 0, 1, 0, -1]),
+                vec![1, 8],
+            )
+            .expect("integer signal");
+            let input = gpu_helpers::upload_tensor(provider, &signal).expect("upload");
+            let output = call(
+                Value::GpuTensor(input.clone()),
+                &[Value::Num(8.0), Value::Num(0.0), Value::Num(8.0)],
+                Some(2),
+            )
+            .expect("pwelch");
+            let Value::OutputList(outputs) = output else {
+                panic!("expected two resident outputs")
+            };
+            assert_eq!(outputs.len(), 2);
+            for output in &outputs {
+                let Value::GpuTensor(handle) = output else {
+                    panic!("expected resident output")
+                };
+                assert!(runmat_accelerate_api::provider_for_handle(handle)
+                    .is_some_and(|owner| std::ptr::eq(owner, provider)));
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(handle),
+                    None,
+                    "Welch outputs are floating"
+                );
+                assert_eq!(
+                    runmat_accelerate_api::handle_precision(handle),
+                    Some(runmat_accelerate_api::ProviderPrecision::F64)
+                );
+            }
+            let gathered = block_on(gpu_helpers::gather_value_async(&outputs[0])).expect("gather");
+            let Value::Tensor(pxx) = gathered else {
+                panic!("expected floating PSD")
+            };
+            assert_eq!(pxx.shape, vec![5, 1]);
+        });
     }
 
     #[test]

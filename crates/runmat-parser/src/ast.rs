@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::Span;
+use crate::{IntegerLiteral, Span};
 
 mod parallel;
 pub use parallel::SpmdHeader;
@@ -8,6 +8,7 @@ pub use parallel::SpmdHeader;
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Expr {
     Number(String, Span),
+    IntegerLiteral(IntegerLiteral, Span),
     String(String, Span),
     Ident(String, Span),
     EndKeyword(Span), // 'end' used in indexing contexts
@@ -55,6 +56,7 @@ impl Expr {
     pub fn span(&self) -> Span {
         match self {
             Expr::Number(_, span)
+            | Expr::IntegerLiteral(_, span)
             | Expr::String(_, span)
             | Expr::Ident(_, span)
             | Expr::EndKeyword(span)
@@ -86,6 +88,7 @@ impl Expr {
     pub fn with_span(self, span: Span) -> Expr {
         match self {
             Expr::Number(value, _) => Expr::Number(value, span),
+            Expr::IntegerLiteral(value, _) => Expr::IntegerLiteral(value, span),
             Expr::String(value, _) => Expr::String(value, span),
             Expr::Ident(value, _) => Expr::Ident(value, span),
             Expr::EndKeyword(_) => Expr::EndKeyword(span),

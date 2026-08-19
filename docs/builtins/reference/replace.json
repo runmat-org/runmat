@@ -35,7 +35,8 @@
     "Character arrays are handled row by row. Rows expand or shrink as needed and are padded with spaces so the result remains a rectangular char array, just like MATLAB.",
     "Cell arrays must contain string scalars or character vectors. The result is a cell array with the same size and element types mirrored after replacement.",
     "The `old` and `new` inputs can be string scalars, string arrays, character arrays, or cell arrays of character vectors / strings. `new` must be a scalar or match the number of search terms in `old`.",
-    "Non-text inputs (numeric, logical, structs, GPU tensors, etc.) produce MATLAB-compatible errors."
+    "Non-text inputs (numeric, logical, structs, GPU tensors, etc.) produce MATLAB-compatible errors.",
+    "Integer semantics: `replace` has no numeric input role. Numeric, logical, symbolic, and provider-resident values are rejected before gather or provider access."
   ],
   "examples": [
     {

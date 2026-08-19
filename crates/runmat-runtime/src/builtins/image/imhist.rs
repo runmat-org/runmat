@@ -1,7 +1,11 @@
 //! MATLAB-compatible `imhist` grayscale and indexed-image histograms.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerClass, BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
@@ -9,7 +13,7 @@ use runmat_value::{IntValue, LogicalArray, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ProviderHook, ReductionNaN, ResidencyPolicy, ShapeRequirements,
+    ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::image::color::common;
@@ -177,6 +181,65 @@ pub const IMHIST_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &IMHIST_ERRORS,
 };
 
+const IMHIST_TYPED_BIN_COUNT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "imhist-typed-integer-bin-count",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "imhist accepts a typed-integer bin count as a RunMat extension because the public positive-integer form does not enumerate typed storage classes",
+    error_identifier: Some("RunMat:compatibility:ImhistTypedIntegerBinCountExtension"),
+};
+pub const IMHIST_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [IMHIST_TYPED_BIN_COUNT_EXTENSION];
+
+const IMHIST_GRAYSCALE_INTEGER_CLASSES: [BuiltinIntegerClass; 6] = [
+    BuiltinIntegerClass::Int8,
+    BuiltinIntegerClass::Int16,
+    BuiltinIntegerClass::Int32,
+    BuiltinIntegerClass::Uint8,
+    BuiltinIntegerClass::Uint16,
+    BuiltinIntegerClass::Uint32,
+];
+const IMHIST_WIDE_INTEGER_CLASSES: [BuiltinIntegerClass; 2] =
+    [BuiltinIntegerClass::Int64, BuiltinIntegerClass::Uint64];
+const IMHIST_INDEXED_INTEGER_CLASSES: [BuiltinIntegerClass; 2] =
+    [BuiltinIntegerClass::Uint8, BuiltinIntegerClass::Uint16];
+const IMHIST_GRAYSCALE_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "I",
+        classes: &IMHIST_GRAYSCALE_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Documented grayscale integer image classes use their full class interval. RunMat currently returns double counts and bin locations; the exact public output classes remain evidence-open below.",
+    }];
+const IMHIST_INDEXED_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &IMHIST_INDEXED_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Uint8 and uint16 indexed images use zero-based colormap indices; indexed gpuArray input is not supported.",
+    }];
+const IMHIST_BIN_COUNT_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "n",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public form requires a positive integer scalar but does not enumerate typed-integer storage classes; RunMat accepts every native integer scalar exactly after range validation.",
+    }];
+const IMHIST_REJECTED_WIDE_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "I_or_X",
+        classes: &IMHIST_WIDE_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Rejected,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Int64 and uint64 are outside both documented image-class surfaces and reject from host or resident metadata before evaluation.",
+    }];
+pub const IMHIST_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor { form: "[counts, binLocations] = imhist(integer_I, n?)", inputs: &IMHIST_GRAYSCALE_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Exact native values are assigned to the documented class-wide half-open bins. Counts and bin locations are double, and supported resident grayscale results use owner-aware fallback." },
+    BuiltinIntegerCapabilityDescriptor { form: "[counts, binLocations] = imhist(integer_X, map)", inputs: &IMHIST_INDEXED_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GpuRestricted, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Host uint8 and uint16 indices are counted exactly, counts and bin locations are double, and indexed gpuArray input is rejected as unsupported." },
+    BuiltinIntegerCapabilityDescriptor { form: "[counts, binLocations] = imhist(I, integer_n)", inputs: &IMHIST_BIN_COUNT_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::ScalarOnly, notes: "The public reference requires a positive integer-valued bin count without enumerating native storage classes. RunMat accepts all eight native integer classes only as a gated extension, parses them exactly, and returns double histogram arrays." },
+    BuiltinIntegerCapabilityDescriptor { form: "imhist(int64_or_uint64_image, ...)", inputs: &IMHIST_REJECTED_WIDE_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Unsupported wide image classes reject without a lossy floating conversion or provider access." },
+];
+
 fn imhist_error_with_message(
     error: &'static BuiltinErrorDescriptor,
     message: impl Into<String>,
@@ -240,14 +303,14 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Custom("image-histogram"),
     supported_precisions: &[crate::builtins::common::spec::ScalarType::F32, crate::builtins::common::spec::ScalarType::F64],
     broadcast: BroadcastSemantics::None,
-    provider_hooks: &[ProviderHook::Custom("imhist")],
+    provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::GatherImmediately,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "imhist gathers gpuArray inputs today so image-class binning and output shapes remain MATLAB-compatible.",
+    notes: "Grayscale gpuArray inputs are downloaded non-destructively for exact image-class binning and programmatic outputs are restored to the owner; indexed gpuArray inputs reject.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::image::imhist")]
@@ -270,6 +333,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     type_resolver(imhist_type),
     descriptor(crate::builtins::image::imhist::IMHIST_DESCRIPTOR),
+    extensions(crate::builtins::image::imhist::IMHIST_EXTENSIONS),
+    integer_capabilities(crate::builtins::image::imhist::IMHIST_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::image::imhist"
 )]
 async fn imhist_builtin(image: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -278,35 +343,53 @@ async fn imhist_builtin(image: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
     if crate::output_context::requested_output_count() == Some(0)
         && crate::output_count::current_output_count().is_none()
     {
+        if eval.has_resident_source() {
+            return Ok(eval.into_host_counts_value());
+        }
         eval.render_plot()?;
         return Ok(Value::OutputList(Vec::new()));
     }
 
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
+            if eval.has_resident_source() {
+                return Ok(eval.into_host_counts_value());
+            }
             eval.render_plot()?;
             return Ok(Value::OutputList(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![eval.counts_value()]));
+            return Ok(Value::OutputList(vec![eval.into_counts_value()?]));
         }
         if out_count == 2 {
-            return Ok(Value::OutputList(eval.outputs()));
+            return Ok(Value::OutputList(eval.into_outputs()?));
         }
         return Err(too_many_outputs());
     }
 
-    Ok(eval.counts_value())
+    eval.into_counts_value()
 }
 
 pub async fn evaluate(image: Value, rest: &[Value]) -> BuiltinResult<ImhistEvaluation> {
-    let image = common::gather_value(NAME, &image).await.map_err(map_flow)?;
+    ensure_supported_resident_image_class(&image)?;
+    let resident_source = match &image {
+        Value::GpuTensor(handle) => Some(handle.clone()),
+        _ => None,
+    };
+    let indexed_call = rest.first().is_some_and(is_colormap_argument);
+    let indexed_argument_is_resident = rest
+        .first()
+        .is_some_and(|value| matches!(value, Value::GpuTensor(_)));
+    if indexed_call && (resident_source.is_some() || indexed_argument_is_resident) {
+        return Err(unsupported("indexed gpuArray images are not supported"));
+    }
+    let image = gather_preserving_resident_value(&image).await?;
     let mut gathered_rest = Vec::with_capacity(rest.len());
     for arg in rest {
-        gathered_rest.push(common::gather_value(NAME, arg).await.map_err(map_flow)?);
+        gathered_rest.push(gather_preserving_resident_value(arg).await?);
     }
     let call = parse_call(image, &gathered_rest)?;
-    Ok(match call.mode {
+    let eval = match call.mode {
         ImhistMode::Grayscale { bins } => {
             let input = GrayscaleInput::from_value(call.image)?;
             input.evaluate(bins)?
@@ -315,7 +398,63 @@ pub async fn evaluate(image: Value, rest: &[Value]) -> BuiltinResult<ImhistEvalu
             let input = IndexedInput::from_value(call.image, bins)?;
             input.evaluate()?
         }
-    })
+    };
+    Ok(eval.with_resident_source(resident_source))
+}
+
+async fn gather_preserving_resident_value(value: &Value) -> BuiltinResult<Value> {
+    let Value::GpuTensor(handle) = value else {
+        return Ok(value.clone());
+    };
+    let owner = crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
+        .ok_or_else(|| internal("no acceleration provider owns the gpuArray input"))?;
+    let metadata = crate::builtins::common::gpu_helpers::snapshot_handle_metadata(handle);
+    let result = crate::builtins::common::gpu_helpers::download_value_preserving_residency_async(
+        owner, handle,
+    )
+    .await;
+    crate::builtins::common::gpu_helpers::restore_handle_metadata(handle, &metadata);
+    result.map_err(map_flow)
+}
+
+fn ensure_supported_resident_image_class(value: &Value) -> BuiltinResult<()> {
+    match value {
+        Value::Int(IntValue::I64(_) | IntValue::U64(_)) => Err(unsupported(
+            "int64 and uint64 image classes are not supported",
+        )),
+        Value::Tensor(tensor)
+            if matches!(
+                tensor.numeric_dtype(),
+                runmat_value::NumericDType::I64 | runmat_value::NumericDType::U64
+            ) =>
+        {
+            Err(unsupported(
+                "int64 and uint64 image classes are not supported",
+            ))
+        }
+        Value::GpuTensor(handle)
+            if matches!(
+                runmat_accelerate_api::handle_integer_type(handle),
+                Some(
+                    runmat_accelerate_api::IntegerElementType::I64
+                        | runmat_accelerate_api::IntegerElementType::U64
+                )
+            ) =>
+        {
+            Err(unsupported(
+                "int64 and uint64 image classes are not supported",
+            ))
+        }
+        _ => Ok(()),
+    }
+}
+
+fn is_colormap_argument(value: &Value) -> bool {
+    match value {
+        Value::Tensor(tensor) => tensor.shape.len() == 2 && tensor.shape.get(1) == Some(&3),
+        Value::GpuTensor(handle) => handle.shape.len() == 2 && handle.shape.get(1) == Some(&3),
+        _ => false,
+    }
 }
 
 struct ParsedCall {
@@ -355,6 +494,12 @@ fn parse_call(image: Value, rest: &[Value]) -> BuiltinResult<ParsedCall> {
 }
 
 fn parse_optional_bin_count(value: &Value) -> BuiltinResult<Option<usize>> {
+    if is_typed_integer_scalar(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &IMHIST_TYPED_BIN_COUNT_EXTENSION,
+            NAME,
+        )?;
+    }
     if let Some(bins) = integer_scalar_bin_count(value)? {
         validate_bin_count(bins)?;
         return Ok(Some(bins));
@@ -380,11 +525,24 @@ fn parse_optional_bin_count(value: &Value) -> BuiltinResult<Option<usize>> {
     Ok(Some(bins))
 }
 
+fn is_typed_integer_scalar(value: &Value) -> bool {
+    match value {
+        Value::Int(_) => true,
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            tensor.integer_storage().is_some()
+        }
+        _ => false,
+    }
+}
+
 fn parse_colormap_bins(value: &Value) -> BuiltinResult<usize> {
     let tensor = Tensor::try_from(value)
         .map_err(|err| invalid(format!("colormap must be an Nx3 numeric array: {err}")))?;
     if tensor.shape.len() != 2 || tensor.cols != 3 || tensor.rows == 0 {
         return Err(invalid("colormap must be a non-empty Nx3 numeric array"));
+    }
+    if tensor.numeric_dtype() != runmat_value::NumericDType::F64 {
+        return Err(invalid("colormap must be a double Nx3 numeric array"));
     }
     let values = tensor_utils::tensor_values_f64_cow(&tensor);
     if !values.iter().all(|value| value.is_finite()) {
@@ -439,11 +597,6 @@ impl GrayscaleInput {
     }
 
     fn from_tensor(tensor: Tensor) -> BuiltinResult<Self> {
-        if !is_grayscale_shape(&tensor.shape) {
-            return Err(unsupported(
-                "expected an MxN grayscale image; truecolor RGB images are not accepted",
-            ));
-        }
         let shape = tensor.shape.clone();
         let storage = tensor
             .into_numeric_storage()
@@ -464,11 +617,7 @@ impl GrayscaleInput {
                 i32::MIN as f64,
                 i32::MAX as f64,
             )),
-            storage @ NumericStorage::I64(_) => Ok(Self::from_integer_storage(
-                storage,
-                i64::MIN as f64,
-                i64::MAX as f64,
-            )),
+            NumericStorage::I64(_) => Err(unsupported("int64 grayscale images are not supported")),
             storage @ NumericStorage::U8(_) => Ok(Self::from_integer_storage(storage, 0.0, 255.0)),
             storage @ NumericStorage::U16(_) => {
                 Ok(Self::from_integer_storage(storage, 0.0, 65535.0))
@@ -476,9 +625,7 @@ impl GrayscaleInput {
             storage @ NumericStorage::U32(_) => {
                 Ok(Self::from_integer_storage(storage, 0.0, u32::MAX as f64))
             }
-            storage @ NumericStorage::U64(_) => {
-                Ok(Self::from_integer_storage(storage, 0.0, u64::MAX as f64))
-            }
+            NumericStorage::U64(_) => Err(unsupported("uint64 grayscale images are not supported")),
             storage @ (NumericStorage::F32(_) | NumericStorage::F64(_)) => {
                 Self::from_float_storage(storage, &shape)
             }
@@ -523,9 +670,6 @@ impl GrayscaleInput {
     }
 
     fn from_logical(logical: LogicalArray) -> BuiltinResult<Self> {
-        if !is_grayscale_shape(&logical.shape) {
-            return Err(unsupported("expected an MxN logical image"));
-        }
         Ok(Self {
             storage: NumericStorage::F64(
                 logical
@@ -549,12 +693,7 @@ impl GrayscaleInput {
         }
     }
 
-    fn from_float_storage(storage: NumericStorage, shape: &[usize]) -> BuiltinResult<Self> {
-        if !is_grayscale_shape(shape) {
-            return Err(unsupported(
-                "expected an MxN grayscale image; truecolor RGB images are not accepted",
-            ));
-        }
+    fn from_float_storage(storage: NumericStorage, _shape: &[usize]) -> BuiltinResult<Self> {
         let valid = match &storage {
             NumericStorage::F64(values) => values
                 .iter()
@@ -596,9 +735,6 @@ impl IndexedInput {
     fn from_value(value: Value, bins: usize) -> BuiltinResult<Self> {
         match value {
             Value::Tensor(tensor) => {
-                if !is_grayscale_shape(&tensor.shape) {
-                    return Err(unsupported("indexed image must be an MxN matrix"));
-                }
                 let zero_based = matches!(
                     tensor.numeric_dtype(),
                     runmat_value::NumericDType::U8 | runmat_value::NumericDType::U16
@@ -612,22 +748,17 @@ impl IndexedInput {
                     bins,
                 })
             }
-            Value::LogicalArray(logical) => {
-                if !is_grayscale_shape(&logical.shape) {
-                    return Err(unsupported("indexed image must be an MxN matrix"));
-                }
-                Ok(Self {
-                    storage: NumericStorage::F64(
-                        logical
-                            .data
-                            .into_iter()
-                            .map(|value| if value == 0 { 0.0 } else { 1.0 })
-                            .collect(),
-                    ),
-                    zero_based: true,
-                    bins,
-                })
-            }
+            Value::LogicalArray(logical) => Ok(Self {
+                storage: NumericStorage::F64(
+                    logical
+                        .data
+                        .into_iter()
+                        .map(|value| if value == 0 { 0.0 } else { 1.0 })
+                        .collect(),
+                ),
+                zero_based: true,
+                bins,
+            }),
             Value::Num(value) => Ok(Self {
                 storage: NumericStorage::F64(vec![value]),
                 zero_based: false,
@@ -676,6 +807,7 @@ fn numeric_storage_from_int(value: IntValue) -> NumericStorage {
 pub struct ImhistEvaluation {
     counts: Tensor,
     locations: Tensor,
+    resident_source: Option<runmat_accelerate_api::GpuTensorHandle>,
 }
 
 impl ImhistEvaluation {
@@ -688,23 +820,121 @@ impl ImhistEvaluation {
             .map_err(|err| internal(format!("counts tensor: {err}")))?;
         let locations = Tensor::new(locations, vec![rows, 1])
             .map_err(|err| internal(format!("bin location tensor: {err}")))?;
-        Ok(Self { counts, locations })
+        Ok(Self {
+            counts,
+            locations,
+            resident_source: None,
+        })
     }
 
-    fn counts_value(&self) -> Value {
-        Value::Tensor(self.counts.clone())
+    fn has_resident_source(&self) -> bool {
+        self.resident_source.is_some()
     }
 
-    fn locations_value(&self) -> Value {
-        Value::Tensor(self.locations.clone())
+    fn with_resident_source(
+        mut self,
+        source: Option<runmat_accelerate_api::GpuTensorHandle>,
+    ) -> Self {
+        self.resident_source = source;
+        self
     }
 
-    fn outputs(&self) -> Vec<Value> {
-        vec![self.counts_value(), self.locations_value()]
+    fn into_counts_value(self) -> BuiltinResult<Value> {
+        let mut outputs = self.publish_values(vec![Value::Tensor(self.counts.clone())])?;
+        Ok(outputs.remove(0))
+    }
+
+    fn into_host_counts_value(self) -> Value {
+        Value::Tensor(self.counts)
+    }
+
+    fn into_outputs(self) -> BuiltinResult<Vec<Value>> {
+        self.publish_values(vec![
+            Value::Tensor(self.counts.clone()),
+            Value::Tensor(self.locations.clone()),
+        ])
+    }
+
+    fn publish_values(&self, host_values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
+        let Some(source) = self.resident_source.as_ref() else {
+            return Ok(host_values);
+        };
+        let Some(_provider) =
+            crate::builtins::common::gpu_helpers::exact_provider_for_handle(source)
+        else {
+            if runmat_accelerate_api::handle_is_explicit(source) {
+                return Err(internal(
+                    "explicit gpuArray input has no owning provider for result publication",
+                ));
+            }
+            return Ok(host_values);
+        };
+
+        let mut restored = Vec::with_capacity(host_values.len());
+        for host_value in host_values.iter().cloned() {
+            let protected = std::iter::once(source.clone())
+                .chain(restored.iter().filter_map(|value| match value {
+                    Value::GpuTensor(handle) => Some(handle.clone()),
+                    _ => None,
+                }))
+                .collect::<Vec<_>>();
+            let output = match common::restore_resident_numeric_result_for_sources(
+                &protected, host_value, NAME,
+            ) {
+                Ok(output) => output,
+                Err(err) => {
+                    free_restored_outputs(&restored, source);
+                    if runmat_accelerate_api::handle_is_explicit(source) {
+                        return Err(err);
+                    }
+                    return Ok(host_values);
+                }
+            };
+            let Value::GpuTensor(handle) = &output else {
+                free_restored_outputs(&restored, source);
+                if !runmat_accelerate_api::handle_is_explicit(source) {
+                    return Ok(host_values);
+                }
+                return Err(internal(
+                    "provider returned a host value during result publication",
+                ));
+            };
+            if protected
+                .iter()
+                .any(|protected| same_gpu_handle(handle, protected))
+            {
+                free_restored_outputs(&restored, source);
+                return Err(internal(
+                    "provider aliased a protected handle during result publication",
+                ));
+            }
+            restored.push(output);
+        }
+        Ok(restored)
     }
 
     fn render_plot(&self) -> BuiltinResult<()> {
         render_imhist_plot(&self.counts, &self.locations)
+    }
+}
+
+fn same_gpu_handle(
+    left: &runmat_accelerate_api::GpuTensorHandle,
+    right: &runmat_accelerate_api::GpuTensorHandle,
+) -> bool {
+    left.device_id == right.device_id && left.buffer_id == right.buffer_id
+}
+
+fn free_restored_outputs(outputs: &[Value], source: &runmat_accelerate_api::GpuTensorHandle) {
+    let mut freed = std::collections::BTreeSet::new();
+    for handle in outputs.iter().filter_map(|value| match value {
+        Value::GpuTensor(handle) => Some(handle),
+        _ => None,
+    }) {
+        if same_gpu_handle(handle, source) || !freed.insert((handle.device_id, handle.buffer_id)) {
+            continue;
+        }
+        crate::builtins::common::gpu_helpers::free_unprotected_exact_owner(handle, &[source]);
     }
 }
 
@@ -745,10 +975,6 @@ fn render_imhist_plot(counts: &Tensor, locations: &Tensor) -> BuiltinResult<()> 
 #[cfg(not(feature = "plot-core"))]
 fn render_imhist_plot(_counts: &Tensor, _locations: &Tensor) -> BuiltinResult<()> {
     Ok(())
-}
-
-fn is_grayscale_shape(shape: &[usize]) -> bool {
-    matches!(shape.len(), 0..=2)
 }
 
 fn scalar_number(value: &Value) -> Option<f64> {
@@ -1067,6 +1293,7 @@ fn plot_display_bins(counts: &Tensor, locations: &Tensor) -> BuiltinResult<PlotD
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::{gpu_helpers, test_support};
     use futures::executor::block_on;
     use runmat_value::{IntegerStorage, NumericDType};
 
@@ -1172,6 +1399,17 @@ mod tests {
     }
 
     #[test]
+    fn indexed_image_accepts_n_dimensional_storage() {
+        let image = tensor(vec![1.0, 2.0, 3.0, 2.0], vec![1, 2, 2], NumericDType::F64);
+        let map = tensor(vec![0.0; 9], vec![3, 3], NumericDType::F64);
+        let Value::Tensor(counts) = call(Value::Tensor(image), vec![Value::Tensor(map)], None)
+        else {
+            panic!("expected counts");
+        };
+        assert_eq!(counts.materialize_f64(), vec![1.0, 2.0, 1.0]);
+    }
+
+    #[test]
     fn uint8_indexed_image_uses_zero_based_colormap_indices() {
         let image = tensor(vec![0.0, 1.0, 1.0, 2.0], vec![2, 2], NumericDType::U8);
         let map = tensor(vec![0.0; 9], vec![3, 3], NumericDType::F64);
@@ -1193,23 +1431,16 @@ mod tests {
     }
 
     #[test]
-    fn wide_integer_grayscale_storage_stays_exact_through_binning() {
+    fn wide_integer_grayscale_input_rejects_before_lossy_conversion() {
         let image = Tensor::new_integer(
             IntegerStorage::U64(vec![0, (1_u64 << 53) + 1, u64::MAX]),
             vec![1, 3],
         )
         .expect("uint64 tensor");
-        let grayscale = GrayscaleInput::from_tensor(image).expect("uint64 image");
-
-        assert_eq!(
-            grayscale.storage,
-            NumericStorage::U64(vec![0, (1_u64 << 53) + 1, u64::MAX])
-        );
-        let evaluation = grayscale.evaluate(Some(256)).expect("uint64 histogram");
-        let counts = tensor_utils::tensor_values_f64_cow(&evaluation.counts);
-        assert_eq!(counts.iter().sum::<f64>(), 3.0);
-        assert_eq!(counts[0], 2.0);
-        assert_eq!(counts[255], 1.0);
+        let Err(err) = block_on(evaluate(Value::Tensor(image), &[])) else {
+            panic!("uint64 grayscale image must be rejected");
+        };
+        assert!(err.message().contains("int64 and uint64"));
     }
 
     #[test]
@@ -1236,6 +1467,7 @@ mod tests {
 
     #[test]
     fn bin_count_parser_preserves_typed_integer_scalar_bounds() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         assert_eq!(
             parse_optional_bin_count(&Value::Int(IntValue::U32(1024))).unwrap(),
             Some(1024)
@@ -1269,6 +1501,21 @@ mod tests {
                 Some(2)
             );
         }
+    }
+
+    #[test]
+    fn integer_capabilities_record_double_outputs_and_typed_n_extension() {
+        assert_eq!(IMHIST_INTEGER_CAPABILITIES.len(), 4);
+        assert!(IMHIST_INTEGER_CAPABILITIES[..3]
+            .iter()
+            .all(|capability| capability.output_class == BuiltinIntegerOutputClassRule::Double));
+        let typed_n = &IMHIST_INTEGER_CAPABILITIES[2];
+        assert_eq!(typed_n.inputs[0].name, "n");
+        assert_eq!(typed_n.inputs[0].classes.len(), 8);
+        assert_eq!(
+            typed_n.inputs[0].availability,
+            BuiltinIntegerInputAvailability::RunMatOnly
+        );
     }
 
     #[test]
@@ -1326,10 +1573,137 @@ mod tests {
     }
 
     #[test]
-    fn rejects_rgb_shaped_input() {
+    fn accepts_n_dimensional_grayscale_input_including_three_plane_shape() {
         let image = tensor(vec![0.0; 12], vec![2, 2, 3], NumericDType::F64);
-        let err = block_on(imhist_builtin(Value::Tensor(image), vec![])).unwrap_err();
-        assert_eq!(err.identifier(), Some("RunMat:imhist:UnsupportedImage"));
+        let Value::Tensor(counts) = block_on(imhist_builtin(Value::Tensor(image), vec![])).unwrap()
+        else {
+            panic!("expected counts tensor");
+        };
+        assert_eq!(counts.shape, vec![DEFAULT_GRAYSCALE_BINS, 1]);
+        assert_eq!(counts.materialize_f64().iter().sum::<f64>(), 12.0);
+        assert_eq!(counts.materialize_f64()[0], 12.0);
+    }
+
+    #[test]
+    fn resident_programmatic_outputs_are_deferred_unique_and_owner_preserving() {
+        test_support::with_test_provider(|provider| {
+            let input = tensor(vec![0.0, 1.0, 1.0, 255.0], vec![2, 2], NumericDType::U8);
+            let source = gpu_helpers::upload_tensor(provider, &input).expect("resident image");
+            let source =
+                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let result = {
+                let _outputs = crate::output_count::push_output_count(Some(2));
+                block_on(imhist_builtin(Value::GpuTensor(source.clone()), vec![]))
+                    .expect("resident histogram")
+            };
+            let Value::OutputList(outputs) = result else {
+                panic!("expected two outputs");
+            };
+            let [Value::GpuTensor(counts), Value::GpuTensor(locations)] = outputs.as_slice() else {
+                panic!("expected resident outputs");
+            };
+            assert!(!same_gpu_handle(counts, &source));
+            assert!(!same_gpu_handle(locations, &source));
+            assert!(!same_gpu_handle(counts, locations));
+            assert!(runmat_accelerate_api::provider_for_handle(counts)
+                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            assert!(runmat_accelerate_api::provider_for_handle(locations)
+                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            assert!(runmat_accelerate_api::handle_is_explicit(counts));
+            assert!(runmat_accelerate_api::handle_is_explicit(locations));
+
+            let gathered_source =
+                test_support::gather(Value::GpuTensor(source)).expect("source remains readable");
+            assert_eq!(gathered_source.numeric_dtype(), NumericDType::U8);
+            assert_eq!(gathered_source.materialize_f64(), input.materialize_f64());
+        });
+    }
+
+    #[test]
+    fn resident_statement_form_returns_host_counts_without_plotting_or_publication() {
+        test_support::with_test_provider(|provider| {
+            let input = tensor(vec![0.0, 1.0], vec![1, 2], NumericDType::F64);
+            let source = gpu_helpers::upload_tensor(provider, &input).expect("resident image");
+            let source =
+                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let result = {
+                let _requested = crate::output_context::push_output_count(0);
+                block_on(imhist_builtin(Value::GpuTensor(source.clone()), vec![]))
+                    .expect("resident statement histogram")
+            };
+            let Value::Tensor(counts) = result else {
+                panic!("gpuArray statement form must return host counts in ans");
+            };
+            assert_eq!(counts.shape, vec![DEFAULT_GRAYSCALE_BINS, 1]);
+            let gathered_source = test_support::gather(Value::GpuTensor(source))
+                .expect("source remains resident and readable");
+            assert_eq!(gathered_source.materialize_f64(), input.materialize_f64());
+        });
+    }
+
+    #[test]
+    fn explicit_resident_input_does_not_silently_return_host_on_precision_mismatch() {
+        test_support::with_f32_test_provider(|provider| {
+            runmat_accelerate::ensure_residency_hooks();
+            let input = tensor(vec![0.0, 1.0], vec![1, 2], NumericDType::F32);
+            let source = gpu_helpers::upload_tensor(provider, &input).expect("resident image");
+            let source =
+                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let err = block_on(imhist_builtin(Value::GpuTensor(source), vec![]))
+                .expect_err("double output cannot silently become host output");
+            assert!(
+                err.message().contains("requires Some(F64)")
+                    || err.message().contains("result precision"),
+                "unexpected error: {}",
+                err.message()
+            );
+        });
+    }
+
+    #[test]
+    fn automatic_f32_resident_outputs_fall_back_to_host_without_publication() {
+        test_support::with_f32_test_provider(|provider| {
+            runmat_accelerate::ensure_residency_hooks();
+            let input = tensor(vec![0.0, 1.0], vec![1, 2], NumericDType::F32);
+            let source = gpu_helpers::upload_tensor(provider, &input).expect("resident image");
+            let source =
+                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            runmat_accelerate_api::mark_residency(&source);
+            let result = {
+                let _outputs = crate::output_count::push_output_count(Some(2));
+                block_on(imhist_builtin(Value::GpuTensor(source.clone()), vec![]))
+                    .expect("automatic precision mismatch falls back")
+            };
+            let Value::OutputList(outputs) = result else {
+                panic!("expected two outputs");
+            };
+            assert!(matches!(
+                outputs.as_slice(),
+                [Value::Tensor(_), Value::Tensor(_)]
+            ));
+            assert!(runmat_accelerate::fusion_residency::is_resident(&source));
+        });
+    }
+
+    #[test]
+    fn indexed_resident_image_rejects_before_download() {
+        test_support::with_test_provider(|provider| {
+            let input = tensor(vec![0.0, 1.0], vec![1, 2], NumericDType::U8);
+            let source = gpu_helpers::upload_tensor(provider, &input).expect("resident image");
+            let source =
+                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let map = tensor(vec![0.0; 6], vec![2, 3], NumericDType::F64);
+            let err = block_on(imhist_builtin(
+                Value::GpuTensor(source.clone()),
+                vec![Value::Tensor(map)],
+            ))
+            .expect_err("indexed gpuArray input must reject");
+            assert_eq!(err.identifier(), Some("RunMat:imhist:UnsupportedImage"));
+            assert!(err.message().contains("indexed gpuArray"));
+            let gathered = test_support::gather(Value::GpuTensor(source))
+                .expect("rejected source remains readable");
+            assert_eq!(gathered.materialize_f64(), input.materialize_f64());
+        });
     }
 
     #[cfg(feature = "plot-core")]

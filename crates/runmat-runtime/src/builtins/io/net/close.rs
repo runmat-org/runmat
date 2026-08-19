@@ -421,6 +421,7 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         assert_eq!(
             futures::executor::block_on(close_if_network_targets(&[resident]))
@@ -451,7 +452,7 @@ pub(crate) mod tests {
                     other => panic!("unexpected ServerAddress {other:?}"),
                 };
                 let port = match st.fields.get("ServerPort") {
-                    Some(Value::Int(iv)) => iv.to_i64() as u16,
+                    Some(Value::Num(value)) => *value as u16,
                     other => panic!("unexpected ServerPort {other:?}"),
                 };
                 (address, port)
@@ -470,7 +471,7 @@ pub(crate) mod tests {
 
         let client = run_tcpclient(
             Value::from("127.0.0.1"),
-            Value::Int(IntValue::I32(port as i32)),
+            Value::Num(port as f64),
             Vec::new(),
         )
         .expect("tcpclient");
@@ -480,12 +481,8 @@ pub(crate) mod tests {
     }
 
     fn spawn_tcp_server() -> Value {
-        run_tcpserver(
-            Value::from("127.0.0.1"),
-            Value::Int(IntValue::I32(0)),
-            Vec::new(),
-        )
-        .expect("tcpserver")
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        run_tcpserver(Value::from("127.0.0.1"), Value::Num(0.0), Vec::new()).expect("tcpserver")
     }
 
     fn accept_from_server(server: &Value) -> Value {

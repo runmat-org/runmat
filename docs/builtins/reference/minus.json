@@ -41,9 +41,9 @@
     "Implicit expansion works across any dimension, provided the non-singleton extents match. Size mismatches raise the standard MATLAB-compatible error message.",
     "Complex operands follow MATLAB's analytic rule `(a + ib) - (c + id) = (a - c) + i(b - d)`.",
     "Empty dimensions propagate naturally—if either operand has a zero-sized dimension after broadcasting, the result is empty with the broadcasted shape.",
-    "Integer inputs promote to double precision before subtraction, mirroring MATLAB behaviour and keeping numeric tower rules consistent with other RunMat arithmetic builtins.",
+    "Integer subtraction preserves the integer class. The other operand must use the same integer class or be scalar double; fractional results round, overflow saturates, and 64-bit integer/scalar-double arithmetic uses the extended-precision compatibility path.",
     "Sparse real matrices interoperate with sparse, dense, logical, character, scalar, and complex operands. Sparse-sparse subtraction preserves sparse storage; dense, nonzero scalar, and complex interop returns full real or complex storage when implicit zeros become nonzero.",
-    "The optional `'like'` prototype makes the output adopt the residency (host or GPU) and complexity characteristics of the prototype, which is particularly useful for keeping implicit-expansion expressions on the device."
+    "In RunMat compatibility mode, the RunMat-only optional `'like'` prototype makes the output adopt the residency and complexity characteristics of the prototype. MATLAB-compatible mode rejects this extension before dispatch."
   ],
   "examples": [
     {
@@ -84,7 +84,7 @@
     },
     {
       "question": "What numeric type does `minus` return?",
-      "answer": "Results are double precision for real inputs and complex double when either operand is complex. Logical and character inputs are promoted to double before subtraction."
+      "answer": "Ordinary real inputs produce double and complex inputs produce complex double. Integer arithmetic preserves the integer class under MATLAB's same-class-or-scalar-double rules. Logical and character inputs are promoted to double."
     },
     {
       "question": "Can I subtract gpuArrays and host scalars?",
@@ -104,7 +104,7 @@
     },
     {
       "question": "Are integer inputs supported?",
-      "answer": "Yes. Integers promote to double precision during the subtraction, matching other RunMat arithmetic builtins."
+      "answer": "Yes. Integer subtraction preserves the integer class, rounds fractional results, and saturates overflow. Inputs must use the same integer class or pair one integer operand with scalar double."
     },
     {
       "question": "Can I mix complex and real operands?",

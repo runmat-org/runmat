@@ -3,10 +3,44 @@ use runmat_types::{
     MemberAccess, MethodAttributes, MethodName, QualifiedName, SymbolName,
 };
 
+pub const GPU_ARRAY_PUBLIC_METHODS: &[&str] = &[
+    "arrayfun",
+    "existsOnGPU",
+    "gather",
+    "isgpuarray",
+    "isUnderlyingType",
+    "ndims",
+    "pagefun",
+    "size",
+    "underlyingType",
+];
+
 /// Return immutable standard-library class metadata used during composition.
 /// Mutable runtime registrations and static property values are intentionally
 /// not visible through this interface.
 pub fn standard_class_declaration(name: &str) -> Option<ExternalClassDeclaration> {
+    if name == "gpuArray" {
+        return Some(ExternalClassDeclaration {
+            name: qualified(name),
+            parent: None,
+            kind: ClassKind::Value,
+            is_sealed: false,
+            is_abstract: false,
+            properties: Vec::new(),
+            methods: GPU_ARRAY_PUBLIC_METHODS
+                .iter()
+                .map(|method| ExternalMethodDeclaration {
+                    name: MethodName((*method).to_owned()),
+                    attributes: MethodAttributes::default(),
+                    is_static: false,
+                    callable: CallableIdentity::ExternalName(qualified(&format!(
+                        "gpuArray.{method}"
+                    ))),
+                    implicit_class_argument: None,
+                })
+                .collect(),
+        });
+    }
     let primitive = [
         "double", "single", "logical", "int8", "int16", "int32", "int64", "uint8", "uint16",
         "uint32", "uint64",

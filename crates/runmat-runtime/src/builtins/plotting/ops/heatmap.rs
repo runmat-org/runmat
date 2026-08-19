@@ -637,6 +637,19 @@ pub(crate) fn public_color_limits_for_value(
     value: &Value,
     builtin: &'static str,
 ) -> crate::BuiltinResult<(f64, f64)> {
+    if let Ok(tensor) = Tensor::try_from(value) {
+        if integer_limits_are_ordered(&tensor) {
+            let values = tensor.materialize_f64();
+            return Ok((
+                values[0],
+                if values[0] < values[1] {
+                    values[1]
+                } else {
+                    next_f64_up(values[0])
+                },
+            ));
+        }
+    }
     let (lo, hi) = crate::builtins::plotting::op_common::limits::limits_from_value(value, builtin)?;
     if lo < hi {
         return Ok((lo, hi));
@@ -659,12 +672,12 @@ pub(crate) fn renderer_color_limits_for_value(
     value: &Value,
     builtin: &'static str,
 ) -> crate::BuiltinResult<(f64, f64)> {
-    let public = crate::builtins::plotting::op_common::limits::limits_from_value(value, builtin)?;
     let limits =
         Tensor::try_from(value).map_err(|error| heatmap_invalid(format!("{builtin}: {error}")))?;
     if let Some(exact) = exact_integer_renderer_limits(color_data, &limits) {
         return Ok(exact);
     }
+    let public = crate::builtins::plotting::op_common::limits::limits_from_value(value, builtin)?;
     let Some((source_lo, source_hi)) = integer_public_color_limits(color_data) else {
         return Ok(public);
     };
@@ -673,6 +686,23 @@ pub(crate) fn renderer_color_limits_for_value(
         return Ok((0.0, 1.0));
     }
     Ok(((public.0 - source_lo) / span, (public.1 - source_lo) / span))
+}
+
+fn integer_limits_are_ordered(tensor: &Tensor) -> bool {
+    if tensor.len() != 2 {
+        return false;
+    }
+    match tensor.integer_storage() {
+        Some(IntegerStorage::I8(values)) => values[0] < values[1],
+        Some(IntegerStorage::I16(values)) => values[0] < values[1],
+        Some(IntegerStorage::I32(values)) => values[0] < values[1],
+        Some(IntegerStorage::I64(values)) => values[0] < values[1],
+        Some(IntegerStorage::U8(values)) => values[0] < values[1],
+        Some(IntegerStorage::U16(values)) => values[0] < values[1],
+        Some(IntegerStorage::U32(values)) => values[0] < values[1],
+        Some(IntegerStorage::U64(values)) => values[0] < values[1],
+        None => false,
+    }
 }
 
 fn exact_integer_renderer_limits(color_data: &Tensor, limits: &Tensor) -> Option<(f64, f64)> {
@@ -1139,6 +1169,7 @@ mod tests {
             shape: vec![2, 2],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let err = futures::executor::block_on(heatmap_builtin(vec![gpu]))
@@ -1275,6 +1306,7 @@ mod tests {
             shape: vec![2, 2, 2],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let error = futures::executor::block_on(heatmap_builtin(vec![resident]))
             .expect_err("N-D resident CData must reject from handle metadata");

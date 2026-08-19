@@ -1544,6 +1544,7 @@ pub(crate) mod tests {
             shape: shape.to_vec(),
             device_id: 0,
             buffer_id: 0,
+            descriptor: Default::default(),
         }
     }
 

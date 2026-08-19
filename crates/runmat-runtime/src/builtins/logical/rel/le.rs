@@ -5,6 +5,11 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, LogicalArray, StringArray, Tensor, Value};
 
@@ -65,6 +70,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "le";
+const LE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability { name: "A", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "All numeric classes may be compared without a lossy conversion; signed, unsigned, and floating counterparts are compared exactly." },
+    BuiltinIntegerInputCapability { name: "B", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Mixed numeric classes are documented and compatible dimensions expand implicitly." },
+];
+pub const LE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor { form: "tf = le(A, B)", inputs: &LE_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Predicate, output_class: BuiltinIntegerOutputClassRule::Logical, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::BroadcastCompatible, notes: "Integer comparisons remain exact across class boundaries. Complex inputs compare real components only, and resident fallback restores a logical result to the owning provider." }];
 
 const LE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "tf",
@@ -135,16 +146,40 @@ fn le_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     keywords = "le,less equal,comparison,logical,gpu",
     accel = "elementwise",
     type_resolver(logical_binary_type),
+    integer_capabilities(LE_INTEGER_CAPABILITIES),
     descriptor(crate::builtins::logical::rel::le::LE_DESCRIPTOR),
     builtin_path = "crate::builtins::logical::rel::le"
 )]
 async fn le_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
+    let source = match (&lhs, &rhs) {
+        (Value::GpuTensor(handle), _) => Some(handle.clone()),
+        (_, Value::GpuTensor(handle)) => Some(handle.clone()),
+        _ => None,
+    };
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {
         if let Some(result) = try_le_gpu(a, b).await {
             return result;
         }
     }
-    le_host(lhs, rhs).await
+    let mut host = le_host(lhs, rhs).await?;
+    if let Some(source) = source.as_ref() {
+        host = match host {
+            Value::Bool(flag) => Value::LogicalArray(
+                LogicalArray::new(vec![u8::from(flag)], vec![1, 1])
+                    .map_err(|_| le_error(&LE_ERROR_INVALID_INPUT))?,
+            ),
+            other => other,
+        };
+        let restored = gpu_helpers::restore_class_preserving_value(source, host, BUILTIN_NAME)?;
+        if runmat_accelerate_api::handle_is_explicit(source)
+            && !matches!(restored, Value::GpuTensor(_))
+        {
+            return Err(le_error(&LE_ERROR_INVALID_INPUT));
+        }
+        Ok(restored)
+    } else {
+        Ok(host)
+    }
 }
 
 async fn try_le_gpu(
@@ -468,6 +503,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::AccelProvider;
     use runmat_accelerate_api::HostTensorView;
 
     fn run_le(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
@@ -613,13 +650,38 @@ pub(crate) mod tests {
         });
     }
 
+    #[test]
+    fn le_mixed_explicit_gpu_host_restores_logical_residency() {
+        test_support::with_test_provider(|provider| {
+            let lhs = Tensor::new_integer(
+                runmat_value::IntegerStorage::U64(vec![(1_u64 << 53) + 1, 4]),
+                vec![2, 1],
+            )
+            .expect("lhs");
+            let handle = gpu_helpers::upload_tensor(provider, &lhs).expect("upload");
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let result = run_le(Value::GpuTensor(handle), Value::Num((1_u64 << 53) as f64))
+                .expect("mixed le");
+            let Value::GpuTensor(output) = result else {
+                panic!("explicit gpuArray comparison must remain resident");
+            };
+            assert!(runmat_accelerate_api::handle_is_explicit(&output));
+            assert!(runmat_accelerate_api::handle_is_logical(&output));
+            let gathered = test_support::gather(Value::GpuTensor(output)).expect("gather");
+            assert_eq!(gathered.materialize_f64(), vec![0.0, 1.0]);
+        });
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn le_wgpu_matches_host() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        ) else {
+            return;
+        };
         let lhs = Tensor::new(vec![0.0, 2.0, 5.0, 7.0], vec![4, 1]).unwrap();
         let rhs = Tensor::new(vec![1.0, 2.0, 4.0, 8.0], vec![4, 1]).unwrap();
         let cpu = run_le_host(Value::Tensor(lhs.clone()), Value::Tensor(rhs.clone())).unwrap();
@@ -632,7 +694,6 @@ pub(crate) mod tests {
             data: &rhs.materialize_f64(),
             shape: &rhs.shape,
         };
-        let provider = runmat_accelerate_api::provider().expect("provider");
         let handle_l = provider.upload(&view_l).expect("upload lhs");
         let handle_r = provider.upload(&view_r).expect("upload rhs");
         let gpu = run_le(Value::GpuTensor(handle_l), Value::GpuTensor(handle_r)).unwrap();

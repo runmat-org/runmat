@@ -12,12 +12,15 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::math::ode::common::{
-    build_ode_output, ode_options_from_struct, parse_ode_input, parse_options, solve_ode, OdeMethod,
+    build_ode_output, define_ode_integer_contract, ode_options_from_struct, parse_ode_input,
+    parse_options, prepare_ode_options, solve_ode, OdeMethod,
 };
 use crate::builtins::math::ode::type_resolvers::ode_solution_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "ode45";
+
+define_ode_integer_contract!("ode45", "Ode45");
 
 const ODE45_OUTPUT_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "y",
@@ -216,6 +219,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     type_resolver(ode_solution_type),
     descriptor(crate::builtins::math::ode::ode45::ODE45_DESCRIPTOR),
+    extensions(crate::builtins::math::ode::ode45::EXTENSIONS),
+    integer_capabilities(crate::builtins::math::ode::ode45::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::ode::ode45"
 )]
 async fn ode45_builtin(
@@ -232,9 +237,12 @@ async fn ode45_builtin(
     }
     let options = parse_options(NAME, rest.first())
         .map_err(|err| ode45_map_error(err, &ODE45_ERROR_INVALID_ARGUMENT))?;
+    let options = prepare_ode_options(NAME, options, ODE_COMPATIBILITY_EXTENSIONS)
+        .await
+        .map_err(|err| ode45_map_error(err, &ODE45_ERROR_INVALID_ARGUMENT))?;
     let opts = ode_options_from_struct(NAME, options.as_ref())
         .map_err(|err| ode45_map_error(err, &ODE45_ERROR_INVALID_ARGUMENT))?;
-    let input = parse_ode_input(NAME, tspan, y0)
+    let input = parse_ode_input(NAME, tspan, y0, ODE_COMPATIBILITY_EXTENSIONS)
         .await
         .map_err(|err| ode45_map_error(err, &ODE45_ERROR_INVALID_INPUT))?;
     let result = solve_ode(NAME, OdeMethod::Ode45, &function, &input, &opts)
@@ -246,8 +254,11 @@ async fn ode45_builtin(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_accelerate_api::HostTensorView;
     use runmat_value::Tensor;
+    use runmat_value::{IntValue, IntegerStorage};
     use std::sync::Arc;
 
     #[test]
@@ -282,6 +293,120 @@ mod tests {
             }
             other => panic!("unexpected output {other:?}"),
         }
+    }
+
+    #[test]
+    fn ode45_strict_mode_rejects_integer_tspan_before_rhs() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let tspan = Tensor::new_integer(IntegerStorage::U16(vec![0, 1]), vec![1, 2]).unwrap();
+
+        let error = block_on(ode45_builtin(
+            Value::FunctionHandle("unused".into()),
+            Value::Tensor(tspan),
+            Value::Num(1.0),
+            Vec::new(),
+        ))
+        .expect_err("integer tspan is a RunMat-only extension");
+
+        assert_eq!(error.identifier(), INTEGER_TSPAN_EXTENSION.error_identifier);
+    }
+
+    #[test]
+    fn ode45_runmat_mode_rejects_wide_integer_tspan() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let tspan =
+            Tensor::new_integer(IntegerStorage::U64(vec![0, (1_u64 << 53) + 1]), vec![1, 2])
+                .unwrap();
+
+        let error = block_on(ode45_builtin(
+            Value::FunctionHandle("unused".into()),
+            Value::Tensor(tspan),
+            Value::Num(1.0),
+            Vec::new(),
+        ))
+        .expect_err("wide integer tspan cannot cross exactly");
+
+        assert!(error.message().contains("exactly representable"));
+    }
+
+    #[test]
+    fn ode45_strict_mode_rejects_integer_derivative_result() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let _resolver =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|_name| {
+                Some(903)
+            })));
+        let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            |_function, _args, _requested_outputs| {
+                Box::pin(async move { Ok(Value::Int(IntValue::I32(-1))) })
+            },
+        )));
+
+        let error = block_on(ode45_builtin(
+            Value::FunctionHandle("integer_rhs".into()),
+            Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
+            Value::Num(1.0),
+            Vec::new(),
+        ))
+        .expect_err("integer derivative is a RunMat-only extension");
+
+        assert_eq!(
+            error.identifier(),
+            INTEGER_CALLBACK_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn ode45_automatic_resident_input_gathers_but_explicit_input_is_gated() {
+        test_support::with_test_provider(|provider| {
+            let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
+                Arc::new(|_function, _args, _requested_outputs| {
+                    Box::pin(async move { Ok(Value::Num(-1.0)) })
+                }),
+            ));
+            let times = [0.0, 0.1];
+            let shape = [1, 2];
+            let automatic = provider
+                .upload(&HostTensorView {
+                    data: &times,
+                    shape: &shape,
+                })
+                .expect("automatic upload");
+            let automatic =
+                automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let result = block_on(ode45_builtin(
+                Value::BoundFunctionHandle {
+                    name: "constant_rhs".to_string(),
+                    function: 905,
+                },
+                Value::GpuTensor(automatic),
+                Value::Num(1.0),
+                Vec::new(),
+            ))
+            .expect("automatic resident tspan gathers");
+            assert!(matches!(result, Value::Tensor(_)));
+
+            let explicit = provider
+                .upload(&HostTensorView {
+                    data: &times,
+                    shape: &shape,
+                })
+                .expect("explicit upload");
+            let explicit =
+                explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(ode45_builtin(
+                Value::FunctionHandle("unused".into()),
+                Value::GpuTensor(explicit),
+                Value::Num(1.0),
+                Vec::new(),
+            ))
+            .expect_err("explicit resident tspan is gated before fallback");
+            assert_eq!(
+                error.identifier(),
+                RESIDENT_INPUT_EXTENSION.error_identifier
+            );
+        });
     }
 
     #[test]

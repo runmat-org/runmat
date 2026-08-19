@@ -826,6 +826,7 @@ pub fn handle_register_class(
             |(name, is_static, is_constant, default_literal, get_access, set_access)| {
                 let default_value = default_literal.map(|literal| match literal {
                     PropertyDefaultLiteral::Num(value) => Value::Num(value),
+                    PropertyDefaultLiteral::Int(value) => Value::Int(value),
                     PropertyDefaultLiteral::Bool(value) => Value::Bool(value),
                     PropertyDefaultLiteral::String(value) => Value::String(value),
                 });

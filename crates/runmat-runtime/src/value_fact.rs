@@ -371,8 +371,7 @@ fn gpu_kind(handle: &runmat_accelerate_api::GpuTensorHandle) -> Option<ValueKind
 mod tests {
     use super::*;
     use runmat_accelerate_api::{
-        clear_handle_metadata, set_handle_integer_type, set_handle_storage, GpuTensorHandle,
-        GpuTensorStorage, IntegerElementType,
+        clear_handle_metadata, GpuTensorHandle, GpuTensorStorage, NumericElementType,
     };
     use runmat_value::{CellArray, ForeignRef, Tensor};
 
@@ -406,13 +405,10 @@ mod tests {
 
     #[test]
     fn preserves_device_integer_class_domain_shape_and_residency() {
-        let handle = GpuTensorHandle {
-            shape: vec![2, 3],
-            device_id: 71,
-            buffer_id: 9,
-        };
-        set_handle_integer_type(&handle, IntegerElementType::U64);
-        set_handle_storage(&handle, GpuTensorStorage::ComplexInterleaved);
+        let handle = GpuTensorHandle::new(vec![2, 3], 71, 9).with_numeric_descriptor(
+            NumericElementType::U64,
+            GpuTensorStorage::ComplexInterleaved,
+        );
         let fact = value_fact(&Value::GpuTensor(handle.clone()));
         assert_eq!(
             fact.kind,
@@ -434,11 +430,7 @@ mod tests {
 
     #[test]
     fn unknown_device_element_type_is_an_explicit_dynamic_boundary() {
-        let handle = GpuTensorHandle {
-            shape: vec![1, 4],
-            device_id: 73,
-            buffer_id: 11,
-        };
+        let handle = GpuTensorHandle::new(vec![1, 4], 73, 11);
         clear_handle_metadata(&handle);
         let fact = value_fact(&Value::GpuTensor(handle));
         assert_eq!(fact.kind, ValueKindFact::Unknown);

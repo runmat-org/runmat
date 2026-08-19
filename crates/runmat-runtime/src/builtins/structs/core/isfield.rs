@@ -9,6 +9,7 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, LogicalArray, StructValue, Value};
 use std::collections::HashSet;
@@ -149,6 +150,7 @@ pub const ISFIELD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ISFIELD_ERRORS,
 };
+pub const ISFIELD_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "isfield is a universal structure predicate; an integer target returns false and integer field names reject without numeric conversion or provider access." };
 
 fn isfield_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     isfield_error_with_message(error.message, error)
@@ -172,6 +174,7 @@ fn isfield_error_with_message(
     keywords = "isfield,struct,field existence",
     type_resolver(isfield_type),
     descriptor(crate::builtins::structs::core::isfield::ISFIELD_DESCRIPTOR),
+    integer_audit(crate::builtins::structs::core::isfield::ISFIELD_INTEGER_AUDIT),
     builtin_path = "crate::builtins::structs::core::isfield"
 )]
 async fn isfield_builtin(target: Value, names: Value) -> BuiltinResult<Value> {

@@ -195,10 +195,9 @@ fn factorial_error_with_detail(
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }
-    if matches!(
-        error.identifier,
-        Some("RunMat:factorial:GpuUnsupported" | "RunMat:factorial:InvalidInput")
-    ) {
+    if std::ptr::eq(error, &FACTORIAL_ERROR_GPU_UNSUPPORTED)
+        || std::ptr::eq(error, &FACTORIAL_ERROR_INVALID_INPUT)
+    {
         builder = builder.with_gpu_gather_retry(crate::GpuGatherRetry::Never);
     }
     builder.build()

@@ -18,6 +18,7 @@ The lexer converts source text into a stream of `Token` variants. It is built on
 - Keywords: Standard MATLAB control flow tokens such as `if`, `for`, `while`, `function`, `classdef`, and `try`
 - Operators: Arithmetic (`+`, `-`, `*`, `./`), logical (`&&`, `||`), and comparison (`==`, `>=`, `~=`)
 - Structural: Brackets `[]`, braces `{}`, and parentheses `()` used for arrays, cell arrays, and indexing/calls
+- Literals: Decimal floating-point values and exact hexadecimal or binary integer values with optional integer-class suffixes
 - MATLAB Specifics: The `transpose` operator (`'`), the `colon` operator (`:`), and the `ellipsis` (`...`) for line continuation
 
 ### Data Flow: Lexer to Parser
@@ -111,6 +112,7 @@ classDiagram
     Tensor(Vec~Vec~Expr~~)
     Ident(String)
     Number(String)
+    IntegerLiteral(IntegerLiteral)
   }
 
   Program *-- Stmt

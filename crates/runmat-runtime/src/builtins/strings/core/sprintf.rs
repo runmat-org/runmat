@@ -4,6 +4,11 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, Value};
 
@@ -113,6 +118,26 @@ pub const SPRINTF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &SPRINTF_ERRORS,
 };
 
+const SPRINTF_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A...",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target explicitly lists all eight integer classes. Integer conversions read authoritative values directly, including signed, unsigned, octal, hexadecimal, character-code, width, and precision roles.",
+    }];
+pub const SPRINTF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "txt = sprintf(formatSpec, integer_A...)",
+        inputs: &SPRINTF_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Formatting preserves full-width integer text without an f64 intermediary and consumes array elements in column order. Resident numeric arguments gather authoritatively because formatting executes on the client.",
+    }];
+
 fn sprintf_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     sprintf_error_with_message(error.message, error)
 }
@@ -141,6 +166,7 @@ fn remap_sprintf_flow(err: RuntimeError) -> RuntimeError {
     sink = true,
     type_resolver(string_scalar_type),
     descriptor(crate::builtins::strings::core::sprintf::SPRINTF_DESCRIPTOR),
+    integer_capabilities(crate::builtins::strings::core::sprintf::SPRINTF_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::strings::core::sprintf"
 )]
 async fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

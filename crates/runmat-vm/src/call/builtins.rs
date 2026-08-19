@@ -404,6 +404,11 @@ pub fn vm_intrinsic_builtin(
             Ok(Value::Num(0.0))
         }
         VmIntrinsicBuiltin::Nargoutchk => {
+            if matches!(args.len(), 3 | 4) {
+                return runmat_runtime::builtins::introspection::arity_check::dispatch_nargoutchk(
+                    args,
+                );
+            }
             validate_intrinsic_arg_count(intrinsic.name(), args.len(), 2)?;
             let (_, nout) = call_counts.last().cloned().unwrap_or((0, 0));
             validate_nargoutchk(&args, nout)?;

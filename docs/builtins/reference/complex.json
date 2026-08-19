@@ -18,7 +18,7 @@
       "f64"
     ],
     "broadcasting": "scalar-only",
-    "notes": "Floating gpuArray inputs stay resident when the owning provider exposes complex construction. Typed-integer resident inputs gather before exact composition because the current provider ABI does not yet define typed complex-integer buffers; this is a documented general backend gap."
+    "notes": "Floating gpuArray inputs stay resident when the owning provider exposes complex construction. Typed-integer resident inputs use exact native transfer for composition and restore paired complex-integer storage to the owning provider."
   },
   "fusion": {
     "elementwise": false,
@@ -39,7 +39,7 @@
     "String and character inputs are rejected because the constructor accepts numeric inputs only.",
     "Unary `complex(a)` preserves existing complex scalars and complex tensors. Real inputs become complex values with zero imaginary parts.",
     "Empty real tensors preserve their empty shape and return empty complex tensors.",
-    "Real floating gpuArray inputs remain device-resident when the owning provider supports complex construction; typed-integer resident inputs currently return an exact host complex integer result rather than silently losing class or wide bits."
+    "Real floating gpuArray inputs remain device-resident when the owning provider supports complex construction; typed-integer resident inputs preserve exact paired storage and return to the owning provider after exact fallback composition."
   ],
   "examples": [
     {
@@ -100,7 +100,7 @@
     },
     {
       "question": "Can `complex` run on GPU arrays?",
-      "answer": "Floating real gpuArray inputs use owning-provider complex construction when precision and hooks support it. Typed-integer resident inputs gather and return exact host complex-integer storage because the provider ABI has no typed complex-integer buffer contract."
+      "answer": "Floating real gpuArray inputs use owning-provider complex construction when precision and hooks support it. Typed-integer resident inputs use exact native transfer for fallback composition and restore paired complex-integer output to the same owner."
     }
   ],
   "links": [
@@ -141,10 +141,10 @@
     "label": "`crates/runmat-runtime/src/builtins/math/elementwise/complex.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/complex.rs"
   },
-  "gpu_residency": "`complex` keeps floating real gpuArray inputs resident when the owning provider supports the required precision and complex-construction hook. Typed-integer resident inputs use an exact host fallback.",
+  "gpu_residency": "`complex` keeps floating real gpuArray inputs resident when the owning provider supports the required precision and complex-construction hook. Typed-integer input uses exact owner-aware fallback and restores paired native storage to that owner.",
   "gpu_behavior": [
     "Unary `complex(A)` on a floating real gpuArray writes `[real, 0]` interleaved lanes when the owning-provider hook is available.",
-    "Binary `complex(A, B)` uses the owning-provider hook only when class and precision rules can be preserved; typed integers and unsupported mixed precision gather for a correct host result.",
+    "Binary `complex(A, B)` uses the owning-provider hook only when class and precision rules can be preserved; typed integers use exact native fallback and restore resident output to the selected owner.",
     "If either two-argument operand is already complex, RunMat raises the same real-input error as the host path."
   ]
 }

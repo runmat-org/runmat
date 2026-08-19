@@ -68,7 +68,7 @@
       "output": "angles =\n    0.7854    2.3562\n   -0.7854   -2.3562"
     },
     {
-      "description": "Using RunMat's gated character-input extension",
+      "description": "Computing four-quadrant angles from character codes",
       "input": "theta = atan2('A', 100)",
       "output": "theta = 0.5764"
     }

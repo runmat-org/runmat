@@ -13,7 +13,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "`subsasgn` is object-dispatch logic and executes on the host."
+    "notes": "Method resolution executes on the host, but selector payloads and right-hand-side values are forwarded to the class implementation without numeric conversion or an implicit residency change."
   },
   "fusion": {
     "elementwise": false,
@@ -32,6 +32,7 @@
     "For dot assignment, `payload` is typically a field/property name string.",
     "For `()` and `{}` assignment, `payload` is typically a cell array of indices.",
     "The builtin forwards the assignment to the receiver's class-specific `Class.subsasgn` implementation and returns the updated object value.",
+    "Integer selectors and assigned values retain their native class, exact value, shape, and resident handle during dispatch. The class method owns assignment conversion, overflow, and returned-receiver semantics.",
     "Prefer normal assignment syntax in user code; direct calls to `subsasgn` are mainly useful for advanced dispatch or testing."
   ],
   "examples": [

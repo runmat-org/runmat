@@ -81,7 +81,7 @@ const GRAY2RGB_CALL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDesc
     id: "gray2rgb-callable",
     mode: BuiltinExtensionMode::RunMatOnly,
     description:
-        "gray2rgb is a RunMat-provided image helper rather than an R2026a MATLAB product API",
+        "gray2rgb is a RunMat-provided image helper rather than an API in the compatibility target",
     error_identifier: Some("RunMat:compatibility:Gray2rgbCallExtension"),
 };
 
@@ -93,7 +93,7 @@ const GRAY2RGB_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight integer classes are replicated directly from authoritative storage without entering a floating compatibility mirror.",
+        notes: "All eight integer classes are replicated with their exact source class and values preserved.",
     }];
 
 pub const GRAY2RGB_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =

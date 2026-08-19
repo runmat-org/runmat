@@ -116,7 +116,7 @@ pub const FIND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Linear indices are exact binary64 indices; resident integer inputs gather without an f64 value mirror.",
+        notes: "Linear indices are exact binary64 indices; resident integer values gather exactly through their owning provider.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "[row,col,v] = find(integer_X,___)",
@@ -1483,10 +1483,6 @@ pub(crate) mod tests {
                     shape: &[2, 2],
                 })
                 .expect("upload f32-owner input");
-            runmat_accelerate_api::set_handle_precision(
-                &handle,
-                runmat_accelerate_api::ProviderPrecision::F32,
-            );
 
             let eval = evaluate(Value::GpuTensor(handle), &[]).expect("find fallback");
             let Value::GpuTensor(indices_handle) = eval.linear_value().expect("linear indices")
@@ -1566,10 +1562,6 @@ pub(crate) mod tests {
                 shape: &[2, 2],
             })
             .expect("upload fallback input");
-        runmat_accelerate_api::set_handle_precision(
-            &fallback_input,
-            runmat_accelerate_api::ProviderPrecision::F32,
-        );
         let fallback = evaluate(Value::GpuTensor(fallback_input), &[]).expect("fallback find");
         let Value::GpuTensor(fallback_indices) = fallback.linear_value().expect("fallback indices")
         else {

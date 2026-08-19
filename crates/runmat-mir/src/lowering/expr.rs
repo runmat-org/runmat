@@ -26,6 +26,9 @@ pub(crate) fn lower_expr_with_replacements(
         HirExprKind::Number(value) => {
             MirRvalue::Use(MirOperand::Constant(MirConstant::Number(value.clone())))
         }
+        HirExprKind::IntegerLiteral(value) => MirRvalue::Use(MirOperand::Constant(
+            MirConstant::IntegerLiteral(value.clone()),
+        )),
         HirExprKind::String(value) => {
             MirRvalue::Use(MirOperand::Constant(MirConstant::String(value.clone())))
         }
@@ -439,7 +442,7 @@ fn index_component_is_definitely_scalar(component: &IndexComponent) -> bool {
 
 fn hir_expr_is_definitely_scalar_index(expr: &HirExpr) -> bool {
     match &expr.kind {
-        HirExprKind::Number(_) => true,
+        HirExprKind::Number(_) | HirExprKind::IntegerLiteral(_) => true,
         HirExprKind::Constant(name)
             if name.0.eq_ignore_ascii_case("true") || name.0.eq_ignore_ascii_case("false") =>
         {
@@ -738,6 +741,9 @@ pub(crate) fn lower_simple_operand(
 ) -> Result<Option<MirOperand>, HirError> {
     Ok(Some(match &expr.kind {
         HirExprKind::Number(value) => MirOperand::Constant(MirConstant::Number(value.clone())),
+        HirExprKind::IntegerLiteral(value) => {
+            MirOperand::Constant(MirConstant::IntegerLiteral(value.clone()))
+        }
         HirExprKind::String(value) => MirOperand::Constant(MirConstant::String(value.clone())),
         HirExprKind::Constant(name) => MirOperand::Constant(MirConstant::Symbol(name.clone())),
         HirExprKind::Binding(binding) => MirOperand::Local(ctx.local_for_binding(*binding)?),

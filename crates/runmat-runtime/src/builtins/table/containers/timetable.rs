@@ -10,15 +10,94 @@ pub(in crate::builtins::table) struct Array2TimetableOptions {
     pub(in crate::builtins::table) dimension_names: Option<Vec<String>>,
 }
 
+#[derive(Default)]
+pub(in crate::builtins::table) struct Table2TimetableOptions {
+    pub(in crate::builtins::table) row_times: Option<Value>,
+    pub(in crate::builtins::table) sample_rate: Option<Value>,
+    pub(in crate::builtins::table) time_step: Option<Value>,
+    pub(in crate::builtins::table) start_time: Option<Value>,
+}
+
+#[derive(Default)]
+pub(in crate::builtins::table) struct TimetableConstructorOptions {
+    pub(in crate::builtins::table) table: TableConstructorOptions,
+    pub(in crate::builtins::table) sample_rate: Option<Value>,
+    pub(in crate::builtins::table) time_step: Option<Value>,
+    pub(in crate::builtins::table) start_time: Option<Value>,
+}
+
+pub(in crate::builtins::table) fn parse_table2timetable_options(
+    args: &[Value],
+) -> BuiltinResult<Table2TimetableOptions> {
+    let mut options = Table2TimetableOptions::default();
+    let mut idx = 0usize;
+    while idx < args.len() {
+        if idx + 1 >= args.len() {
+            return Err(invalid_argument(
+                "table2timetable: name-value options must be provided in pairs",
+            ));
+        }
+        let name = scalar_text(&args[idx], "table2timetable option")?;
+        let value = args[idx + 1].clone();
+        if name.eq_ignore_ascii_case("RowTimes") {
+            options.row_times = Some(value);
+        } else if name.eq_ignore_ascii_case("SampleRate") {
+            options.sample_rate = Some(value);
+        } else if name.eq_ignore_ascii_case("TimeStep") {
+            options.time_step = Some(value);
+        } else if name.eq_ignore_ascii_case("StartTime") {
+            options.start_time = Some(value);
+        } else {
+            return Err(invalid_argument(format!(
+                "table2timetable: unsupported option '{name}'"
+            )));
+        }
+        idx += 2;
+    }
+    let timing_forms = usize::from(options.row_times.is_some())
+        + usize::from(options.sample_rate.is_some())
+        + usize::from(options.time_step.is_some());
+    if timing_forms > 1 {
+        return Err(invalid_argument(
+            "table2timetable: specify at most one of RowTimes, SampleRate, or TimeStep",
+        ));
+    }
+    if options.start_time.is_some() && options.sample_rate.is_none() && options.time_step.is_none()
+    {
+        return Err(invalid_argument(
+            "table2timetable: StartTime requires SampleRate or TimeStep",
+        ));
+    }
+    Ok(options)
+}
+
+pub(in crate::builtins::table) fn table2timetable_generated_row_times(
+    options: &Table2TimetableOptions,
+    height: usize,
+) -> BuiltinResult<Option<Value>> {
+    if options.sample_rate.is_none() && options.time_step.is_none() {
+        return Ok(None);
+    }
+    let array_options = Array2TimetableOptions {
+        row_times: None,
+        sample_rate: options.sample_rate.clone(),
+        time_step: options.time_step.clone(),
+        start_time: options.start_time.clone(),
+        variable_names: None,
+        dimension_names: None,
+    };
+    array2timetable_row_times(&array_options, height).map(Some)
+}
+
 pub(in crate::builtins::table) fn split_timetable_constructor_args(
     args: Vec<Value>,
-) -> BuiltinResult<(Option<Value>, Vec<Value>, TableConstructorOptions)> {
+) -> BuiltinResult<(Option<Value>, Vec<Value>, TimetableConstructorOptions)> {
     if args.is_empty() {
-        return Ok((None, Vec::new(), TableConstructorOptions::default()));
+        return Ok((None, Vec::new(), TimetableConstructorOptions::default()));
     }
     let mut variables = Vec::new();
     let mut row_times = None;
-    let mut options = TableConstructorOptions::default();
+    let mut options = TimetableConstructorOptions::default();
     let mut idx = 0usize;
     let has_explicit_row_times = args.iter().any(|value| {
         scalar_text(value, "timetable option")
@@ -38,12 +117,37 @@ pub(in crate::builtins::table) fn split_timetable_constructor_args(
                     continue;
                 }
                 if name.eq_ignore_ascii_case("VariableNames") {
-                    options.variable_names = Some(variable_name_list(&args[idx + 1])?);
+                    options.table.variable_names = Some(variable_name_list(&args[idx + 1])?);
                     idx += 2;
                     continue;
                 }
                 if name.eq_ignore_ascii_case("RowNames") {
-                    options.row_names = Some(string_list(&args[idx + 1])?);
+                    options.table.row_names = Some(string_list(&args[idx + 1])?);
+                    idx += 2;
+                    continue;
+                }
+                if name.eq_ignore_ascii_case("Size") {
+                    options.table.size = Some(args[idx + 1].clone());
+                    idx += 2;
+                    continue;
+                }
+                if name.eq_ignore_ascii_case("VariableTypes") {
+                    options.table.variable_types = Some(string_list(&args[idx + 1])?);
+                    idx += 2;
+                    continue;
+                }
+                if name.eq_ignore_ascii_case("SampleRate") {
+                    options.sample_rate = Some(args[idx + 1].clone());
+                    idx += 2;
+                    continue;
+                }
+                if name.eq_ignore_ascii_case("TimeStep") {
+                    options.time_step = Some(args[idx + 1].clone());
+                    idx += 2;
+                    continue;
+                }
+                if name.eq_ignore_ascii_case("StartTime") {
+                    options.start_time = Some(args[idx + 1].clone());
                     idx += 2;
                     continue;
                 }
@@ -61,6 +165,11 @@ pub(in crate::builtins::table) fn is_timetable_option_token(value: &Value) -> bo
             name.eq_ignore_ascii_case("RowTimes")
                 || name.eq_ignore_ascii_case("VariableNames")
                 || name.eq_ignore_ascii_case("RowNames")
+                || name.eq_ignore_ascii_case("Size")
+                || name.eq_ignore_ascii_case("VariableTypes")
+                || name.eq_ignore_ascii_case("SampleRate")
+                || name.eq_ignore_ascii_case("TimeStep")
+                || name.eq_ignore_ascii_case("StartTime")
         })
         .unwrap_or(false)
 }
@@ -70,36 +179,6 @@ pub(in crate::builtins::table) fn is_time_like_value(value: &Value) -> bool {
         value,
         Value::Object(obj) if obj.is_class("datetime") || obj.is_class("duration")
     )
-}
-
-pub(in crate::builtins::table) fn parse_timetable_options(
-    args: &[Value],
-    context: &str,
-) -> BuiltinResult<(Option<Value>, TableConstructorOptions)> {
-    let mut row_times = None;
-    let mut table_options = TableConstructorOptions::default();
-    let mut idx = 0usize;
-    while idx < args.len() {
-        if idx + 1 >= args.len() {
-            return Err(invalid_argument(format!(
-                "{context}: name-value options must be provided in pairs"
-            )));
-        }
-        let name = scalar_text(&args[idx], "timetable option")?;
-        if name.eq_ignore_ascii_case("RowTimes") {
-            row_times = Some(args[idx + 1].clone());
-        } else if name.eq_ignore_ascii_case("VariableNames") {
-            table_options.variable_names = Some(variable_name_list(&args[idx + 1])?);
-        } else if name.eq_ignore_ascii_case("RowNames") {
-            table_options.row_names = Some(string_list(&args[idx + 1])?);
-        } else {
-            return Err(invalid_argument(format!(
-                "{context}: unsupported option '{name}'"
-            )));
-        }
-        idx += 2;
-    }
-    Ok((row_times, table_options))
 }
 
 pub(in crate::builtins::table) fn parse_array2timetable_options(
@@ -210,7 +289,10 @@ pub(in crate::builtins::table) fn array2timetable_row_times(
     ))
 }
 
-fn validate_explicit_row_times(value: &Value, height: usize) -> BuiltinResult<()> {
+pub(in crate::builtins::table) fn validate_explicit_row_times(
+    value: &Value,
+    height: usize,
+) -> BuiltinResult<()> {
     let tensor = if crate::builtins::datetime::is_datetime_object(value) {
         crate::builtins::datetime::serials_from_datetime_value(value)?
     } else if crate::builtins::duration::is_duration_object(value) {
@@ -251,13 +333,18 @@ fn numeric_sample_rate(value: &Value) -> BuiltinResult<f64> {
 }
 
 fn positive_integer_sample_rate(value: &runmat_value::IntValue) -> BuiltinResult<f64> {
-    if value.try_to_u64().is_some_and(|value| value > 0) {
-        Ok(value.to_f64())
-    } else {
-        Err(invalid_argument(
-            "array2timetable: SampleRate must be a positive finite numeric scalar",
-        ))
+    let exact = value
+        .try_to_u64()
+        .filter(|value| *value > 0)
+        .ok_or_else(|| {
+            invalid_argument("array2timetable: SampleRate must be a positive finite numeric scalar")
+        })?;
+    if exact > (1_u64 << 53) {
+        return Err(invalid_argument(
+            "array2timetable: integer SampleRate must be exactly representable as double",
+        ));
     }
+    Ok(exact as f64)
 }
 
 fn fixed_step_row_times(

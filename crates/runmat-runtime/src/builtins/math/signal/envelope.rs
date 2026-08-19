@@ -79,7 +79,7 @@ pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The typed control is extension-gated before x or a provider is accessed and is parsed without an f64 mirror; RunMat preserves the floating signal precision consistently across host and resident execution.",
+        notes: "The typed control is extension-gated before x or a provider is accessed and is parsed exactly; RunMat preserves the floating signal precision consistently across host and resident execution.",
     },
 ];
 

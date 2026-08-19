@@ -125,8 +125,6 @@ const LINSPACE_SHADER_F64: &str = crate::backend::wgpu::shaders::creation::LINSP
 const LINSPACE_SHADER_F32: &str = crate::backend::wgpu::shaders::creation::LINSPACE_SHADER_F32;
 const WINDOW_SHADER_F64: &str = crate::backend::wgpu::shaders::window::WINDOW_SHADER_F64;
 const WINDOW_SHADER_F32: &str = crate::backend::wgpu::shaders::window::WINDOW_SHADER_F32;
-const RANDOM_INT_SHADER_F64: &str = crate::backend::wgpu::shaders::creation::RANDOM_INT_SHADER_F64;
-const RANDOM_INT_SHADER_F32: &str = crate::backend::wgpu::shaders::creation::RANDOM_INT_SHADER_F32;
 const RANDOM_EXPRND_SHADER_F64: &str =
     crate::backend::wgpu::shaders::creation::RANDOM_EXPRND_SHADER_F64;
 const RANDOM_EXPRND_SHADER_F32: &str =
@@ -323,7 +321,6 @@ pub struct WgpuPipelines {
     pub fill: PipelineBundle,
     pub linspace: PipelineBundle,
     pub window: PipelineBundle,
-    pub random_int: PipelineBundle,
     pub random_uniform: PipelineBundle,
     pub random_normal: PipelineBundle,
     pub random_exprnd: PipelineBundle,
@@ -1245,18 +1242,6 @@ impl WgpuPipelines {
             },
         );
 
-        let random_int = create_pipeline(
-            device,
-            "runmat-random-int-layout",
-            "runmat-random-int-shader",
-            "runmat-random-int-pipeline",
-            vec![storage_read_write_entry(0), uniform_entry(1)],
-            match precision {
-                NumericPrecision::F64 => RANDOM_INT_SHADER_F64,
-                NumericPrecision::F32 => RANDOM_INT_SHADER_F32,
-            },
-        );
-
         let window = create_pipeline(
             device,
             "runmat-window-layout",
@@ -1732,7 +1717,6 @@ impl WgpuPipelines {
             fill,
             linspace,
             window,
-            random_int,
             random_uniform,
             random_normal,
             random_exprnd,

@@ -169,7 +169,7 @@ const DOUBLE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents conversion from every built-in integer class; conversion to IEEE binary64 can round wide int64/uint64 values.",
+        notes: "The compatibility target documents conversion from every built-in integer class; conversion to IEEE binary64 can round wide int64/uint64 values.",
     }];
 
 pub const DOUBLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
@@ -1119,11 +1119,9 @@ pub(crate) mod tests {
                 .free(&wrong_shape)
                 .expect("free wrong-shape result");
 
-            let wrong_storage = make_output();
-            runmat_accelerate_api::set_handle_storage(
-                &wrong_storage,
-                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            );
+            let mut wrong_storage = make_output();
+            wrong_storage.descriptor.storage =
+                Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
             assert!(!valid_double_like_output(
                 &wrong_storage,
                 &prototype,
@@ -1135,11 +1133,9 @@ pub(crate) mod tests {
                 .free(&wrong_storage)
                 .expect("free wrong-storage result");
 
-            let wrong_precision = make_output();
-            runmat_accelerate_api::set_handle_precision(
-                &wrong_precision,
-                runmat_accelerate_api::ProviderPrecision::F32,
-            );
+            let mut wrong_precision = make_output();
+            wrong_precision.descriptor.element_type =
+                Some(runmat_accelerate_api::NumericElementType::F32);
             assert!(!valid_double_like_output(
                 &wrong_precision,
                 &prototype,
@@ -1151,11 +1147,8 @@ pub(crate) mod tests {
                 .free(&wrong_precision)
                 .expect("free wrong-precision result");
 
-            let integer = make_output();
-            runmat_accelerate_api::set_handle_integer_type(
-                &integer,
-                runmat_accelerate_api::IntegerElementType::U8,
-            );
+            let mut integer = make_output();
+            integer.descriptor.element_type = Some(runmat_accelerate_api::NumericElementType::U8);
             assert!(!valid_double_like_output(
                 &integer,
                 &prototype,
@@ -1176,11 +1169,9 @@ pub(crate) mod tests {
             ));
             provider.free(&logical).expect("free logical result");
 
-            let owned_rejection = make_output();
-            runmat_accelerate_api::set_handle_storage(
-                &owned_rejection,
-                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            );
+            let mut owned_rejection = make_output();
+            owned_rejection.descriptor.storage =
+                Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
             free_rejected_double_handle(&owned_rejection, &[]);
             assert!(block_on(provider.download(&owned_rejection)).is_err());
 
@@ -1201,6 +1192,7 @@ pub(crate) mod tests {
                 device_id: prototype.device_id.wrapping_add(10_000),
                 buffer_id: prototype.buffer_id,
                 shape: vec![2, 1],
+                descriptor: Default::default(),
             };
             assert!(!valid_double_like_output(
                 &unowned_rejection,

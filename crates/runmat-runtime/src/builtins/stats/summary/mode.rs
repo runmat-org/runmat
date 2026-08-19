@@ -410,7 +410,7 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<ModeAxes>> {
             return Err(mode_error_with(
                 &MODE_ERROR_INVALID_DIMENSION,
                 if scalar_hint {
-                    "mode: dimension must be >= 1"
+                    MODE_ERROR_INVALID_DIMENSION.message
                 } else {
                     "mode: dimension entries must be >= 1"
                 },
@@ -439,7 +439,7 @@ fn mode_dimension_error(message: String, scalar: bool) -> RuntimeError {
         }
     } else if message.contains("non-negative") {
         if scalar {
-            "mode: dimension must be >= 1"
+            MODE_ERROR_INVALID_DIMENSION.message
         } else {
             "mode: dimension entries must be >= 1"
         }
@@ -573,6 +573,9 @@ fn mode_evaluate(
     output_class: OutputClass,
 ) -> BuiltinResult<ModeEvaluation> {
     let tensor = materialize_tensor(value)?;
+    if matches!(&args.axes, ModeAxes::Default) && tensor.shape == [0, 0] {
+        return ModeEvaluation::empty(vec![1, 1], output_class);
+    }
     if let Some(storage) = tensor.integer_storage().cloned() {
         return match args.axes {
             ModeAxes::Default => {
@@ -2021,6 +2024,29 @@ pub(crate) mod tests {
             other => panic!("expected scalar NaN, got {other:?}"),
         }
         assert_eq!(outputs[1], Value::Num(0.0));
+    }
+
+    #[test]
+    fn mode_empty_integer_inputs_return_documented_double_nan_and_zero_frequency() {
+        for storage in [
+            IntegerStorage::I8(Vec::new()),
+            IntegerStorage::I16(Vec::new()),
+            IntegerStorage::I32(Vec::new()),
+            IntegerStorage::I64(Vec::new()),
+            IntegerStorage::U8(Vec::new()),
+            IntegerStorage::U16(Vec::new()),
+            IntegerStorage::U32(Vec::new()),
+            IntegerStorage::U64(Vec::new()),
+        ] {
+            let tensor = Tensor::new_integer(storage, vec![0, 0]).expect("typed empty");
+            let outputs = mode_outputs(Value::Tensor(tensor), Vec::new(), 2).expect("mode");
+            assert!(
+                matches!(&outputs[0], Value::Num(value) if value.is_nan()),
+                "unexpected empty integer mode output: {:?}",
+                outputs[0]
+            );
+            assert_eq!(outputs[1], Value::Num(0.0));
+        }
     }
 
     #[test]

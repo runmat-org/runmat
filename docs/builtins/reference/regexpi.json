@@ -36,7 +36,8 @@
     "`'forceCellOutput'` forces cell outputs even for scalar inputs, matching MATLAB semantics.",
     "`'once'` limits each element to its first match, influencing every requested output.",
     "`'emptymatch','allow'` keeps zero-length matches; `'emptymatch','remove'` is the default filter.",
-    "Named tokens (using `(?<name>...)`) return scalar struct values per match when `'names'` is requested. Unmatched names resolve to empty strings for MATLAB compatibility."
+    "Named tokens (using `(?<name>...)`) return scalar struct values per match when `'names'` is requested. Unmatched names resolve to empty strings for MATLAB compatibility.",
+    "Integer semantics: numeric match locations are outputs only. Numeric, logical, symbolic, and provider-resident inputs or options are rejected by the shared regular-expression admission boundary before gather or provider access."
   ],
   "examples": [
     {

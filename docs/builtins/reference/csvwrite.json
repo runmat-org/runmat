@@ -65,7 +65,7 @@
       "input": "mask = [true false true; false true false];\ncsvwrite(\"mask.csv\", mask)"
     },
     {
-      "description": "RunMat extensions: writing resident data and returning a byte count",
+      "description": "Writing resident data and returning a byte count",
       "input": "% Requires both csvwrite-resident-input and csvwrite-bytes-written-output.\nG = gpuArray(single([0.1 0.2 0.3]));\nbytes = csvwrite(\"gpu_values.csv\", G)",
       "output": "bytes = 12"
     },

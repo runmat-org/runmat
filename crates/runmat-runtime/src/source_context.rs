@@ -182,6 +182,24 @@ pub fn source_info(source_id: SourceId) -> Option<SourceInfo> {
     SOURCE_CATALOG.with(|catalog| catalog.borrow().get(&source_id).cloned())
 }
 
+/// Seed a newly-created standalone runtime context from the ambient source
+/// state that preceded it.
+///
+/// Embedders normally install source state directly on an active context. The
+/// standalone VM compatibility boundary creates that context after callers
+/// have installed a legacy catalog, so it must transfer the catalog and
+/// current source exactly once before entering the context scope.
+pub fn inherit_legacy_source_context(context: &crate::context::RuntimeContext) {
+    if active_state().is_some() {
+        return;
+    }
+    let current = CURRENT_SOURCE.with(|slot| slot.borrow().clone());
+    let catalog = SOURCE_CATALOG.with(|catalog| catalog.borrow().clone());
+    let mut state = context.state().source.borrow_mut();
+    state.current = current;
+    state.catalog = catalog;
+}
+
 fn active_state() -> Option<std::rc::Rc<crate::context::RuntimeContextState>> {
     crate::context::legacy::active().map(|context| std::rc::Rc::clone(context.state()))
 }

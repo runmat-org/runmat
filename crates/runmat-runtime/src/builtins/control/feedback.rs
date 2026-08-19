@@ -586,6 +586,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: 9_404_001,
+            descriptor: Default::default(),
         });
         let error = block_on(feedback_builtin(tf(vec![1.0], vec![1.0]), vec![resident]))
             .expect_err("resident gate");

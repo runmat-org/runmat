@@ -1169,11 +1169,13 @@ mod tests {
             shape: vec![1],
             device_id: 17,
             buffer_id: 17001,
+            descriptor: Default::default(),
         };
         let old_only = GpuTensorHandle {
             shape: vec![1],
             device_id: 17,
             buffer_id: 17002,
+            descriptor: Default::default(),
         };
         fusion_residency::mark(&shared);
         fusion_residency::mark(&old_only);

@@ -6,11 +6,29 @@ use crate::core::{
 };
 use crate::gpu::axis::OwnedAxisData;
 use crate::gpu::{util::readback_scalar_buffer_f64, ScalarType};
+use crate::plots::NumericPlotData;
 use glam::{Vec3, Vec4};
 use std::sync::Arc;
 
+pub type QuiverSourceData<'a> = (
+    &'a NumericPlotData,
+    &'a NumericPlotData,
+    Option<&'a NumericPlotData>,
+    &'a NumericPlotData,
+    &'a NumericPlotData,
+    Option<&'a NumericPlotData>,
+);
+
 #[derive(Debug, Clone)]
 pub struct QuiverPlot {
+    source_x: Option<NumericPlotData>,
+    source_y: Option<NumericPlotData>,
+    source_z: Option<NumericPlotData>,
+    source_u: Option<NumericPlotData>,
+    source_v: Option<NumericPlotData>,
+    source_w: Option<NumericPlotData>,
+
+    /// Floating renderer cache derived from the authoritative source storage.
     pub x: Vec<f64>,
     pub y: Vec<f64>,
     pub z: Option<Vec<f64>>,
@@ -88,6 +106,16 @@ impl QuiverPlot {
         ),
         String,
     > {
+        if let Some((x, y, z, u, v, w)) = self.source_data() {
+            return Ok((
+                x.materialize_f64(),
+                y.materialize_f64(),
+                z.map(NumericPlotData::materialize_f64),
+                u.materialize_f64(),
+                v.materialize_f64(),
+                w.map(NumericPlotData::materialize_f64),
+            ));
+        }
         if !self.x.is_empty()
             && self.x.len() == self.y.len()
             && self.x.len() == self.u.len()
@@ -201,16 +229,44 @@ impl QuiverPlot {
     }
 
     pub fn new(x: Vec<f64>, y: Vec<f64>, u: Vec<f64>, v: Vec<f64>) -> Result<Self, String> {
+        let x_len = x.len();
+        let y_len = y.len();
+        let u_len = u.len();
+        let v_len = v.len();
+        Self::from_numeric_data(
+            NumericPlotData::from_f64(x, vec![1, x_len])?,
+            NumericPlotData::from_f64(y, vec![1, y_len])?,
+            NumericPlotData::from_f64(u, vec![1, u_len])?,
+            NumericPlotData::from_f64(v, vec![1, v_len])?,
+        )
+    }
+
+    pub fn from_numeric_data(
+        x: NumericPlotData,
+        y: NumericPlotData,
+        u: NumericPlotData,
+        v: NumericPlotData,
+    ) -> Result<Self, String> {
         let n = x.len();
         if n == 0 || y.len() != n || u.len() != n || v.len() != n {
             return Err("quiver: X,Y,U,V must have same non-zero length".to_string());
         }
+        let render_x = x.materialize_f64();
+        let render_y = y.materialize_f64();
+        let render_u = u.materialize_f64();
+        let render_v = v.materialize_f64();
         Ok(Self {
-            x,
-            y,
+            source_x: Some(x),
+            source_y: Some(y),
+            source_z: None,
+            source_u: Some(u),
+            source_v: Some(v),
+            source_w: None,
+            x: render_x,
+            y: render_y,
             z: None,
-            u,
-            v,
+            u: render_u,
+            v: render_v,
             w: None,
             color: Vec4::new(0.0, 0.0, 0.0, 1.0),
             line_width: 1.0,
@@ -235,17 +291,48 @@ impl QuiverPlot {
         v: Vec<f64>,
         w: Vec<f64>,
     ) -> Result<Self, String> {
+        let lengths = [x.len(), y.len(), z.len(), u.len(), v.len(), w.len()];
+        Self::from_numeric_data3d(
+            NumericPlotData::from_f64(x, vec![1, lengths[0]])?,
+            NumericPlotData::from_f64(y, vec![1, lengths[1]])?,
+            NumericPlotData::from_f64(z, vec![1, lengths[2]])?,
+            NumericPlotData::from_f64(u, vec![1, lengths[3]])?,
+            NumericPlotData::from_f64(v, vec![1, lengths[4]])?,
+            NumericPlotData::from_f64(w, vec![1, lengths[5]])?,
+        )
+    }
+
+    pub fn from_numeric_data3d(
+        x: NumericPlotData,
+        y: NumericPlotData,
+        z: NumericPlotData,
+        u: NumericPlotData,
+        v: NumericPlotData,
+        w: NumericPlotData,
+    ) -> Result<Self, String> {
         let n = x.len();
         if n == 0 || y.len() != n || z.len() != n || u.len() != n || v.len() != n || w.len() != n {
             return Err("quiver3: X,Y,Z,U,V,W must have same non-zero length".to_string());
         }
+        let render_x = x.materialize_f64();
+        let render_y = y.materialize_f64();
+        let render_z = z.materialize_f64();
+        let render_u = u.materialize_f64();
+        let render_v = v.materialize_f64();
+        let render_w = w.materialize_f64();
         Ok(Self {
-            x,
-            y,
-            z: Some(z),
-            u,
-            v,
-            w: Some(w),
+            source_x: Some(x),
+            source_y: Some(y),
+            source_z: Some(z),
+            source_u: Some(u),
+            source_v: Some(v),
+            source_w: Some(w),
+            x: render_x,
+            y: render_y,
+            z: Some(render_z),
+            u: render_u,
+            v: render_v,
+            w: Some(render_w),
             color: Vec4::new(0.0, 0.0, 0.0, 1.0),
             line_width: 1.0,
             scale: 1.0,
@@ -271,6 +358,12 @@ impl QuiverPlot {
         bounds: BoundingBox,
     ) -> Self {
         Self {
+            source_x: None,
+            source_y: None,
+            source_z: None,
+            source_u: None,
+            source_v: None,
+            source_w: None,
             x: Vec::new(),
             y: Vec::new(),
             z: None,
@@ -312,15 +405,86 @@ impl QuiverPlot {
         self.visible = v;
     }
     pub fn has_cpu_vector_data(&self) -> bool {
-        !self.x.is_empty()
-            && self.x.len() == self.y.len()
-            && self.x.len() == self.u.len()
-            && self.x.len() == self.v.len()
-            && self.z.as_ref().is_none_or(|z| z.len() == self.x.len())
-            && self.w.as_ref().is_none_or(|w| w.len() == self.x.len())
+        self.source_data().is_some()
+            || (!self.x.is_empty()
+                && self.x.len() == self.y.len()
+                && self.x.len() == self.u.len()
+                && self.x.len() == self.v.len()
+                && self.z.as_ref().is_none_or(|z| z.len() == self.x.len())
+                && self.w.as_ref().is_none_or(|w| w.len() == self.x.len()))
     }
     pub fn cpu_vector_data_len(&self) -> Option<usize> {
-        self.has_cpu_vector_data().then_some(self.x.len())
+        self.source_data()
+            .map(|(x, _, _, _, _, _)| x.len())
+            .or_else(|| self.has_cpu_vector_data().then_some(self.x.len()))
+    }
+
+    pub fn source_data(&self) -> Option<QuiverSourceData<'_>> {
+        match (
+            &self.source_x,
+            &self.source_y,
+            &self.source_z,
+            &self.source_u,
+            &self.source_v,
+            &self.source_w,
+        ) {
+            (Some(x), Some(y), z, Some(u), Some(v), w)
+                if x.len() == y.len()
+                    && x.len() == u.len()
+                    && x.len() == v.len()
+                    && z.as_ref().is_none_or(|z| z.len() == x.len())
+                    && w.as_ref().is_none_or(|w| w.len() == x.len()) =>
+            {
+                Some((x, y, z.as_ref(), u, v, w.as_ref()))
+            }
+            _ => None,
+        }
+    }
+
+    pub fn set_numeric_component(
+        &mut self,
+        component: &str,
+        data: NumericPlotData,
+    ) -> Result<(), String> {
+        let expected = self
+            .cpu_vector_data_len()
+            .ok_or_else(|| "quiver source data is unavailable".to_string())?;
+        if data.len() != expected {
+            return Err(format!(
+                "quiver {component} length {} does not match existing length {expected}",
+                data.len()
+            ));
+        }
+        let rendered = data.materialize_f64();
+        match component {
+            "x" => {
+                self.source_x = Some(data);
+                self.x = rendered;
+            }
+            "y" => {
+                self.source_y = Some(data);
+                self.y = rendered;
+            }
+            "z" => {
+                self.source_z = Some(data);
+                self.z = Some(rendered);
+            }
+            "u" => {
+                self.source_u = Some(data);
+                self.u = rendered;
+            }
+            "v" => {
+                self.source_v = Some(data);
+                self.v = rendered;
+            }
+            "w" => {
+                self.source_w = Some(data);
+                self.w = Some(rendered);
+            }
+            other => return Err(format!("unknown quiver numeric component {other}")),
+        }
+        self.mark_dirty();
+        Ok(())
     }
     pub fn mark_dirty(&mut self) {
         self.dirty = true;
@@ -455,9 +619,23 @@ impl QuiverPlot {
     }
 
     pub fn estimated_memory_usage(&self) -> usize {
-        self.vertices
-            .as_ref()
-            .map_or(0, |v| v.len() * std::mem::size_of::<Vertex>())
+        let source_bytes = [
+            self.source_x.as_ref(),
+            self.source_y.as_ref(),
+            self.source_z.as_ref(),
+            self.source_u.as_ref(),
+            self.source_v.as_ref(),
+            self.source_w.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        .map(NumericPlotData::estimated_byte_len)
+        .sum::<usize>();
+        source_bytes.saturating_add(
+            self.vertices
+                .as_ref()
+                .map_or(0, |v| v.len() * std::mem::size_of::<Vertex>()),
+        )
     }
 }
 

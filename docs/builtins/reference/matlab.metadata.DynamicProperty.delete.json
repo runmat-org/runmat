@@ -31,7 +31,8 @@
     "The input must be a valid `matlab.metadata.DynamicProperty` handle returned by `addprop` or `findprop`.",
     "Deleting the metadata handle removes the target object's dynamic property value and metadata.",
     "All metadata handle aliases for the same dynamic property observe the deleted state because RunMat reuses a canonical metadata object for `findprop` aliases.",
-    "After deletion, reading or writing the removed dynamic property through dot syntax, `getfield`, or `setfield` fails like an undefined property."
+    "After deletion, reading or writing the removed dynamic property through dot syntax, `getfield`, or `setfield` fails like an undefined property.",
+    "Integer scalars, arrays, and resident numeric handles are not dynamic-property metadata handles and reject without conversion or provider access; this API is explicitly integer-inapplicable."
   ],
   "examples": [
     {

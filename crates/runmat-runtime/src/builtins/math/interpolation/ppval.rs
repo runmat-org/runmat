@@ -1,7 +1,11 @@
 //! Evaluate piecewise-polynomial structs produced by `spline` and `pchip`.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ResolveContext, Type,
 };
@@ -83,6 +87,33 @@ pub const PPVAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &PPVAL_ERRORS,
 };
 
+const PPVAL_INTEGER_QUERY_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ppval-integer-query-points",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ppval accepts typed-integer query points as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PpvalIntegerQueryPointsExtension"),
+};
+pub const PPVAL_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [PPVAL_INTEGER_QUERY_EXTENSION];
+const PPVAL_INTEGER_QUERY_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Xq",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double query points. RunMat admits typed integers only when every value is exactly representable at the floating piecewise-polynomial boundary.",
+    }];
+pub const PPVAL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Vq = ppval(pp,integer_Xq)",
+        inputs: &PPVAL_INTEGER_QUERY_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer query points are gated before gather and cross once into the polynomial evaluation domain.",
+    }];
+
 fn ppval_error_with_message(
     message: impl Into<String>,
     error: &'static BuiltinErrorDescriptor,
@@ -141,9 +172,19 @@ fn ppval_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     sink = true,
     type_resolver(ppval_type),
     descriptor(crate::builtins::math::interpolation::ppval::PPVAL_DESCRIPTOR),
+    extensions(crate::builtins::math::interpolation::ppval::PPVAL_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::interpolation::ppval::PPVAL_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::interpolation::ppval"
 )]
 async fn ppval_builtin(pp: Value, xq: Value) -> crate::BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&xq, NAME)?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &xq,
+        &PPVAL_INTEGER_QUERY_EXTENSION,
+        NAME,
+        "query point",
+    )
+    .await?;
     let parsed = pp_from_value(pp, NAME).await.map_err(|err| {
         ppval_error_with_message(err.message().to_string(), &PPVAL_ERROR_INVALID_ARGUMENT)
     })?;

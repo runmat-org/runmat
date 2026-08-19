@@ -2,7 +2,11 @@
 
 use regex::Regex;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
@@ -24,6 +28,53 @@ const DEFAULT_PRECISION: usize = 15;
 const MAX_PRECISION: usize = 52;
 
 const BUILTIN_NAME: &str = "num2str";
+
+const NUM2STR_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "num2str-explicit-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "num2str host formatting for explicit gpuArray input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Num2strExplicitGpuInputExtension"),
+};
+const NUM2STR_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [NUM2STR_EXPLICIT_GPU_EXTENSION];
+
+const NUM2STR_INTEGER_VALUE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer classes are formatted directly from authoritative native storage; paired complex-integer components retain exact decimal text as well.",
+    }];
+const NUM2STR_INTEGER_PRECISION_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "p",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The precision control accepts every integer class and is range checked exactly before conversion to a bounded host usize.",
+    }];
+pub const NUM2STR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "txt = num2str(integer_A, ...)",
+        inputs: &NUM2STR_INTEGER_VALUE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Default and custom formatting preserve exact signed and unsigned decimal values, including values above flintmax. Automatic residency gathers through its owner; explicit gpuArray fallback is separately gated.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "txt = num2str(A, integer_p[, \"local\"])",
+        inputs: &NUM2STR_INTEGER_PRECISION_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "Precision is accepted only in the supported bounded range and does not determine output numeric storage.",
+    },
+];
 
 const NUM2STR_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "txt",
@@ -226,10 +277,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "num2str,number to string,format,precision",
     examples = "txt = num2str([1 2 3]);",
     type_resolver(string_scalar_type),
+    extensions(NUM2STR_EXTENSIONS),
+    integer_capabilities(NUM2STR_INTEGER_CAPABILITIES),
     descriptor(crate::builtins::strings::core::num2str::NUM2STR_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::core::num2str"
 )]
 async fn num2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::value_contains_explicit_gpu(&value)
+        || rest
+            .iter()
+            .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &NUM2STR_EXPLICIT_GPU_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let gathered = gather_if_needed_async(&value)
         .await
         .map_err(remap_num2str_flow)?;

@@ -29,7 +29,7 @@
   "description": "`sym` creates scalar symbolic variables from identifier text and scalar symbolic constants from numeric input. Nonconstant symbolic values remain symbolic through supported arithmetic, trigonometric, and limit operations.",
   "behaviors": [
     "Text that is a valid MATLAB identifier creates a symbolic variable with that name.",
-    "Finite numeric, integer, logical, and scalar numeric tensor inputs create scalar symbolic constants with class `sym`.",
+    "Finite numeric, integer, logical, and scalar numeric tensor inputs create scalar symbolic constants with class `sym`. Integer scalars are represented exactly, including `int64` and `uint64` values outside the exactly representable range of double precision.",
     "Text containing a finite numeric scalar creates that numeric symbolic constant.",
     "Text containing a simple integer rational such as `1/3` creates an exact scalar symbolic rational.",
     "Symbolic values are host-only and do not participate in GPU fusion or residency."

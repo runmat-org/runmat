@@ -21,6 +21,92 @@ pub const FULL_INTEGER_SPARSE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExt
     error_identifier: Some("RunMat:compatibility:FullIntegerSparseExtension"),
 };
 
+pub const ZEROS_COLUMN_SIZE_VECTOR_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "zeros-column-size-vector",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "Allow a column vector where the public size-vector form requires a row vector",
+        error_identifier: Some("RunMat:compatibility:ZerosColumnSizeVectorExtension"),
+    };
+pub const ZEROS_RESIDENT_SIZE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "zeros-resident-size-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "Allow a resident numeric value as a size control",
+    error_identifier: Some("RunMat:compatibility:ZerosResidentSizeControlExtension"),
+};
+pub const ZEROS_IMPLICIT_PROTOTYPE_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "zeros-implicit-prototype",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "Allow a prototype array without the like keyword",
+        error_identifier: Some("RunMat:compatibility:ZerosImplicitPrototypeExtension"),
+    };
+pub const ZEROS_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    ZEROS_COLUMN_SIZE_VECTOR_EXTENSION,
+    ZEROS_RESIDENT_SIZE_EXTENSION,
+    ZEROS_IMPLICIT_PROTOTYPE_EXTENSION,
+];
+
+const ZEROS_INTEGER_DIM_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "n/sz1...szN/sz",
+        classes: &ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "All eight integer classes are exact structural size controls; negative signed values clamp to zero and trailing singleton dimensions normalize away.",
+    }];
+const ZEROS_INTEGER_LIKE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "p",
+        classes: &ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "An integer prototype selects exact output class, sparsity, complexity, and applicable residency.",
+    }];
+pub const ZEROS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "X = zeros(integer_n[, integer_sz2, ...])",
+        inputs: &ZEROS_INTEGER_DIM_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::FunctionSpecific,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The default output is double; typename or like can select logical, single, or an exact integer class.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "X = zeros(integer_sz)",
+        inputs: &ZEROS_INTEGER_DIM_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::FunctionSpecific,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The documented size vector is a row vector of exact integer values.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "X = zeros(..., integer_typename)",
+        inputs: &[],
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Every integer typename creates exact native zero storage in the selected class, including explicit gpuArray construction.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "X = zeros(..., like=integer_p)",
+        inputs: &ZEROS_INTEGER_LIKE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Integer prototypes preserve exact class; resident prototypes use typed owning-provider allocation or upload when available.",
+    },
+];
+
 pub const FULL_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [FULL_INTEGER_SPARSE_EXTENSION];
 
 const FULL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -343,8 +429,8 @@ pub const ZEROS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         artifact_dependencies: &[],
     },
     bindings: &ZEROS_BINDINGS,
-    extensions: &[],
-    integer_capabilities: &[],
+    extensions: &ZEROS_EXTENSIONS,
+    integer_capabilities: &ZEROS_INTEGER_CAPABILITIES,
     integer_audit: None,
     suppress_auto_output: false,
 };

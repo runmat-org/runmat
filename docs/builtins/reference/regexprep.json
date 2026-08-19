@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Runs on the CPU. Inputs resident on the GPU are gathered before evaluation, and results remain on the host."
+    "notes": "Evaluation runs on the CPU. Automatic residency gathers transparently; explicit gpuArray host fallback is a declared RunMat extension, and results remain on the host."
   },
   "fusion": {
     "elementwise": false,
@@ -25,7 +25,7 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::strings::regex::regexprep::tests",
-    "integration": "builtins::strings::regex::regexprep::tests::regexprep_elementwise_arrays"
+    "integration": "crates/runmat-vm/tests/integer_label_and_text_control_semantics.rs"
   },
   "description": "`regexprep(str, pattern, replacement)` searches `str` for regular-expression matches and replaces them with `replacement`. It supports character vectors, string arrays, and cell arrays of text, with MATLAB-compatible container and option semantics.",
   "behaviors": [
@@ -34,7 +34,9 @@
     "Cell or string arrays of patterns apply sequentially: each `(pattern, replacement)` pair is applied in order to every element.",
     "The `'once'` flag limits each element to the first match. `'emptymatch','remove'` (default) skips zero-length matches, while `'emptymatch','allow'` lets them participate.",
     "`'ignorecase'` and `'matchcase'` control case sensitivity. `'lineanchors'`, `'dotall'`, and `'dotExceptNewline'` toggle multiline and dot behaviours in the same way as `regexp`.",
-    "`'preservecase'` adjusts the replacement text so the case pattern of the first match (all upper, all lower, or title case) is preserved."
+    "`'preservecase'` adjusts the replacement text so the case pattern of the first match (all upper, all lower, or title case) is preserved.",
+    "A positive integer scalar option `N` replaces only the Nth eligible occurrence and accepts every integer class through exact native validation.",
+    "Integer values in the subject, pattern, or replacement text roles reject without implicit decimal formatting or provider access."
   ],
   "examples": [
     {

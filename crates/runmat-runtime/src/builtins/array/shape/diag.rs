@@ -918,7 +918,6 @@ fn upload_diag_result(
             };
             let handle = gpu_helpers::upload_tensor(provider, &tensor)
                 .map_err(|error| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {error}")))?;
-            runmat_accelerate_api::set_handle_precision(&handle, precision);
             validate_uploaded_diag_result(
                 &handle,
                 provider,
@@ -933,12 +932,27 @@ fn upload_diag_result(
         }
         Value::LogicalArray(array) => {
             let shape = array.shape.clone();
-            let tensor = tensor::logical_to_tensor(&array)
+            let storage = match input_precision {
+                ProviderPrecision::F32 => NumericStorage::F32(
+                    array
+                        .data
+                        .iter()
+                        .map(|value| f32::from(*value != 0))
+                        .collect(),
+                ),
+                ProviderPrecision::F64 => NumericStorage::F64(
+                    array
+                        .data
+                        .iter()
+                        .map(|value| f64::from(*value != 0))
+                        .collect(),
+                ),
+            };
+            let tensor = Tensor::from_numeric_storage(storage, shape.clone())
                 .map_err(|error| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {error}")))?;
             let handle = gpu_helpers::upload_tensor(provider, &tensor)
                 .map_err(|error| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {error}")))?;
             runmat_accelerate_api::set_handle_logical(&handle, true);
-            runmat_accelerate_api::set_handle_precision(&handle, input_precision);
             validate_uploaded_diag_result(
                 &handle,
                 provider,
@@ -953,11 +967,19 @@ fn upload_diag_result(
         }
         Value::ComplexTensor(tensor) => {
             let shape = tensor.shape.clone();
-            // Gathering may materialize complex values as binary64 even when the
-            // resident source is binary32. The resident handle is authoritative.
             let precision = input_precision;
+            let expected_dtype = provider_precision_to_dtype(precision);
+            let tensor = if tensor.numeric_dtype() == expected_dtype {
+                tensor
+            } else {
+                ComplexTensor::from_f64_values_with_dtype(
+                    tensor.materialize_f64(),
+                    shape.clone(),
+                    expected_dtype,
+                )
+                .map_err(|error| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {error}")))?
+            };
             let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)?;
-            runmat_accelerate_api::set_handle_precision(&handle, precision);
             validate_uploaded_diag_result(
                 &handle,
                 provider,
@@ -971,10 +993,13 @@ fn upload_diag_result(
             Ok(gpu_helpers::complex_gpu_value(handle))
         }
         Value::Complex(re, im) => {
-            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|error| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {error}")))?;
+            let tensor = ComplexTensor::from_f64_values_with_dtype(
+                vec![(re, im)],
+                vec![1, 1],
+                provider_precision_to_dtype(input_precision),
+            )
+            .map_err(|error| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {error}")))?;
             let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)?;
-            runmat_accelerate_api::set_handle_precision(&handle, input_precision);
             validate_uploaded_diag_result(
                 &handle,
                 provider,
@@ -1028,7 +1053,8 @@ fn validate_uploaded_diag_result(
         && runmat_accelerate_api::handle_storage(handle) == expected_storage
         && runmat_accelerate_api::handle_integer_type(handle) == expected_integer
         && runmat_accelerate_api::handle_is_logical(handle) == expected_logical
-        && runmat_accelerate_api::handle_precision(handle) == Some(expected_precision);
+        && (expected_integer.is_some()
+            || runmat_accelerate_api::handle_precision(handle) == Some(expected_precision));
     if valid {
         return Ok(());
     }
@@ -1100,7 +1126,6 @@ fn try_diag_gpu(handle: GpuTensorHandle, parsed: &ParsedDiagArgs) -> BuiltinResu
         Ok(out)
             if native_diag_output_matches(&handle, &out, provider, &expected_shape, template) =>
         {
-            runmat_accelerate_api::set_handle_precision(&out, template.precision);
             runmat_accelerate_api::set_handle_logical(&out, template.logical);
             Ok(Some(Value::GpuTensor(out)))
         }
@@ -1749,16 +1774,18 @@ async fn apply_gpu_like_template(
                 .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))?;
             (handle, shape, GpuTensorStorage::Real, expected_integer)
         }
-        Value::ComplexTensor(tensor) if tensor.integer_storage().is_none() => {
+        Value::ComplexTensor(tensor) => {
             let shape = tensor.shape.clone();
+            let expected_integer = tensor
+                .integer_storage()
+                .map(|storage| integer_storage_element_type(&storage.real));
             let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)?;
-            (handle, shape, GpuTensorStorage::ComplexInterleaved, None)
-        }
-        Value::ComplexTensor(_) => {
-            return Err(diag_error(
-                MESSAGE_ID_INVALID_INPUT,
-                "diag: typed complex integer gpuArray 'like' results are not supported",
-            ));
+            (
+                handle,
+                shape,
+                GpuTensorStorage::ComplexInterleaved,
+                expected_integer,
+            )
         }
         other => {
             return Err(diag_error(
@@ -1768,9 +1795,6 @@ async fn apply_gpu_like_template(
         }
     };
 
-    if expected_integer.is_none() {
-        runmat_accelerate_api::set_handle_precision(&uploaded, precision);
-    }
     runmat_accelerate_api::set_handle_logical(&uploaded, logical_target);
     let valid = uploaded.device_id == prototype.device_id
         && uploaded.shape == expected_shape
@@ -2671,6 +2695,68 @@ mod tests {
     }
 
     #[test]
+    fn diag_resident_like_preserves_exact_paired_complex_integer_storage() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        test_support::with_test_provider(|provider| {
+            let wide = (1_u64 << 53) + 1;
+            let prototype = ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![0]),
+                    IntegerStorage::U64(vec![0]),
+                )
+                .expect("paired prototype storage"),
+                vec![1, 1],
+            )
+            .expect("paired prototype");
+            let prototype = gpu_helpers::upload_complex_tensor(provider, &prototype)
+                .expect("upload paired prototype");
+            let input = ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![wide, u64::MAX]),
+                    IntegerStorage::U64(vec![u64::MAX, wide]),
+                )
+                .expect("paired input storage"),
+                vec![1, 2],
+            )
+            .expect("paired input");
+            let output = run_diag(
+                Value::ComplexTensor(input),
+                vec![Value::from("like"), Value::GpuTensor(prototype.clone())],
+            )
+            .expect("resident paired diag");
+            let Value::GpuTensor(output) = output else {
+                panic!("expected resident paired result");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&output),
+                GpuTensorStorage::ComplexInterleaved
+            );
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&output),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            let gathered = futures::executor::block_on(gpu_helpers::gather_value_async(
+                &Value::GpuTensor(output.clone()),
+            ))
+            .expect("gather paired diag");
+            let Value::ComplexTensor(gathered) = gathered else {
+                panic!("expected paired diag tensor");
+            };
+            let storage = gathered.integer_storage().expect("paired storage");
+            assert_eq!(
+                storage.real,
+                IntegerStorage::U64(vec![wide, 0, 0, u64::MAX])
+            );
+            assert_eq!(
+                storage.imag,
+                IntegerStorage::U64(vec![u64::MAX, 0, 0, wide])
+            );
+            provider.free(&prototype).expect("free prototype");
+            provider.free(&output).expect("free output");
+        });
+    }
+
+    #[test]
     fn diag_resident_logical_like_preserves_logical_metadata() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
@@ -2747,7 +2833,6 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let input = Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).unwrap();
             let input_handle = gpu_helpers::upload_tensor(provider, &input).unwrap();
-            runmat_accelerate_api::set_handle_precision(&input_handle, ProviderPrecision::F32);
             let output = run_diag(
                 Value::GpuTensor(input_handle.clone()),
                 vec![Value::from("double")],
@@ -2794,15 +2879,9 @@ mod tests {
             assert_eq!(gathered.shape, vec![2, 1]);
             assert_eq!(gathered.materialize_f64(), vec![4.0, 8.0]);
 
-            let logical = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
-            let logical_handle = provider
-                .upload(&HostTensorView {
-                    data: &logical.materialize_f64(),
-                    shape: &logical.shape,
-                })
-                .expect("upload logical");
+            let logical = Tensor::from_f32(vec![1.0, 0.0], vec![1, 2]).unwrap();
+            let logical_handle = gpu_helpers::upload_tensor(provider, &logical).unwrap();
             runmat_accelerate_api::set_handle_logical(&logical_handle, true);
-            runmat_accelerate_api::set_handle_precision(&logical_handle, ProviderPrecision::F32);
             let logical_out = run_diag(
                 Value::GpuTensor(logical_handle),
                 vec![Value::from("logical")],
@@ -2992,7 +3071,6 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = ComplexTensor::from_f32(vec![(1.0, 2.0), (3.0, 4.0)], vec![1, 2]).unwrap();
             let input = gpu_helpers::upload_complex_tensor(provider, &tensor).unwrap();
-            runmat_accelerate_api::set_handle_precision(&input, ProviderPrecision::F32);
             let input_for_cleanup = input.clone();
             let output = run_diag(Value::GpuTensor(input), Vec::new()).unwrap();
             let Value::GpuTensor(output) = output else {
@@ -3039,6 +3117,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let control_err = run_diag(vector(), vec![resident_control]).unwrap_err();
         assert_eq!(
@@ -3049,6 +3128,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX - 1,
+            descriptor: Default::default(),
         });
         let like_err = run_diag(vector(), vec![Value::from("like"), resident_like]).unwrap_err();
         assert_eq!(like_err.identifier(), DIAG_LIKE_EXTENSION.error_identifier);

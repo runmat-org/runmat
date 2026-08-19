@@ -204,13 +204,10 @@ async fn gamma_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let output = gamma_tensor(gathered)?;
     if let Some(provider) = provider {
         let dtype = output.numeric_dtype();
-        let handle = gpu_helpers::upload_tensor(provider, &output)
+        let mut handle = gpu_helpers::upload_tensor(provider, &output)
             .map_err(|detail| gamma_error_with_detail(&GAMMA_ERROR_INTERNAL, detail))?;
         if dtype == runmat_value::NumericDType::F32 {
-            runmat_accelerate_api::set_handle_precision(
-                &handle,
-                runmat_accelerate_api::ProviderPrecision::F32,
-            );
+            handle.descriptor.element_type = Some(runmat_accelerate_api::NumericElementType::F32);
         }
         Ok(gpu_helpers::resident_gpu_value(handle))
     } else {
@@ -546,10 +543,6 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let input = Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let handle = gpu_helpers::upload_tensor(provider, &input).unwrap();
-            runmat_accelerate_api::set_handle_precision(
-                &handle,
-                runmat_accelerate_api::ProviderPrecision::F32,
-            );
             let output = call(Value::GpuTensor(handle), Vec::new()).unwrap();
             assert!(matches!(output, Value::GpuTensor(_)));
             let gathered = test_support::gather(output).unwrap();

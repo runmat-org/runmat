@@ -23,6 +23,86 @@ const RESAMPLE_NAME: &str = "resample";
 const DEFAULT_RESAMPLE_N: usize = 10;
 const DEFAULT_RESAMPLE_BETA: f64 = 5.0;
 
+const UPSAMPLE_INTEGER_FACTOR_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "upsample-integer-factor",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "upsample with a typed-integer factor is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:UpsampleIntegerFactorExtension"),
+};
+const UPSAMPLE_INTEGER_PHASE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "upsample-integer-phase",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "upsample with a typed-integer phase is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:UpsampleIntegerPhaseExtension"),
+};
+const UPSAMPLE_ND_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "upsample-nd-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "upsample with an input having more than two dimensions is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:UpsampleNdInputExtension"),
+};
+const UPSAMPLE_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    UPSAMPLE_INTEGER_FACTOR_EXTENSION,
+    UPSAMPLE_INTEGER_PHASE_EXTENSION,
+    UPSAMPLE_ND_INPUT_EXTENSION,
+];
+const UPSAMPLE_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The public X argument has no datatype restriction. Zero insertion preserves authoritative integer elements, class, and shape exactly.",
+    }];
+const UPSAMPLE_INTEGER_FACTOR_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "N",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target lists single and double for N; RunMat mode additionally parses typed integers exactly as host sizes.",
+    }];
+const UPSAMPLE_INTEGER_PHASE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "PHASE",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target lists single and double for PHASE; RunMat mode additionally parses typed integers exactly before validating 0 <= PHASE < N.",
+    }];
+pub const UPSAMPLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = upsample(integer_X, N, PHASE?)",
+        inputs: &UPSAMPLE_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Host storage is copied without conversion; resident integer storage uses owner-resolved allocation and scatter with matching device, shape, storage, and integer class.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = upsample(X, integer_N, PHASE?)",
+        inputs: &UPSAMPLE_INTEGER_FACTOR_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The factor is extension-gated before X or any provider is accessed, then converted exactly to a host size.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = upsample(X, N, integer_PHASE)",
+        inputs: &UPSAMPLE_INTEGER_PHASE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The phase is extension-gated before X or any provider is accessed, parsed exactly, and range-checked against N.",
+    },
+];
+
 const DOWNSAMPLE_INTEGER_FACTOR_EXTENSION: BuiltinExtensionDescriptor =
     BuiltinExtensionDescriptor {
         id: "downsample-integer-factor",
@@ -61,7 +141,7 @@ const DOWNSAMPLE_INTEGER_FACTOR_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a lists single and double for N; RunMat mode additionally parses typed integers exactly as host sizes.",
+        notes: "The compatibility target lists single and double for N; RunMat mode additionally parses typed integers exactly as host sizes.",
     }];
 const DOWNSAMPLE_INTEGER_PHASE_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -69,7 +149,7 @@ const DOWNSAMPLE_INTEGER_PHASE_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a lists single and double for PHASE; RunMat mode additionally parses typed integers exactly before validating 0 <= PHASE < N.",
+        notes: "The compatibility target lists single and double for PHASE; RunMat mode additionally parses typed integers exactly before validating 0 <= PHASE < N.",
     }];
 pub const DOWNSAMPLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
     BuiltinIntegerCapabilityDescriptor {
@@ -420,6 +500,70 @@ pub const RESAMPLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &RESAMPLE_ERRORS,
 };
 
+const RESAMPLE_INTEGER_OPTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "resample-integer-options",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "resample accepts typed-integer rate, filter-design, filter, and dimension arguments as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ResampleIntegerOptionsExtension"),
+};
+const RESAMPLE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [RESAMPLE_INTEGER_OPTION_EXTENSION];
+const RESAMPLE_REJECTED_INTEGER_DATA: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Rejected,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double signal input; native integer signals reject before host or provider execution.",
+    }];
+const RESAMPLE_INTEGER_STRUCTURAL_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "P/Q/N/Dimension",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target lists single and double controls; RunMat mode additionally reads typed integer rate and dimension controls exactly as structural values.",
+    }];
+const RESAMPLE_INTEGER_FLOAT_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "BETA/B",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed Kaiser beta or FIR coefficients are a RunMat extension and enter filtering only after exact binary64 representability is proved.",
+    }];
+pub const RESAMPLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "resample(integer_X, P, Q, ...)",
+        inputs: &RESAMPLE_REJECTED_INTEGER_DATA,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Integer signal storage is outside the compatibility surface and rejects from authoritative host or resident dtype metadata before filtering.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = resample(X, integer_P, integer_Q, integer_N, Dimension=integer_dim)",
+        inputs: &RESAMPLE_INTEGER_STRUCTURAL_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Rate and dimension controls remain exact through validation; checked arithmetic owns output and filter geometry.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = resample(X, P, Q, integer_BETA_or_B)",
+        inputs: &RESAMPLE_INTEGER_FLOAT_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Filter-design or coefficient integers cross one named checked binary64 FIR boundary; X retains its documented floating output class and residency behavior.",
+    },
+];
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SampleOp {
     Up,
@@ -564,10 +708,30 @@ fn sample_error_with_source(
     summary = "Increase sample rate by inserting zeros between samples.",
     keywords = "upsample,sample rate,zero insertion,signal processing",
     type_resolver(upsample_type),
+    extensions(UPSAMPLE_EXTENSIONS),
+    integer_capabilities(UPSAMPLE_INTEGER_CAPABILITIES),
     descriptor(crate::builtins::math::signal::sample_rate::UPSAMPLE_DESCRIPTOR),
     builtin_path = "crate::builtins::math::signal::sample_rate"
 )]
 async fn upsample_builtin(x: Value, n: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if is_typed_integer_value(&n) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &UPSAMPLE_INTEGER_FACTOR_EXTENSION,
+            UPSAMPLE_NAME,
+        )?;
+    }
+    if rest.first().is_some_and(is_typed_integer_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &UPSAMPLE_INTEGER_PHASE_EXTENSION,
+            UPSAMPLE_NAME,
+        )?;
+    }
+    if value_rank(&x).is_some_and(|rank| rank > 2) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &UPSAMPLE_ND_INPUT_EXTENSION,
+            UPSAMPLE_NAME,
+        )?;
+    }
     sample_rate_builtin(UPSAMPLE_NAME, SampleOp::Up, x, n, rest).await
 }
 
@@ -628,6 +792,8 @@ fn value_rank(value: &Value) -> Option<usize> {
     keywords = "resample,sample rate,polyphase,antialiasing,FIR,signal processing",
     type_resolver(resample_type),
     descriptor(crate::builtins::math::signal::sample_rate::RESAMPLE_DESCRIPTOR),
+    extensions(RESAMPLE_EXTENSIONS),
+    integer_capabilities(RESAMPLE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::signal::sample_rate"
 )]
 async fn resample_builtin(x: Value, p: Value, q: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -640,6 +806,22 @@ async fn resample_builtin(x: Value, p: Value, q: Value, rest: Vec<Value>) -> Bui
         _ => {}
     }
 
+    if is_typed_integer_value(&x) {
+        return Err(sample_error_with_detail(
+            RESAMPLE_NAME,
+            &SAMPLE_ERROR_INVALID_INPUT,
+            "resample input must be single or double",
+        ));
+    }
+    let typed_options = is_typed_integer_value(&p)
+        || is_typed_integer_value(&q)
+        || rest.iter().any(is_typed_integer_value);
+    if typed_options {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &RESAMPLE_INTEGER_OPTION_EXTENSION,
+            RESAMPLE_NAME,
+        )?;
+    }
     let mut p = parse_factor(&p, RESAMPLE_NAME).await?;
     let mut q = parse_factor(&q, RESAMPLE_NAME).await?;
     let divisor = gcd(p, q);
@@ -800,10 +982,29 @@ async fn resample_gpu(
 
     if input_len == 0 || output_len == 0 {
         return match provider.zeros_with_storage(&output_shape, storage) {
-            Ok(output) => Ok(Some(ResampleEval {
-                y: wrap_resampled_gpu(handle, output),
-                filter: options.filter.clone(),
-            })),
+            Ok(output)
+                if valid_class_preserving_gpu_output(
+                    provider,
+                    handle,
+                    &output,
+                    &output_shape,
+                    false,
+                ) =>
+            {
+                Ok(Some(ResampleEval {
+                    y: wrap_resampled_gpu(output),
+                    filter: options.filter.clone(),
+                }))
+            }
+            Ok(output) => {
+                let _ = provider.free(&output);
+                runmat_accelerate_api::clear_handle_metadata(&output);
+                Err(sample_error_with_detail(
+                    RESAMPLE_NAME,
+                    &SAMPLE_ERROR_GATHER_FAILED,
+                    "provider returned an incompatible empty resample result",
+                ))
+            }
             Err(_) => Ok(None),
         };
     }
@@ -924,10 +1125,29 @@ async fn resample_gpu(
     let _ = provider.free(&padded);
 
     match output {
-        Ok(output) => Ok(Some(ResampleEval {
-            y: wrap_resampled_gpu(handle, output),
-            filter: options.filter.clone(),
-        })),
+        Ok(output)
+            if valid_class_preserving_gpu_output(
+                provider,
+                handle,
+                &output,
+                &output_shape,
+                false,
+            ) =>
+        {
+            Ok(Some(ResampleEval {
+                y: wrap_resampled_gpu(output),
+                filter: options.filter.clone(),
+            }))
+        }
+        Ok(output) => {
+            let _ = provider.free(&output);
+            runmat_accelerate_api::clear_handle_metadata(&output);
+            Err(sample_error_with_detail(
+                RESAMPLE_NAME,
+                &SAMPLE_ERROR_GATHER_FAILED,
+                "provider returned an incompatible resample result",
+            ))
+        }
         Err(_) => Ok(None),
     }
 }
@@ -1052,6 +1272,16 @@ async fn scalar_integer_option(value: &Value) -> BuiltinResult<Option<usize>> {
 }
 
 async fn scalar_f64_option(value: &Value) -> BuiltinResult<f64> {
+    if is_typed_integer_value(value)
+        && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(value)
+            .await?
+    {
+        return Err(sample_error_with_detail(
+            RESAMPLE_NAME,
+            &SAMPLE_ERROR_INVALID_OPTION,
+            "typed integer BETA must be exactly representable as double",
+        ));
+    }
     let Some(raw) = tensor::scalar_f64_from_value_async(value)
         .await
         .map_err(|err| {
@@ -1075,6 +1305,16 @@ async fn scalar_f64_option(value: &Value) -> BuiltinResult<f64> {
 }
 
 async fn parse_filter_vector(value: Value) -> BuiltinResult<ResampleFilter> {
+    if is_typed_integer_value(&value)
+        && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(&value)
+            .await?
+    {
+        return Err(sample_error_with_detail(
+            RESAMPLE_NAME,
+            &SAMPLE_ERROR_INVALID_OPTION,
+            "typed integer filter coefficients must be exactly representable as double",
+        ));
+    }
     if let Value::GpuTensor(handle) = value {
         let len = checked_product(&handle.shape)
             .ok_or_else(|| sample_error(RESAMPLE_NAME, &SAMPLE_ERROR_SIZE_OVERFLOW))?;
@@ -1378,6 +1618,15 @@ fn upsample_gpu(
         Ok(output) => output,
         Err(_) => return Ok(None),
     };
+    if !valid_class_preserving_gpu_output(provider, handle, &output, &output_shape, false) {
+        let _ = provider.free(&output);
+        runmat_accelerate_api::clear_handle_metadata(&output);
+        return Err(sample_error_with_detail(
+            builtin,
+            &SAMPLE_ERROR_GATHER_FAILED,
+            "provider returned an incompatible upsample allocation",
+        ));
+    }
     match provider.scatter_linear(&output, &indices, handle) {
         Ok(()) => Ok(Some(wrap_sample_rate_gpu(handle, output))),
         Err(_) => {
@@ -1425,20 +1674,8 @@ fn downsample_gpu(
         Ok(output) => {
             let output_identity = (output.device_id, output.buffer_id);
             let input_identity = (handle.device_id, handle.buffer_id);
-            let valid = output_identity != input_identity
-                && output.shape == output_shape
-                && output.device_id == handle.device_id
-                && resolved_actual_downsample_owner(&output)
-                    .is_some_and(|owner| std::ptr::eq(owner, provider))
-                && runmat_accelerate_api::handle_storage(&output)
-                    == runmat_accelerate_api::handle_storage(handle)
-                && runmat_accelerate_api::handle_integer_type(&output)
-                    == runmat_accelerate_api::handle_integer_type(handle)
-                && runmat_accelerate_api::handle_is_logical(&output)
-                    == runmat_accelerate_api::handle_is_logical(handle)
-                && (runmat_accelerate_api::handle_integer_type(handle).is_some()
-                    || runmat_accelerate_api::handle_precision(&output)
-                        == runmat_accelerate_api::handle_precision(handle));
+            let valid =
+                valid_class_preserving_gpu_output(provider, handle, &output, &output_shape, true);
             if valid {
                 Ok(Some(wrap_sample_rate_gpu(handle, output)))
             } else {
@@ -1469,33 +1706,33 @@ fn wrap_sample_rate_gpu(
     source: &runmat_accelerate_api::GpuTensorHandle,
     output: runmat_accelerate_api::GpuTensorHandle,
 ) -> Value {
-    if let Some(precision) = runmat_accelerate_api::handle_precision(source) {
-        runmat_accelerate_api::set_handle_precision(&output, precision);
-    }
     if runmat_accelerate_api::handle_is_logical(source) {
         gpu_helpers::logical_gpu_value(output)
     } else {
-        runmat_accelerate_api::set_handle_storage(
-            &output,
-            runmat_accelerate_api::handle_storage(source),
-        );
         gpu_helpers::resident_gpu_value(output)
     }
 }
 
-fn wrap_resampled_gpu(
-    source: &runmat_accelerate_api::GpuTensorHandle,
-    output: runmat_accelerate_api::GpuTensorHandle,
-) -> Value {
-    if let Some(precision) = runmat_accelerate_api::handle_precision(source) {
-        runmat_accelerate_api::set_handle_precision(&output, precision);
-    }
-    runmat_accelerate_api::set_handle_storage(
-        &output,
-        runmat_accelerate_api::handle_storage(source),
-    );
+fn wrap_resampled_gpu(output: runmat_accelerate_api::GpuTensorHandle) -> Value {
     runmat_accelerate_api::clear_handle_logical(&output);
     gpu_helpers::resident_gpu_value(output)
+}
+
+fn valid_class_preserving_gpu_output(
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    source: &runmat_accelerate_api::GpuTensorHandle,
+    output: &runmat_accelerate_api::GpuTensorHandle,
+    expected_shape: &[usize],
+    require_distinct: bool,
+) -> bool {
+    (!require_distinct || !gpu_helpers::same_gpu_handle(source, output))
+        && output.device_id == provider.device_id()
+        && output.shape == expected_shape
+        && runmat_accelerate_api::provider_for_handle(output)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+        && gpu_helpers::numeric_descriptor_matches_source(source, output)
+        && (!runmat_accelerate_api::handle_is_logical(output)
+            || runmat_accelerate_api::handle_is_logical(source))
 }
 
 fn upsample_linear_indices(
@@ -1905,7 +2142,7 @@ mod tests {
     use futures::executor::block_on;
     use runmat_accelerate_api::{
         AccelDownloadFuture, AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorOwned,
-        HostTensorView, IntegerElementType, ProviderPrecision,
+        HostTensorView, ProviderPrecision,
     };
     use runmat_value::IntegerStorage;
     use std::collections::HashMap;
@@ -1954,14 +2191,18 @@ mod tests {
                     storage,
                 },
             );
-            let handle = GpuTensorHandle {
+            GpuTensorHandle {
                 shape,
                 device_id,
                 buffer_id,
-            };
-            runmat_accelerate_api::set_handle_precision(&handle, precision);
-            runmat_accelerate_api::set_handle_storage(&handle, storage);
-            handle
+                descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
+                    match precision {
+                        ProviderPrecision::F32 => runmat_accelerate_api::NumericElementType::F32,
+                        ProviderPrecision::F64 => runmat_accelerate_api::NumericElementType::F64,
+                    },
+                    storage,
+                ),
+            }
         }
     }
 
@@ -1998,9 +2239,6 @@ mod tests {
             {
                 self.frees.fetch_add(1, Ordering::Relaxed);
             }
-            runmat_accelerate_api::clear_handle_precision(handle);
-            runmat_accelerate_api::clear_handle_storage(handle);
-            runmat_accelerate_api::clear_handle_integer_type(handle);
             runmat_accelerate_api::clear_handle_logical(handle);
             Ok(())
         }
@@ -2047,7 +2285,7 @@ mod tests {
             } else {
                 GpuTensorStorage::Real
             };
-            let output = self.allocate(
+            let mut output = self.allocate(
                 vec![99.0; shape.iter().product()],
                 shape,
                 device_id,
@@ -2055,7 +2293,8 @@ mod tests {
                 storage,
             );
             if mode == 4 {
-                runmat_accelerate_api::set_handle_integer_type(&output, IntegerElementType::U8);
+                output.descriptor.element_type =
+                    Some(runmat_accelerate_api::NumericElementType::U8);
             }
             if mode == 5 {
                 runmat_accelerate_api::set_handle_logical(&output, true);
@@ -2324,6 +2563,32 @@ mod tests {
     }
 
     #[test]
+    fn upsample_typed_controls_are_separately_extension_gated() {
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let factor_error = block_on(upsample_builtin(
+            tensor(vec![1.0, 2.0], vec![1, 2]),
+            Value::Int(runmat_value::IntValue::U8(2)),
+            vec![],
+        ))
+        .expect_err("integer factor extension");
+        assert_eq!(
+            factor_error.identifier(),
+            UPSAMPLE_INTEGER_FACTOR_EXTENSION.error_identifier
+        );
+        let phase_error = block_on(upsample_builtin(
+            tensor(vec![1.0, 2.0], vec![1, 2]),
+            Value::Num(2.0),
+            vec![Value::Int(runmat_value::IntValue::U8(1))],
+        ))
+        .expect_err("integer phase extension");
+        assert_eq!(
+            phase_error.identifier(),
+            UPSAMPLE_INTEGER_PHASE_EXTENSION.error_identifier
+        );
+        drop(strict);
+    }
+
+    #[test]
     fn downsample_nd_input_is_extension_gated() {
         let strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = block_on(downsample_builtin(
@@ -2475,6 +2740,7 @@ mod tests {
             shape: input.shape.clone(),
             device_id: input.device_id.wrapping_add(10_000),
             buffer_id: input.buffer_id,
+            descriptor: Default::default(),
         };
         let frees_before = provider.frees.load(Ordering::Relaxed);
 
@@ -2530,6 +2796,7 @@ mod tests {
                     shape: vec![1, 2],
                     device_id: provider.device_id.wrapping_add(10_000),
                     buffer_id: provider.last_output.load(Ordering::Relaxed),
+                    descriptor: Default::default(),
                 };
                 provider.free(&unknown).expect("test cleanup");
             } else {
@@ -2711,6 +2978,7 @@ mod tests {
 
     #[test]
     fn sample_rate_operates_along_first_non_singleton_nd_dimension() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let out = call_upsample(vec![
             tensor(vec![1.0, 2.0, 3.0, 4.0], vec![1, 2, 2]),
             Value::Num(2.0),
@@ -2838,6 +3106,7 @@ mod tests {
 
     #[test]
     fn resample_filter_vector_reads_typed_integer_storage_exactly() {
+        let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
         let filter = Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 0]), vec![1, 3]).unwrap();
 
         let parsed = block_on(parse_filter_vector(Value::Tensor(filter))).unwrap();
@@ -2863,7 +3132,7 @@ mod tests {
     }
 
     #[test]
-    fn resample_scalar_integer_option_reads_typed_integer_storage_without_mirror() {
+    fn resample_scalar_integer_option_decodes_exact_native_value() {
         let scalar =
             Tensor::new_integer(IntegerStorage::U16(vec![12]), vec![1, 1]).expect("scalar");
         let vector =

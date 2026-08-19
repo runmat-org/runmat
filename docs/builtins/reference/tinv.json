@@ -6,19 +6,22 @@
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
-    "precisions": ["f64"],
+    "precisions": ["f32", "f64"],
     "broadcasting": "elementwise",
-    "notes": "GPU inputs are gathered to host for compatibility until a provider hook exists."
+    "notes": "Resident inputs use owner-aware gather fallback and restore the result through the owning provider when possible."
   },
   "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
   "requires_feature": null,
   "tested": { "unit": "builtins::stats::summary::distributions::tests", "integration": null },
   "description": "`tinv(p,nu)` returns the Student's t quantile for probability `p` and degrees of freedom `nu`.",
   "behaviors": [
-    "`p` and `nu` may be scalars or matching-size numeric arrays.",
+    "`p` and `nu` may be single or double scalars or arrays with compatible scalar-expansion shapes.",
     "Scalar inputs broadcast over matching-size array inputs.",
     "`p` outside `[0,1]` or nonpositive `nu` produces `NaN` elementwise.",
-    "`p = 0` and `p = 1` return infinite tails."
+    "`p = 0` and `p = 1` return infinite tails.",
+    "Single input selects single output; otherwise the result uses double precision.",
+    "Native integer and logical inputs are mode-gated extensions. Integer values must be exactly representable at the binary64 inverse-CDF boundary.",
+    "Resident input returns through the owning provider when owner-preserving restoration is available."
   ],
   "examples": [{ "description": "95th percentile", "input": "x = tinv(0.95, 50)" }],
   "faqs": [{ "question": "How is tinv computed?", "answer": "RunMat solves against the Student's t CDF with a bounded bisection path, using symmetry around zero." }],

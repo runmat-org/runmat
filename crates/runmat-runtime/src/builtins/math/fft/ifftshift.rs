@@ -89,7 +89,7 @@ const IFFTSHIFT_MULTI_DIM_INPUT: [BuiltinIntegerInputCapability; 1] =
             "RunMat-only numeric vectors are decoded exactly; logical masks share the same gate.",
     }];
 pub const IFFTSHIFT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor { form: "Y = ifftshift(integer_X)", inputs: &IFFTSHIFT_DATA_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving, notes: "Real and typed-complex integer storage is reordered without an f64 mirror; resident fallback restores to the owner." },
+    BuiltinIntegerCapabilityDescriptor { form: "Y = ifftshift(integer_X)", inputs: &IFFTSHIFT_DATA_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving, notes: "Real and typed-complex integer values are reordered exactly with class preserved; resident fallback restores to the owner." },
     BuiltinIntegerCapabilityDescriptor { form: "Y = ifftshift(X, integer_DIM)", inputs: &IFFTSHIFT_DIM_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "All eight documented integer scalar classes select one dimension exactly." },
     BuiltinIntegerCapabilityDescriptor { form: "Y = ifftshift(X, integer_DIMS)", inputs: &IFFTSHIFT_MULTI_DIM_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "RunMat-only multi-axis vector/mask selection is independently gated." },
 ];
@@ -174,13 +174,21 @@ const IFFTSHIFT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor 
     when: "Shifting, tensor reconstruction, or GPU transfer operations fail.",
     message: "ifftshift: internal error",
 };
+const IFFTSHIFT_ERROR_PROVIDER_INTEGRITY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IFFTSHIFT.PROVIDER_INTEGRITY",
+    identifier: Some("RunMat:ifftshift:ProviderIntegrity"),
+    when:
+        "The provider returns ownership, shape, or physical metadata inconsistent with the request.",
+    message: "ifftshift: provider integrity error",
+};
 
-const IFFTSHIFT_ERRORS: [BuiltinErrorDescriptor; 5] = [
+const IFFTSHIFT_ERRORS: [BuiltinErrorDescriptor; 6] = [
     IFFTSHIFT_ERROR_ARG_COUNT,
     IFFTSHIFT_ERROR_INVALID_DIMS,
     IFFTSHIFT_ERROR_INVALID_INPUT,
     IFFTSHIFT_ERROR_UNSUPPORTED_INPUT,
     IFFTSHIFT_ERROR_INTERNAL,
+    IFFTSHIFT_ERROR_PROVIDER_INTEGRITY,
 ];
 
 pub const IFFTSHIFT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -232,7 +240,11 @@ fn ifftshift_terminal_error(detail: impl AsRef<str>) -> RuntimeError {
         detail.as_ref()
     ))
     .with_builtin(BUILTIN_NAME)
-    .with_identifier("RunMat:ifftshift:ProviderIntegrity")
+    .with_identifier(
+        IFFTSHIFT_ERROR_PROVIDER_INTEGRITY
+            .identifier
+            .expect("ifftshift provider-integrity descriptor identifier"),
+    )
     .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
     .build()
 }

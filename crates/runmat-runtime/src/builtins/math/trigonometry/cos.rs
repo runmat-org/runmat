@@ -10,7 +10,9 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{CharArray, ComplexStorage, ComplexTensor, NumericDType, Tensor, Value};
+#[cfg(test)]
+use runmat_value::NumericDType;
+use runmat_value::{CharArray, ComplexStorage, ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
@@ -475,14 +477,8 @@ fn upload_real_gpu_output(
     provider: &dyn runmat_accelerate_api::AccelProvider,
     tensor: Tensor,
 ) -> BuiltinResult<Value> {
-    let precision = if tensor.numeric_dtype() == NumericDType::F32 {
-        runmat_accelerate_api::ProviderPrecision::F32
-    } else {
-        runmat_accelerate_api::ProviderPrecision::F64
-    };
     let handle = gpu_helpers::upload_tensor(provider, &tensor)
         .map_err(|e| cos_error_with_detail(&COS_ERROR_INTERNAL, e))?;
-    runmat_accelerate_api::set_handle_precision(&handle, precision);
     Ok(gpu_helpers::resident_gpu_value(handle))
 }
 
@@ -490,13 +486,7 @@ fn upload_complex_gpu_output(
     provider: &dyn runmat_accelerate_api::AccelProvider,
     tensor: ComplexTensor,
 ) -> BuiltinResult<Value> {
-    let precision = if tensor.numeric_dtype() == NumericDType::F32 {
-        runmat_accelerate_api::ProviderPrecision::F32
-    } else {
-        runmat_accelerate_api::ProviderPrecision::F64
-    };
     let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)?;
-    runmat_accelerate_api::set_handle_precision(&handle, precision);
     Ok(gpu_helpers::complex_gpu_value(handle))
 }
 
@@ -816,14 +806,18 @@ pub(crate) mod tests {
                 },
             );
             self.allocations.fetch_add(1, Ordering::Relaxed);
-            let handle = GpuTensorHandle {
+            GpuTensorHandle {
                 shape,
                 device_id,
                 buffer_id,
-            };
-            runmat_accelerate_api::set_handle_precision(&handle, precision);
-            runmat_accelerate_api::set_handle_storage(&handle, storage);
-            handle
+                descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
+                    match precision {
+                        ProviderPrecision::F32 => runmat_accelerate_api::NumericElementType::F32,
+                        ProviderPrecision::F64 => runmat_accelerate_api::NumericElementType::F64,
+                    },
+                    storage,
+                ),
+            }
         }
     }
 
@@ -859,8 +853,6 @@ pub(crate) mod tests {
             {
                 self.frees.fetch_add(1, Ordering::Relaxed);
             }
-            runmat_accelerate_api::clear_handle_precision(handle);
-            runmat_accelerate_api::clear_handle_storage(handle);
             Ok(())
         }
 

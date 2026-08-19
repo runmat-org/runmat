@@ -6,16 +6,18 @@
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
-    "precisions": ["f64"],
+    "precisions": ["f32", "f64"],
     "broadcasting": "elementwise",
-    "notes": "GPU inputs are gathered to host for compatibility until a provider hook exists."
+    "notes": "Resident inputs use checked host fallback and return through the exact owner only when it can preserve the required single/double class. Incompatible automatic residency may finish on host; incompatible explicit gpuArray intent errors."
   },
   "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
   "requires_feature": null,
-  "tested": { "unit": "builtins::stats::summary::distributions::tests", "integration": null },
+  "tested": { "unit": "builtins::stats::summary::distributions::tests", "integration": "crates/runmat-vm/tests/integer_normal_distribution_and_regression_semantics.rs" },
   "description": "`normcdf(x)` evaluates the standard normal CDF. `normcdf(x,mu)` and `normcdf(x,mu,sigma)` evaluate a normal distribution with mean `mu` and standard deviation `sigma`. `normcdf(...,\"upper\")` returns the upper-tail probability.",
   "behaviors": [
     "`x`, `mu`, and `sigma` may be scalars or matching-size numeric arrays.",
+    "MATLAB-compatible numeric inputs are single or double. Typed integers and logical values in any numeric role are independently gated RunMat extensions.",
+    "Admitted integer values must be exactly representable as double. Any single floating input selects single output; otherwise output is double.",
     "Negative `sigma` values produce `NaN` elementwise.",
     "`sigma = 0` returns a step at `mu`.",
     "`\"upper\"` uses the complementary error-function path for better extreme-tail stability."

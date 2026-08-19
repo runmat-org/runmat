@@ -183,7 +183,7 @@ All runtime settings are under `[runtime]`. Runtime settings control the behavio
 | `compat` | string | `"runmat"` | `runmat`, `matlab`, `strict` | Language compatibility mode. |
 
 
-See [MATLAB Language Compatability](/docs/runtime/getting-started/compatability) for more details on runtime language compatibility modes.
+See [MATLAB Language Compatibility](/docs/runtime/getting-started/compatability) for the compatibility modes and [MATLAB Language Extensions](/docs/runtime/getting-started/matlab-language-extensions) for the RunMat-only behavior controlled by those modes.
 
 ### `[runtime.jit]`
 

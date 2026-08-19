@@ -4,6 +4,10 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
+    BuiltinIntegerAuditKind,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, LogicalArray, Tensor, Value};
 
@@ -18,6 +22,26 @@ use crate::{
 
 const DEFAULT_PROMPT: &str = "Input: ";
 const BUILTIN_NAME: &str = "input";
+
+const INPUT_NO_PROMPT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "input-no-prompt",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "input() with RunMat's default prompt is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:InputNoPromptExtension"),
+};
+const INPUT_SWAPPED_ARGUMENTS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "input-swapped-arguments",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "input('s', prompt) argument order is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:InputSwappedArgumentsExtension"),
+};
+pub const INPUT_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [INPUT_NO_PROMPT_EXTENSION, INPUT_SWAPPED_ARGUMENTS_EXTENSION];
+pub const INPUT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "input accepts only a text prompt and the text flag 's'. In expression mode the entered expression is evaluated normally, so any integer result retains the class and shape produced by that expression rather than serving as an integer input role of input itself.",
+};
 
 const INPUT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "value",
@@ -195,7 +219,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Prompts execute on the host. Input text is always delivered via the host handler; GPU tensors are only gathered when used as prompt strings.",
+    notes: "Prompts execute on the host. Interactive resident prompt and flag values are rejected before provider access; expression results retain the residency established by the entered expression itself.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::input")]
@@ -212,6 +236,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "input",
     summary = "Prompt users for interactive input.",
+    extensions(INPUT_EXTENSIONS),
+    integer_audit(crate::builtins::io::input::INPUT_INTEGER_AUDIT),
     type_resolver(crate::builtins::io::type_resolvers::input_type),
     descriptor(crate::builtins::io::input::INPUT_DESCRIPTOR),
     builtin_path = "crate::builtins::io::input"
@@ -219,6 +245,16 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 async fn input_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     if args.len() > 2 {
         return Err(input_error(&INPUT_ERROR_TOO_MANY_INPUTS));
+    }
+
+    if args.is_empty() {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INPUT_NO_PROMPT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if args.iter().any(crate::dispatcher::value_contains_gpu) {
+        return Err(input_error(&INPUT_ERROR_INVALID_PROMPT_TYPE));
     }
 
     let mut prompt_index = if args.is_empty() { None } else { Some(0usize) };
@@ -231,6 +267,10 @@ async fn input_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
                 if let Some(prompt_idx) = prompt_index {
                     match parse_string_flag(&args[prompt_idx]).await {
                         Ok(swapped_flag) => {
+                            crate::compatibility::ensure_builtin_extension_enabled(
+                                &INPUT_SWAPPED_ARGUMENTS_EXTENSION,
+                                BUILTIN_NAME,
+                            )?;
                             parsed_flag = Some(swapped_flag);
                             prompt_index = Some(idx);
                         }
@@ -251,20 +291,24 @@ async fn input_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         DEFAULT_PROMPT.to_string()
     };
     let return_string = parsed_flag.unwrap_or(false);
-    let line = interaction::request_line_async(&prompt, true)
-        .await
-        .map_err(|err| {
-            let message = err.message().to_string();
-            input_error_with_source(
-                &INPUT_ERROR_INTERACTION_FAILED,
-                format!("input: {message}"),
-                err,
-            )
-        })?;
-    if return_string {
-        return Ok(Value::CharArray(CharArray::new_row(&line)));
+    loop {
+        let line = interaction::request_line_async(&prompt, true)
+            .await
+            .map_err(|err| {
+                let message = err.message().to_string();
+                input_error_with_source(
+                    &INPUT_ERROR_INTERACTION_FAILED,
+                    format!("input: {message}"),
+                    err,
+                )
+            })?;
+        if return_string {
+            return Ok(Value::CharArray(CharArray::new_row(&line)));
+        }
+        if let Ok(value) = parse_numeric_response(&line).await {
+            return Ok(value);
+        }
     }
-    parse_numeric_response(&line).await
 }
 
 async fn parse_prompt(value: &Value) -> Result<String, RuntimeError> {
@@ -305,13 +349,12 @@ async fn parse_string_flag(value: &Value) -> Result<bool, RuntimeError> {
             ))
         }
     };
-    let trimmed = text.trim();
-    if trimmed.eq_ignore_ascii_case("s") {
+    if text == "s" {
         Ok(true)
     } else {
         Err(input_error_with(
             &INPUT_ERROR_INVALID_STRING_FLAG,
-            format!("input: invalid string flag ({trimmed})"),
+            format!("input: invalid string flag ({text})"),
         ))
     }
 }
@@ -352,7 +395,7 @@ async fn parse_numeric_response(line: &str) -> Result<Value, RuntimeError> {
     }
 
     // Fallback when no eval hook is installed (unit tests, native REPL).
-    call_builtin_async("str2double", &[Value::String(trimmed.to_string())])
+    let parsed = call_builtin_async("str2double", &[Value::String(trimmed.to_string())])
         .await
         .map_err(|err| {
             let message = err.message().to_string();
@@ -361,7 +404,14 @@ async fn parse_numeric_response(line: &str) -> Result<Value, RuntimeError> {
                 format!("input: invalid numeric expression ({message})"),
                 err,
             )
-        })
+        })?;
+    if matches!(parsed, Value::Num(value) if value.is_nan()) {
+        return Err(input_error_with(
+            &INPUT_ERROR_INVALID_NUMERIC_EXPRESSION,
+            INPUT_ERROR_INVALID_NUMERIC_EXPRESSION.message,
+        ));
+    }
+    Ok(parsed)
 }
 
 /// Parse a single MATLAB scalar token into a [`Value`].
@@ -489,6 +539,10 @@ pub(crate) mod tests {
     use super::*;
     use crate::interaction::{push_queued_response, InteractionResponse};
 
+    fn input_with_empty_prompt() -> BuiltinResult<Value> {
+        futures::executor::block_on(input_builtin(vec![Value::String(String::new())]))
+    }
+
     #[test]
     fn input_descriptor_signatures_cover_core_forms() {
         let labels: Vec<&str> = INPUT_DESCRIPTOR
@@ -506,7 +560,7 @@ pub(crate) mod tests {
     #[test]
     fn numeric_input_parses_scalar() {
         push_queued_response(Ok(InteractionResponse::Line("41".into())));
-        let value = futures::executor::block_on(input_builtin(vec![])).expect("input");
+        let value = input_with_empty_prompt().expect("input");
         assert_eq!(value, Value::Num(41.0));
     }
 
@@ -524,7 +578,7 @@ pub(crate) mod tests {
     #[test]
     fn empty_response_returns_empty_tensor() {
         push_queued_response(Ok(InteractionResponse::Line("   ".into())));
-        let value = futures::executor::block_on(input_builtin(vec![])).expect("input");
+        let value = input_with_empty_prompt().expect("input");
         match value {
             Value::Tensor(t) => assert!(t.materialize_f64().is_empty()),
             other => panic!("expected empty tensor, got {other:?}"),
@@ -537,7 +591,7 @@ pub(crate) mod tests {
         // The fast-path parser handles `[1 2 3]` directly, so no eval hook (and
         // therefore no recursive interpret() call) is needed.
         push_queued_response(Ok(InteractionResponse::Line("[1 2 3]".into())));
-        let value = futures::executor::block_on(input_builtin(vec![])).expect("input");
+        let value = input_with_empty_prompt().expect("input");
         match value {
             Value::Tensor(t) => {
                 assert_eq!(t.rows, 1);
@@ -552,7 +606,7 @@ pub(crate) mod tests {
     #[test]
     fn named_constants_parse_without_eval_hook() {
         push_queued_response(Ok(InteractionResponse::Line("pi".into())));
-        let value = futures::executor::block_on(input_builtin(vec![])).expect("input");
+        let value = input_with_empty_prompt().expect("input");
         assert_eq!(value, Value::Num(std::f64::consts::PI));
     }
 
@@ -577,7 +631,7 @@ pub(crate) mod tests {
     #[test]
     fn true_input_returns_logical_not_double() {
         push_queued_response(Ok(InteractionResponse::Line("true".into())));
-        let value = futures::executor::block_on(input_builtin(vec![])).expect("input");
+        let value = input_with_empty_prompt().expect("input");
         assert_eq!(value, Value::Bool(true));
     }
 
@@ -585,7 +639,7 @@ pub(crate) mod tests {
     #[test]
     fn false_input_returns_logical_not_double() {
         push_queued_response(Ok(InteractionResponse::Line("false".into())));
-        let value = futures::executor::block_on(input_builtin(vec![])).expect("input");
+        let value = input_with_empty_prompt().expect("input");
         assert_eq!(value, Value::Bool(false));
     }
 
@@ -593,7 +647,7 @@ pub(crate) mod tests {
     #[test]
     fn bool_input_is_case_insensitive() {
         push_queued_response(Ok(InteractionResponse::Line("TRUE".into())));
-        let value = futures::executor::block_on(input_builtin(vec![])).expect("input");
+        let value = input_with_empty_prompt().expect("input");
         assert_eq!(value, Value::Bool(true));
     }
 
@@ -601,7 +655,7 @@ pub(crate) mod tests {
     #[test]
     fn column_vector_parses_without_eval_hook() {
         push_queued_response(Ok(InteractionResponse::Line("[1;2;3]".into())));
-        let value = futures::executor::block_on(input_builtin(vec![])).expect("input");
+        let value = input_with_empty_prompt().expect("input");
         match value {
             Value::Tensor(t) => {
                 assert_eq!(t.rows, 3);
@@ -616,7 +670,7 @@ pub(crate) mod tests {
     #[test]
     fn logical_row_vector_parses_as_logical_array() {
         push_queued_response(Ok(InteractionResponse::Line("[true false]".into())));
-        let value = futures::executor::block_on(input_builtin(vec![])).expect("input");
+        let value = input_with_empty_prompt().expect("input");
         match value {
             Value::LogicalArray(la) => {
                 assert_eq!(la.shape, vec![1, 2]);
@@ -630,7 +684,7 @@ pub(crate) mod tests {
     #[test]
     fn logical_column_vector_parses_as_logical_array() {
         push_queued_response(Ok(InteractionResponse::Line("[true; false]".into())));
-        let value = futures::executor::block_on(input_builtin(vec![])).expect("input");
+        let value = input_with_empty_prompt().expect("input");
         match value {
             Value::LogicalArray(la) => {
                 assert_eq!(la.shape, vec![2, 1]);
@@ -644,7 +698,7 @@ pub(crate) mod tests {
     #[test]
     fn mixed_logical_and_numeric_coerces_to_double_tensor() {
         push_queued_response(Ok(InteractionResponse::Line("[true 2.0]".into())));
-        let value = futures::executor::block_on(input_builtin(vec![])).expect("input");
+        let value = input_with_empty_prompt().expect("input");
         match value {
             Value::Tensor(t) => {
                 assert_eq!(t.rows, 1);
@@ -661,7 +715,7 @@ pub(crate) mod tests {
         // [1 2; 3 4] → get2(r,c) must return element at row r, col c, not the transpose.
         // Column-major storage: data = [1, 3, 2, 4] (not the row-major [1, 2, 3, 4]).
         push_queued_response(Ok(InteractionResponse::Line("[1 2; 3 4]".into())));
-        let value = futures::executor::block_on(input_builtin(vec![])).expect("input");
+        let value = input_with_empty_prompt().expect("input");
         match value {
             Value::Tensor(t) => {
                 assert_eq!(t.rows, 2);
@@ -682,7 +736,7 @@ pub(crate) mod tests {
         push_queued_response(Ok(InteractionResponse::Line(
             "[true false; false true]".into(),
         )));
-        let value = futures::executor::block_on(input_builtin(vec![])).expect("input");
+        let value = input_with_empty_prompt().expect("input");
         match value {
             Value::LogicalArray(la) => {
                 assert_eq!(la.shape, vec![2, 2]);
@@ -701,5 +755,48 @@ pub(crate) mod tests {
         let bad_flag = Value::String("not-string-mode".to_string());
         let err = futures::executor::block_on(input_builtin(vec![prompt, bad_flag])).unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:input:InvalidStringFlag"));
+    }
+
+    #[test]
+    fn strict_mode_gates_runmat_only_call_forms_before_interaction() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let no_prompt = futures::executor::block_on(input_builtin(vec![])).unwrap_err();
+        assert_eq!(
+            no_prompt.identifier(),
+            INPUT_NO_PROMPT_EXTENSION.error_identifier
+        );
+        let swapped = futures::executor::block_on(input_builtin(vec![
+            Value::String("s".into()),
+            Value::String("Prompt: ".into()),
+        ]))
+        .unwrap_err();
+        assert_eq!(
+            swapped.identifier(),
+            INPUT_SWAPPED_ARGUMENTS_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn resident_prompt_rejects_without_provider_access() {
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+            descriptor: Default::default(),
+        });
+        let error = futures::executor::block_on(input_builtin(vec![resident])).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            INPUT_ERROR_INVALID_PROMPT_TYPE.identifier
+        );
+    }
+
+    #[test]
+    fn input_integer_audit_is_explicitly_not_applicable() {
+        assert_eq!(
+            INPUT_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        assert_eq!(INPUT_EXTENSIONS.len(), 2);
     }
 }

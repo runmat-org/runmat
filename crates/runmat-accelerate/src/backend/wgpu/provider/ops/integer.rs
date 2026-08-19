@@ -202,7 +202,7 @@ impl WgpuProvider {
     ) -> Result<(GpuTensorHandle, Option<GpuTensorHandle>)> {
         let entry = self.get_entry_raw(a)?;
         let integer_type = entry
-            .integer_type
+            .integer_type()
             .ok_or_else(|| anyhow!("{operation_name}: expected native integer gpuArray input"))?;
         ensure!(
             entry.storage == GpuTensorStorage::Real,
@@ -417,7 +417,7 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         let entry = self.get_entry_raw(a)?;
         let integer_type = entry
-            .integer_type
+            .integer_type()
             .ok_or_else(|| anyhow!("{operation_name}: expected native integer gpuArray input"))?;
         ensure!(
             entry.storage == GpuTensorStorage::Real,
@@ -667,7 +667,7 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         let entry = self.get_entry_raw(a)?;
         let integer_type = entry
-            .integer_type
+            .integer_type()
             .ok_or_else(|| anyhow!("{operation_name}: expected native integer gpuArray input"))?;
         ensure!(
             entry.storage == GpuTensorStorage::Real,
@@ -879,7 +879,7 @@ impl WgpuProvider {
     ) -> Result<runmat_accelerate_api::ReduceDimResult> {
         let entry = self.get_entry_raw(a)?;
         let integer_type = entry
-            .integer_type
+            .integer_type()
             .ok_or_else(|| anyhow!("{operation_name}: expected native integer gpuArray input"))?;
         ensure!(
             entry.storage == GpuTensorStorage::Real,
@@ -1050,10 +1050,10 @@ impl WgpuProvider {
         let entry_a = self.get_entry_raw(a)?;
         let entry_b = self.get_entry_raw(b)?;
         let integer_type = entry_a
-            .integer_type
+            .integer_type()
             .ok_or_else(|| anyhow!("{operation_name}: expected native integer gpuArray input"))?;
         ensure!(
-            entry_b.integer_type == Some(integer_type),
+            entry_b.integer_type() == Some(integer_type),
             "{operation_name}: integer operands must have the same class"
         );
         ensure!(
@@ -1207,10 +1207,10 @@ impl WgpuProvider {
         let entry_a = self.get_entry_raw(a)?;
         let entry_b = self.get_entry_raw(b)?;
         let integer_type = entry_a
-            .integer_type
+            .integer_type()
             .ok_or_else(|| anyhow!("{operation_name}: expected native integer gpuArray input"))?;
         ensure!(
-            entry_b.integer_type == Some(integer_type),
+            entry_b.integer_type() == Some(integer_type),
             "{operation_name}: integer operands must have the same class"
         );
         ensure!(
@@ -1386,7 +1386,7 @@ impl WgpuProvider {
         if len > u32::MAX as usize {
             return Err(gpu_dispatch_length_limit_error("integer cast", len));
         }
-        let source_type = if let Some(integer_type) = entry.integer_type {
+        let source_type = if let Some(integer_type) = entry.integer_type() {
             integer_type_code(integer_type)
         } else {
             match entry.precision {

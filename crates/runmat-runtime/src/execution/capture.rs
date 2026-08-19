@@ -183,6 +183,7 @@ mod tests {
             shape: vec![1],
             device_id,
             buffer_id,
+            descriptor: Default::default(),
         })
     }
 

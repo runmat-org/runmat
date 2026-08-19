@@ -14,8 +14,16 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
-use runmat_value::{ComplexTensor, LogicalArray, StringArray, StructValue, Tensor, Value};
+use runmat_value::{
+    ComplexTensor, IntegerStorage, LogicalArray, StringArray, StructValue, Tensor, Value,
+};
+use runmat_value::{IntValue, NumericScalar};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::structs::core::structfun")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -45,6 +53,27 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "structfun";
+
+const STRUCTFUN_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "integer field values and callback results",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Callbacks receive exact integer field values and may return scalar values in any native integer class.",
+    }];
+
+pub const STRUCTFUN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "A = structfun(func, S, options...) with integer fields or results",
+        inputs: &STRUCTFUN_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Host callbacks receive authoritative integer values. UniformOutput=true preserves a common integer class exactly and rejects mixed output classes; UniformOutput=false preserves each returned value in its field.",
+    }];
 
 const STRUCTFUN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "A",
@@ -258,6 +287,9 @@ pub const STRUCTFUN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     keywords = "structfun,struct,functional,uniformoutput,errorhandler",
     type_resolver(structfun_type),
     descriptor(crate::builtins::structs::core::structfun::STRUCTFUN_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::structs::core::structfun::STRUCTFUN_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::structs::core::structfun"
 )]
 async fn structfun_builtin(
@@ -512,10 +544,26 @@ impl OutputCollector {
 }
 
 enum UniformCollector {
-    Pending { len: usize },
-    Double { data: Vec<f64>, len: usize },
-    Logical { data: Vec<u8>, len: usize },
-    Complex { data: Vec<(f64, f64)>, len: usize },
+    Pending {
+        len: usize,
+    },
+    Double {
+        data: Vec<f64>,
+        len: usize,
+    },
+    Integer {
+        prototype: IntegerStorage,
+        values: Vec<IntValue>,
+        len: usize,
+    },
+    Logical {
+        data: Vec<u8>,
+        len: usize,
+    },
+    Complex {
+        data: Vec<(f64, f64)>,
+        len: usize,
+    },
 }
 
 impl UniformCollector {
@@ -536,6 +584,14 @@ impl UniformCollector {
                 ClassifiedValue::Double(value) => {
                     *self = UniformCollector::Double {
                         data: vec![value],
+                        len: *len,
+                    };
+                    Ok(())
+                }
+                ClassifiedValue::Integer(value) => {
+                    *self = UniformCollector::Integer {
+                        prototype: IntegerStorage::from_scalar(value.clone()),
+                        values: vec![value],
                         len: *len,
                     };
                     Ok(())
@@ -565,6 +621,7 @@ impl UniformCollector {
                     };
                     Ok(())
                 }
+                ClassifiedValue::Integer(_) => Err(heterogeneous_uniform_output()),
                 ClassifiedValue::Complex(value) => {
                     let mut values = data
                         .iter()
@@ -587,6 +644,7 @@ impl UniformCollector {
                     data.push(value);
                     Ok(())
                 }
+                ClassifiedValue::Integer(_) => Err(heterogeneous_uniform_output()),
                 ClassifiedValue::Complex(value) => {
                     let mut values = data.iter().map(|&value| (value, 0.0)).collect::<Vec<_>>();
                     values.push(value);
@@ -597,6 +655,20 @@ impl UniformCollector {
                     Ok(())
                 }
             },
+            UniformCollector::Integer {
+                prototype, values, ..
+            } => match classify_uniform_value(value)? {
+                ClassifiedValue::Integer(value) => {
+                    if IntegerStorage::from_scalar(value.clone()).numeric_dtype()
+                        != prototype.numeric_dtype()
+                    {
+                        return Err(heterogeneous_uniform_output());
+                    }
+                    values.push(value);
+                    Ok(())
+                }
+                _ => Err(heterogeneous_uniform_output()),
+            },
             UniformCollector::Complex { data, .. } => match classify_uniform_value(value)? {
                 ClassifiedValue::Logical(flag) => {
                     data.push((if flag { 1.0 } else { 0.0 }, 0.0));
@@ -606,6 +678,7 @@ impl UniformCollector {
                     data.push((value, 0.0));
                     Ok(())
                 }
+                ClassifiedValue::Integer(_) => Err(heterogeneous_uniform_output()),
                 ClassifiedValue::Complex(value) => {
                     data.push(value);
                     Ok(())
@@ -626,6 +699,20 @@ impl UniformCollector {
                 .map_err(|err| {
                     structfun_error(format!("structfun: {err}"), &STRUCTFUN_ERROR_INTERNAL)
                 }),
+            UniformCollector::Integer {
+                prototype,
+                values,
+                len,
+            } => {
+                let storage = prototype.from_same_class_values(values).map_err(|err| {
+                    structfun_error(format!("structfun: {err}"), &STRUCTFUN_ERROR_INTERNAL)
+                })?;
+                Tensor::new_integer(storage, vec![len, 1])
+                    .map(Value::Tensor)
+                    .map_err(|err| {
+                        structfun_error(format!("structfun: {err}"), &STRUCTFUN_ERROR_INTERNAL)
+                    })
+            }
             UniformCollector::Logical { data, len } => LogicalArray::new(data, vec![len, 1])
                 .map(Value::LogicalArray)
                 .map_err(|err| {
@@ -643,6 +730,7 @@ impl UniformCollector {
 enum ClassifiedValue {
     Logical(bool),
     Double(f64),
+    Integer(IntValue),
     Complex((f64, f64)),
 }
 
@@ -650,10 +738,26 @@ fn classify_uniform_value(value: &Value) -> BuiltinResult<ClassifiedValue> {
     match value {
         Value::Bool(flag) => Ok(ClassifiedValue::Logical(*flag)),
         Value::Num(value) => Ok(ClassifiedValue::Double(*value)),
-        Value::Int(value) => Ok(ClassifiedValue::Double(value.to_f64())),
+        Value::Int(value) => Ok(ClassifiedValue::Integer(value.clone())),
         Value::Complex(re, im) => Ok(ClassifiedValue::Complex((*re, *im))),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
-            Ok(ClassifiedValue::Double(tensor::tensor_value_f64(tensor, 0)))
+            match tensor.numeric_value_at(0).ok_or_else(|| {
+                structfun_error(
+                    "structfun: scalar tensor has no numeric storage value",
+                    &STRUCTFUN_ERROR_INTERNAL,
+                )
+            })? {
+                NumericScalar::F64(value) => Ok(ClassifiedValue::Double(value)),
+                NumericScalar::F32(value) => Ok(ClassifiedValue::Double(value as f64)),
+                value => Ok(ClassifiedValue::Integer(
+                    value.into_int_value().ok_or_else(|| {
+                        structfun_error(
+                            "structfun: integer scalar classification failed",
+                            &STRUCTFUN_ERROR_INTERNAL,
+                        )
+                    })?,
+                )),
+            }
         }
         Value::LogicalArray(array) if array.data.len() == 1 => {
             Ok(ClassifiedValue::Logical(array.data[0] != 0))
@@ -667,6 +771,13 @@ fn classify_uniform_value(value: &Value) -> BuiltinResult<ClassifiedValue> {
             &STRUCTFUN_ERROR_UNIFORM_OUTPUT,
         )),
     }
+}
+
+fn heterogeneous_uniform_output() -> RuntimeError {
+    structfun_error(
+        "structfun: callback outputs with UniformOutput=true must have the same data type on every invocation",
+        &STRUCTFUN_ERROR_UNIFORM_OUTPUT,
+    )
 }
 
 fn wrap_callback_error(error: RuntimeError) -> RuntimeError {
@@ -695,6 +806,7 @@ mod tests {
     use std::sync::Arc;
 
     fn call(func: Value, st: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         block_on(structfun_builtin(func, st, rest))
     }
 
@@ -705,11 +817,52 @@ mod tests {
                 .expect("integer tensor");
 
         match classify_uniform_value(&Value::Tensor(tensor)).expect("classify") {
-            ClassifiedValue::Double(value) => {
-                assert_eq!(value, 9_007_199_254_740_993_u64 as f64);
+            ClassifiedValue::Integer(IntValue::U64(value)) => {
+                assert_eq!(value, 9_007_199_254_740_993);
             }
-            _ => panic!("expected double classification"),
+            _ => panic!("expected uint64 classification"),
         }
+    }
+
+    #[test]
+    fn uniform_collector_preserves_every_integer_class() {
+        for value in [
+            IntValue::I8(i8::MIN),
+            IntValue::I16(i16::MIN),
+            IntValue::I32(i32::MIN),
+            IntValue::I64(i64::MIN),
+            IntValue::U8(u8::MAX),
+            IntValue::U16(u16::MAX),
+            IntValue::U32(u32::MAX),
+            IntValue::U64(u64::MAX),
+        ] {
+            let expected = IntegerStorage::from_scalar(value.clone());
+            let mut collector = UniformCollector::new(2);
+            collector.push(&Value::Int(value.clone())).expect("first");
+            collector.push(&Value::Int(value)).expect("second");
+            let Value::Tensor(tensor) = collector.finish().expect("finish") else {
+                panic!("expected integer tensor");
+            };
+            assert_eq!(tensor.numeric_dtype(), expected.numeric_dtype());
+            assert_eq!(
+                tensor.integer_storage().unwrap().value_at(0),
+                expected.value_at(0)
+            );
+            assert_eq!(
+                tensor.integer_storage().unwrap().value_at(1),
+                expected.value_at(0)
+            );
+        }
+    }
+
+    #[test]
+    fn uniform_collector_rejects_mixed_integer_classes() {
+        let mut collector = UniformCollector::new(2);
+        collector.push(&Value::Int(IntValue::U8(1))).unwrap();
+        let err = collector
+            .push(&Value::Int(IntValue::U16(2)))
+            .expect_err("mixed classes must reject");
+        assert_eq!(err.identifier(), STRUCTFUN_ERROR_UNIFORM_OUTPUT.identifier);
     }
 
     #[test]

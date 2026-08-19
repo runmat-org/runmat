@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "R2026a documents GPU Array input for `imshow`. RunMat treats `imshow` as a plotting sink rather than a precision-specialized compute kernel; grayscale gpuArray inputs may use the image/surface rendering path, while filename decoding and truecolor normalization run on the host."
+    "notes": "The compatibility target documents GPU Array input for `imshow`. RunMat treats `imshow` as a plotting sink rather than a precision-specialized compute kernel; grayscale gpuArray inputs may use the image/surface rendering path, while filename decoding and truecolor normalization run on the host."
   },
   "fusion": {
     "elementwise": false,

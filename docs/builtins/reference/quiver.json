@@ -19,7 +19,7 @@
       "double"
     ],
     "broadcasting": "none",
-    "notes": "`quiver` uses a GPU-backed geometry path and can keep vector-field inputs resident on device when the shared plotting device is available. Default X/Y grids are represented as compact axis buffers while U/V remain resident; explicit host X/Y coordinates are uploaded as axis buffers for the packer."
+    "notes": "`quiver` uses a GPU-backed floating geometry path and can keep compatible vector-field inputs resident on device when the shared plotting device is available. Native host storage remains authoritative for XData, YData, UData, VData, property access, and scene persistence; renderer buffers and floating geometry are derived caches. Default X/Y grids are represented as compact axis buffers while U/V remain resident, and unsupported integer buffers gather exactly through their owning provider."
   },
   "fusion": {
     "elementwise": false,
@@ -38,7 +38,8 @@
     "`quiver(X, Y, U, V)` accepts explicit coordinate vectors or meshgrid-style axes, depending on the input layout.",
     "The returned value is a quiver-handle object that can be queried and updated through `get` and `set`.",
     "Auto-scale factor, head size, line width, color, and display-name workflows are all part of the plotting property path.",
-    "Dedicated GPU geometry generation keeps vector-field rendering on device when plotting-compatible U/V buffers are available, including `quiver(U,V)` with an implicit coordinate grid."
+    "Dedicated GPU geometry generation keeps vector-field rendering on device when plotting-compatible U/V buffers are available, including `quiver(U,V)` with an implicit coordinate grid.",
+    "Integer X, Y, U, and V inputs retain their exact class, shape, and values in graphics properties and serialized scenes, including 64-bit values beyond binary64's exact range; only the renderer cache crosses the floating geometry boundary."
   ],
   "options": [
     "`'AutoScaleFactor'` / `'Scale'` controls arrow scaling.",

@@ -5,6 +5,7 @@ pub(crate) fn last_is_value_token(tok: &Token) -> bool {
         tok,
         Token::Ident
             | Token::Integer
+            | Token::RadixInteger
             | Token::Float
             | Token::True
             | Token::False

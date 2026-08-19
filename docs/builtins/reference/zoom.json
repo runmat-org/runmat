@@ -33,7 +33,7 @@
     {
       "name": "factor",
       "type": "positive numeric scalar",
-      "description": "Zoom factor applied around the current axes center. Values greater than 1 zoom in; values between 0 and 1 zoom out."
+      "description": "Zoom factor applied around the current axes center. Values greater than 1 zoom in; values between 0 and 1 zoom out. Integer scalars from any native integer class are accepted."
     },
     {
       "name": "fig",
@@ -43,7 +43,7 @@
     {
       "name": "ax",
       "type": "axes handle",
-      "description": "Target axes handle. Explicit axes updates do not change the current axes selection."
+      "description": "Target axes handle. Explicit axes updates do not change the current axes selection. RunMat mode additionally accepts a typed-integer alias for an encoded handle."
     }
   ],
   "examples": [

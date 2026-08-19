@@ -15,7 +15,7 @@ use runmat_value::{
     StructValue, Tensor, Value,
 };
 
-use crate::builtins::common::tensor as tensor_utils;
+use crate::builtins::common::{gpu_helpers, tensor as tensor_utils};
 use crate::builtins::math::reduction::{mean, median, min, std as std_reduction, sum, var};
 use crate::builtins::table::{
     is_tabular_object, select_rows, selected_row_names, table_from_columns_like, table_height,
@@ -153,6 +153,105 @@ const MISSING_ERRORS: [BuiltinErrorDescriptor; 3] = [
     MISSING_ERROR_INTERNAL,
 ];
 
+const MISSING_SHAPED_ARRAY_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "missing-shaped-array",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "missing(size...) is a RunMat convenience; the documented MATLAB missing function accepts no input arguments",
+    error_identifier: Some("RunMat:compatibility:MissingShapedArrayExtension"),
+};
+pub const MISSING_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [MISSING_SHAPED_ARRAY_EXTENSION];
+
+const STANDARDIZE_MISSING_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "standardize-missing-integer-data",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "standardizeMissing with a bare typed-integer input array is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:StandardizeMissingIntegerDataExtension"),
+    };
+const STANDARDIZE_MISSING_EXPLICIT_GPU_INDICATOR_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "standardize-missing-explicit-gpu-indicator",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "standardizeMissing with an explicitly GPU-resident indicator is a RunMat extension",
+        error_identifier: Some(
+            "RunMat:compatibility:StandardizeMissingExplicitGpuIndicatorExtension",
+        ),
+    };
+pub const STANDARDIZE_MISSING_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    STANDARDIZE_MISSING_INTEGER_DATA_EXTENSION,
+    STANDARDIZE_MISSING_EXPLICIT_GPU_INDICATOR_EXTENSION,
+];
+
+const STANDARDIZE_MISSING_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target's array-input datatype table excludes integer arrays. RunMat mode treats a bare integer array as an exact no-op because integer classes have no standard missing value.",
+    }];
+const STANDARDIZE_MISSING_INTEGER_INDICATOR_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "indicator",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target explicitly states that single, integer, and logical indicators also match double entries of A.",
+    }];
+const STANDARDIZE_MISSING_TABLE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "integer table variables",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Table input is documented and preserves each variable datatype. Integer variables have no standard missing representation and therefore remain unchanged.",
+    }];
+pub const STANDARDIZE_MISSING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = standardizeMissing(integer_A, indicator)",
+        inputs: &STANDARDIZE_MISSING_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "The RunMat-only bare-array form preserves class, shape, and exact storage. Compatibility admission precedes provider access; automatic residency may gather transparently after admission.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = standardizeMissing(A, integer_indicator)",
+        inputs: &STANDARDIZE_MISSING_INTEGER_INDICATOR_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer indicators are read from authoritative storage and compared in the documented target-class matching domain. Explicit gpuArray indicators are separately gated; automatic residency remains transparent.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = standardizeMissing(table_with_integer_variables, indicator)",
+        inputs: &STANDARDIZE_MISSING_TABLE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer table variables pass through with exact native storage while supported floating or textual variables are standardized independently.",
+    },
+];
+
+const MISSING_INTEGER_SIZE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "size arguments",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Every native integer size is read exactly and checked against nonnegative platform allocation limits; the entire shaped-array syntax is a RunMat-only convenience.",
+    }];
+pub const MISSING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor { form: "missing(integer_size, ...)", inputs: &MISSING_INTEGER_SIZE_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "MATLAB-compatible modes reject every argument before provider access because public missing has only a zero-argument syntax. RunMat mode gathers admitted automatic or explicit size controls through their exact owner and creates a host string array." }];
+
 macro_rules! descriptor {
     ($name:ident, $signatures:ident, $mode:expr) => {
         pub const $name: BuiltinDescriptor = BuiltinDescriptor {
@@ -174,6 +273,32 @@ descriptor!(
     ONE_VALUE_SIGNATURES,
     BuiltinOutputMode::Fixed
 );
+const ISMISSING_RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ismissing-resident-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ismissing with an interactive GPU-resident input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:IsmissingResidentInputExtension"),
+};
+const ISMISSING_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ISMISSING_RESIDENT_INPUT_EXTENSION];
+const ISMISSING_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight fixed-width integer classes have no standard missing value.",
+    }];
+pub const ISMISSING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "TF = ismissing(integer_A)",
+        inputs: &ISMISSING_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Predicate,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Returns a same-shaped all-false logical mask. Interactive resident input is a separately gated RunMat extension; admitted resident integers are validated from owner and class metadata without reading the payload and preserve this CPU builtin's host logical output policy.",
+    }];
 descriptor!(
     ANYMISSING_DESCRIPTOR,
     ANYMISSING_SIGNATURES,
@@ -199,6 +324,52 @@ pub const ANYMISSING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 
         overload: BuiltinIntegerOverloadKind::Multiple,
         notes: "Integer scalars and arrays return logical false because integer classes have no default missing representation; resident inputs gather without floating conversion.",
     }];
+
+const RMMISSING_INTEGER_DIM_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "rmmissing-integer-dimension",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "rmmissing accepts a typed-integer dimension control as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RmmissingIntegerDimensionExtension"),
+};
+pub const RMMISSING_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [RMMISSING_INTEGER_DIM_EXTENSION];
+const RMMISSING_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The R2022a-and-later surface accepts datatypes without a standard missing definition; all eight integer classes therefore remain unchanged.",
+    }];
+const RMMISSING_INTEGER_DIM_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "dim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "RunMat additionally accepts a typed integer dimension scalar and reads it exactly as a structural control.",
+    }];
+pub const RMMISSING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[R,TF] = rmmissing(integer_A, ...)",
+        inputs: &RMMISSING_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer A is an exact no-op because it has no standard missing value; R preserves class and storage, TF is all-false logical, and documented resident outputs return through the owning provider.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "R = rmmissing(A, integer_dim)",
+        inputs: &RMMISSING_INTEGER_DIM_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The dimension extension is mode-gated before provider access and never crosses a floating boundary.",
+    },
+];
 
 const FILLMISSING_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "fillmissing-integer-data",
@@ -537,9 +708,17 @@ fn internal_error(detail: impl Into<String>) -> RuntimeError {
     accel = "cpu",
     type_resolver(any_type),
     descriptor(crate::builtins::missing::MISSING_DESCRIPTOR),
+    extensions(crate::builtins::missing::MISSING_EXTENSIONS),
+    integer_capabilities(crate::builtins::missing::MISSING_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::missing"
 )]
 async fn missing_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if !args.is_empty() {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &MISSING_SHAPED_ARRAY_EXTENSION,
+            "missing",
+        )?;
+    }
     let packed = Value::OutputList(args);
     let gathered = gather_if_needed_async(&packed)
         .await
@@ -560,13 +739,47 @@ async fn missing_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     accel = "cpu",
     type_resolver(logical_type),
     descriptor(crate::builtins::missing::ISMISSING_DESCRIPTOR),
+    extensions(crate::builtins::missing::ISMISSING_EXTENSIONS),
+    integer_capabilities(crate::builtins::missing::ISMISSING_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::missing"
 )]
 async fn ismissing_builtin(value: Value) -> BuiltinResult<Value> {
+    if let Value::GpuTensor(handle) = &value {
+        if runmat_accelerate_api::handle_is_explicit(handle) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &ISMISSING_RESIDENT_INPUT_EXTENSION,
+                "ismissing",
+            )?;
+        }
+        if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+            return ismissing_resident_integer(handle);
+        }
+    }
     let value = gather_if_needed_async(&value)
         .await
         .map_err(|err| invalid_argument(format!("ismissing: failed to gather input: {err}")))?;
     ismissing_value(&value)
+}
+
+fn ismissing_resident_integer(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+) -> BuiltinResult<Value> {
+    let integer = runmat_accelerate_api::handle_integer_type(handle)
+        .expect("resident integer predicate requires integer metadata");
+    let storage = runmat_accelerate_api::handle_storage(handle);
+    if gpu_helpers::exact_provider_for_handle(handle).is_none()
+        || storage != runmat_accelerate_api::GpuTensorStorage::Real
+        || runmat_accelerate_api::handle_precision(handle).is_some()
+        || runmat_accelerate_api::handle_is_logical(handle)
+        || !gpu_helpers::gpu_class_metadata_matches(handle, None, Some(integer), false)
+    {
+        return Err(internal_error(
+            "ismissing: resident integer metadata is contradictory",
+        ));
+    }
+    Ok(Value::LogicalArray(LogicalArray::zeros(
+        handle.shape.clone(),
+    )))
 }
 
 #[runtime_builtin(
@@ -595,16 +808,35 @@ async fn anymissing_builtin(value: Value) -> BuiltinResult<Value> {
     accel = "cpu",
     type_resolver(any_type),
     descriptor(crate::builtins::missing::STANDARDIZE_MISSING_DESCRIPTOR),
+    extensions(crate::builtins::missing::STANDARDIZE_MISSING_EXTENSIONS),
+    integer_capabilities(crate::builtins::missing::STANDARDIZE_MISSING_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::missing"
 )]
 async fn standardize_missing_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::value_has_native_integer_class(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &STANDARDIZE_MISSING_INTEGER_DATA_EXTENSION,
+            "standardizeMissing",
+        )?;
+    }
+    let indicator = rest
+        .first()
+        .ok_or_else(|| invalid_argument("standardizeMissing: missing indicators argument"))?;
+    if crate::builtins::common::validation::value_contains_explicit_gpu(indicator) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &STANDARDIZE_MISSING_EXPLICIT_GPU_INDICATOR_EXTENSION,
+            "standardizeMissing",
+        )?;
+    }
     let value = gather_if_needed_async(&value).await.map_err(|err| {
         invalid_argument(format!("standardizeMissing: failed to gather input: {err}"))
     })?;
-    let indicators = rest
-        .first()
-        .ok_or_else(|| invalid_argument("standardizeMissing: missing indicators argument"))?;
-    let indicators = indicator_set(indicators)?;
+    let indicator = gather_if_needed_async(indicator).await.map_err(|err| {
+        invalid_argument(format!(
+            "standardizeMissing: failed to gather indicators: {err}"
+        ))
+    })?;
+    let indicators = indicator_set(&indicator)?;
     standardize_missing_value(value, &indicators)
 }
 
@@ -616,20 +848,50 @@ async fn standardize_missing_builtin(value: Value, rest: Vec<Value>) -> BuiltinR
     accel = "cpu",
     type_resolver(any_type),
     descriptor(crate::builtins::missing::RMMISSING_DESCRIPTOR),
+    extensions(crate::builtins::missing::RMMISSING_EXTENSIONS),
+    integer_capabilities(crate::builtins::missing::RMMISSING_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::missing"
 )]
 async fn rmmissing_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let value = gather_if_needed_async(&value)
-        .await
-        .map_err(|err| invalid_argument(format!("rmmissing: failed to gather input: {err}")))?;
+    if rest.iter().any(is_real_typed_integer_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &RMMISSING_INTEGER_DIM_EXTENSION,
+            "rmmissing",
+        )?;
+    }
+    let source = match &value {
+        Value::GpuTensor(handle) => Some(handle.clone()),
+        _ => None,
+    };
+    let value = if let Some(handle) = source.as_ref() {
+        let owner = gpu_helpers::exact_provider_for_handle(handle)
+            .ok_or_else(|| invalid_argument("rmmissing: no provider owns the resident input"))?;
+        gpu_helpers::download_value_preserving_residency_async(owner, handle)
+            .await
+            .map_err(|err| invalid_argument(format!("rmmissing: failed to gather input: {err}")))?
+    } else {
+        value
+    };
     let options = RemoveOptions::parse(&rest)?;
     let (result, removed) = remove_missing_value(value, options)?;
+    let (result, removed) = if let Some(source) = source.as_ref() {
+        (
+            gpu_helpers::restore_class_preserving_value(source, result, "rmmissing")?,
+            gpu_helpers::restore_class_preserving_value(
+                source,
+                Value::LogicalArray(removed),
+                "rmmissing",
+            )?,
+        )
+    } else {
+        (result, Value::LogicalArray(removed))
+    };
     match crate::output_count::current_output_count() {
         Some(0) => Ok(Value::OutputList(Vec::new())),
         Some(1) => Ok(Value::OutputList(vec![result])),
         Some(n) => Ok(crate::output_count::output_list_with_padding(
             n,
-            vec![result, Value::LogicalArray(removed)],
+            vec![result, removed],
         )),
         None => Ok(result),
     }
@@ -2724,7 +2986,6 @@ fn is_missing_text(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(feature = "wgpu")]
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
@@ -2745,6 +3006,7 @@ mod tests {
 
     #[test]
     fn missing_constructs_scalar_and_arrays() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let scalar = block_on(missing_builtin(Vec::new())).unwrap();
         assert!(matches!(scalar, Value::StringArray(sa) if sa.data == vec![MISSING_TEXT]));
         let shaped = block_on(missing_builtin(vec![Value::Num(2.0), Value::Num(3.0)])).unwrap();
@@ -2754,7 +3016,47 @@ mod tests {
     }
 
     #[test]
+    fn missing_runmat_shape_extension_reads_every_integer_class_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let cases = [
+            IntValue::I8(2),
+            IntValue::I16(2),
+            IntValue::I32(2),
+            IntValue::I64(2),
+            IntValue::U8(2),
+            IntValue::U16(2),
+            IntValue::U32(2),
+            IntValue::U64(2),
+        ];
+        for size in cases {
+            let result =
+                block_on(missing_builtin(vec![Value::Int(size)])).expect("RunMat shaped missing");
+            assert!(
+                matches!(result, Value::StringArray(array) if array.shape == vec![2, 2] && array.data.len() == 4)
+            );
+        }
+    }
+
+    #[test]
+    fn missing_shaped_extension_gates_before_provider_access() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let value = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 9_419_005,
+            descriptor: Default::default(),
+        });
+        let error = block_on(missing_builtin(vec![value]))
+            .expect_err("MATLAB-compatible mode must reject shaped missing");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:MissingShapedArrayExtension")
+        );
+    }
+
+    #[test]
     fn missing_preserves_typed_integer_size_vectors_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let large = 9_007_199_254_740_993_u64;
         let dims = Tensor::new_integer(IntegerStorage::U64(vec![large, 0]), vec![1, 2]).unwrap();
 
@@ -2858,6 +3160,94 @@ mod tests {
     }
 
     #[test]
+    fn ismissing_returns_same_shaped_false_for_all_integer_classes() {
+        let storages = [
+            IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+            IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+            IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![u8::MIN, u8::MAX]),
+            IntegerStorage::U16(vec![u16::MIN, u16::MAX]),
+            IntegerStorage::U32(vec![u32::MIN, u32::MAX]),
+            IntegerStorage::U64(vec![u64::MIN, u64::MAX]),
+        ];
+        for storage in storages {
+            let input = Tensor::new_integer(storage, vec![2, 1]).expect("integer tensor");
+            let result = block_on(ismissing_builtin(Value::Tensor(input))).expect("ismissing");
+            assert!(matches!(
+                result,
+                Value::LogicalArray(mask)
+                    if mask.shape == vec![2, 1] && mask.data == vec![0, 0]
+            ));
+        }
+    }
+
+    #[test]
+    fn ismissing_resident_integer_uses_shape_metadata_and_returns_host_mask() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![1, 2])
+                .expect("integer tensor");
+            let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload integer");
+            let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let result = block_on(ismissing_builtin(Value::GpuTensor(handle.clone())))
+                .expect("resident ismissing extension");
+            assert!(matches!(
+                result,
+                Value::LogicalArray(mask)
+                    if mask.shape == vec![1, 2] && mask.data == vec![0, 0]
+            ));
+            assert!(gpu_helpers::exact_provider_for_handle(&handle).is_some());
+            provider.free(&handle).ok();
+        });
+    }
+
+    #[test]
+    fn ismissing_rejects_contradictory_resident_integer_metadata() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new_integer(IntegerStorage::I8(vec![1]), vec![1, 1])
+                .expect("integer tensor");
+            let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload integer");
+            runmat_accelerate_api::set_handle_logical(&handle, true);
+            let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let error = block_on(ismissing_builtin(Value::GpuTensor(handle.clone())))
+                .expect_err("integer/logical metadata contradiction must reject");
+            assert!(error.message().contains("metadata is contradictory"));
+            provider.free(&handle).ok();
+        });
+    }
+
+    #[test]
+    fn ismissing_matlab_mode_only_gates_explicit_resident_input() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1])
+                .expect("integer tensor");
+            let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload integer");
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let result = block_on(ismissing_builtin(Value::GpuTensor(handle.clone())))
+                    .expect("automatic residency is transparent");
+                assert!(matches!(
+                    result,
+                    Value::LogicalArray(mask)
+                        if mask.shape == vec![1, 1] && mask.data == vec![0]
+                ));
+            }
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = block_on(ismissing_builtin(Value::GpuTensor(handle.clone())))
+                    .expect_err("explicit resident input is a compatibility-gated extension");
+                assert_eq!(
+                    error.identifier(),
+                    ISMISSING_RESIDENT_INPUT_EXTENSION.error_identifier
+                );
+            }
+            provider.free(&handle).ok();
+        });
+    }
+
+    #[test]
     fn anymissing_returns_false_for_every_integer_storage_class() {
         let storages = [
             IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
@@ -2937,6 +3327,53 @@ mod tests {
             }
             other => panic!("expected tensor and mask, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn rmmissing_resident_integer_restores_value_and_mask_through_exact_owner() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new_integer(
+                IntegerStorage::U64(vec![1, 9_007_199_254_740_993]),
+                vec![1, 2],
+            )
+            .expect("integer tensor");
+            let source = gpu_helpers::upload_tensor(provider, &input).expect("upload integer");
+            let source =
+                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let _outputs = crate::output_count::push_output_count(Some(2));
+            let result = block_on(rmmissing_builtin(
+                Value::GpuTensor(source.clone()),
+                Vec::new(),
+            ))
+            .expect("resident rmmissing");
+            let Value::OutputList(outputs) = result else {
+                panic!("expected output list");
+            };
+            assert_eq!(outputs.len(), 2);
+            for output in &outputs {
+                assert!(
+                    matches!(output, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
+                );
+            }
+            assert!(
+                matches!(&outputs[1], Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+            );
+            let gathered_value = test_support::gather(outputs[0].clone()).expect("gather value");
+            assert_eq!(
+                gathered_value.integer_storage(),
+                Some(&IntegerStorage::U64(vec![1, 9_007_199_254_740_993]))
+            );
+            let gathered_mask = test_support::gather(outputs[1].clone()).expect("gather mask");
+            assert_eq!(gathered_mask.shape, vec![1, 2]);
+            assert_eq!(gathered_mask.materialize_f64(), vec![0.0, 0.0]);
+            assert!(gpu_helpers::exact_provider_for_handle(&source).is_some());
+            for output in outputs {
+                if let Value::GpuTensor(handle) = output {
+                    provider.free(&handle).ok();
+                }
+            }
+            provider.free(&source).ok();
+        });
     }
 
     #[test]
@@ -3208,6 +3645,7 @@ mod tests {
 
     #[test]
     fn standardize_missing_reads_indicator_storage_and_does_not_nan_integer_targets() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let marker = Tensor::new_integer(IntegerStorage::I16(vec![-99]), vec![1, 1])
             .expect("integer marker");
         let expected = IntegerStorage::I16(vec![-99, 2]);
@@ -3226,6 +3664,56 @@ mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn standardize_missing_integer_data_is_mode_gated() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let input = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::I16(vec![-99, 2]), vec![1, 2]).unwrap(),
+        );
+        let error = block_on(standardize_missing_builtin(input, vec![Value::Num(-99.0)]))
+            .expect_err("MATLAB-compatible mode must reject direct integer data");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:StandardizeMissingIntegerDataExtension")
+        );
+    }
+
+    #[test]
+    fn standardize_missing_documented_integer_indicator_needs_no_extension() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let marker =
+            Value::Tensor(Tensor::new_integer(IntegerStorage::I16(vec![-99]), vec![1, 1]).unwrap());
+        let result = block_on(standardize_missing_builtin(
+            tensor(vec![-99.0, 2.0], vec![1, 2]),
+            vec![marker],
+        ))
+        .expect("documented integer indicator");
+        assert!(
+            matches!(result, Value::Tensor(t) if t.materialize_f64()[0].is_nan() && t.materialize_f64()[1] == 2.0)
+        );
+    }
+
+    #[test]
+    fn standardize_missing_explicit_gpu_indicator_is_gated_before_provider_access() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 9_451_002,
+            descriptor: Default::default(),
+        };
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let error = block_on(standardize_missing_builtin(
+            tensor(vec![-99.0, 2.0], vec![1, 2]),
+            vec![Value::GpuTensor(handle)],
+        ))
+        .expect_err("explicit GPU indicator must be gated");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:StandardizeMissingExplicitGpuIndicatorExtension")
+        );
     }
 
     #[test]
@@ -3409,11 +3897,12 @@ mod tests {
     fn legacy_nan_integer_extensions_preserve_declared_residency() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
-            let cases: [(
-                &str,
+            type ResidentNanCase = (
+                &'static str,
                 fn(Value, Vec<Value>) -> BuiltinResult<Value>,
                 Vec<f64>,
-            ); 2] = [
+            );
+            let cases: [ResidentNanCase; 2] = [
                 (
                     "nanmean",
                     |value, rest| block_on(nanmean_builtin(value, rest)),

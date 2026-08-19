@@ -886,6 +886,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: 9_362_001,
+            descriptor: Default::default(),
         };
         let error = run(vec![Value::GpuTensor(resident)])
             .expect_err("resident text-model input must reject");

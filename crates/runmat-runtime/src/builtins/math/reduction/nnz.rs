@@ -11,11 +11,14 @@ use crate::builtins::common::{
     tensor,
 };
 use crate::builtins::math::reduction::type_resolvers::count_nonzero_type;
-use crate::dispatcher::download_handle_async;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ResolveContext, Type,
 };
@@ -68,6 +71,35 @@ const NNZ_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
         inputs: &NNZ_INPUTS_DIM,
         outputs: &NNZ_OUTPUT,
     },
+];
+
+const NNZ_DIMENSION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "nnz-dimension-reduction",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "nnz(A,dim) is a RunMat reduction convenience; the documented MATLAB nnz surface accepts only nnz(A)",
+    error_identifier: Some("RunMat:compatibility:NnzDimensionExtension"),
+};
+pub const NNZ_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [NNZ_DIMENSION_EXTENSION];
+
+const NNZ_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer classes are explicitly documented and zero tests read authoritative native storage.",
+    }];
+const NNZ_INTEGER_DIM_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "dim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The entire dimension-reduction overload is RunMat-only; admitted integer dimensions are parsed exactly before reduction.",
+    }];
+pub const NNZ_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor { form: "N = nnz(integer_A)", inputs: &NNZ_INTEGER_DATA_INPUTS, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Every exact nonzero native integer contributes one and the result is a host double scalar. Resident input uses its exact owner for provider reduction or non-destructive authoritative fallback." },
+    BuiltinIntegerCapabilityDescriptor { form: "N = nnz(integer_A, integer_dim)", inputs: &NNZ_INTEGER_DIM_INPUTS, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "MATLAB-compatible modes reject the undocumented overload before provider access. RunMat mode returns a host double reduction with MATLAB dimension geometry." },
 ];
 
 const NNZ_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -206,9 +238,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     type_resolver(nnz_type),
     descriptor(crate::builtins::math::reduction::nnz::NNZ_DESCRIPTOR),
+    extensions(crate::builtins::math::reduction::nnz::NNZ_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::reduction::nnz::NNZ_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::reduction::nnz"
 )]
 async fn nnz_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if !rest.is_empty() {
+        crate::compatibility::ensure_builtin_extension_enabled(&NNZ_DIMENSION_EXTENSION, NAME)?;
+    }
     let dim = parse_dimension_arg(&rest).await?;
     match value {
         Value::GpuTensor(handle) => nnz_gpu(handle, dim).await,
@@ -239,17 +276,41 @@ async fn parse_dimension_arg(args: &[Value]) -> BuiltinResult<Option<usize>> {
 }
 
 async fn nnz_gpu(handle: GpuTensorHandle, dim: Option<usize>) -> BuiltinResult<Value> {
-    let provider = runmat_accelerate_api::provider();
+    let provider = gpu_helpers::exact_provider_for_handle(&handle)
+        .filter(|_| runmat_accelerate_api::handle_integer_type(&handle).is_none());
     match dim {
         None => {
             if let Some(p) = provider {
-                if let Ok(result) = p.reduce_nnz(&handle).await {
-                    let host = download_handle_async(p, &result).await.map_err(|e| {
-                        nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, e.to_string())
-                    })?;
-                    let _ = p.free(&result);
-                    let count = host.data.into_iter().next().unwrap_or(0.0);
-                    return Ok(Value::Num(count));
+                match p.reduce_nnz(&handle).await {
+                    Ok(result) => {
+                        validate_provider_result(p, &handle, &result, &[1, 1])?;
+                        let host =
+                            gpu_helpers::download_value_preserving_residency_async(p, &result)
+                                .await;
+                        gpu_helpers::free_unprotected_exact_owner(&result, &[&handle]);
+                        let host = host.map_err(|error| {
+                            nnz_terminal_provider_error(format!(
+                                "reduce_nnz result download failed: {error}"
+                            ))
+                        })?;
+                        let count = match host {
+                            Value::Tensor(tensor) if tensor.len() == 1 => {
+                                tensor::tensor_value_f64(&tensor, 0)
+                            }
+                            other => {
+                                return Err(nnz_terminal_provider_error(format!(
+                                    "reduce_nnz returned invalid scalar payload {other:?}"
+                                )))
+                            }
+                        };
+                        return Ok(Value::Num(count));
+                    }
+                    Err(error) if provider_operation_unsupported(&error, "reduce_nnz") => {}
+                    Err(error) => {
+                        return Err(nnz_terminal_provider_error(format!(
+                            "reduce_nnz execution failed: {error}"
+                        )))
+                    }
                 }
             }
             let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
@@ -259,15 +320,33 @@ async fn nnz_gpu(handle: GpuTensorHandle, dim: Option<usize>) -> BuiltinResult<V
             if let Some(p) = provider {
                 let zero_based = dim.saturating_sub(1);
                 if zero_based < handle.shape.len() {
-                    if let Ok(result) = p.reduce_nnz_dim(&handle, zero_based).await {
-                        let host = download_handle_async(p, &result).await.map_err(|e| {
-                            nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, e.to_string())
-                        })?;
-                        let _ = p.free(&result);
-                        let tensor = Tensor::new(host.data, host.shape).map_err(|e| {
-                            nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, &e)
-                        })?;
-                        return Ok(tensor::tensor_into_value(tensor));
+                    match p.reduce_nnz_dim(&handle, zero_based).await {
+                        Ok(result) => {
+                            let mut expected_shape = normalize_scalar_shape(&handle.shape);
+                            expected_shape[zero_based] = 1;
+                            validate_provider_result(p, &handle, &result, &expected_shape)?;
+                            let host =
+                                gpu_helpers::download_value_preserving_residency_async(p, &result)
+                                    .await;
+                            gpu_helpers::free_unprotected_exact_owner(&result, &[&handle]);
+                            let host = host.map_err(|error| {
+                                nnz_terminal_provider_error(format!(
+                                    "reduce_nnz_dim result download failed: {error}"
+                                ))
+                            })?;
+                            return match host {
+                                Value::Tensor(tensor) => Ok(tensor::tensor_into_value(tensor)),
+                                other => Err(nnz_terminal_provider_error(format!(
+                                    "reduce_nnz_dim returned invalid payload {other:?}"
+                                ))),
+                            };
+                        }
+                        Err(error) if provider_operation_unsupported(&error, "reduce_nnz_dim") => {}
+                        Err(error) => {
+                            return Err(nnz_terminal_provider_error(format!(
+                                "reduce_nnz_dim execution failed: {error}"
+                            )))
+                        }
                     }
                 }
             }
@@ -275,6 +354,53 @@ async fn nnz_gpu(handle: GpuTensorHandle, dim: Option<usize>) -> BuiltinResult<V
             nnz_host_value(Value::Tensor(tensor), Some(dim))
         }
     }
+}
+
+fn provider_operation_unsupported(error: &anyhow::Error, operation: &str) -> bool {
+    let expected = format!("{operation} not supported by provider");
+    error.chain().any(|cause| cause.to_string() == expected)
+}
+
+fn nnz_terminal_provider_error(detail: impl AsRef<str>) -> RuntimeError {
+    build_runtime_error(format!(
+        "{}: {}",
+        NNZ_ERROR_INTERNAL.message,
+        detail.as_ref()
+    ))
+    .with_builtin(NAME)
+    .with_identifier(
+        NNZ_ERROR_INTERNAL
+            .identifier
+            .expect("nnz internal identifier"),
+    )
+    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+    .build()
+}
+
+fn validate_provider_result(
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    source: &GpuTensorHandle,
+    result: &GpuTensorHandle,
+    expected_shape: &[usize],
+) -> BuiltinResult<()> {
+    let valid = !gpu_helpers::same_gpu_handle(source, result)
+        && result.shape == expected_shape
+        && result.device_id == provider.device_id()
+        && gpu_helpers::exact_provider_for_handle(result)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+        && runmat_accelerate_api::handle_storage(result)
+            == runmat_accelerate_api::GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_integer_type(result).is_none()
+        && !runmat_accelerate_api::handle_is_logical(result)
+        && runmat_accelerate_api::handle_precision(result) == Some(provider.precision())
+        && gpu_helpers::gpu_class_metadata_matches(result, Some(provider.precision()), None, false);
+    if valid {
+        return Ok(());
+    }
+    gpu_helpers::free_unprotected_exact_owner(result, &[source]);
+    Err(nnz_terminal_provider_error(
+        "provider returned a malformed, aliased, or foreign reduction result",
+    ))
 }
 
 fn nnz_host_value(value: Value, dim: Option<usize>) -> BuiltinResult<Value> {
@@ -320,6 +446,13 @@ fn count_nonzero_value(value: &Value) -> BuiltinResult<usize> {
 }
 
 fn count_nonzero_tensor(tensor: &Tensor) -> usize {
+    if let Some(storage) = tensor.integer_storage() {
+        return storage
+            .exact_values()
+            .into_iter()
+            .filter(|value| !value.is_zero())
+            .count();
+    }
     tensor::tensor_values_f64_cow(tensor)
         .iter()
         .copied()
@@ -382,17 +515,24 @@ fn mask_from_value(value: &Value) -> BuiltinResult<Mask> {
     match value {
         Value::Tensor(tensor) => {
             let shape = canonical_shape(&tensor.shape, tensor.len());
-            let values = tensor::tensor_values_f64_cow(tensor);
-            let bits = values
-                .iter()
-                .map(|&v| if is_nonzero_scalar(v) { 1u8 } else { 0u8 })
-                .collect();
+            let bits = if let Some(storage) = tensor.integer_storage() {
+                storage
+                    .exact_values()
+                    .into_iter()
+                    .map(|value| u8::from(!value.is_zero()))
+                    .collect()
+            } else {
+                tensor::tensor_values_f64_cow(tensor)
+                    .iter()
+                    .map(|&value| u8::from(is_nonzero_scalar(value)))
+                    .collect()
+            };
             Ok(Mask { bits, shape })
         }
         Value::ComplexTensor(tensor) => {
-            let shape = canonical_shape(&tensor.shape, tensor.materialize_f64().len());
-            let bits = if let Some(storage) = tensor.integer_storage() {
-                (0..storage.len())
+            let shape = canonical_shape(&tensor.shape, tensor.len());
+            let bits = match tensor.complex_storage() {
+                runmat_value::ComplexStorage::Integer(storage) => (0..storage.len())
                     .map(|index| {
                         u8::from(
                             storage
@@ -400,13 +540,17 @@ fn mask_from_value(value: &Value) -> BuiltinResult<Mask> {
                                 .expect("typed complex integer storage is structurally valid"),
                         )
                     })
-                    .collect()
-            } else {
-                tensor
-                    .materialize_f64()
+                    .collect(),
+                runmat_value::ComplexStorage::F64(values) => values
                     .iter()
-                    .map(|&(re, im)| if is_nonzero_complex(re, im) { 1u8 } else { 0u8 })
-                    .collect()
+                    .map(|&(real, imag)| u8::from(is_nonzero_complex(real, imag)))
+                    .collect(),
+                runmat_value::ComplexStorage::F32(values) => values
+                    .iter()
+                    .map(|&(real, imag)| {
+                        u8::from(real.is_nan() || imag.is_nan() || real != 0.0 || imag != 0.0)
+                    })
+                    .collect(),
             };
             Ok(Mask { bits, shape })
         }
@@ -793,6 +937,63 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(2.0));
     }
 
+    #[test]
+    fn nnz_counts_every_integer_class_from_authoritative_storage() {
+        let cases = [
+            IntegerStorage::I8(vec![0, i8::MIN, i8::MAX]),
+            IntegerStorage::I16(vec![0, i16::MIN, i16::MAX]),
+            IntegerStorage::I32(vec![0, i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![0, i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![0, 1, u8::MAX]),
+            IntegerStorage::U16(vec![0, 1, u16::MAX]),
+            IntegerStorage::U32(vec![0, 1, u32::MAX]),
+            IntegerStorage::U64(vec![0, 1, u64::MAX]),
+        ];
+        for storage in cases {
+            let tensor = Tensor::new_integer(storage, vec![3, 1]).expect("integer tensor");
+            assert_eq!(
+                nnz_host_value(Value::Tensor(tensor), None).expect("integer nnz"),
+                Value::Num(2.0)
+            );
+        }
+    }
+
+    #[test]
+    fn nnz_dimension_extension_gates_before_provider_access() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let source = Value::GpuTensor(GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 9_419_008,
+            descriptor: Default::default(),
+        });
+        let error = block_on(nnz_builtin(source, vec![Value::Int(IntValue::U8(1))]))
+            .expect_err("undocumented dimension overload must gate");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:NnzDimensionExtension")
+        );
+    }
+
+    #[test]
+    fn nnz_provider_failures_only_fallback_for_exact_unsupported_errors() {
+        assert!(provider_operation_unsupported(
+            &anyhow::anyhow!("reduce_nnz not supported by provider"),
+            "reduce_nnz"
+        ));
+        assert!(provider_operation_unsupported(
+            &anyhow::anyhow!("reduce_nnz_dim not supported by provider")
+                .context("provider context"),
+            "reduce_nnz_dim"
+        ));
+        assert!(!provider_operation_unsupported(
+            &anyhow::anyhow!("reduce_nnz not supported by provider: device lost"),
+            "reduce_nnz"
+        ));
+        let error = nnz_terminal_provider_error("device lost");
+        assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_sparse_ignores_explicit_stored_zeros() {
@@ -1018,9 +1219,11 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn nnz_wgpu_dim_matches_cpu() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let _guard = test_support::accel_test_lock();
+        runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        )
+        .expect("register WGPU provider");
         let tensor = Tensor::new(vec![1.0, 0.0, 2.0, 5.0], vec![2, 2]).unwrap();
         let cpu = nnz_host_value(Value::Tensor(tensor.clone()), Some(1)).expect("nnz");
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
@@ -1037,6 +1240,32 @@ pub(crate) mod tests {
             }
             other => panic!("unexpected comparison result {other:?}"),
         }
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn nnz_wgpu_integer_fallback_is_exact_and_preserves_source() {
+        let _guard = test_support::accel_test_lock();
+        runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .expect("register WGPU provider");
+        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![0, 9_007_199_254_740_993, u64::MAX]),
+            vec![3, 1],
+        )
+        .expect("integer tensor");
+        let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload integer");
+        let result = block_on(nnz_gpu(handle.clone(), None)).expect("integer nnz fallback");
+        assert_eq!(result, Value::Num(2.0));
+        let source = block_on(gpu_helpers::download_value_preserving_residency_async(
+            provider, &handle,
+        ))
+        .expect("source remains live");
+        assert!(
+            matches!(source, Value::Tensor(tensor) if tensor.integer_storage() == Some(&IntegerStorage::U64(vec![0, 9_007_199_254_740_993, u64::MAX])))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1059,6 +1288,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nnz_too_many_args_sets_invalid_argument_identifier() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let err = block_on(nnz_builtin(
             Value::Num(1.0),
             vec![Value::Num(1.0), Value::Num(2.0)],

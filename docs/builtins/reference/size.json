@@ -32,6 +32,7 @@
     "`size(A)` returns a `1×N` row vector listing the extents of each dimension.",
     "`size(A, dim)` returns the extent of the specified dimension as a scalar. Dimensions outside the current rank return `1`.",
     "`size(A, dims)` accepts a vector of dimensions and returns the corresponding extents.",
+    "`size(A, [])` returns a `1×0` empty double row vector. Integer dimension vectors are read from their native storage and must contain positive values.",
     "Column and row vectors are distinguished by the tensor metadata: `size(A)` yields `[m n]` for `m×n` matrices, `[1 n]` for row vectors, and `[m 1]` for column vectors.",
     "Character arrays return `[rows cols]`; string scalars return `[1 1]`.",
     "Cell arrays and struct scalars follow MATLAB's array semantics.",

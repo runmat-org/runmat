@@ -51,7 +51,7 @@
       "input": "patch = [1 0 1; 0 1 0; 1 0 1];\nF = fft2(patch, 8, 8)"
     },
     {
-      "description": "RunMat extension: specifying transform lengths with a size vector",
+      "description": "Specifying transform lengths with a size vector",
       "input": "X = rand(4, 6);\nF = fft2(X, [8 4]);   % requires RunMat extension mode"
     },
     {

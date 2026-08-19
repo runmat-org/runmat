@@ -2838,7 +2838,7 @@ mod tests {
         let Value::Tensor(tensor) = &vars[y_export.slot.0] else {
             panic!("expected tensor");
         };
-        assert_eq!(tensor.shape, vec![2, 1]);
+        assert_eq!(tensor.shape, vec![1, 2]);
         assert_eq!(tensor.materialize_f64(), vec![30.0, 40.0]);
     }
 
@@ -6952,11 +6952,11 @@ y = x^[1 2; 3 4];\n",
                 }
             })),
         );
-        let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(
-            Some(Arc::new(|function, args, requested_outputs| {
-                assert_eq!(function, 9001);
-                assert_eq!(args, &[Value::Num(2.0)]);
-                assert_eq!(requested_outputs, 1);
+        let _invoker_guard = runmat_runtime::user_functions::install_external_function_invoker(
+            Some(Arc::new(|call| {
+                assert_eq!(call.function, 9001);
+                assert_eq!(call.arguments, [Value::Num(2.0)]);
+                assert_eq!(call.requested_outputs, 1);
                 Box::pin(async move { Ok(Value::Num(3.0)) })
             })),
         );

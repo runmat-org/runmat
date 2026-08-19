@@ -42,7 +42,8 @@
     "Two-output calls return `[p, z]`, where each output is a column vector.",
     "Single-output calls return the pole column vector.",
     "Outputs use complex tensors when any pole or zero has a nonzero imaginary component.",
-    "Input/output delays raise clear unsupported-model diagnostics."
+    "Input/output delays raise clear unsupported-model diagnostics.",
+    "The top-level `sys` input must be a dynamic-system object. A typed-integer array is not a `pzmap` input; integer coefficient semantics belong to the `tf` and `ss` constructors that create the model."
   ],
   "examples": [
     {

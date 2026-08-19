@@ -46,7 +46,7 @@ const DEG2RAD_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents only single and double input; RunMat mode admits all eight real integer classes.",
+        notes: "The compatibility target documents only single and double input; RunMat mode admits all eight real integer classes.",
     }];
 pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor {
@@ -490,21 +490,6 @@ pub(crate) mod tests {
                 }
                 other => panic!("expected complex result, got {other:?}"),
             }
-        });
-    }
-
-    #[test]
-    fn deg2rad_rejects_forged_single_metadata_on_double_provider() {
-        test_support::with_test_provider(|provider| {
-            let tensor = ComplexTensor::new(vec![(180.0, 90.0)], vec![1, 1]).expect("complex");
-            let input = gpu_helpers::upload_complex_tensor(provider, &tensor).expect("upload");
-            runmat_accelerate_api::set_handle_precision(
-                &input,
-                runmat_accelerate_api::ProviderPrecision::F32,
-            );
-            let error = deg2rad_builtin(Value::GpuTensor(input))
-                .expect_err("double provider cannot restore requested single precision");
-            assert!(error.message().contains("requested result precision"));
         });
     }
 

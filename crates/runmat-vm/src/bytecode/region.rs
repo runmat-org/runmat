@@ -19,8 +19,10 @@ pub struct BytecodeRegion {
 }
 
 impl Bytecode {
-    /// Transactionally install the complete analyzed region inventory after
-    /// resolving every MIR program point to an exact empty-stack VM boundary.
+    /// Transactionally install every analyzed region that resolves to exact
+    /// empty-stack VM boundaries in this bytecode product. Regions are
+    /// optional optimization candidates; a composed or transformed product
+    /// that cannot represent one must execute normally without it.
     pub fn install_regions(&mut self, contracts: &[RegionContract]) -> Result<(), String> {
         let mut contracts = contracts.iter().collect::<Vec<_>>();
         contracts.sort_by_key(|contract| contract.id);
@@ -36,22 +38,29 @@ impl Bytecode {
                 usize::try_from(contract.id.function.0)
                     .map_err(|_| "region function identity exceeds this target".to_string())?,
             );
-            let region = if let Some(function) = self.function_registry.functions.get(&function) {
-                map_bytecode_region(contract, &function.resume_points)?
-            } else {
-                let points = self
-                    .layout
-                    .as_ref()
-                    .and_then(|layout| layout.functions.get(&function))
-                    .map(|layout| &layout.resume_points)
-                    .ok_or_else(|| {
-                        format!(
-                            "region {:?} references function without VM layout",
-                            contract.id
-                        )
-                    })?;
-                map_bytecode_region(contract, points)?
+            // Region contracts describe this executable's MIR assembly. Prefer
+            // its immutable layout over the composed session registry: a
+            // persisted function may legitimately reuse a unit-local function
+            // identity while carrying resume points for a different body.
+            let layout_points = self
+                .layout
+                .as_ref()
+                .and_then(|layout| layout.functions.get(&function))
+                .map(|layout| &layout.resume_points);
+            let registry_points = self
+                .function_registry
+                .functions
+                .get(&function)
+                .map(|function| &function.resume_points);
+            let Some(points) = layout_points
+                .filter(|points| contains_region_boundaries(contract, points))
+                .or_else(|| {
+                    registry_points.filter(|points| contains_region_boundaries(contract, points))
+                })
+            else {
+                continue;
             };
+            let region = map_bytecode_region(contract, points)?;
             mapped.push((function, region));
         }
 
@@ -72,6 +81,14 @@ impl Bytecode {
         }
         Ok(())
     }
+}
+
+fn contains_region_boundaries(
+    contract: &RegionContract,
+    points: &std::collections::BTreeMap<ProgramPointId, usize>,
+) -> bool {
+    points.contains_key(&contract.entry)
+        && contract.exits.iter().all(|exit| points.contains_key(exit))
 }
 
 fn map_bytecode_region(

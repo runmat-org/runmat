@@ -2,12 +2,65 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 use super::axis_tick_angle::axis_tick_angle_builtin;
 use super::axis_ticks::TickAxis;
 use crate::builtins::plotting::type_resolvers::get_type;
+
+const XTICKANGLE_INTEGER_AXES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "xtickangle-integer-axes-handle",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "Allow a typed-integer alias for an encoded axes handle",
+    error_identifier: Some("RunMat:compatibility:XtickangleIntegerAxesHandleExtension"),
+};
+pub const XTICKANGLE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [XTICKANGLE_INTEGER_AXES_EXTENSION];
+const XTICKANGLE_INTEGER_ANGLE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "angle",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public numeric-scalar rotation contract accepts integer degree values.",
+    }];
+const XTICKANGLE_INTEGER_AXES_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "ax",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer aliases for encoded axes handles are separately gated.",
+    }];
+pub const XTICKANGLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "xtickangle(integer_angle)",
+        inputs: &XTICKANGLE_INTEGER_ANGLE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The finite angle crosses the graphics rotation boundary; queries return double.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "xtickangle(integer_ax, angle)",
+        inputs: &XTICKANGLE_INTEGER_AXES_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Strict mode rejects before graphics state access.",
+    },
+];
 
 const OUTPUT_ANGLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "angle",
@@ -107,9 +160,21 @@ pub const XTICKANGLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     suppress_auto_output = true,
     type_resolver(get_type),
     descriptor(crate::builtins::plotting::xtickangle::XTICKANGLE_DESCRIPTOR),
+    extensions(crate::builtins::plotting::xtickangle::XTICKANGLE_EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::xtickangle::XTICKANGLE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::xtickangle"
 )]
 pub fn xtickangle_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if args.len() == 2
+        && args
+            .first()
+            .is_some_and(crate::builtins::common::validation::value_has_native_integer_class)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &XTICKANGLE_INTEGER_AXES_EXTENSION,
+            "xtickangle",
+        )?;
+    }
     axis_tick_angle_builtin("xtickangle", TickAxis::X, args)
 }
 

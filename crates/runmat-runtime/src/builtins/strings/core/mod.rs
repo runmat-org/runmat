@@ -6,6 +6,7 @@ pub mod compose;
 pub mod genvarname;
 pub mod int2str;
 pub mod num2str;
+pub mod patterns;
 pub mod sprintf;
 pub mod str2double;
 pub mod strcmp;

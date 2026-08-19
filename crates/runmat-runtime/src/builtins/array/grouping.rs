@@ -64,22 +64,24 @@ pub const FINDGROUPS_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
     FINDGROUPS_TIMETABLE_EXTENSION,
 ];
 
-const FINDGROUPS_INTEGER_VECTOR_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
+const FINDGROUPS_INTEGER_VECTOR_INPUTS: [BuiltinIntegerInputCapability; 1] = [
+    BuiltinIntegerInputCapability {
         name: "A",
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
         notes: "Every integer class is a documented numeric grouping vector and is compared from authoritative storage.",
-    }];
-const FINDGROUPS_INTEGER_MULTI_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
+    },
+];
+const FINDGROUPS_INTEGER_MULTI_INPUTS: [BuiltinIntegerInputCapability; 1] = [
+    BuiltinIntegerInputCapability {
         name: "A1,...,AN",
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
         notes: "Each integer grouping role retains its own class while exact tuples are sorted lexicographically.",
-    }];
+    },
+];
 const FINDGROUPS_INTEGER_TABLE_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
         name: "integer table variables",
@@ -121,16 +123,17 @@ pub const FINDGROUPS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 
     },
 ];
 
-const GRP2IDX_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
+const GRP2IDX_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [
+    BuiltinIntegerInputCapability {
         name: "s",
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
         notes: "All eight integer classes are documented grouping-vector inputs and are compared from authoritative storage.",
-    }];
-pub const GRP2IDX_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
+    },
+];
+pub const GRP2IDX_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [
+    BuiltinIntegerCapabilityDescriptor {
         form: "[g,gN,gL] = grp2idx(integer_s)",
         inputs: &GRP2IDX_INTEGER_INPUTS,
         computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
@@ -139,7 +142,8 @@ pub const GRP2IDX_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] 
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::SameSizeOrScalar,
         notes: "g is a double group-index column, gN is cellstr, and gL preserves s's exact integer class. Documented resident inputs currently use the runtime gather fallback.",
-    }];
+    },
+];
 
 const GROUPCOUNTS_RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor =
     BuiltinExtensionDescriptor {
@@ -148,26 +152,46 @@ const GROUPCOUNTS_RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor =
         description: "groupcounts on interactive resident GPU data is a RunMat extension",
         error_identifier: Some("RunMat:compatibility:GroupcountsResidentInputExtension"),
     };
-pub const GROUPCOUNTS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
-    [GROUPCOUNTS_RESIDENT_INPUT_EXTENSION];
+const GROUPCOUNTS_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "groupcounts-integer-control",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "groupcounts with a native-class integer bin-count or boolean control is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:GroupcountsIntegerControlExtension"),
+    };
+pub const GROUPCOUNTS_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    GROUPCOUNTS_RESIDENT_INPUT_EXTENSION,
+    GROUPCOUNTS_INTEGER_CONTROL_EXTENSION,
+];
 
-const GROUPCOUNTS_INTEGER_ARRAY_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
+const GROUPCOUNTS_INTEGER_ARRAY_INPUTS: [BuiltinIntegerInputCapability; 1] = [
+    BuiltinIntegerInputCapability {
         name: "A",
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
         notes: "Integer numeric grouping columns are compared exactly and their unique group labels preserve class.",
-    }];
-const GROUPCOUNTS_INTEGER_TABLE_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
+    },
+];
+const GROUPCOUNTS_INTEGER_TABLE_INPUTS: [BuiltinIntegerInputCapability; 1] = [
+    BuiltinIntegerInputCapability {
         name: "integer grouping table variables",
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
         notes: "Integer-valued table grouping variables retain exact class and values in the output table.",
-    }];
-pub const GROUPCOUNTS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    },
+];
+const GROUPCOUNTS_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 1] = [
+    BuiltinIntegerInputCapability {
+        name: "native-class integer bin count or boolean name-value control",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented control is a positive numeric scalar or logical value; a native integer scalar is accepted only in RunMat extension mode.",
+    },
+];
+pub const GROUPCOUNTS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
     BuiltinIntegerCapabilityDescriptor {
         form: "[B,BG,BP] = groupcounts(integer_A)",
         inputs: &GROUPCOUNTS_INTEGER_ARRAY_INPUTS,
@@ -176,7 +200,7 @@ pub const GROUPCOUNTS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor;
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Unbinned grouping and BG are exact and BG preserves A's class; B and BP are double count and percentage outputs. [integer-audit-open] Documented integer groupbins remain unresolved and keep this name in the quantitative audit queue.",
+        notes: "Unbinned grouping and BG are exact and BG preserves A's class. One-group numeric-edge and scalar-count forms preserve wide-integer comparisons without floating conversion; multi-group bin specifications and time bins currently reject explicitly. B and BP are double.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "G = groupcounts(T,groupvars) with integer grouping variables",
@@ -186,7 +210,17 @@ pub const GROUPCOUNTS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor;
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "For the unbinned form, output grouping variables preserve exact integer class while GroupCount and Percent are double. [integer-audit-open] Documented integer groupbins remain unresolved and keep this name in the quantitative audit queue.",
+        notes: "Unbinned output grouping variables preserve exact integer class. One-group numeric-edge and scalar-count forms compare integer variables exactly; multi-group bin specifications and time bins currently reject explicitly. GroupCount and Percent are double.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "groupcounts(A,integer_numbins,___) or integer boolean controls",
+        inputs: &GROUPCOUNTS_INTEGER_CONTROL_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "This is an explicitly gated input-form extension; equivalent scalar-double and logical controls remain available in strict compatibility mode.",
     },
 ];
 
@@ -203,17 +237,18 @@ const DISCRETIZE_INTEGER_X_EDGES_INPUTS: [BuiltinIntegerInputCapability; 2] = [
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight integer edge classes are documented; increasing edges are validated without an f64 mirror.",
+        notes: "All eight integer edge classes are documented; increasing edges are validated exactly in their source class.",
     },
 ];
-const DISCRETIZE_INTEGER_VALUES_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
+const DISCRETIZE_INTEGER_VALUES_INPUTS: [BuiltinIntegerInputCapability; 1] = [
+    BuiltinIntegerInputCapability {
         name: "values",
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
         notes: "Integer replacement values preserve class and use exact zero for out-of-range or missing X.",
-    }];
+    },
+];
 pub const DISCRETIZE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
     BuiltinIntegerCapabilityDescriptor {
         form: "Y = discretize(integer_X,integer_edges,___)",
@@ -493,16 +528,17 @@ pub(crate) const COMBINATIONS_RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescript
 pub const COMBINATIONS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
     [COMBINATIONS_RESIDENT_INPUT_EXTENSION];
 
-const COMBINATIONS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
+const COMBINATIONS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [
+    BuiltinIntegerInputCapability {
         name: "A1...An",
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
         notes: "Every public integer class is accepted and each output table variable retains its corresponding input class and exact values.",
-    }];
-pub const COMBINATIONS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
+    },
+];
+pub const COMBINATIONS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [
+    BuiltinIntegerCapabilityDescriptor {
         form: "T = combinations(integer_A1, ..., integer_An)",
         inputs: &COMBINATIONS_INTEGER_INPUTS,
         computation_domain: BuiltinIntegerComputationDomain::Structural,
@@ -510,8 +546,9 @@ pub const COMBINATIONS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Host inputs are repeated from authoritative native storage without an f64 mirror. A resident input is a gated RunMat extension because the required table result is host-resident.",
-    }];
+        notes: "Host inputs retain their exact class and values when repeated. A resident input is a gated RunMat extension because the required table result is host-resident.",
+    },
+];
 
 const ACCUMARRAY_IND_PARAM: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "ind",
@@ -871,11 +908,15 @@ struct Grouping {
 #[derive(Clone, Copy, Debug)]
 struct GroupOptions {
     include_missing: bool,
+    include_empty: bool,
+    included_right: bool,
 }
 
 impl GroupOptions {
     fn parse(args: &[Value], context: &str) -> BuiltinResult<Self> {
         let mut include_missing = true;
+        let mut include_empty = false;
+        let mut included_right = false;
         let mut idx = 0usize;
         while idx < args.len() {
             if idx + 1 >= args.len() {
@@ -887,12 +928,20 @@ impl GroupOptions {
             if name.eq_ignore_ascii_case("IncludeMissingGroups") {
                 include_missing = binary_bool_scalar(&args[idx + 1], "IncludeMissingGroups")?;
             } else if name.eq_ignore_ascii_case("IncludeEmptyGroups") {
-                let include_empty = binary_bool_scalar(&args[idx + 1], "IncludeEmptyGroups")?;
-                if include_empty {
-                    return Err(grouping_error(format!(
-                        "{context}: IncludeEmptyGroups=true is not supported until categorical level expansion is implemented"
-                    )));
-                }
+                include_empty = binary_bool_scalar(&args[idx + 1], "IncludeEmptyGroups")?;
+            } else if name.eq_ignore_ascii_case("IncludedEdge") {
+                included_right = match scalar_text(&args[idx + 1], "IncludedEdge")?
+                    .to_ascii_lowercase()
+                    .as_str()
+                {
+                    "left" => false,
+                    "right" => true,
+                    other => {
+                        return Err(grouping_error(format!(
+                            "{context}: IncludedEdge must be 'left' or 'right', got '{other}'"
+                        )));
+                    }
+                };
             } else {
                 return Err(grouping_error(format!(
                     "{context}: unsupported option '{name}'"
@@ -900,7 +949,11 @@ impl GroupOptions {
             }
             idx += 2;
         }
-        Ok(Self { include_missing })
+        Ok(Self {
+            include_missing,
+            include_empty,
+            included_right,
+        })
     }
 }
 
@@ -1113,36 +1166,45 @@ fn free_grp2idx_outputs(outputs: &[Value], prototype: &runmat_accelerate_api::Gp
     builtin_path = "crate::builtins::array::grouping"
 )]
 pub(crate) async fn groupcounts_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_groupcounts_extensions(&first, &rest)?;
+    ensure_groupcounts_residency_extension(&first, &rest)?;
     let first = gather_if_needed_async(&first).await?;
     let rest = gather_values(rest).await?;
     if let Value::Object(object) = first.clone() {
         if is_tabular_object(&object) {
             let (selector_args, option_args) = split_option_tail(rest)?;
+            let bin_args = selector_args.get(1..).unwrap_or_default();
+            ensure_groupcounts_control_extension(bin_args, &option_args)?;
             return groupcounts_table(object, selector_args, option_args);
         }
     }
     let (data_args, option_args) = split_option_tail(rest)?;
-    if !data_args.is_empty() {
-        return Err(grouping_error(
-            "groupcounts: groupbins are documented but not yet implemented; unbinned grouping accepts no positional argument after A",
-        ));
-    }
+    ensure_groupcounts_control_extension(&data_args, &option_args)?;
     let options = GroupOptions::parse(&option_args, "groupcounts")?;
-    let columns = if matches!(first, Value::Cell(_)) {
+    let mut columns = if matches!(first, Value::Cell(_)) {
         columns_from_group_value("A", first, true)?
     } else {
         columns_from_group_args(vec![first])?
     };
+    let bin_labels = apply_groupcount_bins(&mut columns, &data_args, options.included_right)?;
     let grouping = build_grouping_with_options(&columns, options)?;
-    let counts = grouping
-        .row_groups
+    let (keys, row_groups) =
+        groupcount_keys_with_empty_bins(&grouping, bin_labels.as_deref(), options.include_empty);
+    let counts = row_groups
         .iter()
         .map(|rows| rows.len() as f64)
         .collect::<Vec<_>>();
-    let b =
-        Value::Tensor(Tensor::new(counts, vec![grouping.keys.len(), 1]).map_err(grouping_error)?);
-    let bg_columns = group_label_outputs(&columns, &grouping)?;
+    let b = Value::Tensor(Tensor::new(counts, vec![keys.len(), 1]).map_err(grouping_error)?);
+    let bg_columns = if bin_labels.is_some() {
+        vec![Value::StringArray(
+            StringArray::new(
+                keys.iter().map(|key| key[0].label()).collect(),
+                vec![keys.len(), 1],
+            )
+            .map_err(grouping_error)?,
+        )]
+    } else {
+        group_label_outputs(&columns, &grouping)?
+    };
     let bg = if bg_columns.len() == 1 {
         bg_columns.into_iter().next().expect("one grouping column")
     } else {
@@ -1150,8 +1212,7 @@ pub(crate) async fn groupcounts_builtin(first: Value, rest: Vec<Value>) -> Built
     };
     let bp = Value::Tensor(
         Tensor::new(
-            grouping
-                .row_groups
+            row_groups
                 .iter()
                 .map(|rows| {
                     if grouping.ids.is_empty() {
@@ -1161,15 +1222,15 @@ pub(crate) async fn groupcounts_builtin(first: Value, rest: Vec<Value>) -> Built
                     }
                 })
                 .collect(),
-            vec![grouping.keys.len(), 1],
+            vec![keys.len(), 1],
         )
         .map_err(grouping_error)?,
     );
     multi_output(vec![b, bg, bp])
 }
 
-fn ensure_groupcounts_extensions(first: &Value, rest: &[Value]) -> BuiltinResult<()> {
-    if crate::value_contains_gpu(first) || rest.iter().any(crate::value_contains_gpu) {
+fn ensure_groupcounts_residency_extension(first: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    if value_contains_explicit_gpu(first) || rest.iter().any(value_contains_explicit_gpu) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &GROUPCOUNTS_RESIDENT_INPUT_EXTENSION,
             "groupcounts",
@@ -1178,6 +1239,318 @@ fn ensure_groupcounts_extensions(first: &Value, rest: &[Value]) -> BuiltinResult
     Ok(())
 }
 
+fn ensure_groupcounts_control_extension(
+    positional: &[Value],
+    options: &[Value],
+) -> BuiltinResult<()> {
+    let typed_bin_count =
+        positional.len() == 1 && groupcounts_typed_integer_control(&positional[0]);
+    let typed_boolean = options.chunks_exact(2).any(|pair| {
+        scalar_text(&pair[0], "option").is_ok_and(|name| {
+            name.eq_ignore_ascii_case("IncludeMissingGroups")
+                || name.eq_ignore_ascii_case("IncludeEmptyGroups")
+        }) && groupcounts_typed_integer_control(&pair[1])
+    });
+    if typed_bin_count || typed_boolean {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &GROUPCOUNTS_INTEGER_CONTROL_EXTENSION,
+            "groupcounts",
+        )?;
+    }
+    Ok(())
+}
+
+fn value_contains_explicit_gpu(value: &Value) -> bool {
+    match value {
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_explicit(handle),
+        Value::Cell(cell) => cell.data.iter().any(value_contains_explicit_gpu),
+        Value::Struct(value) => value.fields.values().any(value_contains_explicit_gpu),
+        Value::Object(value) => value.properties.values().any(value_contains_explicit_gpu),
+        Value::Closure(value) => value.captures.iter().any(value_contains_explicit_gpu),
+        Value::OutputList(values) => values.iter().any(value_contains_explicit_gpu),
+        _ => false,
+    }
+}
+
+fn groupcounts_typed_integer_control(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.len() == 1 && tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if handle.shape.iter().product::<usize>() == 1 && runmat_accelerate_api::handle_integer_type(handle).is_some())
+        || matches!(value, Value::Cell(cell) if cell.data.len() == 1 && groupcounts_typed_integer_control(&cell.data[0]))
+}
+
+fn apply_groupcount_bins(
+    columns: &mut [GroupColumn],
+    positional: &[Value],
+    included_right: bool,
+) -> BuiltinResult<Option<Vec<String>>> {
+    if positional.is_empty() {
+        return Ok(None);
+    }
+    if positional.len() != 1 || columns.len() != 1 {
+        return Err(grouping_error(
+            "groupcounts: numeric groupbins currently require one numeric grouping vector; time bins and multiple grouping vectors are not implemented",
+        ));
+    }
+    let spec = match &positional[0] {
+        Value::Cell(cell) if cell.data.len() == 1 => &cell.data[0],
+        Value::Cell(_) => {
+            return Err(grouping_error(
+                "groupcounts: a cell groupbins argument must contain exactly one specification for one grouping vector",
+            ));
+        }
+        value => value,
+    };
+    if scalar_text(spec, "groupbins").is_ok_and(|text| text.eq_ignore_ascii_case("none")) {
+        return Ok(None);
+    }
+    let values = numeric_scalars(&columns[0].value, "groupcounts grouping data")?;
+    let (assignments, labels) = if is_groupcounts_bin_count(spec) {
+        let count = groupcounts_bin_count(spec)?;
+        equal_count_bin_assignments(&values, count, included_right)?
+    } else {
+        let edges = numeric_scalars(spec, "groupcounts numeric bin edges")?;
+        if edges.len() < 2 {
+            return Err(grouping_error(
+                "groupcounts: numeric bin edges must contain at least two values",
+            ));
+        }
+        for pair in edges.windows(2) {
+            if compare_numeric(pair[0], pair[1]) != Some(Ordering::Less) {
+                return Err(grouping_error(
+                    "groupcounts: numeric bin edges must be finite and strictly increasing",
+                ));
+            }
+        }
+        let labels = (0..edges.len() - 1)
+            .map(|idx| {
+                numeric_bin_label(
+                    edges[idx],
+                    edges[idx + 1],
+                    idx,
+                    edges.len() - 1,
+                    included_right,
+                )
+            })
+            .collect::<Vec<_>>();
+        let assignments = values
+            .iter()
+            .map(|value| discretize_one_exact(*value, &edges, included_right).map(|idx| idx - 1))
+            .collect::<Vec<_>>();
+        (assignments, labels)
+    };
+    let row_labels = assignments
+        .into_iter()
+        .map(|bin| {
+            bin.map(|idx| labels[idx].clone())
+                .unwrap_or_else(|| "<missing>".into())
+        })
+        .collect();
+    columns[0].value = Value::StringArray(
+        StringArray::new(row_labels, vec![columns[0].rows, 1]).map_err(grouping_error)?,
+    );
+    Ok(Some(labels))
+}
+
+fn is_groupcounts_bin_count(value: &Value) -> bool {
+    matches!(value, Value::Num(number) if is_positive_integer_f64(*number))
+        || matches!(value, Value::Int(integer) if integer.try_to_usize().is_some_and(|value| value > 0))
+        || matches!(value, Value::Tensor(tensor) if tensor.len() == 1)
+}
+
+fn groupcounts_bin_count(value: &Value) -> BuiltinResult<usize> {
+    let count = tensor_utils::scalar_integer_value(value)
+        .and_then(|value| value.try_to_usize())
+        .or_else(|| match value {
+            Value::Num(value) if is_positive_integer_f64(*value) => Some(*value as usize),
+            Value::Tensor(tensor) if tensor.len() == 1 => {
+                let value = tensor_utils::tensor_value_f64(tensor, 0);
+                is_positive_integer_f64(value).then_some(value as usize)
+            }
+            _ => None,
+        })
+        .filter(|count| *count > 0 && *count <= 1_000_000)
+        .ok_or_else(|| {
+            grouping_error(
+                "groupcounts: number of bins must be a positive integer no greater than 1000000",
+            )
+        })?;
+    Ok(count)
+}
+
+fn equal_count_bin_assignments(
+    values: &[NumericScalar],
+    count: usize,
+    included_right: bool,
+) -> BuiltinResult<(Vec<Option<usize>>, Vec<String>)> {
+    let mut finite = values
+        .iter()
+        .copied()
+        .filter(|value| compare_numeric(*value, *value).is_some())
+        .collect::<Vec<_>>();
+    finite.sort_by(|a, b| compare_numeric(*a, *b).unwrap_or(Ordering::Equal));
+    let Some(min) = finite.first().copied() else {
+        return Ok((
+            vec![None; values.len()],
+            (1..=count).map(|idx| format!("bin{idx}")).collect(),
+        ));
+    };
+    let max = finite.last().copied().expect("nonempty finite values");
+    let assignments = if let (Some(min), Some(max)) = (numeric_integer(min), numeric_integer(max)) {
+        let range = (max - min) as u128;
+        values
+            .iter()
+            .map(|value| {
+                let value = numeric_integer(*value)?;
+                if range == 0 {
+                    return Some(0);
+                }
+                let delta = (value - min) as u128;
+                let scaled = delta * count as u128;
+                let index = if included_right && delta > 0 {
+                    scaled.div_ceil(range).saturating_sub(1)
+                } else {
+                    scaled / range
+                };
+                Some((index as usize).min(count - 1))
+            })
+            .collect()
+    } else {
+        let min = min.materialize_f64();
+        let max = max.materialize_f64();
+        values
+            .iter()
+            .map(|value| {
+                let value = value.materialize_f64();
+                if !value.is_finite() {
+                    None
+                } else if min == max {
+                    Some(0)
+                } else {
+                    let scaled = (value - min) * count as f64 / (max - min);
+                    let index = if included_right && value > min {
+                        scaled.ceil() - 1.0
+                    } else {
+                        scaled.floor()
+                    };
+                    Some((index.max(0.0) as usize).min(count - 1))
+                }
+            })
+            .collect()
+    };
+    Ok((
+        assignments,
+        (1..=count).map(|idx| format!("bin{idx}")).collect(),
+    ))
+}
+
+fn numeric_bin_label(
+    lower: NumericScalar,
+    upper: NumericScalar,
+    index: usize,
+    count: usize,
+    included_right: bool,
+) -> String {
+    let number = |value: NumericScalar| {
+        value
+            .into_int_value()
+            .as_ref()
+            .map(format_integer_key)
+            .unwrap_or_else(|| format_key_number(value.materialize_f64()))
+    };
+    if included_right {
+        format!(
+            "{}{}, {}]",
+            if index == 0 { "[" } else { "(" },
+            number(lower),
+            number(upper)
+        )
+    } else {
+        format!(
+            "[{}, {}{}",
+            number(lower),
+            number(upper),
+            if index + 1 == count { "]" } else { ")" }
+        )
+    }
+}
+
+fn groupcount_keys_with_empty_bins(
+    grouping: &Grouping,
+    labels: Option<&[String]>,
+    include_empty: bool,
+) -> (Vec<Vec<Atom>>, Vec<Vec<usize>>) {
+    let Some(labels) = labels else {
+        return (grouping.keys.clone(), grouping.row_groups.clone());
+    };
+    let by_key = grouping
+        .keys
+        .iter()
+        .cloned()
+        .zip(grouping.row_groups.iter().cloned())
+        .collect::<BTreeMap<_, _>>();
+    let mut keys = labels
+        .iter()
+        .map(|label| vec![Atom::Text(label.clone())])
+        .filter(|key| include_empty || by_key.get(key).is_some_and(|rows| !rows.is_empty()))
+        .collect::<Vec<_>>();
+    if by_key.contains_key(&vec![Atom::Missing]) {
+        keys.push(vec![Atom::Missing]);
+    }
+    let rows = keys
+        .iter()
+        .map(|key| by_key.get(key).cloned().unwrap_or_default())
+        .collect();
+    (keys, rows)
+}
+
+const SPLITAPPLY_INTEGER_GROUP_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "splitapply-integer-group-vector",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "splitapply with a typed-integer G vector is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SplitapplyIntegerGroupVectorExtension"),
+};
+pub const SPLITAPPLY_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [SPLITAPPLY_INTEGER_GROUP_EXTENSION];
+const SPLITAPPLY_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X1,...,XN",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Numeric data variables may use any built-in integer class and each group slice reaches the callback without numeric conversion.",
+    }];
+const SPLITAPPLY_INTEGER_GROUP_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "G",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Public documentation specifies positive integer group numbers but does not establish typed-integer storage; RunMat compares admitted group values exactly.",
+    }];
+pub const SPLITAPPLY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = splitapply(func, integer_X1, ..., G)",
+        inputs: &SPLITAPPLY_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Group row selection preserves each data argument's authoritative class. Output class is determined by func and result concatenation.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = splitapply(func, X1, ..., integer_G)",
+        inputs: &SPLITAPPLY_INTEGER_GROUP_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed group identifiers are a gated RunMat extension and are decoded exactly; public documentation requires positive integer group values without establishing typed storage, and automatic residency may gather transparently.",
+    },
+];
+
 #[runtime_builtin(
     name = "splitapply",
     category = "array/grouping",
@@ -1185,6 +1558,8 @@ fn ensure_groupcounts_extensions(first: &Value, rest: &[Value]) -> BuiltinResult
     keywords = "splitapply,groups,apply,function,table",
     accel = "cpu",
     descriptor(crate::builtins::array::grouping::GROUPING_DESCRIPTOR),
+    extensions(crate::builtins::array::grouping::SPLITAPPLY_EXTENSIONS),
+    integer_capabilities(crate::builtins::array::grouping::SPLITAPPLY_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::grouping"
 )]
 pub(crate) async fn splitapply_builtin(
@@ -1192,6 +1567,14 @@ pub(crate) async fn splitapply_builtin(
     first_data: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    if let Some(group) = rest.last() {
+        if crate::builtins::common::validation::value_has_native_integer_class(group) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &SPLITAPPLY_INTEGER_GROUP_EXTENSION,
+                "splitapply",
+            )?;
+        }
+    }
     let func = gather_if_needed_async(&func).await?;
     let first_data = gather_if_needed_async(&first_data).await?;
     let rest = gather_values(rest).await?;
@@ -1716,6 +2099,8 @@ fn build_grouping(columns: &[GroupColumn]) -> BuiltinResult<Grouping> {
         columns,
         GroupOptions {
             include_missing: false,
+            include_empty: false,
+            included_right: false,
         },
     )
 }
@@ -2016,10 +2401,8 @@ fn groupcounts_table(
     option_args: Vec<Value>,
 ) -> BuiltinResult<Value> {
     let all_names = table_variable_names_from_object(&object)?;
-    if selector_args.len() > 1 {
-        return Err(grouping_error(
-            "groupcounts: groupbins are documented but not yet implemented for table input",
-        ));
+    if selector_args.len() > 2 {
+        return Err(grouping_error("groupcounts: too many positional arguments"));
     }
     let selector = selector_args.first().ok_or_else(|| {
         grouping_error("groupcounts: table input requires a grouping variable selector")
@@ -2041,26 +2424,41 @@ fn groupcounts_table(
             value,
         });
     }
+    let bin_labels = apply_groupcount_bins(
+        &mut columns,
+        selector_args
+            .get(1)
+            .map(std::slice::from_ref)
+            .unwrap_or(&[]),
+        options.included_right,
+    )?;
     let grouping = build_grouping_with_options(&columns, options)?;
+    let (keys, row_groups) =
+        groupcount_keys_with_empty_bins(&grouping, bin_labels.as_deref(), options.include_empty);
     let mut out_names = selected.clone();
-    let mut out_columns = group_label_outputs(&columns, &grouping)?;
+    let mut out_columns = if bin_labels.is_some() {
+        vec![Value::StringArray(
+            StringArray::new(
+                keys.iter().map(|key| key[0].label()).collect(),
+                vec![keys.len(), 1],
+            )
+            .map_err(grouping_error)?,
+        )]
+    } else {
+        group_label_outputs(&columns, &grouping)?
+    };
     out_names.push("GroupCount".to_string());
     out_columns.push(Value::Tensor(
         Tensor::new(
-            grouping
-                .row_groups
-                .iter()
-                .map(|rows| rows.len() as f64)
-                .collect(),
-            vec![grouping.keys.len(), 1],
+            row_groups.iter().map(|rows| rows.len() as f64).collect(),
+            vec![keys.len(), 1],
         )
         .map_err(grouping_error)?,
     ));
     out_names.push("Percent".to_string());
     out_columns.push(Value::Tensor(
         Tensor::new(
-            grouping
-                .row_groups
+            row_groups
                 .iter()
                 .map(|rows| {
                     if height == 0 {
@@ -2070,7 +2468,7 @@ fn groupcounts_table(
                     }
                 })
                 .collect(),
-            vec![grouping.keys.len(), 1],
+            vec![keys.len(), 1],
         )
         .map_err(grouping_error)?,
     ));
@@ -2778,7 +3176,7 @@ fn parse_discretize_args(
                 other => {
                     return Err(grouping_error(format!(
                         "discretize: unsupported IncludedEdge '{other}'"
-                    )))
+                    )));
                 }
             };
         } else {
@@ -3176,6 +3574,11 @@ fn normalize_outputs(value: Value, requested: usize, context: &str) -> BuiltinRe
 }
 
 fn collect_group_results(values: Vec<Value>, rows: usize, context: &str) -> BuiltinResult<Value> {
+    if let Some(storage) = homogeneous_integer_values(&values) {
+        return Tensor::new_integer(storage, vec![rows, 1])
+            .map(Value::Tensor)
+            .map_err(grouping_error);
+    }
     if values
         .iter()
         .all(|value| value_as_numeric_scalar(value).is_some())
@@ -3610,7 +4013,7 @@ mod tests {
     }
 
     #[test]
-    fn discretize_explicit_integer_edges_do_not_use_f64_mirror() {
+    fn discretize_explicit_integer_edges_validate_wide_values_exactly() {
         let base = 9_007_199_254_740_992_u64;
         let out = block_on(discretize_builtin(
             Value::Tensor(
@@ -3759,12 +4162,12 @@ mod tests {
         assert!(ACCUMARRAY_INTEGER_CAPABILITIES
             .iter()
             .any(|capability| capability.output_class == BuiltinIntegerOutputClassRule::Double));
-        assert!(ACCUMARRAY_INTEGER_CAPABILITIES
-            .iter()
-            .any(|capability| capability
+        assert!(ACCUMARRAY_INTEGER_CAPABILITIES.iter().any(|capability| {
+            capability
                 .inputs
                 .iter()
-                .any(|input| input.availability == BuiltinIntegerInputAvailability::Rejected)));
+                .any(|input| input.availability == BuiltinIntegerInputAvailability::Rejected)
+        }));
     }
 
     #[test]
@@ -4238,6 +4641,7 @@ mod tests {
 
     #[test]
     fn groupcounts_sorts_missing_last_and_requires_binary_controls() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let groups = Value::Tensor(Tensor::new(vec![f64::NAN, 1.0, f64::NAN], vec![3, 1]).unwrap());
         let counted = {
             let _outputs = crate::output_count::push_output_count(Some(3));
@@ -4281,13 +4685,19 @@ mod tests {
     }
 
     #[test]
-    fn groupcounts_strict_mode_gates_resident_but_not_documented_groupbins_syntax() {
+    fn groupcounts_strict_mode_gates_explicit_resident_but_not_documented_groupbins_syntax() {
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+        let handle = runmat_accelerate_api::GpuTensorHandle {
             shape: vec![2, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
-        });
+            descriptor: Default::default(),
+        };
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+        ensure_groupcounts_residency_extension(&Value::GpuTensor(handle.clone()), &[])
+            .expect("automatic residency must remain transparent");
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let resident = Value::GpuTensor(handle.clone());
         let resident_error = block_on(groupcounts_builtin(resident, Vec::new()))
             .expect_err("resident form must gate before provider access");
         assert_eq!(
@@ -4295,15 +4705,48 @@ mod tests {
             GROUPCOUNTS_RESIDENT_INPUT_EXTENSION.error_identifier
         );
 
-        let groupbins_error = block_on(groupcounts_builtin(
+        let groupbins = block_on(groupcounts_builtin(
             Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
             vec![Value::Tensor(
                 Tensor::new(vec![3.0, 4.0], vec![2, 1]).unwrap(),
             )],
         ))
-        .expect_err("unimplemented groupbins must reject ordinarily");
-        assert_eq!(groupbins_error.identifier(), ERROR_INVALID_INPUT.identifier);
-        assert!(groupbins_error.message.contains("groupbins"));
+        .expect("documented numeric groupbins must remain available in strict mode");
+        let Value::Tensor(counts) = groupbins else {
+            panic!("expected counts");
+        };
+        assert_eq!(counts.materialize_f64(), vec![2.0]);
+        runmat_accelerate_api::clear_handle_metadata(&handle);
+    }
+
+    #[test]
+    fn groupcounts_table_control_gate_distinguishes_selector_and_bin_roles() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let table = table_from_columns(
+            vec!["G".into()],
+            vec![Value::Tensor(
+                Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap(),
+            )],
+        )
+        .unwrap();
+        let selector_error = block_on(groupcounts_builtin(
+            table.clone(),
+            vec![Value::Int(IntValue::U8(1))],
+        ))
+        .expect_err("unsupported native integer selector must fail in its own role");
+        assert_eq!(
+            selector_error.identifier(),
+            Some("RunMat:grouping:InvalidInput")
+        );
+        let error = block_on(groupcounts_builtin(
+            table,
+            vec![Value::from("G"), Value::Int(IntValue::U8(2))],
+        ))
+        .expect_err("native integer table bin count must gate");
+        assert_eq!(
+            error.identifier(),
+            GROUPCOUNTS_INTEGER_CONTROL_EXTENSION.error_identifier
+        );
     }
 
     #[test]
@@ -4319,15 +4762,13 @@ mod tests {
 
             {
                 let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-                let error =
+                let counted =
                     crate::dispatcher::call_builtin("groupcounts", std::slice::from_ref(&resident))
-                        .expect_err(
-                            "public dispatch must not gather away compatibility provenance",
-                        );
-                assert_eq!(
-                    error.identifier(),
-                    GROUPCOUNTS_RESIDENT_INPUT_EXTENSION.error_identifier
-                );
+                        .expect("automatic residency must remain transparent through dispatch");
+                let Value::Tensor(counted) = counted else {
+                    panic!("expected automatic-residency count tensor");
+                };
+                assert_eq!(counted.materialize_f64(), vec![2.0, 1.0]);
             }
 
             let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
@@ -4479,6 +4920,7 @@ mod tests {
             shape: vec![2, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let err = block_on(findgroups_builtin(resident, Vec::new()))
             .expect_err("resident form must gate before provider lookup");
@@ -4549,7 +4991,7 @@ mod tests {
     }
 
     #[test]
-    fn combinations_preserves_typed_integer_columns_without_f64_mirror() {
+    fn combinations_preserves_typed_integer_columns_exactly() {
         let first =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 9]), vec![1, 2]).unwrap();
         let out = block_on(combinations_builtin(
@@ -4652,6 +5094,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: 99,
             buffer_id: 77,
+            descriptor: Default::default(),
         });
         let error = block_on(combinations_builtin(resident, Vec::new())).unwrap_err();
         assert_eq!(
@@ -4739,6 +5182,51 @@ mod tests {
     }
 
     #[test]
+    fn splitapply_preserves_integer_group_slices_and_gates_typed_groups() {
+        let base = 9_007_199_254_740_993_u64;
+        let data = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![base, 1, base + 2, 2]), vec![4, 1])
+                .unwrap(),
+        );
+        let groups = Value::Tensor(
+            Tensor::new_integer(
+                IntegerStorage::U64(vec![base, base + 1, base, base + 1]),
+                vec![4, 1],
+            )
+            .unwrap(),
+        );
+
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let err = block_on(splitapply_builtin(
+                Value::FunctionHandle("max".into()),
+                data.clone(),
+                vec![groups.clone()],
+            ))
+            .expect_err("typed groups must be gated");
+            assert_eq!(
+                err.identifier(),
+                Some("RunMat:compatibility:SplitapplyIntegerGroupVectorExtension")
+            );
+        }
+
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let output = block_on(splitapply_builtin(
+            Value::FunctionHandle("max".into()),
+            data,
+            vec![groups],
+        ))
+        .expect("exact integer group sums");
+        let Value::Tensor(output) = output else {
+            panic!("expected integer tensor output");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U64(vec![base + 2, 2]))
+        );
+    }
+
+    #[test]
     fn groupcounts_table_returns_count_and_percent_columns() {
         let table = table_from_columns(
             vec!["G".into(), "X".into()],
@@ -4778,5 +5266,69 @@ mod tests {
             panic!("expected table");
         };
         assert_eq!(table_height(&object).unwrap(), 2);
+    }
+
+    #[test]
+    fn groupcounts_numeric_edges_keep_wide_integer_boundaries_exact() {
+        let base = 1_u64 << 53;
+        let input = Value::Tensor(
+            Tensor::new_integer(
+                IntegerStorage::U64(vec![base, base + 1, base + 2]),
+                vec![3, 1],
+            )
+            .unwrap(),
+        );
+        let edges = Value::Tensor(
+            Tensor::new_integer(
+                IntegerStorage::U64(vec![base, base + 1, base + 2]),
+                vec![3, 1],
+            )
+            .unwrap(),
+        );
+        let _outputs = crate::output_count::push_output_count(Some(3));
+        let Value::OutputList(left) =
+            block_on(groupcounts_builtin(input.clone(), vec![edges.clone()]))
+                .expect("left-edge bins")
+        else {
+            panic!("expected three outputs");
+        };
+        let Value::Tensor(counts) = &left[0] else {
+            panic!("expected counts");
+        };
+        assert_eq!(counts.materialize_f64(), vec![1.0, 2.0]);
+
+        let Value::OutputList(right) = block_on(groupcounts_builtin(
+            input,
+            vec![edges, Value::from("IncludedEdge"), Value::from("right")],
+        ))
+        .expect("right-edge bins") else {
+            panic!("expected three outputs");
+        };
+        let Value::Tensor(counts) = &right[0] else {
+            panic!("expected counts");
+        };
+        assert_eq!(counts.materialize_f64(), vec![2.0, 1.0]);
+    }
+
+    #[test]
+    fn groupcounts_numeric_bins_materialize_empty_bins_without_integer_gaps() {
+        let input = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::I64(vec![0, 2]), vec![2, 1]).unwrap(),
+        );
+        let edges = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::I64(vec![0, 1, 2, 3]), vec![4, 1]).unwrap(),
+        );
+        let _outputs = crate::output_count::push_output_count(Some(3));
+        let Value::OutputList(values) = block_on(groupcounts_builtin(
+            input,
+            vec![edges, Value::from("IncludeEmptyGroups"), Value::Bool(true)],
+        ))
+        .expect("empty numeric bins") else {
+            panic!("expected three outputs");
+        };
+        let Value::Tensor(counts) = &values[0] else {
+            panic!("expected counts");
+        };
+        assert_eq!(counts.materialize_f64(), vec![1.0, 0.0, 1.0]);
     }
 }

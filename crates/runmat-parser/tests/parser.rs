@@ -230,6 +230,7 @@ fn strip_stmt(stmt: &Stmt) -> Stmt {
 fn strip_expr(expr: &Expr) -> Expr {
     match expr {
         Expr::Number(value, _) => Expr::Number(value.clone(), Span::default()),
+        Expr::IntegerLiteral(value, _) => Expr::IntegerLiteral(value.clone(), Span::default()),
         Expr::String(value, _) => Expr::String(value.clone(), Span::default()),
         Expr::Ident(value, _) => Expr::Ident(value.clone(), Span::default()),
         Expr::EndKeyword(_) => Expr::EndKeyword(Span::default()),

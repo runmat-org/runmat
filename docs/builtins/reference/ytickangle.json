@@ -36,9 +36,9 @@
   ],
   "behaviors": [
     "`ytickangle()` returns the current Y tick label rotation, defaulting to `0`.",
-    "`ytickangle(angle)` sets the current axes Y tick label rotation in degrees.",
+    "`ytickangle(angle)` sets the current axes Y tick label rotation in degrees. Integer scalars from any native integer class are accepted.",
     "`ytickangle(ax)` queries a scalar axes handle without changing the current axes.",
-    "`ytickangle(ax, angle)` accepts a scalar axes handle or numeric array of axes handles and sets each target.",
+    "`ytickangle(ax, angle)` accepts a scalar axes handle or numeric array of axes handles and sets each target. RunMat mode additionally accepts typed-integer aliases for encoded axes handles.",
     "The function shares state with `YTickLabelRotation` on axes and `TickLabelRotation` on the Y-axis ruler returned by `get(ax, 'YAxis')`."
   ],
   "examples": [

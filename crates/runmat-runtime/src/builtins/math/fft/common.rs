@@ -1,6 +1,5 @@
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::dispatcher::download_handle_async;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use num_complex::Complex;
 use runmat_accelerate_api::{
@@ -351,33 +350,22 @@ pub fn same_gpu_handle(left: &GpuTensorHandle, right: &GpuTensorHandle) -> bool 
     left.device_id == right.device_id && left.buffer_id == right.buffer_id
 }
 
-pub type GpuMetadataSnapshot = (
-    GpuTensorStorage,
-    Option<runmat_accelerate_api::ProviderPrecision>,
-    Option<IntegerElementType>,
-    bool,
-);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GpuMetadataSnapshot {
+    descriptor: runmat_accelerate_api::GpuTensorDescriptor,
+    logical: bool,
+}
 
 pub fn gpu_metadata_snapshot(handle: &GpuTensorHandle) -> GpuMetadataSnapshot {
-    (
-        runmat_accelerate_api::handle_storage(handle),
-        runmat_accelerate_api::handle_precision(handle),
-        runmat_accelerate_api::handle_integer_type(handle),
-        runmat_accelerate_api::handle_is_logical(handle),
-    )
+    GpuMetadataSnapshot {
+        descriptor: handle.descriptor,
+        logical: runmat_accelerate_api::handle_is_logical(handle),
+    }
 }
 
 pub fn restore_gpu_metadata(handle: &GpuTensorHandle, snapshot: GpuMetadataSnapshot) {
-    runmat_accelerate_api::set_handle_storage(handle, snapshot.0);
-    match snapshot.1 {
-        Some(precision) => runmat_accelerate_api::set_handle_precision(handle, precision),
-        None => runmat_accelerate_api::clear_handle_precision(handle),
-    }
-    match snapshot.2 {
-        Some(integer) => runmat_accelerate_api::set_handle_integer_type(handle, integer),
-        None => runmat_accelerate_api::clear_handle_integer_type(handle),
-    }
-    runmat_accelerate_api::set_handle_logical(handle, snapshot.3);
+    debug_assert_eq!(handle.descriptor, snapshot.descriptor);
+    runmat_accelerate_api::set_handle_logical(handle, snapshot.logical);
 }
 
 pub fn provider_operation_unsupported(error: &anyhow::Error, operation: &str) -> bool {
@@ -575,7 +563,7 @@ pub async fn gather_gpu_complex_tensor(
         )
         .map_err(|e| terminal_builtin_error(builtin, format!("{builtin}: {e}")));
     }
-    let host = download_handle_async(provider, handle)
+    let host = gpu_helpers::download_floating_projection_async(provider, handle)
         .await
         .map_err(|e| terminal_builtin_error(builtin, format!("{builtin}: {e}")))?;
     let precision = if runmat_accelerate_api::handle_is_logical(handle) {
@@ -634,7 +622,7 @@ pub async fn download_provider_complex_tensor(
     builtin: &str,
     free_after_download: bool,
 ) -> BuiltinResult<ComplexTensor> {
-    let decoded = download_handle_async(provider, handle)
+    let decoded = gpu_helpers::download_floating_projection_async(provider, handle)
         .await
         .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))
         .and_then(|host| {
@@ -1410,6 +1398,7 @@ mod tests {
             shape: vec![2],
             device_id: 1,
             buffer_id: 7,
+            descriptor: Default::default(),
         };
         let same = left.clone();
         let other_device = GpuTensorHandle {
@@ -1442,7 +1431,6 @@ mod tests {
             let tensor =
                 Tensor::new_integer(IntegerStorage::I32(vec![1, -2, 3]), vec![1, 3]).unwrap();
             let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload integer");
-            runmat_accelerate_api::set_handle_integer_type(&handle, IntegerElementType::I32);
             let gathered = block_on(gather_gpu_complex_tensor(&handle, "ifft"))
                 .expect("exact integer download");
             assert_eq!(
@@ -1466,7 +1454,6 @@ mod tests {
                 Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
                     .unwrap();
             let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload integer");
-            runmat_accelerate_api::set_handle_integer_type(&handle, IntegerElementType::U64);
             let error = block_on(gather_gpu_complex_tensor(&handle, "ifft"))
                 .expect_err("wide resident integer must not materialize through f64");
             assert!(error.message().contains("exact provider transform"));

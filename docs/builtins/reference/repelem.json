@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "GPU inputs are gathered to host memory before replication; no provider hook exists yet."
+    "notes": "GPU inputs without a native replication hook are gathered through their exact owning provider, replicated from authoritative storage, and restored to that owner with class and provenance preserved."
   },
   "fusion": {
     "elementwise": false,
@@ -33,6 +33,7 @@
     "`repelem(v, counts)` accepts a count vector with one non-negative integer count per element of `v`.",
     "`repelem(A, r1, r2, ..., rN)` repeats matrix or N-D array elements along each dimension; scalar factors create element blocks and vector factors provide per-index counts for that dimension.",
     "Numeric, logical, complex, string, char, and cell inputs are supported. Numeric, logical, complex, string, and cell arrays support N-D replication; char arrays are represented as 2-D character matrices.",
+    "All eight integer data classes are replicated from authoritative native storage and returned in the same class; typed integer replication counts are decoded structurally without a floating round trip.",
     "Zero counts are allowed and remove the corresponding element or dimension slice from the output.",
     "Replication counts must be finite, non-negative integers. Count vectors must match the size of the dimension they apply to.",
     "The builtin checks shape and size overflow before materializing output arrays."
@@ -112,7 +113,7 @@
     "label": "crates/runmat-runtime/src/builtins/array/shape/repelem.rs",
     "url": "crates/runmat-runtime/src/builtins/array/shape/repelem.rs"
   },
-  "gpu_residency": "`repelem` is currently a host-resident array construction builtin. If a GPU tensor reaches this builtin, RunMat gathers it before replication.",
+  "gpu_residency": "`repelem` currently uses an exact owner-aware gather-and-restore fallback for GPU tensors, so automatic gathering remains transparent and explicit resident outputs preserve their source owner.",
   "gpu_behavior": [
     "RunMat does not yet expose a provider hook for element-wise replication. Backends can add one later without changing the MATLAB-facing behavior."
   ],

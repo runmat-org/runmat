@@ -2,10 +2,15 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-use super::op_common::{map_figure_error, parse_text_command};
+use super::op_common::{map_figure_error, parse_numeric_text_command};
 use super::state::set_figure_title_for_axes;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
@@ -106,6 +111,28 @@ const TITLE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
     },
 ];
 
+const TITLE_INTEGER_TEXT_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "txt",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes:
+            "A scalar integer title is formatted from its exact signed or unsigned decimal value.",
+    }];
+const TITLE_INTEGER_FONT_SIZE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "FontSize",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "All eight integer classes are documented for FontSize; accepted values are positive finite practical renderer sizes.",
+    }];
+pub const TITLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor { form: "h = title(integer_txt)", inputs: &TITLE_INTEGER_TEXT_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::ScalarOnly, notes: "The exact decimal spelling becomes the stored String property; the graphics handle remains an ordinary double handle." },
+    BuiltinIntegerCapabilityDescriptor { form: "h = title(..., 'FontSize', integer_size)", inputs: &TITLE_INTEGER_FONT_SIZE_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "FontSize crosses the client-renderer scalar boundary only after the shared positive finite size validation." },
+];
+
 const TITLE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.TITLE.INVALID_ARGUMENT",
     identifier: Some("RunMat:title:InvalidArgument"),
@@ -138,10 +165,11 @@ pub const TITLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::title::TITLE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::plotting::title::TITLE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::title"
 )]
 pub fn title_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
-    let command = parse_text_command("title", &args)?;
+    let command = parse_numeric_text_command("title", &args)?;
     set_figure_title_for_axes(
         command.target.0,
         command.target.1,
@@ -161,6 +189,7 @@ mod tests {
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
     };
     use runmat_plot::plots::Figure;
+    use runmat_value::IntValue;
     use runmat_value::{CellArray, CharArray, StringArray, Value};
 
     fn setup_plot_tests() -> PlotTestLockGuard {
@@ -290,6 +319,18 @@ mod tests {
         assert_eq!(
             fig.axes_metadata(0).and_then(|m| m.title.as_deref()),
             Some("A\nB")
+        );
+    }
+
+    #[test]
+    fn title_formats_wide_integer_text_without_binary64_conversion() {
+        let _guard = setup_plot_tests();
+        title_builtin(vec![Value::Int(IntValue::U64(u64::MAX))]).unwrap();
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        assert_eq!(
+            fig.axes_metadata(0)
+                .and_then(|metadata| metadata.title.as_deref()),
+            Some("18446744073709551615")
         );
     }
 }

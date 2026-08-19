@@ -13,4 +13,5 @@ pub use ast::{
 pub use error::SyntaxError;
 pub use options::{CompatMode, ParserOptions};
 pub use parser::{parse, parse_with_options};
+pub use runmat_types::{IntegerLiteral, IntegerLiteralClass};
 pub use span::Span;

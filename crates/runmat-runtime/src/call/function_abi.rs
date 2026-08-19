@@ -8,7 +8,7 @@ use runmat_types::{
     FunctionArgDefaultValue, FunctionArgDim, FunctionArgSizeSpec, FunctionArgValidationLiteral,
     FunctionArgValidator,
 };
-use runmat_value::{CellArray, Tensor, Value};
+use runmat_value::{CellArray, IntValue, Tensor, Value};
 
 /// Borrowed semantic contract for one fixed function input.
 ///
@@ -33,6 +33,30 @@ pub struct PreparedFunctionInputs {
 }
 
 pub fn prepare_function_inputs(
+    function_name: &str,
+    supplied: &[Value],
+    fixed_input_count: usize,
+    accepts_varargin: bool,
+    specs: &[FunctionInputSpec<'_>],
+) -> Result<PreparedFunctionInputs, RuntimeError> {
+    let preparation = prepare_function_inputs_async(
+        function_name,
+        supplied,
+        fixed_input_count,
+        accepts_varargin,
+        specs,
+    );
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        pollster::block_on(preparation)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        futures::executor::block_on(preparation)
+    }
+}
+
+pub async fn prepare_function_inputs_async(
     function_name: &str,
     supplied: &[Value],
     fixed_input_count: usize,
@@ -69,7 +93,7 @@ pub fn prepare_function_inputs(
             }
         }
         if let Some(value) = &fixed[spec.input_index] {
-            validate_input(function_name, spec.input_index, value, spec)?;
+            validate_input(function_name, spec.input_index, value, spec).await?;
         }
     }
 
@@ -139,6 +163,7 @@ pub fn collect_function_outputs(
 fn default_value(default: &FunctionArgDefaultValue) -> Value {
     match default {
         FunctionArgDefaultValue::Number(value) => Value::Num(*value),
+        FunctionArgDefaultValue::Integer(value) => Value::Int(IntValue::from(value)),
         FunctionArgDefaultValue::Bool(value) => Value::Bool(*value),
         FunctionArgDefaultValue::String(value) => Value::String(value.clone()),
         FunctionArgDefaultValue::EmptyArray => Value::Tensor(
@@ -147,7 +172,7 @@ fn default_value(default: &FunctionArgDefaultValue) -> Value {
     }
 }
 
-fn validate_input(
+async fn validate_input(
     function_name: &str,
     input_index: usize,
     value: &Value,
@@ -177,7 +202,7 @@ fn validate_input(
         }
     }
     for validator in spec.validators {
-        if !validator_passes(value, validator)? {
+        if !validator_passes(value, validator).await? {
             return Err(semantic_error(
                 "ArgumentValidationFunction",
                 format!(
@@ -196,15 +221,25 @@ fn dim_matches(dim: &FunctionArgDim, actual: usize) -> bool {
         || matches!(dim, FunctionArgDim::Exact(expected) if *expected == actual)
 }
 
-fn validator_passes(value: &Value, validator: &FunctionArgValidator) -> Result<bool, RuntimeError> {
+async fn validator_passes(
+    value: &Value,
+    validator: &FunctionArgValidator,
+) -> Result<bool, RuntimeError> {
     use FunctionArgValidator as V;
     Ok(match validator {
         V::A(names) => validation::must_be_a(value, names.clone())?,
         V::Column => validation::value_is_column(value),
-        V::Finite => validation::value_is_finite(value),
+        V::Finite => {
+            validation::ensure_resident_extension(value, "mustBeFinite")?;
+            validation::value_is_finite_async(value).await?
+        }
         V::Float => validation::value_is_float(value),
-        V::Folder => validation::dispatch_validator("mustBeFolder", vec![value.clone()]).is_ok(),
-        V::File => validation::dispatch_validator("mustBeFile", vec![value.clone()]).is_ok(),
+        V::Folder => validation::dispatch_validator_async("mustBeFolder", vec![value.clone()])
+            .await
+            .is_ok(),
+        V::File => validation::dispatch_validator_async("mustBeFile", vec![value.clone()])
+            .await
+            .is_ok(),
         V::NumericOrLogical => validation::value_is_numeric_or_logical(value),
         V::Numeric => validation::value_is_numeric(value),
         V::Text => validation::value_is_text(value),
@@ -212,49 +247,78 @@ fn validator_passes(value: &Value, validator: &FunctionArgValidator) -> Result<b
         V::NonzeroLengthText => validation::value_is_nonzero_length_text(value),
         V::Nonempty => !validation::value_is_empty(value),
         V::ScalarOrEmpty => validation::value_is_scalar_or_empty(value),
-        V::Real => validation::value_is_real(value),
-        V::Integer => validation::value_is_integer(value),
-        V::Vector => validation::value_is_vector(value)?,
-        V::Positive => validation::value_is_positive(value),
-        V::Negative => validation::value_is_negative(value),
-        V::Nonnegative => validation::value_is_nonnegative(value),
-        V::Nonmissing => validation::value_is_nonmissing(value),
-        V::NonNan => validation::value_is_non_nan(value),
-        V::Nonzero => validation::value_is_nonzero(value),
-        V::Nonpositive => validation::value_is_nonpositive(value),
-        V::Nonsparse => {
-            validation::dispatch_validator("mustBeNonsparse", vec![value.clone()]).is_ok()
+        V::Real => validation::value_is_real_async(value).await?,
+        V::Integer => {
+            validation::ensure_resident_extension(value, "mustBeInteger")?;
+            validation::value_is_integer_async(value).await?
         }
-        V::Sparse => validation::dispatch_validator("mustBeSparse", vec![value.clone()]).is_ok(),
+        V::Vector { allow_all_empties } => {
+            validation::value_satisfies_vector_validator(value, *allow_all_empties)?
+        }
+        V::Positive => validation::value_is_positive_async(value).await?,
+        V::Negative => validation::value_is_negative_async(value).await?,
+        V::Nonnegative => validation::value_is_nonnegative_async(value).await?,
+        V::Nonmissing => validation::value_is_nonmissing_async(value).await?,
+        V::NonNan => {
+            validation::ensure_resident_extension(value, "mustBeNonNan")?;
+            validation::value_is_non_nan_async(value).await?
+        }
+        V::Nonzero => {
+            validation::ensure_resident_extension(value, "mustBeNonzero")?;
+            validation::value_is_nonzero_async(value).await?
+        }
+        V::Nonpositive => validation::value_is_nonpositive_async(value).await?,
+        V::Nonsparse => {
+            validation::dispatch_validator_async("mustBeNonsparse", vec![value.clone()])
+                .await
+                .is_ok()
+        }
+        V::Sparse => validation::dispatch_validator_async("mustBeSparse", vec![value.clone()])
+            .await
+            .is_ok(),
         V::ValidVariableName => validation::isvarname_value(value),
         V::UnderlyingType(names) => {
             validation::value_underlying_type_matches(value, names.clone())?
         }
         V::Member(literals) => {
             let allowed = literals.iter().map(literal_atom).collect::<Vec<_>>();
-            validation::value_is_member_atoms(value, &allowed)?
+            validation::value_is_member_atoms_async(value, &allowed).await?
         }
-        V::InRange(lower, upper, inclusivity) => validation::value_is_in_range(
-            value,
-            *lower,
-            *upper,
-            validation::RangeInclusivity {
-                lower: inclusivity.lower,
-                upper: inclusivity.upper,
-            },
-        ),
+        V::InRange(lower, upper, inclusivity) => {
+            validation::value_is_in_range_documented_async(
+                value,
+                &Value::Num(*lower),
+                &Value::Num(*upper),
+                validation::RangeInclusivity {
+                    lower: inclusivity.lower,
+                    upper: inclusivity.upper,
+                },
+            )
+            .await?
+        }
         V::GreaterThanOrEqual(threshold) => {
-            validation::value_is_greater_than_or_equal(value, *threshold)
+            validation::value_is_greater_than_or_equal_values_async(value, &Value::Num(*threshold))
+                .await?
         }
-        V::LessThanOrEqual(threshold) => validation::value_is_less_than_or_equal(value, *threshold),
-        V::GreaterThan(threshold) => validation::value_is_greater_than(value, *threshold),
-        V::LessThan(threshold) => validation::value_is_less_than(value, *threshold),
+        V::LessThanOrEqual(threshold) => {
+            validation::value_is_less_than_or_equal_values_async(value, &Value::Num(*threshold))
+                .await?
+        }
+        V::GreaterThan(threshold) => {
+            validation::value_is_greater_than_values_async(value, &Value::Num(*threshold)).await?
+        }
+        V::LessThan(threshold) => {
+            validation::value_is_less_than_values_async(value, &Value::Num(*threshold)).await?
+        }
     })
 }
 
 fn literal_atom(literal: &FunctionArgValidationLiteral) -> validation::ValidationAtom {
     match literal {
         FunctionArgValidationLiteral::Number(value) => validation::ValidationAtom::Number(*value),
+        FunctionArgValidationLiteral::Integer(value) => {
+            validation::ValidationAtom::Integer(IntValue::from(value))
+        }
         FunctionArgValidationLiteral::Text(value) => {
             validation::ValidationAtom::Text(value.clone())
         }
@@ -280,7 +344,7 @@ fn validator_name(validator: &FunctionArgValidator) -> &'static str {
         V::ScalarOrEmpty => "mustBeScalarOrEmpty",
         V::Real => "mustBeReal",
         V::Integer => "mustBeInteger",
-        V::Vector => "mustBeVector",
+        V::Vector { .. } => "mustBeVector",
         V::Positive => "mustBePositive",
         V::Negative => "mustBeNegative",
         V::Nonnegative => "mustBeNonnegative",

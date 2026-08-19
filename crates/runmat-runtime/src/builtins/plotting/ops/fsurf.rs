@@ -1247,10 +1247,11 @@ mod tests {
                         shape: vec![1, 1],
                         device_id: 999_992,
                         buffer_id: 999_992,
-                    };
-                    runmat_accelerate_api::set_handle_integer_type(
-                        &handle,
-                        runmat_accelerate_api::IntegerElementType::U64,
+                        descriptor: Default::default(),
+                    }
+                    .with_numeric_descriptor(
+                        runmat_accelerate_api::NumericElementType::U64,
+                        runmat_accelerate_api::GpuTensorStorage::Real,
                     );
                     Ok(Value::GpuTensor(handle))
                 })

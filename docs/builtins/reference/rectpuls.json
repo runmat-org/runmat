@@ -16,14 +16,14 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "GPU inputs are gathered to the host and evaluated with the scalar reference implementation."
+    "notes": "Automatic resident inputs may gather transparently for host evaluation and return through their exact owner. Explicit gpuArray inputs are a separately gated RunMat extension; admitted outputs retain explicit residency or fail if the owner cannot preserve double output."
   },
   "fusion": {
     "elementwise": false,
     "reduction": false,
     "max_inputs": 1,
     "constants": "inline",
-    "notes": "Fusion is disabled because width validation and boundary half-amplitude semantics are handled by the host builtin."
+    "notes": "Fusion is disabled because width validation and left-closed/right-open boundary semantics are handled by the host builtin."
   },
   "requires_feature": null,
   "tested": {
@@ -33,16 +33,16 @@
   "description": "`rectpuls(T)` returns samples of a unit-width rectangular pulse centered at zero. `rectpuls(T, W)` uses pulse width `W`.",
   "behaviors": [
     "Operates element-wise on real numeric scalars, vectors, matrices, and N-D tensors; preserves input shape.",
-    "Returns `1` for `abs(T) < W/2`, `0.5` at `abs(T) == W/2`, and `0` outside the pulse.",
+    "Returns `1` on the left-closed, right-open interval `-W/2 <= T < W/2` and `0` outside it, so `rectpuls(-0.5)` is `1` while `rectpuls(0.5)` is `0` for the default width.",
     "The width must be positive and finite.",
-    "Integer and logical inputs are promoted to double precision before evaluation.",
+    "The documented sample-time classes are single and double. Typed-integer sample times and widths are independent RunMat-mode extensions, admitted only when their authoritative values are exactly representable at the binary64 waveform boundary.",
     "Complex and text inputs are rejected with a builtin-scoped error."
   ],
   "examples": [
     {
       "description": "Default unit-width rectangular pulse",
       "input": "t = -0.5:0.25:0.5;\ny = rectpuls(t)",
-      "output": "y = [0.5 1 1 1 0.5]"
+      "output": "y = [1 1 1 1 0]"
     },
     {
       "description": "Custom pulse width",
@@ -53,7 +53,7 @@
   "faqs": [
     {
       "question": "What happens at the exact pulse edge?",
-      "answer": "RunMat returns `0.5` at `abs(T) == W/2`, matching the standard sampled rectangular pulse convention."
+      "answer": "The interval is left-closed and right-open: RunMat returns `1` at `T == -W/2` and `0` at `T == W/2`."
     },
     {
       "question": "Can `rectpuls` be used inside `pulstran`?",

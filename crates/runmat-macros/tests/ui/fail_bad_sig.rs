@@ -1,8 +1,5 @@
 use runmat_macros::runtime_builtin;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::{BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor};
 
 const TEST_ERRORS: [BuiltinErrorDescriptor; 0] = [];
 const OOPS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {

@@ -409,7 +409,7 @@ const MAP_VALUE_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInput
     classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
     availability: BuiltinIntegerInputAvailability::Documented,
     scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "Every integer class is a documented ValueType and is stored without a floating mirror.",
+    notes: "Every integer class is a documented ValueType and retains its exact class and payload.",
 }];
 const MAP_STORED_KEY_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
     name: "stored keys",
@@ -3686,6 +3686,7 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: 77,
             buffer_id: 99,
+            descriptor: Default::default(),
         });
         let char_map = containers_map_builtin(Vec::new()).unwrap();
         let checks = [

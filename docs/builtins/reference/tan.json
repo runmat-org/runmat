@@ -34,13 +34,13 @@
   "description": "`y = tan(x)` computes tangent element-wise using radian inputs. It follows MATLAB-compatible shape, broadcasting, and complex-number behavior across scalar and array forms.",
   "behaviors": [
     "Operates on scalars, vectors, matrices, and N-D tensors while respecting MATLAB's implicit-expansion (broadcasting) rules.",
-    "Logical and integer inputs are promoted to double precision (`true → 1.0`, `false → 0.0`) before the tangent is applied so downstream arithmetic mirrors MATLAB.",
-    "Character arrays operate on their Unicode code points and return dense double arrays of identical shape.",
+    "Documented real and complex `single` arrays return `single`; documented `double` arrays return `double`.",
+    "Typed integers, logical arrays, and character arrays are independently gated RunMat extensions. Admitted integers must be exactly representable at the deliberate double transcendental boundary, and character inputs operate on Unicode code points.",
     "Complex inputs follow MATLAB’s analytic extension `tan(a + bi) = sin(2a)/(cos(2a) + cosh(2b)) + i·sinh(2b)/(cos(2a) + cosh(2b))`, propagating `NaN`/`Inf` components independently.",
-    "Appending `'like', prototype` mirrors the prototype’s class and residency for real numeric prototypes; complex prototypes currently raise a descriptive error so you can fall back to the default output rules.",
+    "Appending `'like', prototype` is a separately gated RunMat extension that controls host or GPU output placement for supported numeric prototypes.",
     "`tan` accepts both host tensors and `gpuArray` inputs. GPU residency is preserved whenever the active provider exposes the `unary_tan` kernel or a fused elementwise implementation.",
     "Strings and string arrays are rejected to match MATLAB’s numeric-only contract for the trigonometric family.",
-    "Empty inputs, singleton dimensions, and already-reduced shapes pass through unchanged to avoid unnecessary allocations."
+    "Empty inputs and singleton dimensions retain their shape. MATLAB's documented direct table and timetable calculation form is not implemented yet."
   ],
   "examples": [
     {
@@ -107,11 +107,11 @@
     },
     {
       "question": "Does `tan` change the input type?",
-      "answer": "By default results are double precision. Passing `'like', prototype` preserves the prototype’s real numeric type (host or GPU). Complex prototypes are currently unsupported and raise a clear error."
+      "answer": "Documented single inputs remain single and double inputs remain double. RunMat-only integer, logical, and character inputs return double. The separately gated `'like'` form can control supported output placement."
     },
     {
       "question": "Are logical arrays supported?",
-      "answer": "Yes. Logical arrays are promoted to `0.0`/`1.0` doubles before evaluation so downstream workflows remain compatible with MATLAB semantics."
+      "answer": "Only in RunMat extension mode. MATLAB-compatible mode follows the documented single/double input domain and rejects logical arrays before evaluation."
     },
     {
       "question": "Can I fuse `tan` with other elementwise operations?",

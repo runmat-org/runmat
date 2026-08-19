@@ -275,7 +275,7 @@ fn gpu_handle_bytes(handle: &GpuTensorHandle) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
-    use runmat_accelerate_api::{set_handle_precision, GpuTensorHandle, ProviderPrecision};
+    use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, NumericElementType};
     use runmat_value::{CellArray, Tensor};
 
     use super::*;
@@ -293,12 +293,8 @@ mod tests {
     #[test]
     fn nested_values_are_counted_and_aliased_gpu_handles_are_deduplicated() {
         let host = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
-        let gpu = GpuTensorHandle {
-            shape: vec![2, 2],
-            device_id: 9,
-            buffer_id: 41,
-        };
-        set_handle_precision(&gpu, ProviderPrecision::F32);
+        let gpu = GpuTensorHandle::new(vec![2, 2], 9, 41)
+            .with_numeric_descriptor(NumericElementType::F32, GpuTensorStorage::Real);
         let cell = Value::Cell(
             CellArray::new(
                 vec![host, Value::GpuTensor(gpu.clone()), Value::GpuTensor(gpu)],

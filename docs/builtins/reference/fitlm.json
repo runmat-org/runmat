@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": ["f64"],
     "broadcasting": "none",
-    "notes": "GPU inputs use a separately declared RunMat-only resident-fallback extension: admitted inputs are gathered to host, fitting runs on CPU, and the result is a host LinearModel object. Strict R2026a compatibility mode rejects this fallback before provider access."
+    "notes": "GPU inputs use a separately declared RunMat-only resident-fallback extension: admitted inputs are gathered to host, fitting runs on CPU, and the result is a host LinearModel object. MATLAB-compatible mode rejects this fallback before provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -28,7 +28,7 @@
     "unit": "builtins::stats::ml::linear_model::tests",
     "integration": "crates/runmat-vm/tests/stats_ml.rs"
   },
-  "description": "`fitlm` fits an ordinary least-squares linear regression model from a numeric predictor matrix or table and returns a host `LinearModel` object. R2026a documents single and double matrix data; RunMat mode separately gates typed-integer predictors, responses, weights, structural selectors, and Intercept controls.",
+  "description": "`fitlm` fits an ordinary least-squares linear regression model from a numeric predictor matrix or table and returns a host `LinearModel` object. The compatibility target documents single and double matrix data; RunMat mode separately gates typed-integer predictors, responses, weights, structural selectors, and Intercept controls.",
   "behaviors": [
     "`fitlm(X,y)` fits a model with an intercept and one linear term per predictor column.",
     "Table input uses the last variable as the response by default, or the response from a response name, formula, or `ResponseVar` option.",
@@ -36,7 +36,7 @@
     "Matrix model specifications `constant`, `linear`, `interactions`, `purequadratic`, and `quadratic` are supported.",
     "Rows containing `NaN` in predictors, response, or zero weights are omitted before fitting; `Inf` values are rejected.",
     "`Exclude` accepts logical masks or one-based numeric row indices. `Weights` accepts a numeric vector, and table input also accepts a weights variable name.",
-    "All eight typed-integer classes are RunMat-only inputs. Predictor, response, and weight values must be exactly representable at the binary64 fitting boundary; Exclude indices and Intercept zero/nonzero controls are parsed from authoritative integer storage without a floating mirror.",
+    "All eight typed-integer classes are RunMat-only inputs. Predictor, response, and weight values must be exactly representable at the binary64 fitting boundary; Exclude indices and Intercept zero/nonzero controls are parsed from authoritative integer storage.",
     "The returned model exposes `Coefficients`, `Fitted`, `Residuals.Raw`, `NumObservations`, `DFE`, `RMSE`, `Rsquared`, `Formula`, `PredictorNames`, and `ResponseName` properties.",
     "The `Coefficients` table contains `Estimate`, `SE`, `tStat`, and `pValue` variables with coefficient names in `Properties.RowNames`.",
     "Categorical predictors, robust regression, and Wilkinson interaction formula terms are not supported yet and raise explicit errors."
@@ -61,7 +61,7 @@
   "faqs": [
     {
       "question": "Does fitlm accept typed-integer predictors, responses, weights, or controls?",
-      "answer": "Strict R2026a compatibility mode rejects those typed-integer roles. RunMat mode exposes separately declared extensions for predictor data, response data, Weights, Exclude/selectors, and Intercept. The fitted model remains floating and host-resident."
+      "answer": "MATLAB-compatible mode rejects those typed-integer roles. RunMat mode exposes separately declared extensions for predictor data, response data, Weights, Exclude/selectors, and Intercept. The fitted model remains floating and host-resident."
     },
     {
       "question": "Does `fitlm` add an intercept?",

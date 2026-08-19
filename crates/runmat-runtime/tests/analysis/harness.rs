@@ -43,6 +43,7 @@ fn store_insert(shape: Vec<usize>, data: Vec<f64>) -> anyhow::Result<GpuTensorHa
         shape,
         device_id: 21,
         buffer_id,
+        descriptor: Default::default(),
     })
 }
 

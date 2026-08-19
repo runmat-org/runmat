@@ -431,6 +431,7 @@ fn argument_validator_is_valid(validator: &runmat_types::FunctionArgValidator) -
         }
         FunctionArgValidator::Member(values) => values.iter().all(|value| match value {
             FunctionArgValidationLiteral::Number(value) => value.is_finite(),
+            FunctionArgValidationLiteral::Integer(_) => true,
             FunctionArgValidationLiteral::Text(_) | FunctionArgValidationLiteral::Bool(_) => true,
         }),
         FunctionArgValidator::InRange(lower, upper, _) => {

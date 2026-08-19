@@ -31,8 +31,9 @@
   "behaviors": [
     "Sparse input preserves row indices and column pointers while replacing each stored value with `1`.",
     "Dense numeric and logical input are first converted to sparse pattern storage.",
+    "Typed integer input is a RunMat-only extension. Its nonzero pattern is inspected exactly, and the result is a sparse double matrix of ones.",
     "NaN values count as stored values, matching RunMat sparse storage semantics.",
-    "Complex sparse storage is not available in RunMat's current `SparseTensor` representation."
+    "Complex sparse storage is not currently represented by this builtin."
   ],
   "examples": [
     {

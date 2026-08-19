@@ -12,6 +12,11 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ResolveContext, Type,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
 
@@ -168,7 +173,46 @@ const SIZE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
     },
 ];
 
-const SIZE_ERRORS: [BuiltinErrorDescriptor; 8] = [
+const SIZE_INTEGER_ARRAY_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer array classes are inspected through shape metadata; no element payload or floating conversion is required.",
+    }];
+const SIZE_INTEGER_DIM_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "dim or dimensions",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Scalar and vector selectors are decoded exactly from authoritative integer storage, including documented empty dimension vectors.",
+    }];
+pub const SIZE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "sz = size(integer_A)",
+        inputs: &SIZE_INTEGER_ARRAY_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The result uses MATLAB's conventional double dimension values and preserves the requested output-count rules.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "sz = size(A, integer_dimensions)",
+        inputs: &SIZE_INTEGER_DIM_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Dimension values are range checked before conversion to platform indices; size(A,[]) returns a 1-by-0 double result.",
+    },
+];
+
+const SIZE_ERRORS: [BuiltinErrorDescriptor; 7] = [
     BuiltinErrorDescriptor {
         code: "RM.SIZE.ARG_COUNT",
         identifier: None,
@@ -186,12 +230,6 @@ const SIZE_ERRORS: [BuiltinErrorDescriptor; 8] = [
         identifier: None,
         when: "Dimension vector argument is not vector-shaped.",
         message: "size: dimension vector must be a vector of positive integers",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.SIZE.DIM_VECTOR_EMPTY",
-        identifier: None,
-        when: "Dimension vector argument has zero elements.",
-        message: "size: dimension vector must contain at least one element",
     },
     BuiltinErrorDescriptor {
         code: "RM.SIZE.DIM_NON_FINITE",
@@ -233,6 +271,7 @@ pub const SIZE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     keywords = "size,dimensions,shape,gpu,introspection",
     type_resolver(size_type),
     descriptor(crate::builtins::array::introspection::size::SIZE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::array::introspection::size::SIZE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::introspection::size"
 )]
 async fn size_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -289,11 +328,6 @@ fn parse_dim_selection(arg: &Value) -> crate::BuiltinResult<DimSelection> {
         }
         Value::Tensor(t) => {
             ensure_dim_vector(t)?;
-            if t.is_empty() {
-                return Err(size_error(
-                    "size: dimension vector must contain at least one element",
-                ));
-            }
             let dims = match tensor::integer_tensor_dimension_vector(t, "size", false) {
                 Some(parsed) => parsed.map_err(size_error)?,
                 None => (0..t.len())
@@ -534,13 +568,15 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn size_dimension_vector_must_not_be_empty() {
+    fn size_empty_dimension_vector_returns_empty_row() {
         let tensor = Tensor::new(vec![0.0; 8], vec![2, 4]).unwrap();
         let dims = Tensor::new(vec![], vec![1, 0]).unwrap();
-        let err =
-            size_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)]).expect_err("empty dims");
-        assert!(err
-            .to_string()
-            .contains("must contain at least one element"));
+        let result =
+            size_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)]).expect("empty dims");
+        let Value::Tensor(output) = result else {
+            panic!("expected empty tensor result");
+        };
+        assert_eq!(output.shape, vec![1, 0]);
+        assert!(output.is_empty());
     }
 }

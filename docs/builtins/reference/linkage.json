@@ -16,7 +16,7 @@
     "reduction": false,
     "precisions": ["f64"],
     "broadcasting": "none",
-    "notes": "GPU inputs are gathered to host. Hierarchical clustering runs on CPU."
+    "notes": "Interactive gpuArray input is a RunMat-only owning-provider host fallback. Automatic internal residency may gather transparently. Hierarchical clustering runs on CPU and returns a host tree."
   },
   "fusion": {
     "elementwise": false,
@@ -41,7 +41,8 @@
     "`linkage(X, method, {metric, parameter})` accepts a cell array of `pdist` inputs.",
     "`\"SaveMemory\",\"off\"` is accepted for source compatibility. `\"SaveMemory\",\"on\"` is accepted for observation-matrix input with centroid, median, or ward linkage and Euclidean distance; RunMat uses the same bounded in-memory implementation for both values.",
     "The current exact agglomerative implementation is bounded to 700 observations to avoid unbounded CPU and memory use.",
-    "The first two columns of `Z` contain one-based cluster identifiers. Original observations are numbered `1:m`; newly formed clusters are numbered `m+1`, `m+2`, and so on. The third column contains the linkage distance for each merge."
+    "The first two columns of `Z` contain one-based cluster identifiers. Original observations are numbered `1:m`; newly formed clusters are numbered `m+1`, `m+2`, and so on. The third column contains the linkage distance for each merge.",
+    "Typed-integer observations, condensed distances, and numeric distance parameters are separately gated RunMat extensions and must be exactly representable at the binary64 clustering boundary."
   ],
   "examples": [
     {

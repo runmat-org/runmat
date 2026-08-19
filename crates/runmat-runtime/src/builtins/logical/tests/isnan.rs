@@ -4,6 +4,11 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexTensor, LogicalArray, NumericScalar, StringArray, Tensor, Value,
@@ -107,6 +112,24 @@ pub const ISNAN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ISNAN_ERRORS,
 };
+const ISNAN_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "A",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "Fixed-width integer elements cannot represent NaN.",
+}];
+pub const ISNAN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = isnan(integer_A)",
+        inputs: &ISNAN_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Predicate,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Returns a same-shaped all-false logical mask directly from integer class and shape. Resident integer masks are created on the exact owning provider without downloading the payload.",
+    }];
 
 fn isnan_error(name: &str, error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     isnan_error_with_message(name, error.message, error)
@@ -132,11 +155,15 @@ fn isnan_error_with_message(
     accel = "elementwise",
     type_resolver(logical_unary_type),
     descriptor(crate::builtins::logical::tests::isnan::ISNAN_DESCRIPTOR),
+    integer_capabilities(crate::builtins::logical::tests::isnan::ISNAN_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::logical::tests::isnan"
 )]
 async fn isnan_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => {
+            if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
+                return resident_integer_mask(&handle);
+            }
             let tensor = gpu_helpers::gather_tensor_async(&handle)
                 .await
                 .map_err(|err| {
@@ -150,6 +177,30 @@ async fn isnan_builtin(value: Value) -> BuiltinResult<Value> {
         }
         other => isnan_host(other),
     }
+}
+
+fn resident_integer_mask(handle: &runmat_accelerate_api::GpuTensorHandle) -> BuiltinResult<Value> {
+    let integer = runmat_accelerate_api::handle_integer_type(handle)
+        .expect("resident integer mask requires integer metadata");
+    let storage = runmat_accelerate_api::handle_storage(handle);
+    if gpu_helpers::exact_provider_for_handle(handle).is_none()
+        || storage != runmat_accelerate_api::GpuTensorStorage::Real
+        || runmat_accelerate_api::handle_precision(handle).is_some()
+        || runmat_accelerate_api::handle_is_logical(handle)
+        || !gpu_helpers::gpu_class_metadata_matches(handle, None, Some(integer), false)
+    {
+        return Err(isnan_error_with_message(
+            BUILTIN_NAME,
+            "isnan: resident integer metadata is contradictory",
+            &ISNAN_ERROR_INTERNAL,
+        ));
+    }
+    let mask = LogicalArray::new(
+        vec![0; tensor::element_count(&handle.shape)],
+        handle.shape.clone(),
+    )
+    .map_err(|error| internal_error(BUILTIN_NAME, format!("isnan: {error}")))?;
+    gpu_helpers::restore_class_preserving_value(handle, Value::LogicalArray(mask), BUILTIN_NAME)
 }
 
 fn isnan_host(value: Value) -> BuiltinResult<Value> {
@@ -319,6 +370,72 @@ pub(crate) mod tests {
             }
             other => panic!("expected logical array, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn isnan_returns_same_shaped_false_for_all_integer_classes() {
+        let storages = [
+            IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+            IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+            IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![u8::MIN, u8::MAX]),
+            IntegerStorage::U16(vec![u16::MIN, u16::MAX]),
+            IntegerStorage::U32(vec![u32::MIN, u32::MAX]),
+            IntegerStorage::U64(vec![u64::MIN, u64::MAX]),
+        ];
+        for storage in storages {
+            let tensor = Tensor::new_integer(storage, vec![2, 1]).expect("integer tensor");
+            let result = run_isnan(Value::Tensor(tensor)).expect("isnan");
+            assert!(matches!(
+                result,
+                Value::LogicalArray(mask)
+                    if mask.shape == vec![2, 1] && mask.data == vec![0, 0]
+            ));
+        }
+    }
+
+    #[test]
+    fn isnan_resident_integer_creates_resident_logical_without_downloading_source() {
+        test_support::with_test_provider(|provider| {
+            let tensor =
+                Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![1, 2])
+                    .expect("integer tensor");
+            let source = gpu_helpers::upload_tensor(provider, &tensor).expect("upload integer");
+            let result = run_isnan(Value::GpuTensor(source.clone())).expect("resident isnan");
+            let Value::GpuTensor(mask_handle) = &result else {
+                panic!("resident isnan must preserve NewHandle residency policy")
+            };
+            assert_ne!(mask_handle.buffer_id, source.buffer_id);
+            assert!(runmat_accelerate_api::handle_is_logical(mask_handle));
+            assert!(runmat_accelerate_api::handle_integer_type(mask_handle).is_none());
+            assert!(gpu_helpers::exact_provider_for_handle(&source).is_some());
+            let gathered = test_support::gather(result).expect("gather logical mask");
+            assert_eq!(gathered.shape, vec![1, 2]);
+            assert_eq!(
+                gathered
+                    .into_numeric_storage()
+                    .expect("mask storage")
+                    .materialize_f64(),
+                vec![0.0, 0.0]
+            );
+            provider.free(&source).ok();
+        });
+    }
+
+    #[test]
+    fn isnan_rejects_contradictory_resident_integer_metadata() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1])
+                .expect("integer tensor");
+            let mut handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload integer");
+            handle.descriptor.storage =
+                Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
+            let error = run_isnan(Value::GpuTensor(handle.clone()))
+                .expect_err("integer/float metadata contradiction must reject");
+            assert!(error.message().contains("metadata is contradictory"));
+            provider.free(&handle).ok();
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

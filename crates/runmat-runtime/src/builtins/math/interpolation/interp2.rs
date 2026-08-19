@@ -1,7 +1,11 @@
 //! MATLAB-compatible `interp2` builtin for gridded dense real data.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ResolveContext, Type,
 };
@@ -336,6 +340,94 @@ pub const INTERP2_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &INTERP2_ERRORS,
 };
 
+const INTERP2_INTEGER_SAMPLE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "interp2-integer-sample",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "interp2 with typed-integer sample grids or values is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Interp2IntegerSampleExtension"),
+};
+const INTERP2_INTEGER_QUERY_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "interp2-integer-query",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "interp2 with typed-integer query coordinates is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Interp2IntegerQueryExtension"),
+};
+const INTERP2_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "interp2-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "interp2 with logical numeric input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Interp2LogicalInputExtension"),
+};
+const INTERP2_INTEGER_EXTRAPOLATION_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "interp2-integer-extrapolation",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "interp2 with a typed-integer extrapolation value is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:Interp2IntegerExtrapolationExtension"),
+    };
+pub const INTERP2_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    INTERP2_INTEGER_SAMPLE_EXTENSION,
+    INTERP2_INTEGER_QUERY_EXTENSION,
+    INTERP2_LOGICAL_INPUT_EXTENSION,
+    INTERP2_INTEGER_EXTRAPOLATION_EXTENSION,
+];
+const INTERP2_INTEGER_SAMPLE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X, Y, or V",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Integer grids and values must be exactly representable before interpolation.",
+    }];
+const INTERP2_INTEGER_QUERY_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Xq or Yq",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Integer query coordinates must be exactly representable before interpolation.",
+    }];
+const INTERP2_INTEGER_EXTRAPOLATION_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "extrapolation value",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The scalar fill value must be exactly representable before interpolation.",
+    }];
+pub const INTERP2_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Vq = interp2(integer_X_Y_or_V, ...)",
+        inputs: &INTERP2_INTEGER_SAMPLE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat-only integer samples cross one checked binary64 boundary; MATLAB-compatible modes retain documented single/double grids and values.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Vq = interp2(X, Y, V, integer_Xq_or_Yq)",
+        inputs: &INTERP2_INTEGER_QUERY_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer queries are gated before provider access and converted only after exactness validation.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Vq = interp2(..., method, integer_extrapolation_value)",
+        inputs: &INTERP2_INTEGER_EXTRAPOLATION_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "RunMat accepts this broader scalar fill form only after compatibility and exactness checks that precede provider access or gather.",
+    },
+];
+
 fn interp2_error_with_message(
     message: impl Into<String>,
     error: &'static BuiltinErrorDescriptor,
@@ -430,9 +522,14 @@ fn interp2_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     sink = true,
     type_resolver(interp2_type),
     descriptor(crate::builtins::math::interpolation::interp2::INTERP2_DESCRIPTOR),
+    extensions(crate::builtins::math::interpolation::interp2::INTERP2_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::math::interpolation::interp2::INTERP2_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::math::interpolation::interp2"
 )]
 async fn interp2_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    preflight_interp2_inputs(&args).await?;
     let parsed = ParsedInterp2::parse(args)
         .await
         .map_err(|err| interp2_map_error(err, &INTERP2_ERROR_INVALID_INPUT))?;
@@ -445,6 +542,79 @@ async fn interp2_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         interp2_error_with_message(format!("{NAME}: {err}"), &INTERP2_ERROR_INTERNAL)
     })?;
     Ok(Value::Tensor(tensor))
+}
+
+async fn preflight_interp2_inputs(args: &[Value]) -> crate::BuiltinResult<()> {
+    use crate::builtins::common::validation::{
+        native_integer_value_is_exact_f64_async, value_has_logical_class,
+        value_has_native_integer_class,
+    };
+    if args.len() < 3 {
+        return Ok(());
+    }
+    let explicit = args.len() >= 5 && !is_option_arg(&args[3]);
+    let (samples, queries) = if explicit {
+        (&args[..3], &args[3..5])
+    } else {
+        (&args[..1], &args[1..3])
+    };
+    for value in samples {
+        if value_has_native_integer_class(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &INTERP2_INTEGER_SAMPLE_EXTENSION,
+                NAME,
+            )?;
+            if !native_integer_value_is_exact_f64_async(value).await? {
+                return Err(interp2_invalid_input(
+                    "integer samples must be exactly representable as double",
+                ));
+            }
+        }
+    }
+    for value in queries {
+        if value_has_native_integer_class(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &INTERP2_INTEGER_QUERY_EXTENSION,
+                NAME,
+            )?;
+            if !native_integer_value_is_exact_f64_async(value).await? {
+                return Err(interp2_invalid_input(
+                    "integer query coordinates must be exactly representable as double",
+                ));
+            }
+        }
+    }
+    if samples
+        .iter()
+        .chain(queries.iter())
+        .any(|value| value_has_logical_class(value))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INTERP2_LOGICAL_INPUT_EXTENSION,
+            NAME,
+        )?;
+    }
+    let option_start = if explicit { 5 } else { 3 };
+    for option in args.iter().skip(option_start) {
+        if value_has_native_integer_class(option) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &INTERP2_INTEGER_EXTRAPOLATION_EXTENSION,
+                NAME,
+            )?;
+            if !native_integer_value_is_exact_f64_async(option).await? {
+                return Err(interp2_invalid_input(
+                    "integer extrapolation value must be exactly representable as double",
+                ));
+            }
+        }
+        if value_has_logical_class(option) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &INTERP2_LOGICAL_INPUT_EXTENSION,
+                NAME,
+            )?;
+        }
+    }
+    Ok(())
 }
 
 struct ParsedInterp2 {
@@ -752,21 +922,31 @@ mod tests {
 
     #[test]
     fn interp2_vector_axes_read_typed_integer_storage_exactly() {
-        let value = block_on(interp2_builtin(vec![
-            integer_tensor(IntegerStorage::I16(vec![10, 20]), vec![1, 2]),
-            integer_tensor(IntegerStorage::I16(vec![100, 200]), vec![1, 2]),
-            integer_tensor(IntegerStorage::I16(vec![1, 3, 2, 4]), vec![2, 2]),
-            Value::Num(18.0),
-            Value::Num(120.0),
-            Value::String("nearest".to_string()),
-        ]))
-        .expect("interp2");
+        let args = || {
+            vec![
+                integer_tensor(IntegerStorage::I16(vec![10, 20]), vec![1, 2]),
+                integer_tensor(IntegerStorage::I16(vec![100, 200]), vec![1, 2]),
+                integer_tensor(IntegerStorage::I16(vec![1, 3, 2, 4]), vec![2, 2]),
+                Value::Num(18.0),
+                Value::Num(120.0),
+                Value::String("nearest".to_string()),
+            ]
+        };
+        let error =
+            block_on(interp2_builtin(args())).expect_err("compatible mode rejects integer grids");
+        assert_eq!(
+            error.identifier(),
+            INTERP2_INTEGER_SAMPLE_EXTENSION.error_identifier
+        );
+        let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
+        let value = block_on(interp2_builtin(args())).expect("RunMat interp2");
 
         assert_eq!(value, Value::Num(2.0));
     }
 
     #[test]
     fn interp2_full_grid_axes_read_typed_integer_storage_exactly() {
+        let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
         let x_grid = integer_tensor(IntegerStorage::I16(vec![10, 10, 20, 20]), vec![2, 2]);
         let y_grid = integer_tensor(IntegerStorage::I16(vec![100, 200, 100, 200]), vec![2, 2]);
         let value = block_on(interp2_builtin(vec![
@@ -780,6 +960,30 @@ mod tests {
         .expect("interp2");
 
         assert_eq!(value, Value::Num(2.0));
+    }
+
+    #[test]
+    fn interp2_integer_extrapolation_is_independently_gated() {
+        let args = || {
+            vec![
+                Value::Tensor(Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).expect("tensor")),
+                Value::Num(0.0),
+                Value::Num(0.0),
+                Value::String("linear".to_string()),
+                Value::Int(runmat_value::IntValue::I16(99)),
+            ]
+        };
+        let error = block_on(interp2_builtin(args()))
+            .expect_err("compatible mode rejects integer extrapolation");
+        assert_eq!(
+            error.identifier(),
+            INTERP2_INTEGER_EXTRAPOLATION_EXTENSION.error_identifier
+        );
+        let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
+        assert_eq!(
+            block_on(interp2_builtin(args())).expect("RunMat extrapolation"),
+            Value::Num(99.0)
+        );
     }
 
     #[test]

@@ -10,6 +10,7 @@
     clippy::useless_conversion
 )]
 #![cfg_attr(target_arch = "wasm32", allow(dead_code))]
+
 use runmat_types::MemberAccess;
 
 use runmat_builtins::{
@@ -1762,10 +1763,12 @@ mod tests {
         ];
 
         for (name, label) in cases {
-            let builtin = runmat_builtins::builtin_function_by_name(name)
-                .unwrap_or_else(|| panic!("builtin {name} not registered"));
-            let descriptor = builtin
-                .descriptor
+            let descriptor = runmat_builtins::builtin_catalog_entry_by_name(name)
+                .map(|entry| entry.descriptor)
+                .or_else(|| {
+                    runmat_builtins::builtin_function_by_name(name)
+                        .and_then(|builtin| builtin.descriptor)
+                })
                 .unwrap_or_else(|| panic!("descriptor missing for {name}"));
             assert!(
                 descriptor.signatures.iter().any(|sig| sig.label == label),

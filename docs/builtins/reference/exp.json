@@ -66,7 +66,7 @@
       "output": "result = [1.0000 2.7183; 7.3891 20.0855]"
     },
     {
-      "description": "Use the RunMat character-input extension",
+      "description": "Exponentiating character codes",
       "input": "C = 'ABC';\nY = exp(C)",
       "output": "Y = [1.6949e+28 4.6072e+28 1.2524e+29]"
     }

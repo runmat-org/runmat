@@ -27,8 +27,6 @@ use runmat_builtins::{
 use runmat_value::{ComplexTensor, Value};
 
 use runmat_macros::runtime_builtin;
-#[cfg(test)]
-use runmat_value::Tensor;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::fft::ifftn")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -262,13 +260,21 @@ const IFFTN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "IFFTN execution or tensor shaping fails.",
     message: "ifftn: internal error",
 };
+const IFFTN_ERROR_PROVIDER_INTEGRITY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IFFTN.PROVIDER_INTEGRITY",
+    identifier: Some("RunMat:ifftn:ProviderIntegrity"),
+    when:
+        "The provider returns ownership, shape, or physical metadata inconsistent with the request.",
+    message: "ifftn: provider integrity error",
+};
 
-const IFFTN_ERRORS: [BuiltinErrorDescriptor; 5] = [
+const IFFTN_ERRORS: [BuiltinErrorDescriptor; 6] = [
     IFFTN_ERROR_ARG_COUNT,
     IFFTN_ERROR_INVALID_SIZE,
     IFFTN_ERROR_INVALID_SYMFLAG,
     IFFTN_ERROR_INVALID_INPUT,
     IFFTN_ERROR_INTERNAL,
+    IFFTN_ERROR_PROVIDER_INTEGRITY,
 ];
 
 pub const IFFTN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -320,7 +326,11 @@ fn ifftn_provider_error(detail: impl AsRef<str>) -> RuntimeError {
         detail.as_ref()
     ))
     .with_builtin(BUILTIN_NAME)
-    .with_identifier("RunMat:ifftn:ProviderIntegrity")
+    .with_identifier(
+        IFFTN_ERROR_PROVIDER_INTEGRITY
+            .identifier
+            .expect("ifftn provider-integrity descriptor identifier"),
+    )
     .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
     .build()
 }
@@ -687,6 +697,7 @@ mod tests {
     use crate::builtins::math::fft::fft::fft_complex_tensor;
     use futures::executor::block_on;
     use runmat_builtins::builtin_function_by_name;
+    use runmat_value::Tensor;
 
     fn error_message(error: crate::RuntimeError) -> String {
         error.message().to_string()
@@ -827,11 +838,11 @@ mod tests {
             shape: frequency.shape.clone(),
             device_id: raw.device_id,
             buffer_id: raw.buffer_id,
+            descriptor: runmat_accelerate_api::GpuTensorDescriptor {
+                storage: Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved),
+                ..raw.descriptor
+            },
         };
-        runmat_accelerate_api::set_handle_storage(
-            &source,
-            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-        );
         let gpu = block_on(ifftn_builtin(Value::GpuTensor(source.clone()), Vec::new()))
             .expect("resident ifftn");
         let cpu = block_on(ifftn_builtin(Value::ComplexTensor(frequency), Vec::new()))

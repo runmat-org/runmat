@@ -2,12 +2,26 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
+    BuiltinIntegerAuditKind,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 use super::axis_tick_labels::axis_tick_labels_builtin;
 use super::axis_ticks::TickAxis;
 use crate::builtins::plotting::type_resolvers::get_type;
+
+const XTICKLABELS_INTEGER_AXES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "xticklabels-integer-axes-handle",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "Allow a typed-integer alias for an encoded axes handle",
+    error_identifier: Some("RunMat:compatibility:XticklabelsIntegerAxesHandleExtension"),
+};
+pub const XTICKLABELS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [XTICKLABELS_INTEGER_AXES_EXTENSION];
+pub const XTICKLABELS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "Tick labels accept text and categorical containers; integer label payloads are invalid, while a typed-integer encoded axes alias is a separately gated RunMat extension." };
 
 const XTICKLABELS_OUTPUT_LABELS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "labels",
@@ -117,9 +131,29 @@ pub const XTICKLABELS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     suppress_auto_output = true,
     type_resolver(get_type),
     descriptor(crate::builtins::plotting::xticklabels::XTICKLABELS_DESCRIPTOR),
+    extensions(crate::builtins::plotting::xticklabels::XTICKLABELS_EXTENSIONS),
+    integer_audit(crate::builtins::plotting::xticklabels::XTICKLABELS_INTEGER_AUDIT),
     builtin_path = "crate::builtins::plotting::xticklabels"
 )]
 pub fn xticklabels_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if args.len() == 2
+        && args
+            .first()
+            .is_some_and(crate::builtins::common::validation::value_has_native_integer_class)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &XTICKLABELS_INTEGER_AXES_EXTENSION,
+            "xticklabels",
+        )?;
+    } else if args
+        .iter()
+        .any(crate::builtins::common::validation::value_has_native_integer_class)
+    {
+        return Err(super::plotting_error(
+            "xticklabels",
+            "xticklabels: tick labels must be text or categorical values",
+        ));
+    }
     axis_tick_labels_builtin("xticklabels", TickAxis::X, args)
 }
 

@@ -5,15 +5,23 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode};
-#[cfg(test)]
-use runmat_value::Tensor;
 use runmat_value::Value;
+#[cfg(test)]
+use runmat_value::{IntegerStorage, Tensor};
 
 use super::common::{tensor_to_surface_grid_matlab_xy, SurfaceDataInput};
 use super::contour::{build_contour_plot, default_level_count, ContourLevelSpec, ContourLineColor};
-use super::mesh::build_mesh_surface;
+use super::mesh::{
+    build_mesh_surface, numeric_plot_data_from_tensor, numeric_plot_data_from_value,
+    retain_surface_source_data,
+};
 use super::op_common::surface_composite::contour_for_surface_axes_input;
 use super::op_common::surface_inputs::{
     axis_sources_to_host, parse_surface_call_args_matlab_xy, surface_axis_sources_from_xy_values,
@@ -28,6 +36,43 @@ use crate::RuntimeError;
 use std::sync::Arc;
 
 const BUILTIN_NAME: &str = "meshc";
+
+const INTEGER_X: [BuiltinIntegerInputCapability; 1] = [meshc_integer_input("X")];
+const INTEGER_Y: [BuiltinIntegerInputCapability; 1] = [meshc_integer_input("Y")];
+const INTEGER_Z: [BuiltinIntegerInputCapability; 1] = [meshc_integer_input("Z")];
+
+const fn meshc_integer_input(name: &'static str) -> BuiltinIntegerInputCapability {
+    BuiltinIntegerInputCapability {
+        name,
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes:
+            "The compatibility target explicitly lists every built-in integer class for this surface coordinate role.",
+    }
+}
+
+const fn meshc_integer_capability(
+    form: &'static str,
+    inputs: &'static [BuiltinIntegerInputCapability],
+) -> BuiltinIntegerCapabilityDescriptor {
+    BuiltinIntegerCapabilityDescriptor {
+        form,
+        inputs,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Native class, exact values, and shape remain authoritative on the primary Surface object and in RunMat scene persistence; surface rendering, contour generation, and client-side GPU handling are explicit floating boundaries. The documented independent C color-array form is a general unimplemented graphics gap.",
+    }
+}
+
+pub const MESHC_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    meshc_integer_capability("s = meshc(integer_X, Y, Z, ...)", &INTEGER_X),
+    meshc_integer_capability("s = meshc(X, integer_Y, Z, ...)", &INTEGER_Y),
+    meshc_integer_capability("s = meshc(X, Y, integer_Z, ...)", &INTEGER_Z),
+];
 
 const MESHC_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "h",
@@ -199,12 +244,27 @@ fn map_meshc_internal(err: RuntimeError) -> RuntimeError {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::meshc::MESHC_DESCRIPTOR),
+    integer_capabilities(crate::builtins::plotting::meshc::MESHC_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::meshc"
 )]
 pub async fn meshc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let (x, y, z, rest) = parse_surface_call_args_matlab_xy(args, BUILTIN_NAME)
         .map_err(map_meshc_invalid_argument)?;
+    let source_x = numeric_plot_data_from_value(&x, BUILTIN_NAME)
+        .await
+        .map_err(map_meshc_invalid_argument)?;
+    let source_y = numeric_plot_data_from_value(&y, BUILTIN_NAME)
+        .await
+        .map_err(map_meshc_invalid_argument)?;
     let z_input = SurfaceDataInput::from_value(z, "meshc").map_err(map_meshc_invalid_argument)?;
+    let source_z = match &z_input {
+        SurfaceDataInput::Host(tensor) => Some(numeric_plot_data_from_tensor(tensor)),
+        SurfaceDataInput::Gpu(handle) => Some(numeric_plot_data_from_tensor(
+            &super::common::gather_tensor_from_gpu_async(handle.clone(), BUILTIN_NAME)
+                .await
+                .map_err(map_meshc_invalid_argument)?,
+        )),
+    };
     let (rows, cols) = z_input
         .grid_shape(BUILTIN_NAME)
         .map_err(map_meshc_invalid_argument)?;
@@ -359,6 +419,7 @@ pub async fn meshc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         .with_colormap(ColorMap::Turbo)
         .with_wireframe(true)
         .with_shading(ShadingMode::Faceted);
+    retain_surface_source_data(&mut surface, source_x, source_y, source_z);
 
     let mut surface_opt = Some(surface);
     let mut contour_opt = Some(contour);
@@ -391,7 +452,9 @@ pub async fn meshc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::plotting::tests::ensure_plot_test_env;
+    use crate::builtins::plotting::get::get_builtin;
+    use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
+    use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
     use runmat_builtins::{ResolveContext, Type};
 
     fn setup_plot_tests() {
@@ -452,5 +515,36 @@ pub(crate) mod tests {
         )]))
         .expect("meshc should return handle");
         assert!(handle.is_finite());
+    }
+
+    #[test]
+    fn meshc_integer_capabilities_cover_all_coordinate_roles() {
+        assert_eq!(MESHC_INTEGER_CAPABILITIES.len(), 3);
+        assert!(MESHC_INTEGER_CAPABILITIES
+            .iter()
+            .all(|capability| capability.inputs[0].classes.len() == 8));
+    }
+
+    #[test]
+    fn meshc_resident_integer_zdata_retains_exact_host_property_authority() {
+        let _guard = lock_plot_registry();
+        setup_plot_tests();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let expected = IntegerStorage::U64(vec![1, 2, 3, 4]);
+            let source = Tensor::new_integer(expected.clone(), vec![2, 2]).expect("integer Z");
+            let resident = crate::builtins::common::gpu_helpers::upload_tensor(provider, &source)
+                .expect("resident integer Z");
+            let handle =
+                futures::executor::block_on(meshc_builtin(vec![Value::GpuTensor(resident)]))
+                    .expect("resident integer meshc");
+            let value = get_builtin(vec![Value::Num(handle), Value::String("ZData".into())])
+                .expect("meshc ZData");
+
+            assert!(
+                matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 2] && tensor.integer_storage() == Some(&expected))
+            );
+        });
     }
 }

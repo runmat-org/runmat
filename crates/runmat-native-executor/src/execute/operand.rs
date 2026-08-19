@@ -304,6 +304,9 @@ pub(super) fn evaluate_operand(
                         "invalid MIR numeric constant {text:?}: {error}"
                     ))
                 })?),
+                MirConstant::IntegerLiteral(value) => {
+                    Value::Int(runmat_value::IntValue::from(value))
+                }
                 MirConstant::String(text) if text.is_character_row() => {
                     Value::CharArray(runmat_value::CharArray::new_row(&text.runtime_text()))
                 }

@@ -1,5 +1,9 @@
 //! MATLAB-compatible `load` builtin for RunMat.
 
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind,
+};
 use std::collections::HashMap;
 use std::io::{BufReader, Cursor, Read};
 use std::path::{Path, PathBuf};
@@ -184,6 +188,18 @@ pub const LOAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &LOAD_ERRORS,
 };
 
+pub const LOAD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "integer_value = load(...) or S.integer_field = load(...)",
+        inputs: &[],
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Level-5 MAT integer class tags reconstruct signed or unsigned values of the same class, width, and shape, including nested cell, structure, sparse, complex-component, and RunMat object-envelope payloads.",
+    }];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::mat::load")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "load",
@@ -220,6 +236,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::load_type),
     descriptor(crate::builtins::io::mat::load::LOAD_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::mat::load::LOAD_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::mat::load"
 )]
 async fn load_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -313,6 +330,15 @@ fn load_error_with_source(
 }
 
 pub async fn evaluate(args: &[Value]) -> BuiltinResult<LoadEval> {
+    if args
+        .iter()
+        .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        return Err(load_error_with(
+            &LOAD_ERROR_INVALID_ARGUMENT,
+            "load: filename, options, and variable selectors must be host text values",
+        ));
+    }
     let mut host_args = Vec::with_capacity(args.len());
     for arg in args {
         host_args.push(gather_if_needed_async(arg).await?);

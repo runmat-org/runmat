@@ -18,7 +18,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "RunMat materialises grids on the host and uploads them when GPU residency is requested. Providers may supply dedicated meshgrid hooks to avoid the round-trip."
+    "notes": "RunMat materialises grids on the host and restores them to the requesting GPU owner when a compatible provider hook is unavailable. Native real and paired-complex storage is preserved exactly."
   },
   "fusion": {
     "elementwise": false,
@@ -38,7 +38,7 @@
     "`meshgrid(x, y, z)` returns three outputs sized `length(y) × length(x) × length(z)`, enabling 3-D volume visualisation.",
     "Input vectors may be row or column vectors (or even scalars). Empty vectors propagate to empty grids of matching shape.",
     "In `runmat` compatibility mode, complex axes are a RunMat extension and produce complex grids that preserve their values and precision.",
-    "Supplying GPU vectors keeps real and complex-interleaved outputs on the GPU when an acceleration provider is active. Without provider support, RunMat gathers inputs, materialises the grid on the host, and uploads the result transparently.",
+    "Documented single and double GPU vectors keep outputs resident when an acceleration provider is active. Explicit real-integer gpuArray axes reject; automatically resident real-integer axes gather transparently and produce exact host grids. Paired-complex integer axes are a RunMat extension and preserve exact resident output.",
     "In `runmat` compatibility mode, the RunMat-only `'like', prototype` selector matches both residency and numeric class. Ordinary MATLAB-compatible calls preserve each corresponding input axis class, including all eight integer classes."
   ],
   "examples": [
@@ -62,11 +62,11 @@
       "input": "gx = gpuArray(single(linspace(-pi, pi, 4)));\ngy = gpuArray(single([-1 0 1]));\n[Xg, Yg] = meshgrid(gx, gy)"
     },
     {
-      "description": "Using the RunMat-only `'like'` extension to copy residency in runmat compatibility mode",
+      "description": "Matching grid storage to a prototype",
       "input": "proto = gpuArray.zeros(1, 1, 'double');\nangles = linspace(0, 2*pi, 8);\nradius = [0 1 2];\n[X, Y] = meshgrid(angles, radius, 'like', proto)"
     },
     {
-      "description": "Using complex axes in runmat compatibility mode",
+      "description": "Creating grids from complex axes",
       "input": "z = [1+1i, 2+4i];\n[Zx, Zy] = meshgrid(z)"
     }
   ],
@@ -93,7 +93,7 @@
     },
     {
       "question": "Does `meshgrid` support complex numbers?",
-      "answer": "Complex axes are a RunMat-only extension available in `runmat` compatibility mode. Their imaginary components and precision propagate to complex outputs, including complex-interleaved GPU output when a provider is active."
+      "answer": "Complex axes are a RunMat-only extension available in `runmat` compatibility mode. Their imaginary components and precision propagate to complex outputs, including exact paired-integer components and complex-interleaved GPU output when a provider is active."
     },
     {
       "question": "What does `'like'` do?",

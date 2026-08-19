@@ -36,11 +36,10 @@
   "description": "`vertcat(A1, A2, ...)` stacks inputs top-to-bottom along dimension 1, equivalent to MATLAB semicolon syntax `[A1; A2; ...]` with compatible shape rules.",
   "behaviors": [
     "Hard-codes `dim = 1`. All inputs must agree on every dimension except the first.",
-    "Accepts numeric, logical, complex, character, string, and cell arrays with MATLAB-compatible type checking. Mixing classes is an error.",
+    "Accepts numeric, logical, complex, character, string, and cell arrays with the same class-dominance rules as `cat(...,1)`. Real integer mixtures preserve the leftmost participating integer class with saturating conversion.",
     "Scalars are treated as `1×1`, enabling concise row-building such as `vertcat(1, 2, 3)`.",
     "Empty inputs participate naturally. If any shared dimension is zero, the result is empty with the expected shape.",
-    "The optional trailing `'like', prototype` pair forces the output to match the prototype's data residency (CPU vs GPU) and numeric flavour.",
-    "Mixing `gpuArray` inputs with host inputs is disallowed. Convert explicitly via `gpuArray` or `gather` to control residency."
+    "Compatible host and resident numeric inputs use the owning provider when possible; otherwise RunMat gathers exact values, concatenates on the host, and restores the result when the owner can preserve its class."
   ],
   "examples": [
     {
@@ -72,10 +71,6 @@
     {
       "description": "Keeping gpuArray inputs resident on the device",
       "input": "G1 = gpuArray(rand(128, 256));\nG2 = gpuArray(rand(64, 256));\nstacked = vertcat(G1, G2)"
-    },
-    {
-      "description": "Requesting GPU output with the `'like'` prototype",
-      "input": "proto = gpuArray.zeros(1, 3);\nresult = vertcat([1 2 3], [4 5 6], \"like\", proto)"
     },
     {
       "description": "Working with empty rows without surprises",

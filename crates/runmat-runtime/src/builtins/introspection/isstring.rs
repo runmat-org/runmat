@@ -12,8 +12,10 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
+use runmat_value::{IntValue, IntegerStorage};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::isstring")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -72,6 +74,12 @@ pub const ISSTRING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ISSTRING_ERRORS,
 };
+pub const ISSTRING_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "isstring is a universal type predicate; integer host or resident values return scalar false from value metadata without reading payload data.",
+    };
 
 #[runtime_builtin(
     name = "isstring",
@@ -81,6 +89,7 @@ pub const ISSTRING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "metadata",
     type_resolver(isstring_type),
     descriptor(crate::builtins::introspection::isstring::ISSTRING_DESCRIPTOR),
+    integer_audit(crate::builtins::introspection::isstring::ISSTRING_INTEGER_AUDIT),
     builtin_path = "crate::builtins::introspection::isstring"
 )]
 fn isstring_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -192,6 +201,39 @@ pub(crate) mod tests {
             isstring_builtin(logical_array).expect("isstring"),
             Value::Bool(false)
         );
+    }
+
+    #[test]
+    fn all_integer_classes_report_false() {
+        for value in [
+            IntValue::I8(-1),
+            IntValue::I16(-2),
+            IntValue::I32(-3),
+            IntValue::I64(i64::MIN),
+            IntValue::U8(1),
+            IntValue::U16(2),
+            IntValue::U32(3),
+            IntValue::U64(u64::MAX),
+        ] {
+            assert_eq!(
+                isstring_builtin(Value::Int(value)).expect("isstring"),
+                Value::Bool(false)
+            );
+        }
+    }
+
+    #[test]
+    fn resident_integer_returns_false_without_gather() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+                .expect("integer tensor");
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+                .expect("upload integer");
+            assert_eq!(
+                isstring_builtin(Value::GpuTensor(handle)).expect("isstring"),
+                Value::Bool(false)
+            );
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

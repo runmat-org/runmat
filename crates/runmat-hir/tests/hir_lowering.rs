@@ -1132,6 +1132,7 @@ fn lowering_emits_only_fixed_requested_output_counts() {
             | HirExprKind::WorkspaceFirstStaticProperty { .. }
             | HirExprKind::MetaClass(_)
             | HirExprKind::Number(_)
+            | HirExprKind::IntegerLiteral(_)
             | HirExprKind::String(_)
             | HirExprKind::Constant(_)
             | HirExprKind::Binding(_)

@@ -192,7 +192,7 @@ macro_rules! quantile_integer_metadata {
                 classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
                 availability: BuiltinIntegerInputAvailability::RunMatOnly,
                 scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-                notes: "The documented R2026a data domain is double, single, duration, or datetime; RunMat mode additionally accepts all eight real integer classes.",
+                notes: "The compatibility target's documented data domain is double, single, duration, or datetime; RunMat mode additionally accepts all eight real integer classes.",
             }];
         const INTEGER_PROBABILITY_INPUT: [BuiltinIntegerInputCapability; 1] =
             [BuiltinIntegerInputCapability {
@@ -862,7 +862,7 @@ mod tests {
     }
 
     #[test]
-    fn quantile_supports_r2026a_midpoint_inclusive_and_exclusive_methods() {
+    fn quantile_supports_compatibility_target_midpoint_inclusive_and_exclusive_methods() {
         let input =
             || Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 6.0, 10.0], vec![5, 1]).unwrap());
         let midpoint =

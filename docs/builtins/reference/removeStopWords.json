@@ -30,6 +30,7 @@
   "description": "`removeStopWords(documents)` removes stop words from RunMat `tokenizedDocument` compatibility objects using the object's language metadata and the same compatibility lists returned by `stopWords`.",
   "behaviors": [
     "`documents` must be a RunMat `tokenizedDocument` object created by `tokenizedDocument`.",
+    "Numeric and resident tensor inputs, including every integer class, are not text documents and reject before provider access rather than being gathered or converted to text.",
     "`removeStopWords(documents)` is case-insensitive by default.",
     "`removeStopWords(documents,'IgnoreCase',false)` removes only tokens that match the stop-word list case exactly.",
     "The result preserves `Shape`, `TokenizeMethod`, and `Language` metadata while recomputing document lengths and vocabulary.",

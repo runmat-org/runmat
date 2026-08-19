@@ -31,8 +31,8 @@ pub use control_flow::{apply_control_flow_action, DispatchDecision};
 pub use exceptions::{redirect_exception_to_catch, ExceptionHandling};
 pub use runmat_runtime::condition::logical_truth_from_value;
 pub use stack::{
-    emit_stack_top, emit_var, load_bool, load_char_row, load_complex, load_const, load_local,
-    load_string, load_var, store_local, store_var,
+    emit_stack_top, emit_var, load_bool, load_char_row, load_complex, load_const, load_int,
+    load_local, load_string, load_var, store_local, store_var,
 };
 
 fn builtin_constant_value(name: &str) -> Option<Value> {
@@ -419,6 +419,12 @@ pub async fn dispatch_instruction(
         }
         Instr::LoadConst(value) => {
             load_const(stack, *value);
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::LoadInt(value) => {
+            load_int(stack, value.clone());
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

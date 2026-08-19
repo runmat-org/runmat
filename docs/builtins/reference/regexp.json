@@ -36,7 +36,8 @@
     "`'once'` stops after the first match (per element), and every requested output honours that limit.",
     "`'emptymatch','remove'` (default) filters zero-length matches; `'emptymatch','allow'` keeps them so callers can observe optional patterns.",
     "`'forceCellOutput'` forces cell-array containers even for scalar inputs so downstream code can rely on uniform dimensions. MATLAB-compatible `'warnings','on'/'off'` flags are accepted but currently informational only.",
-    "`'matchcase'` and `'ignorecase'` toggle case sensitivity, while `'lineanchors'` (`^`/`$`) and `'dotall'`/`'dotExceptNewline'` control how `.` interacts with newlines, mirroring MATLAB flags."
+    "`'matchcase'` and `'ignorecase'` toggle case sensitivity, while `'lineanchors'` (`^`/`$`) and `'dotall'`/`'dotExceptNewline'` control how `.` interacts with newlines, mirroring MATLAB flags.",
+    "Integer semantics: numeric match locations are outputs only. Numeric, logical, symbolic, and provider-resident inputs or options are rejected before gather or provider access."
   ],
   "examples": [
     {

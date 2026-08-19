@@ -12,7 +12,9 @@ pub use runmat_types::{
     NARGOUT_BUILTIN_NAME, RUNTESTS_BUILTIN_NAME, RUN_BUILTIN_NAME, SPAWN_EXTENSION_NAME,
     TEST_CLASS_REGISTRATION_BUILTIN_NAME,
 };
-use runmat_types::{FunctionArgDefaultValue, FunctionArgSizeSpec, FunctionArgValidator};
+use runmat_types::{
+    FunctionArgDefaultValue, FunctionArgSizeSpec, FunctionArgValidator, IntegerLiteral,
+};
 use serde::{Deserialize, Serialize};
 
 /// Canonical semantic HIR product for one compiled source set.
@@ -292,6 +294,7 @@ impl HirExpr {
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum HirExprKind {
     Number(String),
+    IntegerLiteral(IntegerLiteral),
     String(StringLiteral),
     Constant(SymbolName),
     Binding(BindingId),

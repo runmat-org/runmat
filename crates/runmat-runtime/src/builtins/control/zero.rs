@@ -4,6 +4,7 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
@@ -66,6 +67,11 @@ pub const ZERO_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ZERO_ERRORS,
 };
+pub const ZERO_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "zero accepts a dynamic-system model; fundamental integer values are invalid model inputs and reject before model payload or provider access.",
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::zero")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -101,9 +107,23 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "zero,zeros,control system,transfer function,tf",
     type_resolver(zero_type),
     descriptor(crate::builtins::control::zero::ZERO_DESCRIPTOR),
+    integer_audit(crate::builtins::control::zero::ZERO_INTEGER_AUDIT),
     builtin_path = "crate::builtins::control::zero"
 )]
 async fn zero_builtin(sys: Value) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::value_has_native_integer_class(&sys) {
+        return Err(crate::build_runtime_error(
+            "zero: input must be a dynamic-system model, not an integer value",
+        )
+        .with_builtin("zero")
+        .with_identifier(
+            ZERO_ERRORS[0]
+                .identifier
+                .expect("zero invalid-model descriptor identifier"),
+        )
+        .build()
+        .into());
+    }
     let model = TfModel::from_value_async(sys, "zero").await?;
     output_complex_column(model.zeros()?, "zero")
 }

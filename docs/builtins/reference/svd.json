@@ -36,7 +36,8 @@
     "Three outputs `[U,S,V] = svd(A)` return the full-sized factors with `U` square `m×m`, `S` shaped `m×n`, and `V` square `n×n` (`m = size(A,1)`, `n = size(A,2)`).",
     "Economy form `[U,S,V] = svd(A,'econ')` (or `svd(A,0)`) reduces the shapes to the rank-defining dimension so that `U` and `V` drop the redundant orthogonal columns.",
     "Vector form `[U,s,V] = svd(A,'vector')` supplies the singular values as a vector instead of a diagonal matrix. You can combine `'vector'` with `'econ'`.",
-    "Logical and integer inputs are promoted to double precision before factorisation.",
+    "The documented matrix classes are single and double. With RunMat extensions enabled, real logical and native integer matrices are also accepted; integer values must be exactly representable as double or the call rejects before factorisation.",
+    "Typed-integer zero can select economy size only when RunMat extensions are enabled. The selector is parsed structurally without a floating conversion.",
     "Complex inputs yield unitary `U` and `V` (conjugate-transpose preserves orthogonality) with real, non-negative singular values.",
     "Empty matrices, row/column vectors, and scalars are all supported and follow MATLAB’s shape conventions."
   ],
@@ -98,6 +99,10 @@
     {
       "question": "Will the results stay on the GPU?",
       "answer": "Not yet. Presently the builtin gathers GPU operands to the host, runs the CPU factorisation, and returns host tensors. The GPU spec already reserves a hook so providers can keep everything device-resident once GPU kernels land."
+    },
+    {
+      "question": "Can `svd` accept an integer matrix?",
+      "answer": "The compatibility surface documents single and double matrices. With RunMat extensions enabled, all eight real integer classes are accepted when every value is exactly representable as double. Wider values that would round at the binary64 boundary are rejected before factorisation; strict compatibility mode rejects typed-integer matrices."
     }
   ],
   "links": [

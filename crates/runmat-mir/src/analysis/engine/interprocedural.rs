@@ -350,7 +350,7 @@ fn validator_shape(validators: &[FunctionArgValidator]) -> ShapeFact {
         ShapeFact::Scalar
     } else if validators
         .iter()
-        .any(|validator| matches!(validator, FunctionArgValidator::Vector))
+        .any(|validator| matches!(validator, FunctionArgValidator::Vector { .. }))
     {
         ShapeFact::Ranked { rank: 2 }
     } else {

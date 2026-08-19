@@ -231,7 +231,7 @@ pub const BOXPLOT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] 
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "RunMat-only grouping form; integer group identity, order, and labels remain exact without a binary64 mirror.",
+        notes: "RunMat-only grouping form; integer group identity, order, and labels remain exact for every supported class.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "boxplot(___,Name,Value) with integer numeric option values",

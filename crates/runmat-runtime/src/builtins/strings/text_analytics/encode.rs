@@ -913,6 +913,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let err = run_encode(vec![bag_of_words(&["alpha"]), resident]).unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:encode:InvalidInput"));
@@ -925,6 +926,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let err = run_encode(vec![
             bag_of_words(&["alpha"]),
@@ -946,6 +948,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX - 2,
+            descriptor: Default::default(),
         });
         let prepared = futures::executor::block_on(runmat_accelerate::prepare_builtin_args(
             "encode",

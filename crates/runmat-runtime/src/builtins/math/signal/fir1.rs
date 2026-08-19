@@ -274,7 +274,7 @@ pub const FIR1_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The order is decoded without an f64 mirror; resident order input gathers through its owner after compatibility admission, and coefficient output remains a host double row vector.",
+        notes: "The order is decoded exactly in every supported integer class; resident order input gathers through its owner after compatibility admission, and coefficient output remains a host double row vector.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "b = fir1(n,integer_Wn,...)",

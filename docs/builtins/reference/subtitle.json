@@ -20,6 +20,8 @@
     "Passing an axes handle as the first argument targets that specific axes, which is useful in subplot layouts.",
     "String scalars, char arrays, string arrays, and cell arrays are all accepted. String arrays and cell arrays produce multiline subtitles, with elements joined by newlines.",
     "Text styling properties such as `FontSize`, `FontWeight`, `FontAngle`, `Color`, `Interpreter`, and `Visible` use the shared plotting text-property system.",
+    "`FontSize` accepts every native integer class as well as floating-point scalars. The value crosses the graphics floating boundary only after exact scalar validation.",
+    "Axes handles are normally the double handles returned by plotting functions. Typed-integer aliases for encoded axes handles are available only when RunMat extensions are enabled and are rejected in strict compatibility mode before graphics state changes.",
     "`get(ax, 'Subtitle')` returns the subtitle text handle for that axes. `get(h, 'String')` returns the subtitle text for the subtitle handle."
   ],
   "examples": [
@@ -61,6 +63,10 @@
     {
       "question": "Can I update the subtitle after creating it?",
       "answer": "Yes. `subtitle` returns a text handle, so you can update it with `set`.\n\n```matlab\nh = subtitle('Initial');\nset(h, 'String', 'Updated', 'FontSize', 12);\n```"
+    },
+    {
+      "question": "Can `FontSize` be an integer value?",
+      "answer": "Yes. All eight native integer classes are accepted for `FontSize`, and practical positive sizes are validated exactly before entering the renderer's floating-point graphics domain."
     }
   ],
   "links": [

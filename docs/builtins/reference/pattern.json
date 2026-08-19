@@ -13,7 +13,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "No GPU kernel is registered for this compatibility builtin; GPU-resident inputs are gathered to host memory before evaluation."
+    "notes": "Pattern text is host-only; numeric resident handles reject without implicit text conversion or provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -54,7 +54,8 @@
   "behaviors": [
     "Create a literal string pattern.",
     "Pattern objects are accepted by matches, contains, startsWith, endsWith, erase, replace, and the boundary helpers added in this compatibility group.",
-    "Literal pattern text is escaped before matching."
+    "Literal pattern text is escaped before matching.",
+    "Integer and other numeric inputs have no semantic role and reject without conversion; this includes resident numeric handles."
   ],
   "examples": [
     "pattern(\"run\") creates a literal pattern object for pattern-aware string APIs."

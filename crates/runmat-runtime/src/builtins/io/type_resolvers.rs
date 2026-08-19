@@ -30,7 +30,7 @@ pub fn disp_type(args: &[Type], ctx: &ResolveContext) -> Type {
 
 pub fn input_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
-    Type::Union(vec![Type::String, Type::Num, Type::tensor()])
+    Type::Unknown
 }
 
 pub fn importdata_type(args: &[Type], _ctx: &ResolveContext) -> Type {
@@ -433,12 +433,7 @@ mod tests {
     }
 
     assert_resolver!(disp_type_resolver, disp_type, &[], Type::tensor());
-    assert_resolver!(
-        input_type_resolver,
-        input_type,
-        &[],
-        Type::Union(vec![Type::String, Type::Num, Type::tensor()])
-    );
+    assert_resolver!(input_type_resolver, input_type, &[], Type::Unknown);
 
     assert_resolver!(fclose_type_resolver, fclose_type, &[], Type::Num);
     assert_resolver!(feof_type_resolver, feof_type, &[], Type::Bool);

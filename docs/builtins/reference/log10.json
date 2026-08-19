@@ -17,12 +17,12 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Falls back to the host implementation when the provider lacks unary_log10 or when the result requires complex values."
+    "notes": "Uses `reduce_min` plus `unary_log10` for resident real data when possible; otherwise computes on the host and restores the result to the exact owner when representable."
   },
   "fusion": {
-    "elementwise": true,
+    "elementwise": false,
     "reduction": false,
-    "max_inputs": 1,
+    "max_inputs": 0,
     "constants": "inline"
   },
   "requires_feature": null,
@@ -31,11 +31,12 @@
     "integration": "builtins::math::elementwise::log10::tests::log10_gpu_provider_roundtrip",
     "gpu": "builtins::math::elementwise::log10::tests::log10_wgpu_matches_cpu_elementwise"
   },
-  "description": "`Y = log10(X)` computes the base-10 logarithm of each element of `X`. Domain promotion to complex values and type handling follow MATLAB semantics.",
+  "description": "`Y = log10(X)` computes the base-10 logarithm of each floating-point element of `X`, including principal-branch complex promotion. Integer, logical, character, and explicit-GPU real-to-complex forms are separately gated RunMat extensions.",
   "behaviors": [
     "`log10` operates element-wise with MATLAB broadcasting rules.",
-    "Logical inputs convert to doubles (`true → 1.0`, `false → 0.0`) before the logarithm is applied.",
-    "Character arrays are interpreted as their numeric code points and return dense double tensors.",
+    "In RunMat extension mode, logical inputs convert to doubles (`true → 1.0`, `false → 0.0`) before the logarithm is applied; compatibility mode rejects this extension.",
+    "In RunMat extension mode, character arrays are interpreted as their numeric code points and return dense double tensors; compatibility mode rejects this extension.",
+    "Integer input is a RunMat-only extension. All eight integer classes are accepted only when every value is exactly representable in binary64, and the result is double or complex double.",
     "`log10(0)` returns `-Inf`, matching MATLAB's handling of the logarithm singularity at zero.",
     "Negative real values promote to complex results: `log10(-10)` returns `1 + i·π/ln(10)`.",
     "Complex inputs follow MATLAB's definition: `log10(z) = log(z) / ln(10)`."
@@ -86,11 +87,11 @@
     },
     {
       "question": "Does the GPU implementation support complex outputs?",
-      "answer": "Current providers operate on real buffers. When complex outputs are required, RunMat gathers the tensor to the host while keeping fusion metadata consistent."
+      "answer": "The real provider hook cannot produce complex output. RunMat gathers through the exact owner, computes the complex result on the host, and restores it to that owner when the complex class is representable. Explicit `gpuArray` input requiring this extension is rejected in compatibility mode."
     },
     {
       "question": "Is `log10` numerically stable for very small or large values?",
-      "answer": "Yes. The implementation promotes to 64-bit doubles throughout and clamps tiny imaginary parts to zero, mirroring MATLAB's behavior for well-conditioned inputs."
+      "answer": "Double input is computed in double precision and single input preserves single precision. RunMat clamps tiny finite components created by floating-point roundoff to zero. Integer extensions enter the double domain only when exactly representable in binary64."
     }
   ],
   "links": [
@@ -203,8 +204,8 @@
     "label": "`crates/runmat-runtime/src/builtins/math/elementwise/log10.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/log10.rs"
   },
-  "gpu_residency": "You typically do **not** need to call `gpuArray` yourself. The auto-offload planner keeps tensors on the GPU when profitable and the result stays real. When complex results are required, RunMat automatically gathers the data to the host to produce the precise MATLAB-compatible answer. Use `gpuArray`/`gather` only when you want to mirror MathWorks MATLAB workflows explicitly.",
+  "gpu_residency": "You typically do **not** need to call `gpuArray` yourself. RunMat resolves the exact provider that owns the input. Real data can remain resident through `reduce_min` and `unary_log10`; integer, logical, complex, unsupported-hook, and real-to-complex paths gather through that owner and restore the correctly typed result when representable. Explicit `gpuArray` input that requires real-to-complex promotion is a RunMat-only extension and is rejected in compatibility mode.",
   "gpu_behavior": [
-    "RunMat Accelerate keeps tensors on the GPU when the active provider implements `unary_log10` and the data is known to stay in the real domain. If complex outputs are required (for example, negative inputs) or the provider lacks the hook, RunMat gathers the tensor to the host, computes the exact MATLAB-compatible result, updates residency metadata, and returns the host-resident value."
+    "RunMat Accelerate uses the exact owning provider's `reduce_min` to classify resident real data, then validates any `unary_log10` output for non-aliasing, shape, device, owner, storage, and precision. When complex output or a fallback is required, it downloads through that owner, computes on the host, and restores the result to the same owner when representable while preserving provenance. `log10` is intentionally excluded from fusion until fused execution can represent its complex-domain semantics."
   ]
 }

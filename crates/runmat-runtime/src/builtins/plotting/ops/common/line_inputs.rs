@@ -1,5 +1,5 @@
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_value::{Tensor, Value};
+use runmat_value::{IntegerStorage, Tensor, Value};
 
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::common::{gather_tensor_from_gpu, gather_tensor_from_gpu_async};
@@ -17,7 +17,10 @@ impl NumericInput {
         match value {
             Value::GpuTensor(handle) => Ok(Self::Gpu(handle)),
             Value::Num(v) => Ok(Self::Host(scalar_tensor(v))),
-            Value::Int(v) => Ok(Self::Host(scalar_tensor(v.to_f64()))),
+            Value::Int(v) => Ok(Self::Host(
+                Tensor::new_integer(IntegerStorage::from_scalar(v), vec![1, 1])
+                    .expect("integer scalar tensor shape"),
+            )),
             Value::Bool(v) => Ok(Self::Host(scalar_tensor(if v { 1.0 } else { 0.0 }))),
             other => {
                 let tensor = Tensor::try_from(&other)
@@ -83,5 +86,21 @@ mod tests {
         let input = NumericInput::from_value(Value::Tensor(tensor), "plot").unwrap();
 
         assert_eq!(input.len(), 3);
+    }
+
+    #[test]
+    fn numeric_input_preserves_wide_typed_integer_scalar() {
+        let wide = 9_007_199_254_740_993_u64;
+        let NumericInput::Host(tensor) =
+            NumericInput::from_value(Value::Int(runmat_value::IntValue::U64(wide)), "plot")
+                .unwrap()
+        else {
+            panic!("expected host tensor")
+        };
+
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::U64(vec![wide]))
+        );
     }
 }

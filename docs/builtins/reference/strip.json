@@ -35,7 +35,8 @@
     "Provide a second argument containing characters to remove to strip those characters instead of whitespace. Supply a scalar string/char vector to apply the same rule to every element or a string / cell array matching the input size to specify element-wise character sets.",
     "Missing string scalars remain `<missing>`.",
     "Character arrays shrink or retain their width to match the longest stripped row; shorter rows are padded with spaces so the output stays rectangular.",
-    "Cell arrays must contain string scalars or character vectors. Results preserve the original cell layout with trimmed elements."
+    "Cell arrays must contain string scalars or character vectors. Results preserve the original cell layout with trimmed elements.",
+    "Integer semantics: `strip` has no numeric input role. Numeric, logical, symbolic, and provider-resident values are rejected before gather or provider access."
   ],
   "examples": [
     {

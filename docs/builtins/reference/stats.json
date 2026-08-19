@@ -26,14 +26,15 @@
     "unit": "builtins::introspection::memoize",
     "integration": "stats reports cache inputs, outputs, nargout, hits, and misses"
   },
-  "description": "`S = stats(memoizedFcn)` returns a structure whose `Cache` field describes the current cache contents and counters for a `MemoizedFunction` object.",
+  "description": "`S = stats(memoizedFcn)` inspects a `MemoizedFunction` object and returns its cached input/output entries plus hit and miss counters. The argument itself must be a memoized-function object, so integers are not a direct input class. Integer values stored inside cached arguments or results remain opaque payloads and are returned without numeric conversion.",
   "behaviors": [
     "`S.Cache.Inputs` is a cell row vector whose entries are cell arrays of cached input arguments.",
     "`S.Cache.Nargout` is a numeric row vector containing the requested output count for each cache entry.",
     "`S.Cache.Outputs` is a cell row vector whose entries are cell arrays of cached outputs.",
     "`S.Cache.HitCount` is a numeric row vector with per-entry hit counts.",
     "`S.Cache.TotalHits` and `S.Cache.TotalMisses` report aggregate counters.",
-    "If `CacheSize` has been reduced, stats trims old entries before reporting the cache."
+    "If `CacheSize` has been reduced, stats trims old entries before reporting the cache.",
+    "Cached integer arguments and outputs preserve their native class and exact payload. Counter fields describe cache metadata and are not derived from cached numeric storage."
   ],
   "examples": [
     {

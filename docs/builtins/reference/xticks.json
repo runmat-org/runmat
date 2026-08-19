@@ -11,10 +11,10 @@
   "description": "`xticks` returns or updates the tick mark locations for the X axis of the current or specified axes.",
   "behaviors": [
     "`xticks()` returns the current X-axis tick values as a row vector.",
-    "`xticks(ticks)` sets manual X-axis tick values. `ticks` must be an increasing numeric vector; `[]` removes X-axis tick marks.",
+    "`xticks(ticks)` sets manual X-axis tick values. All native integer classes are accepted and ordered exactly before conversion; adjacent values must remain distinct in graphics coordinates. `[]` removes X-axis tick marks.",
     "`xticks('auto')` returns the X tick mode to automatic tick generation. `xticks('manual')` freezes the current tick values.",
     "`xticks('mode')` returns `'auto'` or `'manual'`.",
-    "`xticks(ax, ...)` applies the same forms to the specified axes handle.",
+    "`xticks(ax, ...)` applies the same forms to the specified axes handle. RunMat mode additionally accepts a typed-integer alias for an encoded axes handle.",
     "`get(ax, 'XTick')`, `set(ax, 'XTick', ticks)`, `get(ax, 'XTickMode')`, and `set(ax, 'XTickMode', mode)` share the same axes metadata."
   ],
   "examples": [

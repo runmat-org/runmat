@@ -371,6 +371,22 @@ pub fn current_active_semantic_function() -> Option<usize> {
     ACTIVE_SEMANTIC_FUNCTION_STACK.with(|slot| slot.borrow().last().copied())
 }
 
+/// Seed a newly-created standalone runtime context from the legacy
+/// thread-local call environment before entering its scope.
+///
+/// Embedders that already provide an explicit `RuntimeContext` must configure
+/// that context directly. This bridge exists for the standalone VM entrypoints
+/// that historically accepted resolver/invoker guards without a context.
+pub fn inherit_legacy_call_environment(context: &crate::context::RuntimeContext) {
+    let mut call = context.state().call.borrow_mut();
+    call.semantic_invoker = SEMANTIC_FUNCTION_INVOKER.with(|slot| slot.borrow().clone());
+    call.external_invoker = EXTERNAL_FUNCTION_INVOKER.with(|slot| slot.borrow().clone());
+    call.lexical_invoker = LEXICAL_FUNCTION_INVOKER.with(|slot| slot.borrow().clone());
+    call.semantic_resolver = SEMANTIC_FUNCTION_RESOLVER.with(|slot| slot.borrow().clone());
+    call.source_functions = SOURCE_FUNCTION_CATALOG.with(|slot| slot.borrow().clone());
+    call.active_functions = ACTIVE_SEMANTIC_FUNCTION_STACK.with(|slot| slot.borrow().clone());
+}
+
 pub fn source_functions_for(source_id: SourceId) -> Vec<SourceFunctionInfo> {
     if let Some(state) = active_state() {
         return source_functions_in_catalog(

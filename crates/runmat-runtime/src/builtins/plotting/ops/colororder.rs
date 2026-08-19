@@ -623,6 +623,7 @@ mod tests {
             shape: vec![1, 3],
             device_id: 7,
             buffer_id: 42,
+            descriptor: Default::default(),
         };
         let err = colororder_builtin(vec![Value::GpuTensor(handle)])
             .expect_err("gpu color arrays must stay unsupported at the API boundary");

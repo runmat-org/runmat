@@ -33,12 +33,12 @@
   "description": "`cat(dim, A1, A2, ...)` concatenates arrays along dimension `dim`, producing a new array whose slices along that dimension come from the inputs. Non-concatenated dimensions must be size-compatible, and ordering follows MATLAB and RunMat column-major semantics.",
   "behaviors": [
     "`dim` is 1-based and must be a positive integer.",
-    "Valid unlike-class combinations follow concatenation precedence: string dominates real numeric, character, and logical data; character dominates real numeric data but cannot combine with logical; an integer operand makes the leftmost participating integer class dominate real floating and logical operands; otherwise single dominates double, and logical is preserved only when every input is logical.",
-    "Every ordered mixture of the eight real integer classes is accepted. The leftmost participating integer class determines output class, and other numeric or logical values convert with ordinary rounding and saturation.",
+    "Valid unlike-class combinations follow concatenation precedence: string dominates real numeric, character, and logical data; character dominates real numeric data but cannot combine with logical; an integer operand makes the leftmost nonempty integer class dominate real floating and logical operands; otherwise single dominates double, and logical is preserved only when every input is logical.",
+    "Every ordered mixture of the eight real integer classes is accepted. When a nonempty input remains, empty operands are omitted before class selection; otherwise the leftmost integer class determines output class. Other numeric or logical values convert with ordinary rounding and saturation.",
     "Dimensions other than `dim` must match exactly; missing higher dimensions are treated as size `1` automatically.",
     "The size along `dim` becomes the sum of the corresponding sizes from each input.",
     "An empty operand is omitted when a nonempty compatible partner remains; compatible all-empty inputs retain the concatenated empty geometry.",
-    "`gpuArray` inputs stay on the device when an acceleration provider is registered, and numeric host inputs may be mixed with resident inputs in the same call.",
+    "`gpuArray` inputs stay on the device when an acceleration provider is registered, and real or complex numeric host inputs may be mixed with resident inputs in the same call. Paired complex-integer data retains its exact component class and owning provider.",
     "RunMat compatibility mode adds an optional trailing `\"like\", prototype` pair that can request host or GPU output residency; this pair is not part of the pinned public MATLAB syntax."
   ],
   "examples": [
@@ -79,7 +79,7 @@
       "input": "G1 = gpuArray(rand(256, 256));\nG2 = gpuArray(rand(256, 256));\nstacked = cat(3, G1, G2)"
     },
     {
-      "description": "RunMat extension: requesting GPU output with the `\"like\"` prototype",
+      "description": "Requesting GPU output with the `\"like\"` prototype",
       "input": "G = gpuArray(rand(3, 3));\nH = cat(3, zeros(3, 3), ones(3, 3), \"like\", G)"
     },
     {
@@ -171,6 +171,6 @@
     "url": "crates/runmat-runtime/src/builtins/array/shape/cat.rs"
   },
   "gpu_behavior": [
-    "When every supported floating input is a `gpuArray`, RunMat first calls the active provider's `AccelProvider::cat` hook. Typed integer data, mixed numeric host/device inputs, runtime empty omission, or providers without the hook use an exact fallback: resident operands are gathered without changing class, all operands are concatenated on the host in original order, and the result is uploaded to the originating provider. This preserves leftmost-integer class selection and wide integer values across the backend boundary. RunMat compatibility mode can additionally use the trailing `\"like\"` extension to request output residency."
+    "When every supported floating input is a `gpuArray`, RunMat first calls the active provider's `AccelProvider::cat` hook. Typed integer data, mixed numeric host/device inputs, runtime empty omission, or providers without the hook use an exact fallback: resident operands are gathered without changing class, empty operands are omitted before class selection when a nonempty input remains, all remaining operands are concatenated on the host in original order, and the result is uploaded to the originating provider. This preserves integer class selection and wide values across the backend boundary. RunMat compatibility mode can additionally use the trailing `\"like\"` extension to request output residency."
   ]
 }

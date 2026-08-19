@@ -432,6 +432,7 @@ mod tests {
             shape: vec![1, 2],
             device_id: 0,
             buffer_id: 999,
+            descriptor: Default::default(),
         };
         let err = block_on(primes_builtin(Value::GpuTensor(handle), Vec::new()))
             .expect_err("non-scalar gpu handle should fail before gather");

@@ -8,6 +8,11 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ResolveContext, Type,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, Tensor, Value};
 
@@ -77,6 +82,34 @@ fn sub2ind_type(args: &[Type], ctx: &ResolveContext) -> Type {
 }
 
 const BUILTIN_NAME: &str = "sub2ind";
+
+const SUB2IND_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "sz",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The size vector accepts every native integer class and is parsed directly as positive platform dimensions.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "I1...In",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Every subscript role accepts all eight integer classes, including scalar expansion and full-width exact bounds checks.",
+    },
+];
+pub const SUB2IND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "ind = sub2ind(integer_sz, integer_I1, integer_In...)",
+        inputs: &SUB2IND_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Dimensions and subscripts are read from authoritative integer storage, combined with checked column-major index arithmetic, and returned as documented double indices. Resident integer inputs use exact gather fallback and return resident double output when the owner supports upload.",
+    }];
 
 const SUB2IND_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "ind",
@@ -193,6 +226,7 @@ fn sub2ind_internal_error(message: impl Into<String>) -> RuntimeError {
     accel = "custom",
     type_resolver(sub2ind_type),
     descriptor(crate::builtins::array::indexing::sub2ind::SUB2IND_DESCRIPTOR),
+    integer_capabilities(crate::builtins::array::indexing::sub2ind::SUB2IND_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::indexing::sub2ind"
 )]
 async fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

@@ -36,15 +36,7 @@ static LOGICAL_HANDLE_HITS: Lazy<RwLock<HashMap<GpuHandleIdentity, u64>>> =
 static TRANSPOSED_HANDLES: Lazy<RwLock<HashMap<GpuHandleIdentity, TransposeInfo>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
 
-static HANDLE_PRECISIONS: Lazy<RwLock<HashMap<GpuHandleIdentity, ProviderPrecision>>> =
-    Lazy::new(|| RwLock::new(HashMap::new()));
 static HANDLE_CLASS_NAMES: Lazy<RwLock<HashMap<GpuHandleIdentity, String>>> =
-    Lazy::new(|| RwLock::new(HashMap::new()));
-static HANDLE_STORAGES: Lazy<RwLock<HashMap<GpuHandleIdentity, GpuTensorStorage>>> =
-    Lazy::new(|| RwLock::new(HashMap::new()));
-static HANDLE_INTEGER_TYPES: Lazy<RwLock<HashMap<GpuHandleIdentity, IntegerElementType>>> =
-    Lazy::new(|| RwLock::new(HashMap::new()));
-static HANDLE_PROVENANCE: Lazy<RwLock<HashMap<GpuHandleIdentity, GpuHandleProvenance>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
 
 pub const fn handle_identity(handle: &GpuTensorHandle) -> GpuHandleIdentity {
@@ -128,27 +120,12 @@ pub fn export_wgpu_buffer(handle: &GpuTensorHandle) -> Option<WgpuBufferRef> {
     provider_for_handle(handle).and_then(|p| p.export_wgpu_buffer(handle))
 }
 
-/// Record the precision associated with a GPU tensor handle so host operations can
-/// reconstruct the original dtype when gathering back to the CPU.
-pub fn set_handle_precision(handle: &GpuTensorHandle, precision: ProviderPrecision) {
-    if let Ok(mut guard) = HANDLE_PRECISIONS.write() {
-        guard.insert(handle_identity(handle), precision);
-    }
-}
-
-/// Look up the recorded precision for a GPU tensor handle, if any.
+/// Return the floating precision encoded by the handle's durable element type.
 pub fn handle_precision(handle: &GpuTensorHandle) -> Option<ProviderPrecision> {
-    HANDLE_PRECISIONS
-        .read()
-        .ok()
-        .and_then(|guard| guard.get(&handle_identity(handle)).copied())
-}
-
-/// Clear any recorded precision metadata for a GPU tensor handle.
-pub fn clear_handle_precision(handle: &GpuTensorHandle) {
-    if let Ok(mut guard) = HANDLE_PRECISIONS.write() {
-        guard.remove(&handle_identity(handle));
-    }
+    handle
+        .descriptor
+        .element_type
+        .and_then(NumericElementType::precision)
 }
 
 /// Record the MATLAB underlying class associated with a GPU tensor handle.
@@ -168,6 +145,12 @@ pub fn handle_class_name(handle: &GpuTensorHandle) -> Option<String> {
         .read()
         .ok()
         .and_then(|guard| guard.get(&handle_identity(handle)).cloned())
+        .or_else(|| {
+            handle
+                .descriptor
+                .element_type
+                .map(|element_type| element_type.class_name().to_string())
+        })
 }
 
 /// Clear any recorded MATLAB underlying class metadata for a GPU tensor handle.
@@ -192,6 +175,18 @@ pub fn set_handle_logical(handle: &GpuTensorHandle, logical: bool) {
             if let Ok(mut hits) = LOGICAL_HANDLE_HITS.write() {
                 hits.remove(&identity);
             }
+        }
+    }
+    if logical {
+        if let Ok(mut classes) = HANDLE_CLASS_NAMES.write() {
+            classes.insert(identity, "logical".into());
+        }
+    } else if let Ok(mut classes) = HANDLE_CLASS_NAMES.write() {
+        if classes
+            .get(&identity)
+            .is_some_and(|class| class == "logical")
+        {
+            classes.remove(&identity);
         }
     }
 }
@@ -289,31 +284,41 @@ impl IntegerElementType {
     }
 }
 
-/// Record the exact native integer class stored by a GPU tensor handle.
-pub fn set_handle_integer_type(handle: &GpuTensorHandle, element_type: IntegerElementType) {
-    if let Ok(mut guard) = HANDLE_INTEGER_TYPES.write() {
-        guard.insert(handle_identity(handle), element_type);
-    }
-}
-
 /// Look up the exact native integer class stored by a GPU tensor handle.
 pub fn handle_integer_type(handle: &GpuTensorHandle) -> Option<IntegerElementType> {
-    HANDLE_INTEGER_TYPES
-        .read()
-        .ok()
-        .and_then(|guard| guard.get(&handle_identity(handle)).copied())
-}
-
-/// Clear the native integer class annotation for a released handle.
-pub fn clear_handle_integer_type(handle: &GpuTensorHandle) {
-    if let Ok(mut guard) = HANDLE_INTEGER_TYPES.write() {
-        guard.remove(&handle_identity(handle));
-    }
+    handle
+        .descriptor
+        .element_type
+        .and_then(NumericElementType::integer_type)
 }
 
 impl Default for GpuTensorStorage {
     fn default() -> Self {
         Self::Real
+    }
+}
+
+/// Durable physical description of a provider-owned numeric buffer.
+///
+/// Provider-created numeric handles populate element type and storage at
+/// allocation time so cloning or serializing a handle cannot discard its
+/// physical interpretation. A missing physical field is invalid at numeric
+/// provider boundaries. Provenance is populated by ownership-aware runtime
+/// boundaries.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GpuTensorDescriptor {
+    pub element_type: Option<NumericElementType>,
+    pub storage: Option<GpuTensorStorage>,
+    pub provenance: Option<GpuHandleProvenance>,
+}
+
+impl GpuTensorDescriptor {
+    pub const fn numeric(element_type: NumericElementType, storage: GpuTensorStorage) -> Self {
+        Self {
+            element_type: Some(element_type),
+            storage: Some(storage),
+            provenance: None,
+        }
     }
 }
 
@@ -325,6 +330,34 @@ pub struct GpuTensorHandle {
     /// provider routing is keyed by this value.
     pub device_id: u32,
     pub buffer_id: u64,
+    #[serde(default)]
+    pub descriptor: GpuTensorDescriptor,
+}
+
+impl GpuTensorHandle {
+    pub fn new(shape: Vec<usize>, device_id: u32, buffer_id: u64) -> Self {
+        Self {
+            shape,
+            device_id,
+            buffer_id,
+            descriptor: GpuTensorDescriptor::default(),
+        }
+    }
+
+    pub fn with_numeric_descriptor(
+        mut self,
+        element_type: NumericElementType,
+        storage: GpuTensorStorage,
+    ) -> Self {
+        self.descriptor.element_type = Some(element_type);
+        self.descriptor.storage = Some(storage);
+        self
+    }
+
+    pub fn with_provenance(mut self, provenance: GpuHandleProvenance) -> Self {
+        self.descriptor.provenance = Some(provenance);
+        self
+    }
 }
 
 /// Semantic origin of a resident handle.
@@ -338,30 +371,19 @@ pub enum GpuHandleProvenance {
     Explicit,
 }
 
-pub fn set_handle_provenance(handle: &GpuTensorHandle, provenance: GpuHandleProvenance) {
-    if let Ok(mut guard) = HANDLE_PROVENANCE.write() {
-        guard.insert(handle_identity(handle), provenance);
-    }
+pub fn set_handle_provenance(handle: &mut GpuTensorHandle, provenance: GpuHandleProvenance) {
+    handle.descriptor.provenance = Some(provenance);
 }
 
 pub fn handle_provenance(handle: &GpuTensorHandle) -> Option<GpuHandleProvenance> {
-    HANDLE_PROVENANCE
-        .read()
-        .ok()
-        .and_then(|guard| guard.get(&handle_identity(handle)).copied())
+    handle.descriptor.provenance
 }
 
-pub fn clear_handle_provenance(handle: &GpuTensorHandle) {
-    if let Ok(mut guard) = HANDLE_PROVENANCE.write() {
-        guard.remove(&handle_identity(handle));
-    }
-}
-
-pub fn mark_handle_explicit(handle: &GpuTensorHandle) {
+pub fn mark_handle_explicit(handle: &mut GpuTensorHandle) {
     set_handle_provenance(handle, GpuHandleProvenance::Explicit);
 }
 
-pub fn mark_handle_automatic(handle: &GpuTensorHandle) {
+pub fn mark_handle_automatic(handle: &mut GpuTensorHandle) {
     set_handle_provenance(handle, GpuHandleProvenance::Automatic);
 }
 
@@ -369,17 +391,15 @@ pub fn handle_is_explicit(handle: &GpuTensorHandle) -> bool {
     handle_provenance(handle) == Some(GpuHandleProvenance::Explicit)
 }
 
-/// Clear every API-owned annotation for a released handle, including backend
-/// residency tracking registered through [`register_residency_clear`].
+/// Clear mutable API side annotations for a released or freshly reused handle,
+/// including backend residency tracking registered through
+/// [`register_residency_clear`]. The handle-owned physical descriptor remains
+/// available on existing handle values.
 pub fn clear_handle_metadata(handle: &GpuTensorHandle) {
     clear_residency(handle);
-    clear_handle_precision(handle);
     clear_handle_class_name(handle);
     clear_handle_logical(handle);
     clear_handle_transpose(handle);
-    clear_handle_storage(handle);
-    clear_handle_integer_type(handle);
-    clear_handle_provenance(handle);
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -698,24 +718,8 @@ pub struct WgpuBufferRef {
     pub precision: ProviderPrecision,
 }
 
-pub fn set_handle_storage(handle: &GpuTensorHandle, storage: GpuTensorStorage) {
-    if let Ok(mut guard) = HANDLE_STORAGES.write() {
-        guard.insert(handle_identity(handle), storage);
-    }
-}
-
 pub fn handle_storage(handle: &GpuTensorHandle) -> GpuTensorStorage {
-    HANDLE_STORAGES
-        .read()
-        .ok()
-        .and_then(|guard| guard.get(&handle_identity(handle)).cloned())
-        .unwrap_or(GpuTensorStorage::Real)
-}
-
-pub fn clear_handle_storage(handle: &GpuTensorHandle) {
-    if let Ok(mut guard) = HANDLE_STORAGES.write() {
-        guard.remove(&handle_identity(handle));
-    }
+    handle.descriptor.storage.unwrap_or_default()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1500,6 +1504,7 @@ pub struct KernelLaunchTelemetry {
 pub type AccelProviderFuture<'a, T> = Pin<Box<dyn Future<Output = anyhow::Result<T>> + 'a>>;
 pub type AccelDownloadFuture<'a> = AccelProviderFuture<'a, crate::HostTensorOwned>;
 pub type AccelIntegerDownloadFuture<'a> = AccelProviderFuture<'a, crate::HostIntegerTensorOwned>;
+pub type AccelNumericDownloadFuture<'a> = AccelProviderFuture<'a, crate::HostNumericTensorOwned>;
 
 fn unsupported_future<T>(message: &'static str) -> AccelProviderFuture<'static, T> {
     Box::pin(async move { Err(anyhow::anyhow!(message)) })
@@ -1509,6 +1514,106 @@ fn unsupported_future<T>(message: &'static str) -> AccelProviderFuture<'static, 
 pub trait AccelProvider: Send + Sync {
     fn upload(&self, host: &crate::HostTensorView) -> anyhow::Result<GpuTensorHandle>;
     fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a>;
+
+    /// Upload one native numeric payload through the shared all-class transfer
+    /// contract. Providers should override this method as they adopt native
+    /// single and complex integer storage. The default adapter preserves exact
+    /// existing double and real-integer routes and rejects every representation
+    /// those routes cannot express.
+    fn upload_numeric(
+        &self,
+        host: &crate::HostNumericTensorView,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        host.validate()?;
+        let handle = match (host.data, host.storage) {
+            (crate::HostNumericDataView::F64(data), GpuTensorStorage::Real) => {
+                self.upload(&crate::HostTensorView {
+                    data,
+                    shape: host.shape,
+                })
+            }
+            (data, GpuTensorStorage::Real) if data.element_type().integer_type().is_some() => {
+                let data = match data {
+                    crate::HostNumericDataView::I8(data) => crate::HostIntegerDataView::I8(data),
+                    crate::HostNumericDataView::I16(data) => crate::HostIntegerDataView::I16(data),
+                    crate::HostNumericDataView::I32(data) => crate::HostIntegerDataView::I32(data),
+                    crate::HostNumericDataView::I64(data) => crate::HostIntegerDataView::I64(data),
+                    crate::HostNumericDataView::U8(data) => crate::HostIntegerDataView::U8(data),
+                    crate::HostNumericDataView::U16(data) => crate::HostIntegerDataView::U16(data),
+                    crate::HostNumericDataView::U32(data) => crate::HostIntegerDataView::U32(data),
+                    crate::HostNumericDataView::U64(data) => crate::HostIntegerDataView::U64(data),
+                    crate::HostNumericDataView::F64(_) | crate::HostNumericDataView::F32(_) => {
+                        unreachable!("guarded integer numeric transfer")
+                    }
+                };
+                self.upload_integer(&crate::HostIntegerTensorView {
+                    data,
+                    shape: host.shape,
+                })
+            }
+            (data, storage) => Err(anyhow!(
+                "provider must implement native {:?} {:?} uploads through upload_numeric",
+                data.element_type(),
+                storage
+            )),
+        }?;
+        let expected_element = host.data.element_type();
+        if handle.shape != host.shape
+            || handle.descriptor.element_type != Some(expected_element)
+            || handle.descriptor.storage != Some(host.storage)
+        {
+            let _ = self.free(&handle);
+            return Err(anyhow!(
+                "provider returned an invalid numeric upload descriptor: expected shape {:?}, element {:?}, storage {:?}; got shape {:?}, element {:?}, storage {:?}",
+                host.shape,
+                expected_element,
+                host.storage,
+                handle.shape,
+                handle.descriptor.element_type,
+                handle.descriptor.storage
+            ));
+        }
+        Ok(handle)
+    }
+
+    /// Download one native numeric payload through the shared all-class
+    /// transfer contract. The default adapter keeps exact real-integer and
+    /// native-double downloads available while refusing to present widened
+    /// single data as native `f32`.
+    fn download_numeric<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelNumericDownloadFuture<'a> {
+        Box::pin(async move {
+            let element_type = h.descriptor.element_type.ok_or_else(|| {
+                anyhow!("numeric handle is missing its durable element descriptor")
+            })?;
+            let storage = h.descriptor.storage.ok_or_else(|| {
+                anyhow!("numeric handle is missing its durable storage descriptor")
+            })?;
+            if element_type.integer_type().is_some() {
+                if storage != GpuTensorStorage::Real {
+                    return Err(anyhow!(
+                        "provider must implement native complex integer downloads through download_numeric"
+                    ));
+                }
+                let downloaded = self.download_integer(h).await?;
+                let numeric: crate::HostNumericTensorOwned = downloaded.into();
+                numeric.validate()?;
+                return Ok(numeric);
+            }
+            if element_type == NumericElementType::F32 {
+                return Err(anyhow!(
+                    "provider must implement native single downloads through download_numeric"
+                ));
+            }
+            let downloaded = self.download(h).await?;
+            let numeric = crate::HostNumericTensorOwned {
+                data: crate::HostNumericDataOwned::F64(downloaded.data),
+                shape: downloaded.shape,
+                storage: downloaded.storage,
+            };
+            numeric.validate()?;
+            Ok(numeric)
+        })
+    }
 
     /// Upload exact native integer storage without converting through f64.
     /// Providers that do not expose native integer buffers must reject this
@@ -2016,28 +2121,6 @@ pub trait AccelProvider: Send + Sync {
         _options: &'a ImfilterOptions,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("imfilter not supported by provider")
-    }
-
-    /// Allocate a tensor filled with random integers over an inclusive range.
-    fn random_integer_range(
-        &self,
-        _lower: i64,
-        _upper: i64,
-        _shape: &[usize],
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!(
-            "random_integer_range not supported by provider"
-        ))
-    }
-
-    /// Allocate a random integer tensor matching the prototype shape.
-    fn random_integer_like(
-        &self,
-        prototype: &GpuTensorHandle,
-        lower: i64,
-        upper: i64,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        self.random_integer_range(lower, upper, &prototype.shape)
     }
 
     /// Allocate a random permutation of 1..=n, returning the first k elements.
@@ -3702,6 +3785,264 @@ pub async fn try_elem_atan2(y: &GpuTensorHandle, x: &GpuTensorHandle) -> Option<
     None
 }
 
+/// Physical element type carried by a numeric provider transfer.
+///
+/// This type is exhaustive over RunMat's real numeric classes and lives in the
+/// acceleration API so providers do not depend on runtime or builtin storage
+/// types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum NumericElementType {
+    F64,
+    F32,
+    I8,
+    I16,
+    I32,
+    I64,
+    U8,
+    U16,
+    U32,
+    U64,
+}
+
+impl NumericElementType {
+    pub const fn element_size(self) -> usize {
+        match self {
+            Self::F64 | Self::I64 | Self::U64 => 8,
+            Self::F32 | Self::I32 | Self::U32 => 4,
+            Self::I16 | Self::U16 => 2,
+            Self::I8 | Self::U8 => 1,
+        }
+    }
+
+    pub const fn class_name(self) -> &'static str {
+        match self {
+            Self::F64 => "double",
+            Self::F32 => "single",
+            Self::I8 => "int8",
+            Self::I16 => "int16",
+            Self::I32 => "int32",
+            Self::I64 => "int64",
+            Self::U8 => "uint8",
+            Self::U16 => "uint16",
+            Self::U32 => "uint32",
+            Self::U64 => "uint64",
+        }
+    }
+
+    pub const fn precision(self) -> Option<ProviderPrecision> {
+        match self {
+            Self::F64 => Some(ProviderPrecision::F64),
+            Self::F32 => Some(ProviderPrecision::F32),
+            Self::I8
+            | Self::I16
+            | Self::I32
+            | Self::I64
+            | Self::U8
+            | Self::U16
+            | Self::U32
+            | Self::U64 => None,
+        }
+    }
+
+    pub const fn integer_type(self) -> Option<IntegerElementType> {
+        match self {
+            Self::F64 | Self::F32 => None,
+            Self::I8 => Some(IntegerElementType::I8),
+            Self::I16 => Some(IntegerElementType::I16),
+            Self::I32 => Some(IntegerElementType::I32),
+            Self::I64 => Some(IntegerElementType::I64),
+            Self::U8 => Some(IntegerElementType::U8),
+            Self::U16 => Some(IntegerElementType::U16),
+            Self::U32 => Some(IntegerElementType::U32),
+            Self::U64 => Some(IntegerElementType::U64),
+        }
+    }
+}
+
+impl From<IntegerElementType> for NumericElementType {
+    fn from(value: IntegerElementType) -> Self {
+        match value {
+            IntegerElementType::I8 => Self::I8,
+            IntegerElementType::I16 => Self::I16,
+            IntegerElementType::I32 => Self::I32,
+            IntegerElementType::I64 => Self::I64,
+            IntegerElementType::U8 => Self::U8,
+            IntegerElementType::U16 => Self::U16,
+            IntegerElementType::U32 => Self::U32,
+            IntegerElementType::U64 => Self::U64,
+        }
+    }
+}
+
+/// Borrowed native numeric buffer used for provider transfers.
+#[derive(Debug, Clone, Copy)]
+pub enum HostNumericDataView<'a> {
+    F64(&'a [f64]),
+    F32(&'a [f32]),
+    I8(&'a [i8]),
+    I16(&'a [i16]),
+    I32(&'a [i32]),
+    I64(&'a [i64]),
+    U8(&'a [u8]),
+    U16(&'a [u16]),
+    U32(&'a [u32]),
+    U64(&'a [u64]),
+}
+
+impl HostNumericDataView<'_> {
+    pub const fn element_type(self) -> NumericElementType {
+        match self {
+            Self::F64(_) => NumericElementType::F64,
+            Self::F32(_) => NumericElementType::F32,
+            Self::I8(_) => NumericElementType::I8,
+            Self::I16(_) => NumericElementType::I16,
+            Self::I32(_) => NumericElementType::I32,
+            Self::I64(_) => NumericElementType::I64,
+            Self::U8(_) => NumericElementType::U8,
+            Self::U16(_) => NumericElementType::U16,
+            Self::U32(_) => NumericElementType::U32,
+            Self::U64(_) => NumericElementType::U64,
+        }
+    }
+
+    pub const fn len(self) -> usize {
+        match self {
+            Self::F64(data) => data.len(),
+            Self::F32(data) => data.len(),
+            Self::I8(data) => data.len(),
+            Self::I16(data) => data.len(),
+            Self::I32(data) => data.len(),
+            Self::I64(data) => data.len(),
+            Self::U8(data) => data.len(),
+            Self::U16(data) => data.len(),
+            Self::U32(data) => data.len(),
+            Self::U64(data) => data.len(),
+        }
+    }
+
+    pub const fn is_empty(self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// Borrowed tensor transfer with one native numeric payload and explicit
+/// real/complex layout.
+#[derive(Debug, Clone, Copy)]
+pub struct HostNumericTensorView<'a> {
+    pub data: HostNumericDataView<'a>,
+    pub shape: &'a [usize],
+    pub storage: GpuTensorStorage,
+}
+
+impl HostNumericTensorView<'_> {
+    pub fn validate(self) -> anyhow::Result<()> {
+        let logical_len = self
+            .shape
+            .iter()
+            .try_fold(1usize, |len, &dim| len.checked_mul(dim))
+            .ok_or_else(|| anyhow!("numeric transfer shape overflows usize"))?;
+        let expected = match self.storage {
+            GpuTensorStorage::Real => logical_len,
+            GpuTensorStorage::ComplexInterleaved => logical_len
+                .checked_mul(2)
+                .ok_or_else(|| anyhow!("complex numeric transfer length overflows usize"))?,
+        };
+        if self.data.len() != expected {
+            return Err(anyhow!(
+                "{} transfer has {} elements for shape {:?} and {:?} storage; expected {}",
+                self.data.element_type().class_name(),
+                self.data.len(),
+                self.shape,
+                self.storage,
+                expected
+            ));
+        }
+        Ok(())
+    }
+
+    pub const fn element_type(self) -> NumericElementType {
+        self.data.element_type()
+    }
+}
+
+/// Owned native numeric buffer returned by a provider download.
+#[derive(Debug, Clone, PartialEq)]
+pub enum HostNumericDataOwned {
+    F64(Vec<f64>),
+    F32(Vec<f32>),
+    I8(Vec<i8>),
+    I16(Vec<i16>),
+    I32(Vec<i32>),
+    I64(Vec<i64>),
+    U8(Vec<u8>),
+    U16(Vec<u16>),
+    U32(Vec<u32>),
+    U64(Vec<u64>),
+}
+
+impl HostNumericDataOwned {
+    pub const fn element_type(&self) -> NumericElementType {
+        match self {
+            Self::F64(_) => NumericElementType::F64,
+            Self::F32(_) => NumericElementType::F32,
+            Self::I8(_) => NumericElementType::I8,
+            Self::I16(_) => NumericElementType::I16,
+            Self::I32(_) => NumericElementType::I32,
+            Self::I64(_) => NumericElementType::I64,
+            Self::U8(_) => NumericElementType::U8,
+            Self::U16(_) => NumericElementType::U16,
+            Self::U32(_) => NumericElementType::U32,
+            Self::U64(_) => NumericElementType::U64,
+        }
+    }
+
+    pub fn as_view(&self) -> HostNumericDataView<'_> {
+        match self {
+            Self::F64(data) => HostNumericDataView::F64(data),
+            Self::F32(data) => HostNumericDataView::F32(data),
+            Self::I8(data) => HostNumericDataView::I8(data),
+            Self::I16(data) => HostNumericDataView::I16(data),
+            Self::I32(data) => HostNumericDataView::I32(data),
+            Self::I64(data) => HostNumericDataView::I64(data),
+            Self::U8(data) => HostNumericDataView::U8(data),
+            Self::U16(data) => HostNumericDataView::U16(data),
+            Self::U32(data) => HostNumericDataView::U32(data),
+            Self::U64(data) => HostNumericDataView::U64(data),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.as_view().len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// Owned tensor transfer with one native numeric payload and explicit
+/// real/complex layout.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HostNumericTensorOwned {
+    pub data: HostNumericDataOwned,
+    pub shape: Vec<usize>,
+    pub storage: GpuTensorStorage,
+}
+
+impl HostNumericTensorOwned {
+    pub fn as_view(&self) -> HostNumericTensorView<'_> {
+        HostNumericTensorView {
+            data: self.data.as_view(),
+            shape: &self.shape,
+            storage: self.storage,
+        }
+    }
+
+    pub fn validate(&self) -> anyhow::Result<()> {
+        self.as_view().validate()
+    }
+}
+
 // Minimal host tensor views to avoid depending on runmat-builtins and cycles
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HostTensorOwned {
@@ -3801,6 +4142,76 @@ impl HostIntegerDataOwned {
 pub struct HostIntegerTensorOwned {
     pub data: HostIntegerDataOwned,
     pub shape: Vec<usize>,
+}
+
+impl<'a> From<HostTensorView<'a>> for HostNumericTensorView<'a> {
+    fn from(value: HostTensorView<'a>) -> Self {
+        Self {
+            data: HostNumericDataView::F64(value.data),
+            shape: value.shape,
+            storage: GpuTensorStorage::Real,
+        }
+    }
+}
+
+impl<'a> From<&'a HostTensorOwned> for HostNumericTensorView<'a> {
+    fn from(value: &'a HostTensorOwned) -> Self {
+        Self {
+            data: HostNumericDataView::F64(&value.data),
+            shape: &value.shape,
+            storage: value.storage,
+        }
+    }
+}
+
+impl<'a> From<HostIntegerDataView<'a>> for HostNumericDataView<'a> {
+    fn from(value: HostIntegerDataView<'a>) -> Self {
+        match value {
+            HostIntegerDataView::I8(data) => Self::I8(data),
+            HostIntegerDataView::I16(data) => Self::I16(data),
+            HostIntegerDataView::I32(data) => Self::I32(data),
+            HostIntegerDataView::I64(data) => Self::I64(data),
+            HostIntegerDataView::U8(data) => Self::U8(data),
+            HostIntegerDataView::U16(data) => Self::U16(data),
+            HostIntegerDataView::U32(data) => Self::U32(data),
+            HostIntegerDataView::U64(data) => Self::U64(data),
+        }
+    }
+}
+
+impl<'a> From<HostIntegerTensorView<'a>> for HostNumericTensorView<'a> {
+    fn from(value: HostIntegerTensorView<'a>) -> Self {
+        Self {
+            data: value.data.into(),
+            shape: value.shape,
+            storage: GpuTensorStorage::Real,
+        }
+    }
+}
+
+impl From<HostIntegerDataOwned> for HostNumericDataOwned {
+    fn from(value: HostIntegerDataOwned) -> Self {
+        match value {
+            HostIntegerDataOwned::I8(data) => Self::I8(data),
+            HostIntegerDataOwned::I16(data) => Self::I16(data),
+            HostIntegerDataOwned::I32(data) => Self::I32(data),
+            HostIntegerDataOwned::I64(data) => Self::I64(data),
+            HostIntegerDataOwned::U8(data) => Self::U8(data),
+            HostIntegerDataOwned::U16(data) => Self::U16(data),
+            HostIntegerDataOwned::U32(data) => Self::U32(data),
+            HostIntegerDataOwned::U64(data) => Self::U64(data),
+        }
+    }
+}
+
+impl From<HostIntegerTensorOwned> for HostNumericTensorOwned {
+    fn from(value: HostIntegerTensorOwned) -> Self {
+        Self {
+            data: value.data.into(),
+            shape: value.shape,
+            storage: GpuTensorStorage::Real,
+        }
+    }
 }
 
 /// Lightweight 1-D axis view used by provider meshgrid hooks.
@@ -4022,6 +4433,66 @@ mod tests {
         spawn_concurrency: SpawnHandleConcurrency,
     }
 
+    struct DefaultNumericAdapterProvider;
+
+    impl AccelProvider for DefaultNumericAdapterProvider {
+        fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+            assert_eq!(host.data, &[1.0, 2.0]);
+            Ok(GpuTensorHandle {
+                shape: host.shape.to_vec(),
+                device_id: 404,
+                buffer_id: 1,
+                descriptor: GpuTensorDescriptor::numeric(
+                    NumericElementType::F64,
+                    GpuTensorStorage::Real,
+                ),
+            })
+        }
+
+        fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            Box::pin(async move {
+                Ok(HostTensorOwned {
+                    data: vec![1.0, 2.0],
+                    shape: h.shape.clone(),
+                    storage: GpuTensorStorage::Real,
+                })
+            })
+        }
+
+        fn upload_integer(&self, host: &HostIntegerTensorView) -> anyhow::Result<GpuTensorHandle> {
+            assert!(matches!(host.data, HostIntegerDataView::U64([1, u64::MAX])));
+            Ok(GpuTensorHandle {
+                shape: host.shape.to_vec(),
+                device_id: 404,
+                buffer_id: 2,
+                descriptor: GpuTensorDescriptor::numeric(
+                    NumericElementType::U64,
+                    GpuTensorStorage::Real,
+                ),
+            })
+        }
+
+        fn download_integer<'a>(
+            &'a self,
+            h: &'a GpuTensorHandle,
+        ) -> AccelIntegerDownloadFuture<'a> {
+            Box::pin(async move {
+                Ok(HostIntegerTensorOwned {
+                    data: HostIntegerDataOwned::U64(vec![1, u64::MAX]),
+                    shape: h.shape.clone(),
+                })
+            })
+        }
+
+        fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn device_info(&self) -> String {
+            "legacy-numeric-provider".to_string()
+        }
+    }
+
     impl AccelProvider for TestProvider {
         fn upload(&self, _host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
             Err(anyhow!("test provider upload should not be called"))
@@ -4065,6 +4536,20 @@ mod tests {
         spawn_concurrency: SpawnHandleConcurrency::CopyOnWrite,
     };
 
+    fn resolve_ready<F: Future>(future: F) -> F::Output {
+        struct NoopWake;
+        impl std::task::Wake for NoopWake {
+            fn wake(self: std::sync::Arc<Self>) {}
+        }
+        let waker = std::task::Waker::from(std::sync::Arc::new(NoopWake));
+        let mut context = std::task::Context::from_waker(&waker);
+        let mut future = std::pin::pin!(future);
+        match future.as_mut().poll(&mut context) {
+            std::task::Poll::Ready(output) => output,
+            std::task::Poll::Pending => panic!("test adapter future unexpectedly pending"),
+        }
+    }
+
     fn register_test_providers() {
         clear_provider();
         unsafe {
@@ -4074,11 +4559,289 @@ mod tests {
     }
 
     fn test_handle(device_id: u32) -> GpuTensorHandle {
-        GpuTensorHandle {
-            shape: vec![1],
-            device_id,
-            buffer_id: 42,
+        GpuTensorHandle::new(vec![1], device_id, 42)
+    }
+
+    #[test]
+    fn numeric_transfer_contract_is_exhaustive_and_native() {
+        let f64_values = [1.0_f64, 2.0];
+        let f32_values = [1.0_f32, 2.0];
+        let i8_values = [1_i8, 2];
+        let i16_values = [1_i16, 2];
+        let i32_values = [1_i32, 2];
+        let i64_values = [1_i64, 9_007_199_254_740_993];
+        let u8_values = [1_u8, 2];
+        let u16_values = [1_u16, 2];
+        let u32_values = [1_u32, 2];
+        let u64_values = [1_u64, 9_007_199_254_740_993];
+        let cases = [
+            (
+                HostNumericDataView::F64(&f64_values),
+                NumericElementType::F64,
+            ),
+            (
+                HostNumericDataView::F32(&f32_values),
+                NumericElementType::F32,
+            ),
+            (HostNumericDataView::I8(&i8_values), NumericElementType::I8),
+            (
+                HostNumericDataView::I16(&i16_values),
+                NumericElementType::I16,
+            ),
+            (
+                HostNumericDataView::I32(&i32_values),
+                NumericElementType::I32,
+            ),
+            (
+                HostNumericDataView::I64(&i64_values),
+                NumericElementType::I64,
+            ),
+            (HostNumericDataView::U8(&u8_values), NumericElementType::U8),
+            (
+                HostNumericDataView::U16(&u16_values),
+                NumericElementType::U16,
+            ),
+            (
+                HostNumericDataView::U32(&u32_values),
+                NumericElementType::U32,
+            ),
+            (
+                HostNumericDataView::U64(&u64_values),
+                NumericElementType::U64,
+            ),
+        ];
+
+        for (data, element_type) in cases {
+            let transfer = HostNumericTensorView {
+                data,
+                shape: &[1, 2],
+                storage: GpuTensorStorage::Real,
+            };
+            transfer.validate().expect("matching native transfer");
+            assert_eq!(transfer.element_type(), element_type);
+            assert_eq!(element_type.class_name(), data.element_type().class_name());
+            assert_eq!(
+                element_type.element_size(),
+                data.element_type().element_size()
+            );
         }
+
+        assert_eq!(
+            NumericElementType::F64.precision(),
+            Some(ProviderPrecision::F64)
+        );
+        assert_eq!(
+            NumericElementType::F32.precision(),
+            Some(ProviderPrecision::F32)
+        );
+        assert_eq!(
+            NumericElementType::U64.integer_type(),
+            Some(IntegerElementType::U64)
+        );
+        assert_eq!(
+            NumericElementType::I64.integer_type(),
+            Some(IntegerElementType::I64)
+        );
+        assert_eq!(NumericElementType::F64.integer_type(), None);
+    }
+
+    #[test]
+    fn numeric_transfer_contract_validates_real_and_complex_lengths() {
+        let real = HostNumericTensorOwned {
+            data: HostNumericDataOwned::F32(vec![1.0, 2.0]),
+            shape: vec![2, 1],
+            storage: GpuTensorStorage::Real,
+        };
+        real.validate().expect("native single real transfer");
+
+        let complex = HostNumericTensorOwned {
+            data: HostNumericDataOwned::U64(vec![1, u64::MAX, 2, u64::MAX - 1]),
+            shape: vec![1, 2],
+            storage: GpuTensorStorage::ComplexInterleaved,
+        };
+        complex.validate().expect("native complex integer transfer");
+
+        let mismatch = HostNumericTensorView {
+            data: HostNumericDataView::I16(&[1, 2, 3]),
+            shape: &[2, 2],
+            storage: GpuTensorStorage::Real,
+        };
+        let error = mismatch.validate().expect_err("shape mismatch must reject");
+        assert!(error.to_string().contains("expected 4"));
+
+        let overflow = HostNumericTensorView {
+            data: HostNumericDataView::F64(&[]),
+            shape: &[usize::MAX, 2],
+            storage: GpuTensorStorage::Real,
+        };
+        assert!(overflow.validate().is_err());
+    }
+
+    #[test]
+    fn gpu_handle_descriptor_survives_clone_serialization_and_semantic_metadata_cleanup() {
+        let handle = GpuTensorHandle::new(vec![2, 3], 17, 29)
+            .with_numeric_descriptor(
+                NumericElementType::U64,
+                GpuTensorStorage::ComplexInterleaved,
+            )
+            .with_provenance(GpuHandleProvenance::Explicit);
+        let cloned = handle.clone();
+        clear_handle_metadata(&handle);
+        assert_eq!(handle_integer_type(&cloned), Some(IntegerElementType::U64));
+        assert_eq!(handle_precision(&cloned), None);
+        assert_eq!(
+            handle_storage(&cloned),
+            GpuTensorStorage::ComplexInterleaved
+        );
+        assert_eq!(
+            handle_provenance(&cloned),
+            Some(GpuHandleProvenance::Explicit)
+        );
+        assert_eq!(handle_class_name(&cloned).as_deref(), Some("uint64"));
+
+        let encoded = serde_json::to_string(&cloned).expect("serialize durable handle");
+        let decoded: GpuTensorHandle =
+            serde_json::from_str(&encoded).expect("deserialize durable handle");
+        assert_eq!(decoded, cloned);
+
+        let legacy: GpuTensorHandle =
+            serde_json::from_str(r#"{"shape":[1,1],"device_id":5,"buffer_id":8}"#)
+                .expect("deserialize legacy handle");
+        assert_eq!(legacy.descriptor, GpuTensorDescriptor::default());
+        assert_eq!(handle_storage(&legacy), GpuTensorStorage::Real);
+    }
+
+    #[test]
+    fn durable_physical_descriptor_is_the_only_numeric_authority() {
+        let floating = GpuTensorHandle::new(vec![1, 2], 23, 31).with_numeric_descriptor(
+            NumericElementType::F32,
+            GpuTensorStorage::ComplexInterleaved,
+        );
+
+        assert_eq!(handle_precision(&floating), Some(ProviderPrecision::F32));
+        assert_eq!(handle_integer_type(&floating), None);
+        assert_eq!(
+            handle_storage(&floating),
+            GpuTensorStorage::ComplexInterleaved
+        );
+        assert_eq!(handle_class_name(&floating).as_deref(), Some("single"));
+        clear_handle_metadata(&floating);
+
+        let integer = GpuTensorHandle::new(vec![1, 2], 37, 41)
+            .with_numeric_descriptor(NumericElementType::U64, GpuTensorStorage::Real);
+
+        assert_eq!(handle_precision(&integer), None);
+        assert_eq!(handle_integer_type(&integer), Some(IntegerElementType::U64));
+        assert_eq!(handle_class_name(&integer).as_deref(), Some("uint64"));
+        clear_handle_metadata(&integer);
+    }
+
+    #[test]
+    fn removed_physical_side_metadata_surface_stays_absent() {
+        let source = include_str!("lib.rs");
+        let forbidden = [
+            ["set_handle_", "precision"].concat(),
+            ["set_handle_", "integer_type"].concat(),
+            ["set_handle_", "storage"].concat(),
+            ["clear_handle_", "precision"].concat(),
+            ["clear_handle_", "integer_type"].concat(),
+            ["clear_handle_", "storage"].concat(),
+            ["HANDLE_", "PRECISIONS"].concat(),
+            ["HANDLE_", "INTEGER_TYPES"].concat(),
+            ["HANDLE_", "STORAGES"].concat(),
+        ];
+        for symbol in forbidden {
+            assert!(
+                !source.contains(&symbol),
+                "removed symbol returned: {symbol}"
+            );
+        }
+    }
+
+    #[test]
+    fn numeric_transfer_default_adapter_preserves_double_and_integer_storage() {
+        let provider = DefaultNumericAdapterProvider;
+        let double = HostNumericTensorView {
+            data: HostNumericDataView::F64(&[1.0, 2.0]),
+            shape: &[1, 2],
+            storage: GpuTensorStorage::Real,
+        };
+        let double_handle = provider
+            .upload_numeric(&double)
+            .expect("double upload adapter");
+        let double_download = resolve_ready(provider.download_numeric(&double_handle))
+            .expect("double download adapter");
+        assert_eq!(
+            double_download.data,
+            HostNumericDataOwned::F64(vec![1.0, 2.0])
+        );
+
+        let integer = HostNumericTensorView {
+            data: HostNumericDataView::U64(&[1, u64::MAX]),
+            shape: &[1, 2],
+            storage: GpuTensorStorage::Real,
+        };
+        let integer_handle = provider
+            .upload_numeric(&integer)
+            .expect("integer upload adapter");
+        let integer_download = resolve_ready(provider.download_numeric(&integer_handle))
+            .expect("integer download adapter");
+        assert_eq!(
+            integer_download.data,
+            HostNumericDataOwned::U64(vec![1, u64::MAX])
+        );
+        clear_handle_metadata(&integer_handle);
+    }
+
+    #[test]
+    fn numeric_transfer_default_adapter_rejects_widened_single_and_complex_integer() {
+        let provider = DefaultNumericAdapterProvider;
+        let single = HostNumericTensorView {
+            data: HostNumericDataView::F32(&[1.0, 2.0]),
+            shape: &[1, 2],
+            storage: GpuTensorStorage::Real,
+        };
+        assert!(provider.upload_numeric(&single).is_err());
+
+        let complex_integer = HostNumericTensorView {
+            data: HostNumericDataView::I16(&[1, 2, 3, 4]),
+            shape: &[1, 2],
+            storage: GpuTensorStorage::ComplexInterleaved,
+        };
+        assert!(provider.upload_numeric(&complex_integer).is_err());
+
+        let single_handle = GpuTensorHandle {
+            shape: vec![1, 2],
+            device_id: 404,
+            buffer_id: 3,
+            descriptor: GpuTensorDescriptor::numeric(
+                NumericElementType::F32,
+                GpuTensorStorage::Real,
+            ),
+        };
+        let error = resolve_ready(provider.download_numeric(&single_handle))
+            .expect_err("widened single download must reject");
+        assert!(error.to_string().contains("native single"));
+        clear_handle_metadata(&single_handle);
+
+        let complex_integer_handle = GpuTensorHandle {
+            shape: vec![1, 2],
+            device_id: 404,
+            buffer_id: 4,
+            descriptor: GpuTensorDescriptor::numeric(
+                NumericElementType::I16,
+                GpuTensorStorage::ComplexInterleaved,
+            ),
+        };
+        let error = resolve_ready(provider.download_numeric(&complex_integer_handle))
+            .expect_err("complex integer default download must reject");
+        assert!(error.to_string().contains("complex integer"));
+        clear_handle_metadata(&complex_integer_handle);
+
+        let descriptorless = GpuTensorHandle::new(vec![1, 2], 404, 5);
+        let error = resolve_ready(provider.download_numeric(&descriptorless))
+            .expect_err("descriptorless numeric download must reject");
+        assert!(error.to_string().contains("durable element descriptor"));
     }
 
     #[test]
@@ -4121,26 +4884,26 @@ mod tests {
     }
 
     #[test]
-    fn handle_metadata_is_namespaced_by_device_and_buffer() {
-        let first = test_handle(PROVIDER_A.device_id());
-        let second = test_handle(PROVIDER_B.device_id());
+    fn semantic_handle_metadata_is_namespaced_by_device_and_buffer() {
+        let mut first = test_handle(PROVIDER_A.device_id())
+            .with_numeric_descriptor(NumericElementType::F32, GpuTensorStorage::Real);
+        let mut second = test_handle(PROVIDER_B.device_id()).with_numeric_descriptor(
+            NumericElementType::U64,
+            GpuTensorStorage::ComplexInterleaved,
+        );
         clear_handle_metadata(&first);
         clear_handle_metadata(&second);
 
-        set_handle_precision(&first, ProviderPrecision::F32);
-        set_handle_precision(&second, ProviderPrecision::F64);
         set_handle_class_name(&first, "single");
         set_handle_class_name(&second, "uint64");
-        set_handle_integer_type(&second, IntegerElementType::U64);
         set_handle_logical(&first, true);
         record_handle_transpose(&first, 2, 3);
-        set_handle_storage(&second, GpuTensorStorage::ComplexInterleaved);
-        mark_handle_automatic(&first);
-        mark_handle_explicit(&second);
+        mark_handle_automatic(&mut first);
+        mark_handle_explicit(&mut second);
 
         assert_eq!(handle_precision(&first), Some(ProviderPrecision::F32));
-        assert_eq!(handle_precision(&second), Some(ProviderPrecision::F64));
-        assert_eq!(handle_class_name(&first).as_deref(), Some("single"));
+        assert_eq!(handle_precision(&second), None);
+        assert_eq!(handle_class_name(&first).as_deref(), Some("logical"));
         assert_eq!(handle_class_name(&second).as_deref(), Some("uint64"));
         assert_eq!(handle_integer_type(&first), None);
         assert_eq!(handle_integer_type(&second), Some(IntegerElementType::U64));
@@ -4163,12 +4926,15 @@ mod tests {
         assert!(handle_is_explicit(&second));
 
         clear_handle_metadata(&first);
-        assert_eq!(handle_precision(&first), None);
-        assert_eq!(handle_class_name(&first), None);
+        assert_eq!(handle_precision(&first), Some(ProviderPrecision::F32));
+        assert_eq!(handle_class_name(&first).as_deref(), Some("single"));
         assert!(!handle_is_logical(&first));
         assert_eq!(handle_transpose_info(&first), None);
-        assert_eq!(handle_provenance(&first), None);
-        assert_eq!(handle_precision(&second), Some(ProviderPrecision::F64));
+        assert_eq!(
+            handle_provenance(&first),
+            Some(GpuHandleProvenance::Automatic)
+        );
+        assert_eq!(handle_precision(&second), None);
         assert_eq!(handle_integer_type(&second), Some(IntegerElementType::U64));
         assert!(handle_is_explicit(&second));
         clear_handle_metadata(&second);

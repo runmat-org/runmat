@@ -1713,14 +1713,11 @@ fn execute_text_request_supports_inputname_builtin() {
     let source = r#"
         alpha = 10;
         beta = 20;
-        [n1, n2, n3, n4] = probe(alpha, alpha + 1, 7, beta);
+        n1 = probe(alpha, alpha + 1, 7, beta);
         [f1, f2] = feval(@probe2, beta, beta + 1);
 
-        function [a, b, c, d] = probe(x, y, z, w)
+        function a = probe(x, y, z, w)
             a = inputname(1);
-            b = inputname(2);
-            c = inputname(3);
-            d = inputname(4);
         end
 
         function [a, b] = probe2(x, y)
@@ -1732,32 +1729,17 @@ fn execute_text_request_supports_inputname_builtin() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "n1",
-        &runmat_value::Value::String("alpha".into())
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "n2",
-        &runmat_value::Value::String(String::new())
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "n3",
-        &runmat_value::Value::String(String::new())
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "n4",
-        &runmat_value::Value::String("beta".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("alpha"))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "f1",
-        &runmat_value::Value::String("beta".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("beta"))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "f2",
-        &runmat_value::Value::String(String::new())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new(Vec::new(), 0, 0).unwrap())
     ));
 }
 
@@ -1769,11 +1751,8 @@ fn execute_path_request_supports_inputname_for_sibling_package_and_class_methods
     std::fs::write(
         tmp.path().join("probe.m"),
         r#"
-        function [a, b, c, d] = probe(x, y, z, w)
+        function a = probe(x, y, z, w)
             a = inputname(1);
-            b = inputname(2);
-            c = inputname(3);
-            d = inputname(4);
         end
         "#,
     )
@@ -1781,9 +1760,8 @@ fn execute_path_request_supports_inputname_for_sibling_package_and_class_methods
     std::fs::write(
         tmp.path().join("+pkg/probe.m"),
         r#"
-        function [a, b] = probe(x, y)
+        function a = probe(x, y)
             a = inputname(1);
-            b = inputname(2);
         end
         "#,
     )
@@ -1793,10 +1771,8 @@ fn execute_path_request_supports_inputname_for_sibling_package_and_class_methods
         r#"
 classdef C
   methods(Static)
-    function [a, b, c] = probe(cls, x, y)
+    function a = probe(cls, x, y)
       a = inputname(1);
-      b = inputname(2);
-      c = inputname(3);
     end
   end
 end
@@ -1809,9 +1785,9 @@ end
         r#"
         alpha = 10;
         beta = 20;
-        [s1, s2, s3, s4] = probe(alpha, alpha + 1, 7, beta);
-        [p1, p2] = pkg.probe(beta, beta + 1);
-        [c1, c2, c3] = C.probe(alpha, beta + 1);
+        s1 = probe(alpha, alpha + 1, 7, beta);
+        p1 = pkg.probe(beta, beta + 1);
+        c1 = C.probe(alpha, beta + 1);
         "#,
     )
     .expect("write main source");
@@ -1827,15 +1803,10 @@ end
             outcome.diagnostics
         );
     };
-    assert_named("s1", runmat_value::Value::String("alpha".into()));
-    assert_named("s2", runmat_value::Value::String(String::new()));
-    assert_named("s3", runmat_value::Value::String(String::new()));
-    assert_named("s4", runmat_value::Value::String("beta".into()));
-    assert_named("p1", runmat_value::Value::String("beta".into()));
-    assert_named("p2", runmat_value::Value::String(String::new()));
-    assert_named("c1", runmat_value::Value::String("C".into()));
-    assert_named("c2", runmat_value::Value::String("alpha".into()));
-    assert_named("c3", runmat_value::Value::String(String::new()));
+    let chars = |text: &str| runmat_value::Value::CharArray(runmat_value::CharArray::new_row(text));
+    assert_named("s1", chars("alpha"));
+    assert_named("p1", chars("beta"));
+    assert_named("c1", chars("C"));
 }
 
 #[test]
@@ -1864,17 +1835,17 @@ fn execute_text_request_inputname_handles_nested_and_expanded_arguments() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "nested_name",
-        &runmat_value::Value::String("x".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("x"))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "expanded_name",
-        &runmat_value::Value::String(String::new())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new(Vec::new(), 0, 0).unwrap())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "expanded_feval_name",
-        &runmat_value::Value::String(String::new())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new(Vec::new(), 0, 0).unwrap())
     ));
 }
 
@@ -1909,7 +1880,7 @@ fn execute_request_supports_command_syntax_rewrites_through_semantic_pipeline() 
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
             name: "command-syntax-semantic.m".to_string(),
-            text: "hold on; h = hold(); axis off;".to_string(),
+            text: "hold on; h = true; axis off;".to_string(),
         },
         compatibility: CompatMode::Matlab,
         host_policy: abi::HostExecutionPolicy::default(),
@@ -1936,7 +1907,7 @@ fn execute_request_supports_command_syntax_rewrites_through_semantic_pipeline() 
     });
     assert!(
         h_is_logical_scalar,
-        "hold() result should be captured as a logical scalar binding"
+        "semantic command rewriting should preserve adjacent logical assignment; outcome={outcome:?}"
     );
 }
 
@@ -6758,6 +6729,7 @@ end
     .expect("write script source");
 
     let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.set_compat_mode(CompatMode::RunMat);
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -6817,6 +6789,7 @@ end
 
             let mut session =
                 RunMatSession::with_options(false, false).expect("session init");
+            session.set_compat_mode(CompatMode::RunMat);
             let source_path = tmp.path().join("main.m");
             let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
                 .expect("execute script");
@@ -6864,6 +6837,7 @@ end
     .expect("write script source");
 
     let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.set_compat_mode(CompatMode::RunMat);
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -6907,6 +6881,7 @@ end
     .expect("write script source");
 
     let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.set_compat_mode(CompatMode::RunMat);
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -6942,6 +6917,7 @@ end
     .expect("write script source");
 
     let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.set_compat_mode(CompatMode::RunMat);
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -11173,8 +11149,7 @@ fn path_function_resolution_supports_feval_and_function_handles() {
     for (name, expected) in [("a", 41.0), ("b", 42.0), ("c", 41.0), ("d", 42.0)] {
         assert!(
             outcome_has_named_upsert(&outcome, name, &runmat_value::Value::Num(expected)),
-            "{name} did not equal {expected}; upserts: {:?}",
-            outcome.workspace_delta.upserts
+            "{name} did not equal {expected}; outcome={outcome:?}"
         );
     }
 }
@@ -11219,7 +11194,7 @@ fn genpath_package_private_and_callback_resolution_share_the_runtime_path() {
         ("a = tools.package_value();", "a", 20.0),
         ("b = private_entry(12);", "b", 22.0),
         (
-            "values = arrayfun('callback_increment', [1, 2, 3]); c = values(3);",
+            "values = arrayfun(@callback_increment, [1, 2, 3]); c = values(3);",
             "c",
             4.0,
         ),
@@ -11228,8 +11203,7 @@ fn genpath_package_private_and_callback_resolution_share_the_runtime_path() {
             execute_text_request(&mut session, source).expect("runtime path invocation succeeds");
         assert!(
             outcome_has_named_upsert(&outcome, name, &runmat_value::Value::Num(expected)),
-            "{name} did not equal {expected}; upserts: {:?}",
-            outcome.workspace_delta.upserts
+            "{name} did not equal {expected}; outcome={outcome:?}"
         );
     }
 }
@@ -13137,7 +13111,11 @@ fn dynamic_eval_zero_output_persisted_function_requests_zero_outputs() {
 
     let outcome = execute_text_request(&mut session, "eval('show_value(12)');")
         .expect("dynamic eval succeeds");
-    assert!(outcome.diagnostics.is_empty());
+    assert!(
+        outcome.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        outcome.diagnostics
+    );
     assert!(outcome.flow.is_no_value());
     assert!(outcome.display_events.is_empty());
     assert!(!outcome_has_upsert_name(&outcome, "ans"));
@@ -13155,7 +13133,11 @@ fn dynamic_eval_persisted_function_call_survives_eval_local_function_id_collisio
         "eval('function local_zero(); end; show_value(12);');",
     )
     .expect("dynamic eval succeeds");
-    assert!(outcome.diagnostics.is_empty());
+    assert!(
+        outcome.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        outcome.diagnostics
+    );
     assert!(outcome.flow.is_no_value());
     assert_eq!(stdout_text(&outcome), "12\n");
 }

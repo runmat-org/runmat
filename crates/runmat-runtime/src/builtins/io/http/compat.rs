@@ -1,5 +1,13 @@
 //! URL, download, and mail compatibility helpers.
 
+use runmat_builtins::{
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
+    BuiltinIntegerAuditKind, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
+use runmat_value::NumericScalar;
 use std::path::PathBuf;
 #[cfg(not(target_arch = "wasm32"))]
 use std::process::{Command, Stdio};
@@ -19,7 +27,8 @@ use crate::builtins::common::fs::{expand_user_path, path_to_string};
 use crate::builtins::io::repl_fs::compat::session_pref_text;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_TIMEOUT_SECONDS: f64 = 2147.483647;
 const USER_AGENT: &str = "RunMat websave/0.0";
 
 const INPUTS_ONE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -43,29 +52,6 @@ const INPUTS_TWO: [BuiltinParamDescriptor; 2] = [
         arity: BuiltinParamArity::Required,
         default: None,
         description: "Second input argument.",
-    },
-];
-const INPUTS_THREE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "input1",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First input argument.",
-    },
-    BuiltinParamDescriptor {
-        name: "input2",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second input argument.",
-    },
-    BuiltinParamDescriptor {
-        name: "input3",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Third input argument.",
     },
 ];
 const OUTPUT_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -98,24 +84,121 @@ simple_descriptor!(
     "encoded = urlencode(text)",
     &INPUTS_ONE
 );
+pub const URLENCODE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "urlencode accepts host text only; integer and resident numeric values reject before provider access or encoding.",
+    };
 simple_descriptor!(
     URLDECODE_SIGNATURES,
     URLDECODE_DESCRIPTOR,
     "decoded = urldecode(text)",
     &INPUTS_ONE
 );
+pub const URLDECODE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "urldecode accepts host text only; integer and resident numeric values reject before provider access or decoding.",
+    };
 simple_descriptor!(
     WEBSAVE_SIGNATURES,
     WEBSAVE_DESCRIPTOR,
     "filename = websave(filename, url)",
     &INPUTS_TWO
 );
-simple_descriptor!(
-    SENDMAIL_SIGNATURES,
-    SENDMAIL_DESCRIPTOR,
-    "status = sendmail(to, subject, body)",
-    &INPUTS_THREE
-);
+const WEBSAVE_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "websave-explicit-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "passing explicit gpuArray values to host-only websave is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:WebsaveExplicitGpuInputExtension"),
+};
+pub const WEBSAVE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [WEBSAVE_EXPLICIT_GPU_EXTENSION];
+const WEBSAVE_QUERY_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "QueryValue",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Integer scalars and vectors are rendered directly from authoritative storage, including full-width signed and unsigned values.",
+    }];
+const WEBSAVE_TIMEOUT_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "options.Timeout",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "A positive integer timeout is bounded before conversion to the host HTTP duration.",
+    }];
+pub const WEBSAVE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "filename = websave(filename, url, query_name, integer_query_value, ...)",
+        inputs: &WEBSAVE_QUERY_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Default comma-separated query encoding preserves every integer element exactly; the returned filename remains text.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "filename = websave(filename, url, ..., options) with integer options.Timeout",
+        inputs: &WEBSAVE_TIMEOUT_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The bounded timeout crosses the host duration boundary; explicit gpuArray arguments are separately gated before provider access while automatic residency gathers transparently.",
+    },
+];
+const SENDMAIL_INPUTS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "to",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Recipient address or collection of addresses.",
+    },
+    BuiltinParamDescriptor {
+        name: "subject",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Message subject text.",
+    },
+    BuiltinParamDescriptor {
+        name: "message",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some(""),
+        description: "Message body text.",
+    },
+    BuiltinParamDescriptor {
+        name: "attachments",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Optional attachment path or collection of paths.",
+    },
+];
+const SENDMAIL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "status = sendmail(to, subject, message, attachments)",
+    inputs: &SENDMAIL_INPUTS,
+    outputs: &OUTPUT_VALUE,
+}];
+pub const SENDMAIL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SENDMAIL_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &[],
+};
+pub const SENDMAIL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "sendmail accepts textual recipients, subject, message, and attachment paths. Numeric character codes may be embedded in an already constructed character vector, but direct integer scalar, array, nested, or resident numeric arguments are not mail inputs and reject before provider access or transport side effects.",
+};
 
 fn compat_error(name: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(name).build()
@@ -157,16 +240,23 @@ fn char_value(text: &str) -> Value {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::string_type),
     descriptor(crate::builtins::io::http::compat::URLENCODE_DESCRIPTOR),
+    integer_audit(crate::builtins::io::http::compat::URLENCODE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::http::compat"
 )]
 async fn urlencode_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let args = gather_args("urlencode", &args).await?;
     if args.len() != 1 {
         return Err(compat_error(
             "urlencode",
             "urlencode: expected exactly one input",
         ));
     }
+    if crate::builtins::strings::common::contains_numeric_or_resident_text_input(&args[0]) {
+        return Err(compat_error(
+            "urlencode",
+            "urlencode: text must be a host string scalar or character vector",
+        ));
+    }
+    let args = gather_args("urlencode", &args).await?;
     Ok(char_value(&percent_encode(&scalar_text(
         &args[0],
         "urlencode",
@@ -195,16 +285,23 @@ fn percent_encode(text: &str) -> String {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::string_type),
     descriptor(crate::builtins::io::http::compat::URLDECODE_DESCRIPTOR),
+    integer_audit(crate::builtins::io::http::compat::URLDECODE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::http::compat"
 )]
 async fn urldecode_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let args = gather_args("urldecode", &args).await?;
     if args.len() != 1 {
         return Err(compat_error(
             "urldecode",
             "urldecode: expected exactly one input",
         ));
     }
+    if crate::builtins::strings::common::contains_numeric_or_resident_text_input(&args[0]) {
+        return Err(compat_error(
+            "urldecode",
+            "urldecode: text must be a host string scalar or character vector",
+        ));
+    }
+    let args = gather_args("urldecode", &args).await?;
     Ok(char_value(&percent_decode(&scalar_text(
         &args[0],
         "urldecode",
@@ -246,9 +343,20 @@ fn percent_decode(text: &str) -> BuiltinResult<String> {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::string_type),
     descriptor(crate::builtins::io::http::compat::WEBSAVE_DESCRIPTOR),
+    extensions(crate::builtins::io::http::compat::WEBSAVE_EXTENSIONS),
+    integer_capabilities(crate::builtins::io::http::compat::WEBSAVE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::http::compat"
 )]
 async fn websave_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args
+        .iter()
+        .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &WEBSAVE_EXPLICIT_GPU_EXTENSION,
+            "websave",
+        )?;
+    }
     let args = gather_args("websave", &args).await?;
     if args.len() < 2 {
         return Err(compat_error(
@@ -305,10 +413,12 @@ fn parse_websave_rest(
     }
     while idx < args.len() {
         let name = scalar_text(&args[idx], "websave", "name")?;
-        let value = scalar_text(&args[idx + 1], "websave", "value")?;
+        let value = &args[idx + 1];
         match name.to_ascii_lowercase().as_str() {
-            "timeout" => *timeout = Duration::from_secs_f64(parse_positive_seconds(&value)?),
-            "useragent" => *user_agent = value,
+            "timeout" => {
+                *timeout = duration_from_seconds(numeric_seconds(value, "websave Timeout")?)
+            }
+            "useragent" => *user_agent = scalar_text(value, "websave", "UserAgent")?,
             "headerfields" => {
                 return Err(compat_error(
                     "websave",
@@ -316,6 +426,7 @@ fn parse_websave_rest(
                 ));
             }
             _ => {
+                let value = query_value_to_string(value, &name)?;
                 url.query_pairs_mut().append_pair(&name, &value);
             }
         }
@@ -331,7 +442,7 @@ fn apply_websave_options(
     user_agent: &mut String,
 ) -> BuiltinResult<()> {
     if let Some(value) = options.fields.get("Timeout") {
-        *timeout = Duration::from_secs_f64(numeric_seconds(value, "websave Timeout")?);
+        *timeout = duration_from_seconds(numeric_seconds(value, "websave Timeout")?);
     }
     if let Some(value) = options.fields.get("UserAgent") {
         let ua = scalar_text(value, "websave", "UserAgent")?;
@@ -347,8 +458,27 @@ fn apply_websave_options(
 
 fn numeric_seconds(value: &Value, label: &str) -> BuiltinResult<f64> {
     match value {
-        Value::Num(v) if v.is_finite() && *v > 0.0 => Ok(*v),
-        Value::Int(v) if v.to_i64() > 0 => Ok(v.to_f64()),
+        Value::Num(v) if *v > 0.0 && (!v.is_finite() || *v <= MAX_TIMEOUT_SECONDS) => Ok(*v),
+        Value::Int(v) if v.to_i64() > 0 && v.to_f64() <= MAX_TIMEOUT_SECONDS => Ok(v.to_f64()),
+        Value::Tensor(tensor) if tensor.len() == 1 => {
+            let value = tensor
+                .numeric_value_at(0)
+                .expect("timeout tensor index must exist");
+            let seconds = format_numeric_scalar(value).parse::<f64>().map_err(|_| {
+                compat_error(
+                    "websave",
+                    format!("websave: {label} must be a positive numeric scalar"),
+                )
+            })?;
+            if seconds > 0.0 && (!seconds.is_finite() || seconds <= MAX_TIMEOUT_SECONDS) {
+                Ok(seconds)
+            } else {
+                Err(compat_error(
+                    "websave",
+                    format!("websave: {label} is outside the supported timeout range"),
+                ))
+            }
+        }
         Value::String(text) => parse_positive_seconds(text),
         Value::CharArray(array) if array.rows == 1 => {
             parse_positive_seconds(&array.data.iter().collect::<String>())
@@ -367,13 +497,77 @@ fn parse_positive_seconds(text: &str) -> BuiltinResult<f64> {
             "websave: Timeout must be a positive finite scalar",
         )
     })?;
-    if seconds.is_finite() && seconds > 0.0 {
+    if seconds > 0.0 && (!seconds.is_finite() || seconds <= MAX_TIMEOUT_SECONDS) {
         Ok(seconds)
     } else {
         Err(compat_error(
             "websave",
             "websave: Timeout must be a positive finite scalar",
         ))
+    }
+}
+
+fn duration_from_seconds(seconds: f64) -> Duration {
+    Duration::from_secs_f64(if seconds.is_infinite() {
+        MAX_TIMEOUT_SECONDS
+    } else {
+        seconds
+    })
+}
+
+fn query_value_to_string(value: &Value, name: &str) -> BuiltinResult<String> {
+    match value {
+        Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => {
+            scalar_text(value, "websave", name)
+        }
+        Value::Num(value) => Ok(value.to_string()),
+        Value::Int(value) => Ok(value.decimal_string()),
+        Value::Bool(value) => Ok(if *value { "true" } else { "false" }.to_string()),
+        Value::Tensor(tensor)
+            if tensor.shape.len() <= 2 && (tensor.rows() == 1 || tensor.cols() == 1) =>
+        {
+            Ok((0..tensor.len())
+                .map(|index| {
+                    format_numeric_scalar(
+                        tensor
+                            .numeric_value_at(index)
+                            .expect("query tensor index must exist"),
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(","))
+        }
+        Value::LogicalArray(array)
+            if array.shape.len() <= 2
+                && (array.shape.first().copied().unwrap_or(1) == 1
+                    || array.shape.get(1).copied().unwrap_or(1) == 1) =>
+        {
+            Ok(array
+                .data
+                .iter()
+                .map(|value| if *value != 0 { "true" } else { "false" })
+                .collect::<Vec<_>>()
+                .join(","))
+        }
+        _ => Err(compat_error(
+            "websave",
+            format!("websave: query value '{name}' must be text or a numeric, logical, or datetime scalar or vector"),
+        )),
+    }
+}
+
+fn format_numeric_scalar(value: NumericScalar) -> String {
+    match value {
+        NumericScalar::F64(value) => value.to_string(),
+        NumericScalar::F32(value) => value.to_string(),
+        NumericScalar::I8(value) => value.to_string(),
+        NumericScalar::I16(value) => value.to_string(),
+        NumericScalar::I32(value) => value.to_string(),
+        NumericScalar::I64(value) => value.to_string(),
+        NumericScalar::U8(value) => value.to_string(),
+        NumericScalar::U16(value) => value.to_string(),
+        NumericScalar::U32(value) => value.to_string(),
+        NumericScalar::U64(value) => value.to_string(),
     }
 }
 
@@ -425,31 +619,21 @@ fn path_from_value(value: &Value, name: &str) -> BuiltinResult<PathBuf> {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::num_type),
     descriptor(crate::builtins::io::http::compat::SENDMAIL_DESCRIPTOR),
+    integer_audit(crate::builtins::io::http::compat::SENDMAIL_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::http::compat"
 )]
 async fn sendmail_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args.iter().any(|value| {
+        crate::builtins::common::validation::value_contains_native_integer_class(value)
+            || value_contains_resident(value)
+    }) {
+        return Err(compat_error(
+            "sendmail",
+            "sendmail: mail arguments must be text, not numeric or resident values",
+        ));
+    }
     let args = gather_args("sendmail", &args).await?;
-    if args.len() < 3 || args.len() > 4 {
-        return Err(compat_error(
-            "sendmail",
-            "sendmail: recipient, subject, body, and optional attachments are expected",
-        ));
-    }
-    let recipients = recipients_from_value(&args[0])?;
-    let subject = scalar_text(&args[1], "sendmail", "subject")?;
-    let body = scalar_text(&args[2], "sendmail", "body")?;
-    if recipients.is_empty() {
-        return Err(compat_error(
-            "sendmail",
-            "sendmail: recipient must not be empty",
-        ));
-    }
-    if args.len() == 4 {
-        return Err(compat_error(
-            "sendmail",
-            "sendmail: attachments are not supported by the current mail transport",
-        ));
-    }
+    let (recipients, subject, body) = parse_sendmail_args(&args)?;
     let message = format_mail_message(&recipients, &subject, &body);
 
     let outbox = std::env::var("RUNMAT_SENDMAIL_OUTBOX").ok();
@@ -489,6 +673,47 @@ async fn sendmail_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         "sendmail",
         "sendmail: no mail transport configured; set RUNMAT_SENDMAIL_COMMAND, RUNMAT_SENDMAIL_OUTBOX, or configure a system sendmail binary",
     ))
+}
+
+fn parse_sendmail_args(args: &[Value]) -> BuiltinResult<(Vec<String>, String, String)> {
+    if args.len() < 2 || args.len() > 4 {
+        return Err(compat_error(
+            "sendmail",
+            "sendmail: recipient, subject, optional message, and optional attachments are expected",
+        ));
+    }
+    let recipients = recipients_from_value(&args[0])?;
+    let subject = scalar_text(&args[1], "sendmail", "subject")?;
+    let body = args
+        .get(2)
+        .map(|value| scalar_text(value, "sendmail", "message"))
+        .transpose()?
+        .unwrap_or_default();
+    if recipients.is_empty() {
+        return Err(compat_error(
+            "sendmail",
+            "sendmail: recipient must not be empty",
+        ));
+    }
+    if args.len() == 4 {
+        return Err(compat_error(
+            "sendmail",
+            "sendmail: attachments are not supported by the current mail transport",
+        ));
+    }
+    Ok((recipients, subject, body))
+}
+
+fn value_contains_resident(value: &Value) -> bool {
+    match value {
+        Value::GpuTensor(_) => true,
+        Value::Cell(value) => value.data.iter().any(value_contains_resident),
+        Value::Struct(value) => value.fields.values().any(value_contains_resident),
+        Value::Object(value) => value.properties.values().any(value_contains_resident),
+        Value::Closure(value) => value.captures.iter().any(value_contains_resident),
+        Value::OutputList(values) => values.iter().any(value_contains_resident),
+        _ => false,
+    }
 }
 
 fn recipients_from_value(value: &Value) -> BuiltinResult<Vec<String>> {
@@ -609,6 +834,38 @@ mod tests {
     }
 
     #[test]
+    fn url_text_helpers_reject_integer_and_resident_values_before_provider_access() {
+        assert_eq!(
+            URLENCODE_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        assert_eq!(
+            URLDECODE_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        let resident = || {
+            Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+                shape: vec![1, 1],
+                device_id: u32::MAX,
+                buffer_id: u64::MAX,
+                descriptor: Default::default(),
+            })
+        };
+        for error in [
+            run(urlencode_builtin(vec![Value::Int(
+                runmat_value::IntValue::U64(u64::MAX),
+            )]))
+            .expect_err("integer text must reject"),
+            run(urldecode_builtin(vec![resident()])).expect_err("resident text must reject"),
+        ] {
+            assert!(error
+                .message()
+                .contains("host string scalar or character vector"));
+            assert!(!error.message().to_ascii_lowercase().contains("provider"));
+        }
+    }
+
+    #[test]
     fn websave_rest_applies_options_and_query_pairs() {
         let mut url = Url::parse("https://example.test/data").unwrap();
         let mut headers = Vec::new();
@@ -638,5 +895,54 @@ mod tests {
         assert_eq!(headers, vec![("XRunMat".to_string(), "yes".to_string())]);
         assert_eq!(timeout, Duration::from_secs(7));
         assert_eq!(user_agent, "agent");
+    }
+
+    #[test]
+    fn websave_query_values_preserve_exact_integer_vectors() {
+        let value = Value::Tensor(
+            runmat_value::Tensor::new_integer(
+                runmat_value::IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
+                vec![1, 2],
+            )
+            .expect("integer query vector"),
+        );
+        assert_eq!(
+            query_value_to_string(&value, "id").expect("query encoding"),
+            "9007199254740993,18446744073709551615"
+        );
+    }
+
+    #[test]
+    fn sendmail_rejects_integer_payloads_before_transport() {
+        let error = run(sendmail_builtin(vec![
+            Value::String("recipient@example.test".to_string()),
+            Value::String("subject".to_string()),
+            Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_993)),
+        ]))
+        .expect_err("integer message must reject before transport selection");
+        assert!(error.message().contains("must be text"));
+
+        let nested =
+            runmat_value::CellArray::new(vec![Value::Int(runmat_value::IntValue::I8(1))], 1, 1)
+                .unwrap();
+        let error = run(sendmail_builtin(vec![
+            Value::Cell(nested),
+            Value::String("subject".to_string()),
+            Value::String("message".to_string()),
+        ]))
+        .expect_err("nested integer recipient must reject before transport selection");
+        assert!(error.message().contains("must be text"));
+    }
+
+    #[test]
+    fn sendmail_two_argument_form_uses_an_empty_message() {
+        let (recipients, subject, message) = parse_sendmail_args(&[
+            Value::String("recipient@example.test".to_string()),
+            Value::String("subject".to_string()),
+        ])
+        .expect("two-argument sendmail form");
+        assert_eq!(recipients, ["recipient@example.test"]);
+        assert_eq!(subject, "subject");
+        assert!(message.is_empty());
     }
 }

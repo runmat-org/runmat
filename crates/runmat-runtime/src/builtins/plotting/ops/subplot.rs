@@ -1,7 +1,11 @@
 //! MATLAB-compatible `subplot` builtin for selecting axes within a figure.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
@@ -13,6 +17,33 @@ use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "subplot";
+
+pub const SUBPLOT_INTEGER_GRID_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "subplot-integer-grid-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "Allow typed-integer subplot grid controls",
+    error_identifier: Some("RunMat:compatibility:SubplotIntegerGridControlExtension"),
+};
+pub const SUBPLOT_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [SUBPLOT_INTEGER_GRID_EXTENSION];
+const SUBPLOT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "rows, cols, or position",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target's public data types for these controls are single and double; RunMat mode additionally parses typed integer scalars exactly.",
+    }];
+pub const SUBPLOT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "ax = subplot(integer_rows, integer_cols, integer_position)",
+        inputs: &SUBPLOT_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The gated scalars are converted directly to platform dimensions before any figure state changes; the graphics handle remains a host double scalar.",
+    }];
 
 const SUBPLOT_OUTPUT_AX: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "ax",
@@ -120,9 +151,20 @@ fn map_subplot_figure_error(err: FigureError) -> RuntimeError {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::subplot::SUBPLOT_DESCRIPTOR),
+    extensions(crate::builtins::plotting::subplot::SUBPLOT_EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::subplot::SUBPLOT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::subplot"
 )]
 pub fn subplot_builtin(rows: Value, cols: Value, position: Value) -> crate::BuiltinResult<f64> {
+    if [&rows, &cols, &position]
+        .into_iter()
+        .any(crate::builtins::common::validation::value_has_native_integer_class)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SUBPLOT_INTEGER_GRID_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let m = scalar_from_value(&rows, BUILTIN_NAME)
         .map_err(|_| subplot_error(&SUBPLOT_ERROR_INVALID_ARGUMENT))?;
     let n = scalar_from_value(&cols, BUILTIN_NAME)
@@ -141,6 +183,7 @@ mod tests {
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
+    use runmat_value::IntValue;
 
     #[test]
     fn subplot_returns_axes_handle() {
@@ -161,5 +204,34 @@ mod tests {
             .map(|sig| sig.label)
             .collect();
         assert!(labels.contains(&"ax = subplot(rows, cols, position)"));
+    }
+
+    #[test]
+    fn subplot_typed_integer_grid_controls_are_explicitly_gated() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = subplot_builtin(
+            Value::Int(IntValue::U8(1)),
+            Value::Int(IntValue::U16(2)),
+            Value::Int(IntValue::I32(2)),
+        )
+        .expect_err("strict mode rejects typed integer grid controls");
+        assert_eq!(
+            error.identifier(),
+            SUBPLOT_INTEGER_GRID_EXTENSION.error_identifier
+        );
+        drop(strict);
+
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let handle = subplot_builtin(
+            Value::Int(IntValue::U8(1)),
+            Value::Int(IntValue::U16(2)),
+            Value::Int(IntValue::I32(2)),
+        )
+        .expect("extension mode accepts typed integer grid controls");
+        assert!(handle.is_finite());
     }
 }

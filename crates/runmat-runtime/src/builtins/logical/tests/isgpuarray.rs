@@ -152,7 +152,8 @@ pub(crate) mod tests {
                 run_isgpuarray(Value::GpuTensor(handle.clone())).expect("isgpuarray automatic");
             assert_eq!(automatic, Value::Bool(false));
 
-            runmat_accelerate_api::mark_handle_explicit(&handle);
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let explicit =
                 run_isgpuarray(Value::GpuTensor(handle.clone())).expect("isgpuarray explicit");
             assert_eq!(explicit, Value::Bool(true));

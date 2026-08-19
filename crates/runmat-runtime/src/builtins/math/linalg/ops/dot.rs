@@ -5,6 +5,8 @@
 //! necessary and the result is re-uploaded to the active provider when possible so
 //! downstream consumers can remain device-resident.
 
+#[cfg(test)]
+use runmat_accelerate_api::{HostNumericDataView, HostNumericTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
@@ -139,7 +141,7 @@ const DOT_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single/double data only. RunMat mode additionally accepts all eight real typed-integer classes.",
+        notes: "The compatibility target documents single/double data only. RunMat mode additionally accepts all eight real typed-integer classes.",
     }];
 
 const DOT_INTEGER_DIM_INPUTS: [BuiltinIntegerInputCapability; 1] =
@@ -170,7 +172,7 @@ pub const DOT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::HostAndGpu,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "All eight scalar integer classes select the reduction dimension without passing through an f64 mirror.",
+        notes: "All eight scalar integer classes select the reduction dimension through exact structural decoding.",
     },
 ];
 
@@ -1053,6 +1055,48 @@ pub(crate) mod tests {
     #[test]
     fn dot_validates_requested_precision_and_hostile_result_metadata() {
         test_support::with_test_provider(|provider| {
+            let lhs_f32 = provider
+                .upload_numeric(&HostNumericTensorView {
+                    data: HostNumericDataView::F32(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
+                    shape: &[2, 3],
+                    storage: runmat_accelerate_api::GpuTensorStorage::Real,
+                })
+                .expect("single lhs upload");
+            let rhs_f32 = provider
+                .upload_numeric(&HostNumericTensorView {
+                    data: HostNumericDataView::F32(&[6.0, 5.0, 4.0, 3.0, 2.0, 1.0]),
+                    shape: &[2, 3],
+                    storage: runmat_accelerate_api::GpuTensorStorage::Real,
+                })
+                .expect("single rhs upload");
+            let mut f32_output = provider
+                .upload_numeric(&HostNumericTensorView {
+                    data: HostNumericDataView::F32(&[21.0, 22.0, 23.0]),
+                    shape: &[1, 3],
+                    storage: runmat_accelerate_api::GpuTensorStorage::Real,
+                })
+                .expect("single result upload");
+            assert!(valid_provider_dot_output(
+                &f32_output,
+                &lhs_f32,
+                &rhs_f32,
+                provider,
+                Some(1),
+            ));
+
+            f32_output.descriptor.element_type =
+                Some(runmat_accelerate_api::NumericElementType::F64);
+            assert!(!valid_provider_dot_output(
+                &f32_output,
+                &lhs_f32,
+                &rhs_f32,
+                provider,
+                Some(1),
+            ));
+            provider.free(&f32_output).expect("free precision result");
+            provider.free(&lhs_f32).expect("free single lhs");
+            provider.free(&rhs_f32).expect("free single rhs");
+
             let lhs = provider
                 .upload(&HostTensorView {
                     data: &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
@@ -1074,49 +1118,6 @@ pub(crate) mod tests {
                     .expect("result upload")
             };
 
-            let f32_output = make_output();
-            runmat_accelerate_api::set_handle_precision(
-                &lhs,
-                runmat_accelerate_api::ProviderPrecision::F32,
-            );
-            runmat_accelerate_api::set_handle_precision(
-                &rhs,
-                runmat_accelerate_api::ProviderPrecision::F32,
-            );
-            runmat_accelerate_api::set_handle_precision(
-                &f32_output,
-                runmat_accelerate_api::ProviderPrecision::F32,
-            );
-            assert!(valid_provider_dot_output(
-                &f32_output,
-                &lhs,
-                &rhs,
-                provider,
-                Some(1),
-            ));
-
-            runmat_accelerate_api::set_handle_precision(
-                &f32_output,
-                runmat_accelerate_api::ProviderPrecision::F64,
-            );
-            assert!(!valid_provider_dot_output(
-                &f32_output,
-                &lhs,
-                &rhs,
-                provider,
-                Some(1),
-            ));
-            provider.free(&f32_output).expect("free precision result");
-
-            runmat_accelerate_api::set_handle_precision(
-                &lhs,
-                runmat_accelerate_api::ProviderPrecision::F64,
-            );
-            runmat_accelerate_api::set_handle_precision(
-                &rhs,
-                runmat_accelerate_api::ProviderPrecision::F64,
-            );
-
             let wrong_shape = {
                 let mut handle = make_output();
                 handle.shape = vec![3, 1];
@@ -1133,11 +1134,9 @@ pub(crate) mod tests {
                 .free(&wrong_shape)
                 .expect("free wrong-shape result");
 
-            let wrong_storage = make_output();
-            runmat_accelerate_api::set_handle_storage(
-                &wrong_storage,
-                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            );
+            let mut wrong_storage = make_output();
+            wrong_storage.descriptor.storage =
+                Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
             assert!(!valid_provider_dot_output(
                 &wrong_storage,
                 &lhs,
@@ -1149,11 +1148,8 @@ pub(crate) mod tests {
                 .free(&wrong_storage)
                 .expect("free wrong-storage result");
 
-            let integer = make_output();
-            runmat_accelerate_api::set_handle_integer_type(
-                &integer,
-                runmat_accelerate_api::IntegerElementType::I16,
-            );
+            let mut integer = make_output();
+            integer.descriptor.element_type = Some(runmat_accelerate_api::NumericElementType::I16);
             assert!(!valid_provider_dot_output(
                 &integer,
                 &lhs,
@@ -1174,11 +1170,9 @@ pub(crate) mod tests {
             ));
             provider.free(&logical).expect("free logical result");
 
-            let owned_rejection = make_output();
-            runmat_accelerate_api::set_handle_storage(
-                &owned_rejection,
-                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            );
+            let mut owned_rejection = make_output();
+            owned_rejection.descriptor.storage =
+                Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
             free_rejected_dot_handle(&owned_rejection, &[]);
             assert!(block_on(provider.download(&owned_rejection)).is_err());
 
@@ -1205,6 +1199,7 @@ pub(crate) mod tests {
                 device_id: lhs.device_id.wrapping_add(10_000),
                 buffer_id: lhs.buffer_id,
                 shape: vec![1, 3],
+                descriptor: Default::default(),
             };
             assert!(!valid_provider_dot_output(
                 &unowned_rejection,

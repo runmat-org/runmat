@@ -6,11 +6,17 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::introspection::class::class_name_for_value;
 use crate::builtins::introspection::type_resolvers::isa_type;
+use crate::class_registry::get_class;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{handle_integer_type, handle_is_logical};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
@@ -91,6 +97,8 @@ pub const ISA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ISA_ERRORS,
 };
+const ISA_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "A", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Host and internally auto-resident integer values expose their exact class and integer/numeric abstract categories; an explicit gpuArray remains the resident wrapper object's class." }];
+pub const ISA_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "tf = isa(integer_A, type_name)", inputs: &ISA_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Logical, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Host and internally auto-resident integer class/category checks use dtype metadata exactly. Only explicit resident values match gpuArray; isUnderlyingType owns explicit resident underlying-class inspection." }];
 
 #[runtime_builtin(
     name = "isa",
@@ -100,6 +108,7 @@ pub const ISA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "metadata",
     type_resolver(isa_type),
     descriptor(crate::builtins::introspection::isa::ISA_DESCRIPTOR),
+    integer_capabilities(crate::builtins::introspection::isa::ISA_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::introspection::isa"
 )]
 fn isa_builtin(value: Value, class_designator: Value) -> crate::BuiltinResult<Value> {
@@ -143,6 +152,10 @@ fn value_is_a(value: &Value, requested: &str) -> bool {
         return false;
     }
     let requested_lower = trimmed.to_ascii_lowercase();
+    if matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
+    {
+        return requested_lower == "gpuarray";
+    }
     match requested_lower.as_str() {
         "numeric" => is_numeric(value),
         "float" => is_float(value),
@@ -160,7 +173,9 @@ fn value_is_a(value: &Value, requested: &str) -> bool {
                 | Value::BoundFunctionHandle { .. }
                 | Value::Closure(_)
         ),
-        "gpuarray" => matches!(value, Value::GpuTensor(_)),
+        "gpuarray" => {
+            matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
+        }
         "listener" | "event.listener" => matches!(value, Value::Listener(_)),
         "meta.class" => matches!(value, Value::ClassRef(_)),
         "mexception" => matches!(value, Value::MException(_)),
@@ -462,7 +477,7 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn isa_gpu_arrays_treat_metadata_correctly() {
+    fn isa_distinguishes_automatic_numeric_class_from_explicit_wrapper() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
@@ -475,14 +490,32 @@ pub(crate) mod tests {
             let numeric = isa_builtin(gpu_value.clone(), Value::from("numeric")).expect("isa");
             assert_eq!(numeric, Value::Bool(true));
 
-            let double = isa_builtin(gpu_value, Value::from("double")).expect("isa");
-            assert_eq!(double, Value::Bool(false));
+            let double = isa_builtin(gpu_value.clone(), Value::from("double")).expect("isa");
+            assert_eq!(double, Value::Bool(true));
+            assert_eq!(
+                isa_builtin(gpu_value.clone(), Value::from("gpuArray")).expect("automatic isa"),
+                Value::Bool(false)
+            );
+            let Value::GpuTensor(handle) = gpu_value else {
+                unreachable!()
+            };
+            let gpu_value = Value::GpuTensor(
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit),
+            );
+            assert_eq!(
+                isa_builtin(gpu_value.clone(), Value::from("gpuArray")).expect("explicit isa"),
+                Value::Bool(true)
+            );
+            assert_eq!(
+                isa_builtin(gpu_value, Value::from("numeric")).expect("wrapper category"),
+                Value::Bool(false)
+            );
         });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn isa_gpu_logical_handles_match_categories() {
+    fn isa_gpu_logical_handles_preserve_automatic_transparency() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 0.0, 1.0, 0.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
@@ -502,7 +535,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn isa_gpu_integer_handles_match_integer_category() {
+    fn isa_gpu_integer_handles_preserve_automatic_transparency() {
         test_support::with_test_provider(|provider| {
             let values = [u64::MAX, 9_007_199_254_740_993];
             let shape = [1usize, 2usize];
@@ -514,6 +547,10 @@ pub(crate) mod tests {
                 .expect("upload integer gpu tensor");
             let gpu_value = Value::GpuTensor(handle);
 
+            assert_eq!(
+                isa_builtin(gpu_value.clone(), Value::from("gpuArray")).expect("isa gpuArray"),
+                Value::Bool(false)
+            );
             assert_eq!(
                 isa_builtin(gpu_value.clone(), Value::from("numeric")).expect("isa numeric"),
                 Value::Bool(true)
@@ -639,7 +676,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
-    fn isa_gpuarray_with_wgpu_provider_matches_numeric_category() {
+    fn isa_automatic_wgpu_value_matches_underlying_numeric_class() {
         use runmat_accelerate::backend::wgpu::provider::ensure_wgpu_provider;
         use runmat_accelerate_api::AccelProvider;
 
@@ -660,6 +697,6 @@ pub(crate) mod tests {
         assert_eq!(numeric, Value::Bool(true));
 
         let dbl = isa_builtin(value, Value::from("double")).expect("isa double");
-        assert_eq!(dbl, Value::Bool(false));
+        assert_eq!(dbl, Value::Bool(true));
     }
 }

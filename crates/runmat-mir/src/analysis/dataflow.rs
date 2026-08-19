@@ -9,8 +9,8 @@ use runmat_types::{
     infer_member_read, infer_member_write, infer_range, infer_struct, infer_tensor_aggregate,
     infer_unary, AliasFact, CallableFact, CallableIdentity, CertaintyFact, ContiguityFact,
     DynamicReason, ExecutionFact, FutureStateFact, IndexSelectorFact, InvalidationVector,
-    LayoutFact, LiteralValue, MutationContract, MutationFact, RangeStepFact, ResidencyFact,
-    ShapeFact, SpawnSafetyFact, StorageFact, ValueFact, ValueKindFact, ViewFact,
+    LayoutFact, LiteralValue, MutationContract, MutationFact, NumericClass, RangeStepFact,
+    ResidencyFact, ShapeFact, SpawnSafetyFact, StorageFact, ValueFact, ValueKindFact, ViewFact,
 };
 use std::collections::{HashMap, VecDeque};
 
@@ -278,6 +278,10 @@ pub(crate) fn literal_value(constant: &crate::MirConstant) -> LiteralValue {
             text: value.clone(),
             class: runmat_types::NumericClass::Double,
         },
+        crate::MirConstant::IntegerLiteral(value) => LiteralValue::Integer {
+            text: value.text().to_owned(),
+            class: integer_literal_numeric_class(value.class()),
+        },
         crate::MirConstant::String(value) => {
             if value.0.starts_with('\'') {
                 LiteralValue::Character(value.0.trim_matches('\'').to_owned())
@@ -288,6 +292,21 @@ pub(crate) fn literal_value(constant: &crate::MirConstant) -> LiteralValue {
         crate::MirConstant::Symbol(value) => LiteralValue::Symbolic(value.0.clone()),
         crate::MirConstant::Bool(value) => LiteralValue::Bool(*value),
         crate::MirConstant::EmptyArray => LiteralValue::Empty,
+    }
+}
+
+fn integer_literal_numeric_class(class: runmat_types::IntegerLiteralClass) -> NumericClass {
+    use runmat_types::IntegerLiteralClass;
+
+    match class {
+        IntegerLiteralClass::Int8 => NumericClass::Int8,
+        IntegerLiteralClass::Int16 => NumericClass::Int16,
+        IntegerLiteralClass::Int32 => NumericClass::Int32,
+        IntegerLiteralClass::Int64 => NumericClass::Int64,
+        IntegerLiteralClass::UInt8 => NumericClass::UInt8,
+        IntegerLiteralClass::UInt16 => NumericClass::UInt16,
+        IntegerLiteralClass::UInt32 => NumericClass::UInt32,
+        IntegerLiteralClass::UInt64 => NumericClass::UInt64,
     }
 }
 

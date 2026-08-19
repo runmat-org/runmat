@@ -114,12 +114,7 @@ async fn dispatch_builtin_subsref(
         return crate::call_builtin_async_with_outputs("subsref", rest, requested_outputs).await;
     }
     let field = builtin_member_field_name(&subs, "subsref")?;
-    match crate::call_builtin_async_with_outputs(
-        "getfield",
-        &[rest[0].clone(), Value::String(field.clone())],
-        requested_outputs,
-    )
-    .await
+    match crate::builtins::structs::core::getfield::get_member_value(rest[0].clone(), &field).await
     {
         Ok(value) => Ok(value),
         Err(err) if err.identifier() == Some("RunMat:getfield:ObjectProperty") => {

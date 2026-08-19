@@ -69,6 +69,50 @@ fn elementwise_and_accepts_all_integer_classes_through_vm_dispatch() {
 }
 
 #[test]
+fn not_or_and_xor_accept_all_integer_classes_through_vm_dispatch() {
+    for constructor in [
+        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+    ] {
+        let source =
+            format!("a={constructor}([0 1]); neg=not(a); dis=or(a,false); exclusive=xor(a,true);");
+        let vars = execute_source(&source).unwrap_or_else(|error| {
+            panic!("{constructor}: compiled logical calls failed: {error}")
+        });
+        assert!(vars.iter().any(|value| matches!(
+            value,
+            Value::LogicalArray(array) if array.data == vec![0, 1]
+        )));
+        assert!(
+            vars.iter()
+                .filter(|value| matches!(
+                    value,
+                    Value::LogicalArray(array) if array.data == vec![1, 0]
+                ))
+                .count()
+                >= 2,
+            "{constructor}: {vars:?}"
+        );
+    }
+
+    let vars = execute_source(
+        "wide=uint64([0 9007199254740993 18446744073709551615]); neg=not(wide); dis=or(wide,false); exclusive=xor(wide,true);",
+    )
+    .expect("wide integer logical calls");
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::LogicalArray(array) if array.data == vec![1, 0, 0]
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::LogicalArray(array) if array.data == vec![0, 1, 1]
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::LogicalArray(array) if array.data == vec![1, 0, 0]
+    )));
+}
+
+#[test]
 fn angle_rejects_all_real_and_componentwise_complex_integer_classes_through_vm_dispatch() {
     for constructor in [
         "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
@@ -252,6 +296,26 @@ fn every_integer_class_uses_native_arithmetic_and_comparison_dispatch() {
 }
 
 #[test]
+fn unary_integer_operators_preserve_class_and_saturate_every_endpoint() {
+    let vars = execute_source(
+        "a=+intmin('int8'); b=-intmin('int8'); c=+intmin('int16'); d=-intmin('int16'); e=+intmin('int32'); f=-intmin('int32'); g=+intmin('int64'); h=-intmin('int64'); i=-intmax('uint8'); j=-intmax('uint16'); k=-intmax('uint32'); l=-intmax('uint64');",
+    )
+    .expect("compiled unary integer endpoint semantics");
+    assert_eq!(vars[0], Value::Int(IntValue::I8(i8::MIN)));
+    assert_eq!(vars[1], Value::Int(IntValue::I8(i8::MAX)));
+    assert_eq!(vars[2], Value::Int(IntValue::I16(i16::MIN)));
+    assert_eq!(vars[3], Value::Int(IntValue::I16(i16::MAX)));
+    assert_eq!(vars[4], Value::Int(IntValue::I32(i32::MIN)));
+    assert_eq!(vars[5], Value::Int(IntValue::I32(i32::MAX)));
+    assert_eq!(vars[6], Value::Int(IntValue::I64(i64::MIN)));
+    assert_eq!(vars[7], Value::Int(IntValue::I64(i64::MAX)));
+    assert_eq!(vars[8], Value::Int(IntValue::U8(0)));
+    assert_eq!(vars[9], Value::Int(IntValue::U16(0)));
+    assert_eq!(vars[10], Value::Int(IntValue::U32(0)));
+    assert_eq!(vars[11], Value::Int(IntValue::U64(0)));
+}
+
+#[test]
 fn complex_integer_values_preserve_exact_components_through_vm_dispatch() {
     let vars = execute_source(
         "r = uint64([9223372036854775808 18446744073709551615]); z = complex(r, 1); zr = real(z); zi = imag(z); scalar = complex(int64(-9223372036854775808), int64(7)); sr = real(scalar); si = imag(scalar); tf = isreal(z); high = uint64(9223372036854775808) + 1; highz = complex(high, 1); highr = real(highz); picked = z([2 1]); pickedreal = real(picked); reshaped = reshape(z, 2, 1); reshapedreal = real(reshaped); scalarreshape = reshape(high, 1, 1, 1);",
@@ -418,6 +482,7 @@ fn typed_complex_integer_cross_uses_runmat_double_extension() {
 
 #[test]
 fn typed_complex_integer_pagemtimes_is_rejected_before_f64_coercion() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     for operation in ["pagemtimes(z, z)", "pagemtimes(z, 1)", "pagemtimes(1, z)"] {
         let source = format!(
             "z = complex(uint64([9223372036854775808 2; 3 4]), uint64([1 2; 3 4])); out = {operation};"
@@ -464,6 +529,7 @@ fn typed_complex_integer_det_is_rejected_before_f64_coercion() {
 
 #[test]
 fn typed_complex_integer_factorization_and_solve_operations_are_rejected_before_f64_coercion() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let operations = [
         ("chol", "chol(z)"),
         ("lu", "lu(z)"),
@@ -574,6 +640,7 @@ fn typed_complex_integer_signal_operations_are_rejected_before_f64_coercion() {
 
 #[test]
 fn typed_complex_integer_rounding_operations_are_rejected_before_f64_coercion() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let operations = [
         ("ceil", "ceil(z)"),
         ("floor", "floor(z)"),
@@ -594,7 +661,10 @@ fn typed_complex_integer_rounding_operations_are_rejected_before_f64_coercion() 
         assert!(
             err.to_string().contains(
                 "operations involving complex numbers with integer types are not supported"
-            ) || err.to_string().contains("inputs must be real"),
+            ) || err.to_string().contains("inputs must be real")
+                || err
+                    .to_string()
+                    .contains("integer inputs support only the round(X) form"),
             "{name} returned an unexpected error: {err}"
         );
     }
@@ -733,20 +803,30 @@ fn cell_accepts_all_integer_size_classes_through_compiled_dispatch() {
 }
 
 #[test]
-fn typed_complex_integer_gpuarray_is_rejected_before_provider_dispatch() {
-    let err = execute_source(
+fn typed_complex_integer_gpuarray_preserves_exact_descriptor_metadata() {
+    runmat_accelerate::simple_provider::register_inprocess_provider();
+    let provider = runmat_accelerate_api::provider().expect("test provider");
+    let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let vars = execute_source(
         "z = complex(uint64([9223372036854775808 18446744073709551615]), uint64([1 2])); g = gpuArray(z);",
     )
-    .expect_err("typed complex integer gpuArray input must be rejected");
-    assert!(
-        err.to_string()
-            .contains("typed complex integer arrays are not supported"),
-        "unexpected error: {err}"
-    );
+    .expect("typed complex integer gpuArray input");
+    assert!(matches!(
+        &vars[1],
+        Value::GpuTensor(handle)
+            if runmat_accelerate_api::handle_integer_type(handle)
+                == Some(runmat_accelerate_api::IntegerElementType::U64)
+                && runmat_accelerate_api::handle_storage(handle)
+                    == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+                && runmat_accelerate_api::handle_provenance(handle)
+                    == Some(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+    ));
 }
 
 #[test]
 fn typed_complex_integer_analytic_operations_are_rejected_before_f64_coercion() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     for builtin in [
         "abs", "angle", "exp", "expm1", "gamma", "log", "log10", "log1p", "log2", "sign", "sqrt",
         "acos", "acosh", "asin", "asinh", "atan", "atanh", "cos", "cosd", "cosh", "cospi",
@@ -866,18 +946,12 @@ fn typed_complex_integer_extrema_and_mean_are_rejected_before_f64_coercion() {
 }
 
 #[test]
-fn typed_complex_integer_ordering_operations_are_rejected_before_f64_coercion() {
+fn typed_complex_integer_ordering_operations_execute_without_f64_coercion() {
     for operation in ["sort(z)", "argsort(z)", "issorted(z)", "sortrows(z)"] {
         let source = format!(
             "z = complex(uint64([9223372036854775808 1]), uint64([1 0])); out = {operation};"
         );
-        let err = execute_source(&source).expect_err(operation);
-        assert!(
-            err.to_string().contains(
-                "operations involving complex numbers with integer types are not supported"
-            ),
-            "{operation} returned an unexpected error: {err}"
-        );
+        execute_source(&source).unwrap_or_else(|error| panic!("{operation}: {error}"));
     }
 }
 
@@ -1097,6 +1171,7 @@ fn typed_complex_integer_perms_preserves_exact_components() {
 
 #[test]
 fn typed_complex_integer_toeplitz_preserves_exact_components() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let vars = execute_source(
         "c = complex(uint64([18446744073709551615 7]), uint64([5 6])); r = complex(uint64([18446744073709551615 9223372036854775808 9]), uint64([5 8 10])); out = toeplitz(c, r); real_out = real(out); imag_out = imag(out);",
     )
@@ -1235,6 +1310,7 @@ fn typed_complex_integer_mat2cell_preserves_exact_components() {
 
 #[test]
 fn typed_complex_integer_numerical_integration_is_rejected_before_f64_coercion() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     for operation in [
         "gradient(z)",
         "trapz(z)",
@@ -1262,12 +1338,20 @@ fn typed_complex_integer_numerical_integration_is_rejected_before_f64_coercion()
 #[test]
 fn typed_complex_integer_truthiness_uses_exact_paired_storage() {
     let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let error = execute_source(
+        "z = complex(uint64([0 9223372036854775808 0]), uint64([0 0 1])); l = logical(z);",
+    )
+    .expect_err("explicit logical conversion from complex input must reject");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:logical:ConversionNotPossible")
+    );
     let vars = execute_source(
-        "z = complex(uint64([0 9223372036854775808 0]), uint64([0 0 1])); l = logical(z); n = ~z; a = all(z, 'all'); b = any(z, 'all'); c = nnz(z); [r, col, values] = find(z); p = z & z; q = z | 0; x = xor(z, 0);",
+        "z = complex(uint64([0 9223372036854775808 0]), uint64([0 0 1])); n = ~z; a = all(z, 'all'); b = any(z, 'all'); c = nnz(z); [r, col, values] = find(z); p = z & z; q = z | 0; x = xor(z, 0);",
     )
     .expect("typed complex integer truthiness should execute");
 
-    for index in [1, 9, 10, 11] {
+    for index in [8, 9, 10] {
         assert!(
             matches!(
                 &vars[index],
@@ -1278,22 +1362,22 @@ fn typed_complex_integer_truthiness_uses_exact_paired_storage() {
         );
     }
     assert!(matches!(
-        &vars[2],
+        &vars[1],
         Value::LogicalArray(array) if array.data == vec![1, 0, 0]
     ));
-    assert!(!logical_truth(&vars[3]));
-    assert!(logical_truth(&vars[4]));
-    assert_eq!(vars[5], Value::Num(2.0));
+    assert!(!logical_truth(&vars[2]));
+    assert!(logical_truth(&vars[3]));
+    assert_eq!(vars[4], Value::Num(2.0));
     assert!(matches!(
-        &vars[6],
+        &vars[5],
         Value::Tensor(tensor) if tensor.materialize_f64() == vec![1.0, 1.0]
     ));
     assert!(matches!(
-        &vars[7],
+        &vars[6],
         Value::Tensor(tensor) if tensor.materialize_f64() == vec![2.0, 3.0]
     ));
     assert!(matches!(
-        &vars[8],
+        &vars[7],
         Value::ComplexTensor(tensor)
             if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
                 == Some((

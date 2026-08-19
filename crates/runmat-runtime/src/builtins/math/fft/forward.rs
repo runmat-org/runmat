@@ -142,7 +142,7 @@ pub const FFT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::HostAndGpu,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Documented controls are exact and do not pass through the tensor f64 compatibility mirror.",
+        notes: "Documented controls are decoded exactly in every supported integer class.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "Y = fft(int64_or_uint64_X, ...)",

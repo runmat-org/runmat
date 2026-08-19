@@ -1,7 +1,11 @@
 //! Statistics options structure helpers (`statset` / `statget`).
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ResolveContext, Type,
 };
@@ -301,6 +305,54 @@ pub const STATGET_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &STATGET_ERRORS,
 };
 
+const STATSET_INTEGER_OPTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "statset-integer-option-value",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "statset with a native typed-integer option value is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:StatsetIntegerOptionValueExtension"),
+};
+pub const STATSET_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [STATSET_INTEGER_OPTION_EXTENSION];
+
+const STATSET_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "option values",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target lists single/double for numeric option fields and logical for parallel flags. RunMat mode additionally accepts all eight native integer classes after field-specific range validation.",
+    }];
+pub const STATSET_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "options = statset(..., name, integer_value, ...)",
+        inputs: &STATSET_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Compatibility admission occurs recursively before any resident option value is gathered. Count fields normalize to double metadata, logical flags normalize to logical, and vector-valued DerivStep retains authoritative native storage in RunMat mode.",
+    }];
+
+const STATGET_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "defaultData",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented defaultData role accepts any data type. Native integer class, shape, and exact values are returned unchanged when the selected option is empty.",
+    }];
+pub const STATGET_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "val = statget(options, field, integer_defaultData)",
+        inputs: &STATGET_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The integer default is an opaque value carrier rather than a numeric computation. Automatic residency may gather transparently through the owning provider; host values retain their exact class and payload.",
+    }];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::stats::options")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "statset/statget",
@@ -351,21 +403,67 @@ fn statget_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     accel = "cpu",
     type_resolver(stat_options_type),
     descriptor(crate::builtins::stats::options::STATSET_DESCRIPTOR),
+    extensions(crate::builtins::stats::options::STATSET_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::options::STATSET_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::options"
 )]
 async fn statset_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+    if statset_contains_native_integer_option_value(&rest) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &STATSET_INTEGER_OPTION_EXTENSION,
+            STATSET,
+        )?;
+    }
     let args = gather_all(rest).await?;
     Ok(Value::Struct(parse_statset(args)?))
+}
+
+fn statset_contains_native_integer_option_value(args: &[Value]) -> bool {
+    if args.is_empty() {
+        return false;
+    }
+    let mut index = match &args[0] {
+        Value::Struct(_) => {
+            if crate::builtins::common::validation::value_contains_native_integer_class(&args[0]) {
+                return true;
+            }
+            if args
+                .get(1)
+                .is_some_and(|value| matches!(value, Value::Struct(_)))
+            {
+                if crate::builtins::common::validation::value_contains_native_integer_class(
+                    &args[1],
+                ) {
+                    return true;
+                }
+                2
+            } else {
+                1
+            }
+        }
+        first if looks_like_option_name(first) => 0,
+        _ => 1,
+    };
+    while index + 1 < args.len() {
+        if crate::builtins::common::validation::value_contains_native_integer_class(
+            &args[index + 1],
+        ) {
+            return true;
+        }
+        index += 2;
+    }
+    false
 }
 
 #[runtime_builtin(
     name = "statget",
     category = "stats/options",
-    summary = "Access field values in statistics options structures.",
+    summary = "MemberAccess field values in statistics options structures.",
     keywords = "statget,statset,statistics options",
     accel = "cpu",
     type_resolver(statget_type),
     descriptor(crate::builtins::stats::options::STATGET_DESCRIPTOR),
+    integer_capabilities(crate::builtins::stats::options::STATGET_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::options"
 )]
 async fn statget_builtin(options: Value, field: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -907,6 +1005,7 @@ mod tests {
 
     #[test]
     fn statset_reads_typed_integer_tensor_options_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let max_iter =
             Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("MaxIter");
         let tol_fun =
@@ -941,6 +1040,29 @@ mod tests {
             deriv_step.integer_storage()
         );
         assert_eq!(options.fields.get("UseParallel"), Some(&Value::Bool(true)));
+    }
+
+    #[test]
+    fn statset_typed_integer_option_is_mode_gated() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let value =
+            Value::Tensor(Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).unwrap());
+        let error = block_on(statset_builtin(vec![Value::from("MaxIter"), value]))
+            .expect_err("MATLAB-compatible mode must reject typed integer option values");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:StatsetIntegerOptionValueExtension")
+        );
+    }
+
+    #[test]
+    fn statset_invalid_integer_statfun_is_not_misclassified_as_an_option_extension() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(statset_builtin(vec![Value::Int(
+            runmat_value::IntValue::U8(7),
+        )]))
+        .expect_err("an integer is not a statistics function name");
+        assert_eq!(error.identifier(), Some("RunMat:statset:InvalidArgument"));
     }
 
     #[test]
@@ -1063,6 +1185,25 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(value, Value::Num(3.0));
+    }
+
+    #[test]
+    fn statget_returns_integer_default_data_without_a_floating_mirror() {
+        let options = Value::Struct(empty_options());
+        let expected = IntegerStorage::U64(vec![9_007_199_254_740_993]);
+        let default = Value::Tensor(
+            Tensor::new_integer(expected.clone(), vec![1, 1]).expect("integer default"),
+        );
+        let value = block_on(statget_builtin(
+            options,
+            Value::from("TolFun"),
+            vec![default],
+        ))
+        .expect("statget");
+        let Value::Tensor(tensor) = value else {
+            panic!("expected tensor default");
+        };
+        assert_eq!(tensor.integer_storage(), Some(&expected));
     }
 
     #[test]

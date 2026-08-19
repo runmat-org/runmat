@@ -630,11 +630,9 @@ pub(crate) mod tests {
             assert!(!rounding_native_output_matches(&input, &logical, provider));
             free_rejected_rounding_output(&logical, &input, provider);
 
-            let integer = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
-            runmat_accelerate_api::set_handle_integer_type(
-                &integer,
-                runmat_accelerate_api::IntegerElementType::U8,
-            );
+            let mut integer =
+                gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
+            integer.descriptor.element_type = Some(runmat_accelerate_api::NumericElementType::U8);
             assert!(!rounding_native_output_matches(&input, &integer, provider));
             free_rejected_rounding_output(&integer, &input, provider);
             let _ = provider.free(&input);

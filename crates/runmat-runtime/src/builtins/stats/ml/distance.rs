@@ -1,9 +1,14 @@
 //! Pairwise distance and squareform helpers for Statistics and Machine Learning workflows.
 
+use runmat_value::{NumericScalar, NumericStorage};
 use std::cmp::Ordering;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ResolveContext, Type,
 };
@@ -225,12 +230,385 @@ pub const KNNSEARCH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &DISTANCE_ERRORS,
 };
 
+const PDIST_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pdist-integer-observation-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pdist with typed-integer observation data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PdistIntegerObservationDataExtension"),
+};
+const PDIST_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pdist-integer-numeric-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "pdist with a typed-integer distance parameter or cache size is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PdistIntegerNumericControlExtension"),
+};
+pub const PDIST_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    PDIST_INTEGER_DATA_EXTENSION,
+    PDIST_INTEGER_CONTROL_EXTENSION,
+];
+
+const PDIST2_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pdist2-integer-observation-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pdist2 with typed-integer X or Y observation data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Pdist2IntegerObservationDataExtension"),
+};
+const PDIST2_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pdist2-integer-numeric-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "pdist2 with a typed-integer distance parameter or cache size is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Pdist2IntegerNumericControlExtension"),
+};
+const PDIST2_INTEGER_SELECTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pdist2-integer-selection-count",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pdist2 with a typed-integer Smallest or Largest count is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Pdist2IntegerSelectionCountExtension"),
+};
+pub const PDIST2_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    PDIST2_INTEGER_DATA_EXTENSION,
+    PDIST2_INTEGER_CONTROL_EXTENSION,
+    PDIST2_INTEGER_SELECTION_EXTENSION,
+];
+
+const PDIST_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double observation matrices. RunMat gates typed integers before gather and requires exact binary64 conversion.",
+    }];
+const PDIST_INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "DistParameter or CacheSize",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Documented metric parameters are single or double and CacheSize is double; typed values cross a checked floating control boundary.",
+    }];
+pub const PDIST_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "D = pdist(integer_X, ...)",
+        inputs: &PDIST_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "All distance metrics consume one explicit binary64 view after admission; values beyond exact binary64 range reject rather than alias.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "D = pdist(X, Distance, integer_DistParameter_or_CacheSize)",
+        inputs: &PDIST_INTEGER_CONTROL_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed numeric controls are independently gated and must be exactly representable before metric parsing.",
+    },
+];
+
+const PDIST2_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double X observations; RunMat requires exact binary64 conversion for typed integers.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "Y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double Y observations; RunMat requires exact binary64 conversion for typed integers.",
+    },
+];
+const PDIST2_INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "DistParameter or CacheSize",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes:
+            "Typed distance parameters and cache sizes are RunMat-only checked floating controls.",
+    }];
+const PDIST2_INTEGER_SELECTION_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Smallest or Largest",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target enumerates single and double storage for the positive selection count. RunMat decodes typed integers exactly as structural counts.",
+    }];
+pub const PDIST2_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "D = pdist2(integer_X, integer_Y, ...)",
+        inputs: &PDIST2_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Typed observations are gated before gather and enter the floating distance domain only after exactness is proved.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "D = pdist2(X, Y, Distance, integer_DistParameter_or_CacheSize)",
+        inputs: &PDIST2_INTEGER_CONTROL_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed numerical controls are independently gated and cross a checked binary64 boundary.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[D,I] = pdist2(X, Y, Smallest/Largest=integer_K)",
+        inputs: &PDIST2_INTEGER_SELECTION_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The typed selection count is decoded directly from authoritative storage; distances and MATLAB-compatible indices remain double.",
+    },
+];
+
+const KNN_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "knnsearch-integer-observation-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "knnsearch with typed-integer X or Y data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:KnnsearchIntegerObservationDataExtension"),
+};
+const KNN_INTEGER_STRUCTURAL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "knnsearch-integer-structural-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "knnsearch with typed-integer K or BucketSize is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:KnnsearchIntegerStructuralControlExtension"),
+};
+const KNN_INTEGER_FLOATING_CONTROL_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "knnsearch-integer-floating-control",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "knnsearch with typed-integer P, Cov, Scale, or CacheSize is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:KnnsearchIntegerFloatingControlExtension"),
+    };
+const KNN_INTEGER_LOGICAL_CONTROL_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "knnsearch-integer-logical-control",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "knnsearch with typed-integer IncludeTies or SortIndices is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:KnnsearchIntegerLogicalControlExtension"),
+    };
+const KNN_GPU_NSMETHOD_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "knnsearch-gpu-nonexhaustive-search",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "an explicit GPU knnsearch call without NSMethod='exhaustive' is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:KnnsearchGpuNonexhaustiveSearchExtension"),
+};
+const KNN_GPU_INCLUDE_TIES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "knnsearch-gpu-include-ties",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "an explicit GPU knnsearch call with nondefault IncludeTies is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:KnnsearchGpuIncludeTiesExtension"),
+};
+const KNN_GPU_SORT_INDICES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "knnsearch-gpu-sort-indices",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "an explicit GPU knnsearch call with nondefault SortIndices is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:KnnsearchGpuSortIndicesExtension"),
+};
+const KNN_GPU_FAST_DISTANCE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "knnsearch-gpu-fast-distance",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "an explicit GPU knnsearch call with a fast distance variant is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:KnnsearchGpuFastDistanceExtension"),
+};
+
+pub const KNNSEARCH_EXTENSIONS: [BuiltinExtensionDescriptor; 8] = [
+    KNN_INTEGER_DATA_EXTENSION,
+    KNN_INTEGER_STRUCTURAL_EXTENSION,
+    KNN_INTEGER_FLOATING_CONTROL_EXTENSION,
+    KNN_INTEGER_LOGICAL_CONTROL_EXTENSION,
+    KNN_GPU_NSMETHOD_EXTENSION,
+    KNN_GPU_INCLUDE_TIES_EXTENSION,
+    KNN_GPU_SORT_INDICES_EXTENSION,
+    KNN_GPU_FAST_DISTANCE_EXTENSION,
+];
+
+const KNN_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented class is single or double; every admitted typed value must be exact at the binary64 distance boundary.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "Y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented class is single or double; every admitted typed value must be exact at the binary64 distance boundary.",
+    },
+];
+const KNN_INTEGER_STRUCTURAL_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "K",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "RunMat decodes K exactly as a positive output-shape count.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "BucketSize",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "RunMat decodes BucketSize exactly as a positive search-structure count.",
+    },
+];
+const KNN_INTEGER_FLOATING_INPUTS: [BuiltinIntegerInputCapability; 4] = [
+    BuiltinIntegerInputCapability {
+        name: "P",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The Minkowski exponent crosses a checked binary64 numerical boundary.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "Cov",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The covariance matrix crosses a checked binary64 numerical boundary.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "Scale",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The scale vector crosses a checked binary64 numerical boundary.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "CacheSize",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented numeric storage class is double; RunMat requires an exact binary64 value.",
+    },
+];
+const KNN_INTEGER_LOGICAL_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "IncludeTies",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Public documentation specifies false or true; typed numeric toggles remain conservatively RunMat-only.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "SortIndices",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented class is logical; typed numeric toggles remain RunMat-only.",
+    },
+];
+
+pub const KNNSEARCH_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[Idx, D] = knnsearch(integer_X, integer_Y, ...)",
+        inputs: &KNN_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Idx is a MATLAB-compatible double index output. The current host fallback may restore numeric outputs to the source provider when supported.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "knnsearch(X, Y, K/BucketSize=integer_control)",
+        inputs: &KNN_INTEGER_STRUCTURAL_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "These controls are decoded directly from exact storage even though their public MATLAB storage classes are single and double.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "knnsearch(X, Y, P/Cov/Scale/CacheSize=integer_value)",
+        inputs: &KNN_INTEGER_FLOATING_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Each independently gated typed control must be exactly representable before conversion to the floating search domain.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "knnsearch(X, Y, IncludeTies/SortIndices=integer_toggle)",
+        inputs: &KNN_INTEGER_LOGICAL_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Predicate,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Only exact zero and one are accepted after this typed-logical extension is admitted.",
+    },
+];
+
 pub const SQUAREFORM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SQUAREFORM_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &DISTANCE_ERRORS,
 };
+
+const SQUAREFORM_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "squareform-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "squareform with typed-integer distance data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SquareformIntegerInputExtension"),
+};
+const SQUAREFORM_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "squareform-explicit-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "squareform with an explicit GPU input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SquareformExplicitGpuInputExtension"),
+};
+pub const SQUAREFORM_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    SQUAREFORM_INTEGER_INPUT_EXTENSION,
+    SQUAREFORM_EXPLICIT_GPU_EXTENSION,
+];
+
+const SQUAREFORM_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Z",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented MATLAB storage classes are single, double, and logical; RunMat additionally performs the structural conversion on typed integers without changing class or value.",
+    }];
+pub const SQUAREFORM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = squareform(integer_Z)",
+        inputs: &SQUAREFORM_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The condensed-vector and symmetric-matrix layouts are transformed directly in authoritative native storage. Automatic residency may gather transparently; an explicit GPU call remains separately gated.",
+    }];
 
 fn matrix_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Tensor {
@@ -306,11 +684,15 @@ struct KnnOptions {
     keywords = "pdist,pairwise,distance,statistics,machine learning,clustering",
     type_resolver(vector_type),
     descriptor(crate::builtins::stats::ml::distance::PDIST_DESCRIPTOR),
+    extensions(crate::builtins::stats::ml::distance::PDIST_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::ml::distance::PDIST_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::ml::distance"
 )]
 async fn pdist_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_pdist_integer_boundaries(PDIST_NAME, &x, None, &rest).await?;
     let x = value_to_matrix(PDIST_NAME, x).await?;
-    let metric = parse_metric(PDIST_NAME, &x, None, rest).await?;
+    let metric_args = strip_cache_size_option(PDIST_NAME, rest).await?;
+    let metric = parse_metric(PDIST_NAME, &x, None, metric_args).await?;
     let distances = condensed_distances(PDIST_NAME, &x, &metric)?;
     Ok(Value::Tensor(distances))
 }
@@ -322,9 +704,12 @@ async fn pdist_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     keywords = "pdist2,pairwise,distance,nearest neighbor,statistics,machine learning",
     type_resolver(matrix_type),
     descriptor(crate::builtins::stats::ml::distance::PDIST2_DESCRIPTOR),
+    extensions(crate::builtins::stats::ml::distance::PDIST2_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::ml::distance::PDIST2_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::ml::distance"
 )]
 async fn pdist2_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_pdist_integer_boundaries(PDIST2_NAME, &x, Some(&y), &rest).await?;
     let x = value_to_matrix(PDIST2_NAME, x).await?;
     let y = value_to_matrix(PDIST2_NAME, y).await?;
     if x.cols != y.cols {
@@ -334,6 +719,7 @@ async fn pdist2_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<V
         ));
     }
     let (metric_args, selection) = split_pdist2_options(rest)?;
+    let metric_args = strip_cache_size_option(PDIST2_NAME, metric_args).await?;
     let metric = parse_metric(PDIST2_NAME, &x, Some(&y), metric_args).await?;
     let distances = distance_matrix(PDIST2_NAME, &x, &y, &metric)?;
     match selection {
@@ -357,6 +743,101 @@ async fn pdist2_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<V
     }
 }
 
+async fn strip_cache_size_option(
+    name: &'static str,
+    args: Vec<Value>,
+) -> BuiltinResult<Vec<Value>> {
+    let mut metric_args = Vec::with_capacity(args.len());
+    let mut index = 0usize;
+    while index < args.len() {
+        if keyword_of(&args[index]).is_some_and(|keyword| keyword.eq_ignore_ascii_case("cachesize"))
+        {
+            let Some(value) = args.get(index + 1) else {
+                return Err(distance_error(
+                    name,
+                    format!("{name}: CacheSize requires a value"),
+                ));
+            };
+            if keyword_of(value).is_some_and(|keyword| keyword.eq_ignore_ascii_case("maximal")) {
+                index += 2;
+                continue;
+            }
+            let cache_size = scalar_parameter(name, value, "CacheSize").await?;
+            if !cache_size.is_finite() || cache_size <= 0.0 {
+                return Err(distance_error(
+                    name,
+                    format!("{name}: CacheSize must be positive or 'maximal'"),
+                ));
+            }
+            index += 2;
+            continue;
+        }
+        metric_args.push(args[index].clone());
+        index += 1;
+    }
+    Ok(metric_args)
+}
+
+async fn ensure_pdist_integer_boundaries(
+    name: &'static str,
+    x: &Value,
+    y: Option<&Value>,
+    rest: &[Value],
+) -> BuiltinResult<()> {
+    let data_extension = if name == PDIST_NAME {
+        &PDIST_INTEGER_DATA_EXTENSION
+    } else {
+        &PDIST2_INTEGER_DATA_EXTENSION
+    };
+    for (value, role) in std::iter::once((x, "X")).chain(y.map(|value| (value, "Y"))) {
+        if knn_typed_integer(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(data_extension, name)?;
+            ensure_distance_exact_f64(name, value, role).await?;
+        }
+    }
+    for (index, value) in rest.iter().enumerate() {
+        if !knn_typed_integer(value) {
+            continue;
+        }
+        let selector = index
+            .checked_sub(1)
+            .and_then(|previous| keyword_of(&rest[previous]));
+        if name == PDIST2_NAME
+            && selector
+                .as_deref()
+                .is_some_and(|selector| matches!(selector, "smallest" | "largest"))
+        {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &PDIST2_INTEGER_SELECTION_EXTENSION,
+                name,
+            )?;
+            continue;
+        }
+        let extension = if name == PDIST_NAME {
+            &PDIST_INTEGER_CONTROL_EXTENSION
+        } else {
+            &PDIST2_INTEGER_CONTROL_EXTENSION
+        };
+        crate::compatibility::ensure_builtin_extension_enabled(extension, name)?;
+        ensure_distance_exact_f64(name, value, "numeric control").await?;
+    }
+    Ok(())
+}
+
+async fn ensure_distance_exact_f64(
+    name: &'static str,
+    value: &Value,
+    role: &str,
+) -> BuiltinResult<()> {
+    if !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(value).await? {
+        return Err(distance_error(
+            name,
+            format!("{name}: typed-integer {role} must be exactly representable as double"),
+        ));
+    }
+    Ok(())
+}
+
 #[runtime_builtin(
     name = "knnsearch",
     category = "stats/ml",
@@ -364,9 +845,17 @@ async fn pdist2_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<V
     keywords = "knnsearch,nearest neighbor,k nearest,statistics,machine learning,distance",
     type_resolver(matrix_type),
     descriptor(crate::builtins::stats::ml::distance::KNNSEARCH_DESCRIPTOR),
+    extensions(crate::builtins::stats::ml::distance::KNNSEARCH_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::ml::distance::KNNSEARCH_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::ml::distance"
 )]
 async fn knnsearch_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_knnsearch_extensions(&x, &y, &rest)?;
+    ensure_knnsearch_exact_boundaries(&x, &y, &rest).await?;
+    let output_source = crate::builtins::common::gpu_helpers::select_resident_output_source(
+        [&x, &y].into_iter().filter_map(knn_gpu_source),
+        KNNSEARCH_NAME,
+    )?;
     let x = value_to_matrix(KNNSEARCH_NAME, x).await?;
     let y = value_to_matrix(KNNSEARCH_NAME, y).await?;
     if x.cols != y.cols {
@@ -383,7 +872,193 @@ async fn knnsearch_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResul
         ));
     }
     let metric = parse_metric(KNNSEARCH_NAME, &x, Some(&y), metric_args).await?;
-    knnsearch_outputs(&x, &y, &metric, options)
+    let value = knnsearch_outputs(&x, &y, &metric, options)?;
+    restore_knnsearch_value(value, output_source.as_ref())
+}
+
+fn knn_gpu_source(value: &Value) -> Option<runmat_accelerate_api::GpuTensorHandle> {
+    let Value::GpuTensor(handle) = value else {
+        return None;
+    };
+    Some(handle.clone())
+}
+
+fn restore_knnsearch_value(
+    value: Value,
+    source: Option<&runmat_accelerate_api::GpuTensorHandle>,
+) -> BuiltinResult<Value> {
+    let Some(source) = source else {
+        return Ok(value);
+    };
+    match value {
+        Value::Tensor(tensor) => {
+            let restored = crate::builtins::common::gpu_helpers::restore_class_preserving_value(
+                source,
+                Value::Tensor(tensor),
+                KNNSEARCH_NAME,
+            )?;
+            if runmat_accelerate_api::handle_is_explicit(source)
+                && !matches!(restored, Value::GpuTensor(_))
+            {
+                return Err(distance_error(
+                    KNNSEARCH_NAME,
+                    "knnsearch: provider cannot preserve explicit gpuArray output residency",
+                ));
+            }
+            Ok(restored)
+        }
+        Value::Cell(cell) => {
+            let shape = cell.shape.clone();
+            let values = cell
+                .data
+                .into_iter()
+                .map(|value| restore_knnsearch_value(value, Some(source)))
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            CellArray::new_with_shape(values, shape)
+                .map(Value::Cell)
+                .map_err(|error| distance_error(KNNSEARCH_NAME, error))
+        }
+        Value::OutputList(values) => values
+            .into_iter()
+            .map(|value| restore_knnsearch_value(value, Some(source)))
+            .collect::<BuiltinResult<Vec<_>>>()
+            .map(Value::OutputList),
+        other => Ok(other),
+    }
+}
+
+fn knn_typed_integer(value: &Value) -> bool {
+    crate::builtins::common::validation::value_has_native_integer_class(value)
+}
+
+fn explicit_knn_gpu(value: &Value) -> bool {
+    matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
+}
+
+fn ensure_knnsearch_extensions(x: &Value, y: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    if knn_typed_integer(x) || knn_typed_integer(y) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &KNN_INTEGER_DATA_EXTENSION,
+            KNNSEARCH_NAME,
+        )?;
+    }
+    let explicit_gpu =
+        explicit_knn_gpu(x) || explicit_knn_gpu(y) || rest.iter().any(explicit_knn_gpu);
+    let mut explicit_exhaustive = false;
+    let mut idx = 0;
+    while idx + 1 < rest.len() {
+        let Some(name) = keyword_of(&rest[idx]) else {
+            idx += 1;
+            continue;
+        };
+        let value = &rest[idx + 1];
+        if explicit_gpu {
+            match name.as_str() {
+                "includeties" if logical_scalar_is(value, true) => {
+                    crate::compatibility::ensure_builtin_extension_enabled(
+                        &KNN_GPU_INCLUDE_TIES_EXTENSION,
+                        KNNSEARCH_NAME,
+                    )?;
+                }
+                "sortindices" if logical_scalar_is(value, false) => {
+                    crate::compatibility::ensure_builtin_extension_enabled(
+                        &KNN_GPU_SORT_INDICES_EXTENSION,
+                        KNNSEARCH_NAME,
+                    )?;
+                }
+                "distance"
+                    if keyword_of(value).is_some_and(|distance| {
+                        matches!(distance.as_str(), "fasteuclidean" | "fastseuclidean")
+                    }) =>
+                {
+                    crate::compatibility::ensure_builtin_extension_enabled(
+                        &KNN_GPU_FAST_DISTANCE_EXTENSION,
+                        KNNSEARCH_NAME,
+                    )?;
+                }
+                _ => {}
+            }
+        }
+        match name.as_str() {
+            "k" | "bucketsize" if knn_typed_integer(value) => {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &KNN_INTEGER_STRUCTURAL_EXTENSION,
+                    KNNSEARCH_NAME,
+                )?;
+            }
+            "p" | "cov" | "scale" | "cachesize" if knn_typed_integer(value) => {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &KNN_INTEGER_FLOATING_CONTROL_EXTENSION,
+                    KNNSEARCH_NAME,
+                )?;
+            }
+            "includeties" | "sortindices" if knn_typed_integer(value) => {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &KNN_INTEGER_LOGICAL_CONTROL_EXTENSION,
+                    KNNSEARCH_NAME,
+                )?;
+            }
+            "nsmethod" => {
+                explicit_exhaustive = keyword_of(value).as_deref() == Some("exhaustive");
+            }
+            _ => {}
+        }
+        idx += 2;
+    }
+    if explicit_gpu && !explicit_exhaustive {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &KNN_GPU_NSMETHOD_EXTENSION,
+            KNNSEARCH_NAME,
+        )?;
+    }
+    Ok(())
+}
+
+fn logical_scalar_is(value: &Value, expected: bool) -> bool {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer
+            .try_to_usize()
+            .is_some_and(|value| matches!(value, 0 | 1) && (value != 0) == expected);
+    }
+    match value {
+        Value::Bool(value) => *value == expected,
+        Value::LogicalArray(value) if value.data.len() == 1 => (value.data[0] != 0) == expected,
+        Value::Num(value) => (*value != 0.0) == expected,
+        _ => false,
+    }
+}
+
+async fn ensure_knnsearch_exact_boundaries(
+    x: &Value,
+    y: &Value,
+    rest: &[Value],
+) -> BuiltinResult<()> {
+    for (value, role) in [(x, "X"), (y, "Y")] {
+        ensure_knn_exact_f64(value, role).await?;
+    }
+    let mut idx = 0;
+    while idx + 1 < rest.len() {
+        if keyword_of(&rest[idx])
+            .is_some_and(|name| matches!(name.as_str(), "p" | "cov" | "scale" | "cachesize"))
+        {
+            ensure_knn_exact_f64(&rest[idx + 1], "floating option").await?;
+        }
+        idx += 2;
+    }
+    Ok(())
+}
+
+async fn ensure_knn_exact_f64(value: &Value, role: &str) -> BuiltinResult<()> {
+    if knn_typed_integer(value)
+        && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(value)
+            .await?
+    {
+        return Err(distance_error(
+            KNNSEARCH_NAME,
+            format!("knnsearch: typed-integer {role} must be exactly representable as double"),
+        ));
+    }
+    Ok(())
 }
 
 #[runtime_builtin(
@@ -393,9 +1068,23 @@ async fn knnsearch_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResul
     keywords = "squareform,distance,condensed,symmetric,statistics,machine learning",
     type_resolver(matrix_type),
     descriptor(crate::builtins::stats::ml::distance::SQUAREFORM_DESCRIPTOR),
+    extensions(crate::builtins::stats::ml::distance::SQUAREFORM_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::ml::distance::SQUAREFORM_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::ml::distance"
 )]
 async fn squareform_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::value_has_native_integer_class(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SQUAREFORM_INTEGER_INPUT_EXTENSION,
+            SQUAREFORM_NAME,
+        )?;
+    }
+    if crate::builtins::common::validation::value_contains_explicit_gpu(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SQUAREFORM_EXPLICIT_GPU_EXTENSION,
+            SQUAREFORM_NAME,
+        )?;
+    }
     let tensor = value_to_matrix(SQUAREFORM_NAME, value).await?;
     let force = parse_squareform_force(rest)?;
     let output = squareform_compute(tensor, force)?;
@@ -1287,15 +1976,10 @@ fn selected_distance_outputs(distances: &Tensor, selection: Selection) -> Builti
 }
 
 fn select_distances(distances: &Tensor, selection: Selection) -> BuiltinResult<(Tensor, Tensor)> {
-    let k = match selection {
+    let requested = match selection {
         Selection::Smallest(k) | Selection::Largest(k) => k,
     };
-    if k > distances.rows {
-        return Err(distance_error(
-            PDIST2_NAME,
-            "pdist2: Smallest or Largest count must be <= size(X,1)",
-        ));
-    }
+    let k = requested.min(distances.rows);
     let len = k
         .checked_mul(distances.cols)
         .ok_or_else(|| internal_error(PDIST2_NAME, "pdist2: selected output size overflow"))?;
@@ -1553,20 +2237,24 @@ fn vector_to_square(tensor: Tensor) -> BuiltinResult<Tensor> {
     let out_len = size
         .checked_mul(size)
         .ok_or_else(|| internal_error(SQUAREFORM_NAME, "squareform: output size overflow"))?;
-    let mut out = Vec::new();
-    out.try_reserve(out_len)
-        .map_err(|_| internal_error(SQUAREFORM_NAME, "squareform: output allocation failed"))?;
-    out.resize(out_len, 0.0);
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|err| internal_error(SQUAREFORM_NAME, format!("squareform: {err}")))?;
+    let mut out = NumericStorage::zeros(storage.numeric_dtype(), out_len);
     let mut idx = 0usize;
     for col in 0..size {
         for row in (col + 1)..size {
-            let value = tensor::tensor_value_f64(&tensor, idx);
-            out[col * size + row] = value;
-            out[row * size + col] = value;
+            let value = storage.value_at(idx).ok_or_else(|| {
+                internal_error(SQUAREFORM_NAME, "squareform: input storage is inconsistent")
+            })?;
+            out.set_value(col * size + row, value)
+                .map_err(|err| internal_error(SQUAREFORM_NAME, format!("squareform: {err}")))?;
+            out.set_value(row * size + col, value)
+                .map_err(|err| internal_error(SQUAREFORM_NAME, format!("squareform: {err}")))?;
             idx += 1;
         }
     }
-    Tensor::new(out, vec![size, size])
+    Tensor::from_numeric_storage(out, vec![size, size])
         .map_err(|err| internal_error(SQUAREFORM_NAME, format!("squareform: {err}")))
 }
 
@@ -1577,37 +2265,73 @@ fn square_to_vector(tensor: Tensor) -> BuiltinResult<Tensor> {
             "squareform: matrix input must be square",
         ));
     }
-    for idx in 0..tensor.rows {
-        if row_value(&tensor, idx, idx).abs() > EPS {
+    let size = tensor.rows;
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|err| internal_error(SQUAREFORM_NAME, format!("squareform: {err}")))?;
+    for idx in 0..size {
+        let value = storage.value_at(idx * size + idx).ok_or_else(|| {
+            internal_error(SQUAREFORM_NAME, "squareform: input storage is inconsistent")
+        })?;
+        if !squareform_scalar_is_zero(value) {
             return Err(distance_error(
                 SQUAREFORM_NAME,
                 "squareform: matrix diagonal must be zero",
             ));
         }
     }
-    let len = tensor
-        .rows
-        .checked_mul(tensor.rows.saturating_sub(1))
+    let len = size
+        .checked_mul(size.saturating_sub(1))
         .and_then(|value| value.checked_div(2))
         .ok_or_else(|| internal_error(SQUAREFORM_NAME, "squareform: output size overflow"))?;
-    let mut out = Vec::new();
-    out.try_reserve(len)
-        .map_err(|_| internal_error(SQUAREFORM_NAME, "squareform: output allocation failed"))?;
-    for col in 0..tensor.rows {
-        for row in (col + 1)..tensor.rows {
-            let lower = row_value(&tensor, row, col);
-            let upper = row_value(&tensor, col, row);
-            if (lower - upper).abs() > EPS {
+    let mut out = NumericStorage::zeros(storage.numeric_dtype(), len);
+    let mut out_idx = 0usize;
+    for col in 0..size {
+        for row in (col + 1)..size {
+            let lower = storage.value_at(col * size + row).ok_or_else(|| {
+                internal_error(SQUAREFORM_NAME, "squareform: input storage is inconsistent")
+            })?;
+            let upper = storage.value_at(row * size + col).ok_or_else(|| {
+                internal_error(SQUAREFORM_NAME, "squareform: input storage is inconsistent")
+            })?;
+            if !squareform_scalars_equal(lower, upper) {
                 return Err(distance_error(
                     SQUAREFORM_NAME,
                     "squareform: matrix must be symmetric",
                 ));
             }
-            out.push(upper);
+            out.set_value(out_idx, upper)
+                .map_err(|err| internal_error(SQUAREFORM_NAME, format!("squareform: {err}")))?;
+            out_idx += 1;
         }
     }
-    Tensor::new(out, vec![1, len])
+    Tensor::from_numeric_storage(out, vec![1, len])
         .map_err(|err| internal_error(SQUAREFORM_NAME, format!("squareform: {err}")))
+}
+
+fn squareform_scalar_is_zero(value: NumericScalar) -> bool {
+    match value {
+        NumericScalar::F64(value) => value.abs() <= EPS,
+        NumericScalar::F32(value) => f64::from(value).abs() <= EPS,
+        NumericScalar::I8(value) => value == 0,
+        NumericScalar::I16(value) => value == 0,
+        NumericScalar::I32(value) => value == 0,
+        NumericScalar::I64(value) => value == 0,
+        NumericScalar::U8(value) => value == 0,
+        NumericScalar::U16(value) => value == 0,
+        NumericScalar::U32(value) => value == 0,
+        NumericScalar::U64(value) => value == 0,
+    }
+}
+
+fn squareform_scalars_equal(left: NumericScalar, right: NumericScalar) -> bool {
+    match (left, right) {
+        (NumericScalar::F64(left), NumericScalar::F64(right)) => (left - right).abs() <= EPS,
+        (NumericScalar::F32(left), NumericScalar::F32(right)) => {
+            f64::from(left - right).abs() <= EPS
+        }
+        _ => left == right,
+    }
 }
 
 fn condensed_matrix_size(len: usize) -> Option<usize> {
@@ -1631,6 +2355,7 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_value::IntegerStorage;
+    use runmat_value::NumericDType;
 
     fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
@@ -1654,6 +2379,64 @@ mod tests {
         match value {
             Value::Tensor(tensor) => tensor,
             other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn knnsearch_documented_floating_gpu_fallback_preserves_explicit_residency() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let x = Tensor::new(vec![0.0, 2.0, 5.0], vec![3, 1]).unwrap();
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &x)
+                .expect("upload observations");
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let output = block_on(knnsearch_builtin(
+                Value::GpuTensor(handle),
+                tensor(vec![1.0, 4.0], 2, 1),
+                vec![Value::from("NSMethod"), Value::from("exhaustive")],
+            ))
+            .expect("documented resident knnsearch");
+            assert!(matches!(output, Value::GpuTensor(_)));
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn knnsearch_wgpu_fallback_enforces_explicit_residency_contract() {
+        let _accel_guard = crate::builtins::common::test_support::accel_test_lock();
+        let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .expect("actual WGPU provider");
+        let x = Tensor::new(vec![0.0, 2.0, 5.0], vec![3, 1]).unwrap();
+        let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &x)
+            .expect("upload observations");
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let result = block_on(knnsearch_builtin(
+            Value::GpuTensor(handle.clone()),
+            tensor(vec![1.0, 4.0], 2, 1),
+            vec![Value::from("NSMethod"), Value::from("exhaustive")],
+        ));
+        match runmat_accelerate_api::AccelProvider::precision(provider) {
+            runmat_accelerate_api::ProviderPrecision::F64 => {
+                let Value::GpuTensor(output) = result.expect("documented WGPU knnsearch") else {
+                    panic!("expected resident output");
+                };
+                assert!(runmat_accelerate_api::handle_is_explicit(&output));
+                assert_eq!(
+                    output.device_id,
+                    runmat_accelerate_api::AccelProvider::device_id(provider)
+                );
+                assert_eq!(output.shape, vec![2, 1]);
+            }
+            runmat_accelerate_api::ProviderPrecision::F32 => {
+                let error = result.expect_err("double indices cannot use an f32-only provider");
+                assert!(error
+                    .message()
+                    .contains("cannot preserve explicit gpuArray output residency"));
+                assert!(runmat_accelerate_api::handle_is_explicit(&handle));
+            }
         }
     }
 
@@ -1704,6 +2487,7 @@ mod tests {
 
     #[test]
     fn distance_helpers_read_typed_integer_inputs_and_parameters_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let x = poisoned_int_tensor(IntegerStorage::I16(vec![0, 3, 4, 0, 4, 0]), 3, 2);
         let out = block_on(pdist_builtin(
             x,
@@ -1782,6 +2566,7 @@ mod tests {
 
     #[test]
     fn pdist2_selection_reads_typed_integer_count_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let out = block_on(pdist2_builtin(
             poisoned_int_tensor(IntegerStorage::I16(vec![0, 2, 0, 0]), 2, 2),
             poisoned_int_tensor(IntegerStorage::I16(vec![1, 3, 0, 0]), 2, 2),
@@ -1875,6 +2660,7 @@ mod tests {
 
     #[test]
     fn knnsearch_options_read_typed_integer_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let out = block_on(knnsearch_builtin(
             poisoned_int_tensor(IntegerStorage::I16(vec![0, 2, 5, 0, 0, 0]), 3, 2),
             poisoned_int_tensor(IntegerStorage::I16(vec![1, 4, 0, 0]), 2, 2),
@@ -1895,6 +2681,40 @@ mod tests {
         let idx = tensor_out(out);
         assert_eq!(idx.shape, vec![2, 2]);
         assert_eq!(idx.materialize_f64(), vec![1.0, 3.0, 2.0, 2.0]);
+    }
+
+    #[test]
+    fn knnsearch_integer_data_and_controls_are_mode_gated() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(knnsearch_builtin(
+            poisoned_int_tensor(IntegerStorage::I16(vec![0, 1]), 2, 1),
+            tensor(vec![0.0], 1, 1),
+            Vec::new(),
+        ))
+        .expect_err("strict mode rejects typed observation data");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:KnnsearchIntegerObservationDataExtension")
+        );
+        assert_eq!(KNNSEARCH_EXTENSIONS.len(), 8);
+        assert_eq!(KNNSEARCH_INTEGER_CAPABILITIES.len(), 4);
+    }
+
+    #[test]
+    fn knnsearch_runmat_floating_integer_controls_require_exact_double_values() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let error = block_on(knnsearch_builtin(
+            tensor(vec![0.0, 1.0], 2, 1),
+            tensor(vec![0.0], 1, 1),
+            vec![
+                Value::from("Distance"),
+                Value::from("minkowski"),
+                Value::from("P"),
+                poisoned_int_tensor(IntegerStorage::U64(vec![9_007_199_254_740_993]), 1, 1),
+            ],
+        ))
+        .expect_err("wide integer P cannot cross the floating boundary");
+        assert!(error.message().contains("exactly representable as double"));
     }
 
     #[test]
@@ -2015,9 +2835,11 @@ mod tests {
 
     #[test]
     fn squareform_reads_typed_integer_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let vector = cleared_int_tensor(IntegerStorage::U8(vec![5, 4, 2]), 1, 3);
         let matrix = tensor_out(block_on(squareform_builtin(vector, Vec::new())).unwrap());
         assert_eq!(matrix.shape, vec![3, 3]);
+        assert_eq!(matrix.numeric_dtype(), NumericDType::U8);
         assert_eq!(
             matrix.materialize_f64(),
             vec![0.0, 5.0, 4.0, 5.0, 0.0, 2.0, 4.0, 2.0, 0.0]
@@ -2026,11 +2848,25 @@ mod tests {
         let matrix = poisoned_int_tensor(IntegerStorage::U8(vec![0, 5, 4, 5, 0, 2, 4, 2, 0]), 3, 3);
         let vector = tensor_out(block_on(squareform_builtin(matrix, Vec::new())).unwrap());
         assert_eq!(vector.shape, vec![1, 3]);
+        assert_eq!(vector.numeric_dtype(), NumericDType::U8);
         assert_eq!(vector.materialize_f64(), vec![5.0, 4.0, 2.0]);
     }
 
     #[test]
+    fn squareform_gates_typed_integer_extension_in_strict_mode() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let vector = cleared_int_tensor(IntegerStorage::U8(vec![5, 4, 2]), 1, 3);
+        let error = block_on(squareform_builtin(vector, Vec::new()))
+            .expect_err("typed-integer squareform must be gated in strict mode");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:SquareformIntegerInputExtension")
+        );
+    }
+
+    #[test]
     fn seuclidean_scale_reads_typed_integer_storage_length_without_mirror() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let out = block_on(pdist_builtin(
             int_tensor(IntegerStorage::I16(vec![0, 3, 4, 0, 4, 0]), 3, 2),
             vec![

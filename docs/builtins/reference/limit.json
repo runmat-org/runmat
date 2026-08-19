@@ -29,7 +29,8 @@
   },
   "description": "`limit` evaluates scalar symbolic expressions at a finite numeric point. It first performs direct substitution and simplification, then applies repeated L'Hopital reduction for removable `0/0` quotients.",
   "behaviors": [
-    "Supports `limit(expr)`, `limit(expr, point)`, `limit(expr, var)`, `limit(expr, var, point)`, and an optional direction string.",
+    "Supports `limit(expr)`, `limit(expr, point)`, `limit(expr, var)`, `limit(expr, var, point)`, and an optional direction string. MATLAB-compatible calls require a symbolic expression; RunMat mode independently admits scalar numeric expressions.",
+    "All eight integer classes are accepted for a numeric limit point and, in RunMat mode, a numeric expression. Native storage is read directly and values that cannot enter the current binary64 symbolic core exactly are rejected before substitution.",
     "Infers the limit variable when the expression contains exactly one symbolic variable.",
     "Simplifies symbolic arithmetic involving `+`, `-`, `*`, `/`, powers with numeric exponents, and the functions `sin`, `cos`, `tan`, `exp`, `log`, and `sqrt`.",
     "Returns scalar symbolic values, including symbolic constants when the limit simplifies to a finite value.",

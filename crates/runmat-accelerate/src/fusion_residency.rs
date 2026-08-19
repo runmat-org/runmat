@@ -35,6 +35,7 @@ mod tests {
             shape: vec![1, 1],
             device_id,
             buffer_id: 17,
+            descriptor: Default::default(),
         }
     }
 

@@ -621,9 +621,10 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: 9_347_001,
-        };
-        runmat_accelerate_api::set_handle_storage(
-            &complex_handle,
+            descriptor: Default::default(),
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::F64,
             runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
         );
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -639,7 +640,6 @@ pub(crate) mod tests {
                 Some("RunMat:compatibility:AndComplexInputExtension")
             );
         }
-        runmat_accelerate_api::clear_handle_storage(&complex_handle);
         let chars = CharArray::new_row("A");
         let error = run_and(Value::CharArray(chars), Value::Bool(true))
             .expect_err("MATLAB mode rejects character arrays");

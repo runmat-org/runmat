@@ -14,10 +14,11 @@
     "elementwise": true,
     "reduction": false,
     "precisions": [
+      "f32",
       "f64"
     ],
     "broadcasting": "elementwise",
-    "notes": "GPU inputs are gathered to the host so the reference implementation can guarantee MATLAB-exact values at canonical multiples of 45, 90, and 180 degrees, including the +/-Inf poles at +/-90."
+    "notes": "GPU inputs use an owner-preserving host fallback so canonical degree values and poles match the reference implementation while the result returns to the source provider when its precision is compatible."
   },
   "fusion": {
     "elementwise": false,
@@ -34,12 +35,13 @@
   "description": "`y = tand(x)` computes tangent using degree-based angles rather than radians. It follows MATLAB-compatible canonical handling for key multiples, including exact zeros at 180-degree multiples and poles at odd 90-degree multiples.",
   "behaviors": [
     "Operates element-wise on scalars, vectors, matrices, and N-D tensors.",
-    "Integer and logical inputs are promoted to double precision before evaluation.",
+    "Documented single inputs return single and documented double inputs return double.",
+    "Typed integers and logical inputs are independently gated RunMat extensions. Integer angles are reduced exactly modulo 360 before floating evaluation, so wide int64 and uint64 inputs are never rounded through a double angle mirror.",
     "Returns exactly 0 at multiples of 180 and exactly ±1 at multiples of 45.",
     "Returns +Inf at +90 (and angles equivalent under modulo 360) and -Inf at -90 (and equivalent angles).",
     "Complex inputs delegate to the analytic extension of `tan` after scaling by `pi/180`; exact-value treatment for complex operands is deferred.",
     "Output shape matches the input shape; non-finite inputs propagate as `NaN`.",
-    "String inputs are unsupported and raise a builtin-scoped error."
+    "String inputs are unsupported and raise a builtin-scoped error. MATLAB's documented direct table and timetable calculation form is not implemented yet."
   ],
   "examples": [
     {

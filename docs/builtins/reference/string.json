@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Gather-only conversion that downloads GPU tensors to host memory before producing string scalars."
+    "notes": "Conversion produces host strings. Automatically resident numeric values gather transparently; explicit `gpuArray` input is a mode-gated RunMat extension."
   },
   "fusion": {
     "elementwise": false,
@@ -27,15 +27,15 @@
     "unit": "builtins::strings::core::string::tests",
     "integration": "builtins::strings::core::string::tests::string_gpu_numeric_tensor"
   },
-  "description": "`string(x)` converts scalar or array inputs into string arrays whose elements are string scalars. It follows MATLAB-compatible conversion behavior for numeric, logical, char, and existing string inputs.",
+  "description": "`string(A)` converts numeric, logical, character, cell, or existing string data into a string array. Integer values are formatted directly from native storage, so wide `int64` and `uint64` values do not pass through double or lose digits.",
   "behaviors": [
     "Scalar inputs return a `1×1` string array containing the converted value.",
-    "Numeric and logical arrays preserve the original shape while converting each element.",
+    "Numeric and logical arrays preserve the original shape while converting each element; all eight integer classes retain exact decimal values, including values wider than binary64 can represent.",
     "Character arrays turn into columnar string arrays with one row per original row.",
     "Cell arrays must contain text-like or scalar numeric values; each cell becomes one string scalar.",
-    "`string(formatSpec, A1, ..., An)` formats data using MATLAB-compatible `%` placeholders. Scalar format specs broadcast across array arguments and arrays of specs align element-wise.",
+    "RunMat also provides `string(formatSpec, A1, ..., An)` printf-style formatting and `string(X, encoding)` as mode-gated extensions. They are available in `runmat` mode but are not presented as documented `string(A)` forms.",
     "Empty inputs yield empty string arrays that match MATLAB's dimension rules.",
-    "Unsupported types (structs, handle objects, events, functions) raise MATLAB-compatible errors."
+    "Unsupported types (structs, handle objects, events, functions) raise descriptive errors. Explicit GPU numeric input is separately gated, while an automatically resident intermediate may gather at this host string sink."
   ],
   "examples": [
     {
@@ -64,12 +64,12 @@
       "output": "S = 1×3 string\n    \"true\"    \"17\"    \"runmat\""
     },
     {
-      "description": "Formatting Numbers With A Template",
+      "description": "Formatting Numeric Values",
       "input": "labels = string(\"Trial %d\", 1:4)",
       "output": "labels = 1×4 string\n    \"Trial 1\"    \"Trial 2\"    \"Trial 3\"    \"Trial 4\""
     },
     {
-      "description": "Converting GPU-Resident Numeric Data To Strings",
+      "description": "Converting GPU-resident numeric data to strings",
       "input": "G = gpuArray([10 20 30]);\nlabels = string(G)",
       "output": "labels = 1×3 string\n    \"10\"    \"20\"    \"30\""
     }
@@ -85,15 +85,15 @@
     },
     {
       "question": "Can I use format specifiers like `%0.2f`?",
-      "answer": "Yes. Provide a format string as the first argument and pass the values to substitute in the remaining arguments, e.g. `string(\"Value %0.2f\", A)` or `string([\"X%02d\" \"Y%02d\"], 1:2)`. Scalar format specs broadcast across vector inputs following MATLAB's rules."
+      "answer": "In `runmat` mode, yes. RunMat provides the mode-gated extension `string(formatSpec, A1, ..., An)`; for example, `string(\"Value %0.2f\", A)`. MATLAB-compatible mode accepts the documented `string(A)` conversion forms instead."
     },
     {
       "question": "What happens if I pass a GPU tensor?",
-      "answer": "The builtin downloads the tensor using the active acceleration provider and then performs the conversion on the CPU. The resulting string array always resides in host memory."
+      "answer": "An automatically resident intermediate is downloaded through the provider that owns it and converted on the CPU. Explicit `gpuArray` input is a RunMat extension and is rejected in MATLAB-compatible mode. The result is always host-resident text."
     },
     {
       "question": "Can I request a specific character encoding?",
-      "answer": "RunMat currently supports UTF-8 (the default). Passing `'UTF-8'`, `'utf8'`, or `'system'` yields the same behaviour. Other encodings raise a descriptive error."
+      "answer": "In `runmat` mode, the mode-gated encoding extension accepts `'UTF-8'`, `'utf8'`, or `'system'`; each selects RunMat's UTF-8 conversion. MATLAB-compatible mode does not expose this extra `string(X, encoding)` form."
     },
     {
       "question": "Can I convert complex numbers or complex arrays?",
@@ -105,7 +105,7 @@
     },
     {
       "question": "Why does `string` error on structs or handle objects?",
-      "answer": "MATLAB's `string` only supports text-like or scalar numeric types. Structs, objects, listeners, and other handle types cannot be converted automatically and therefore raise an error in RunMat as well."
+      "answer": "RunMat converts supported text, logical, and numeric scalars or arrays element by element. Structs, unsupported objects, listeners, and function values do not have an implicit text conversion and therefore raise an error."
     },
     {
       "question": "How can I keep trailing spaces from character arrays?",
@@ -171,6 +171,6 @@
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/string.rs"
   },
   "gpu_behavior": [
-    "`string` is a residency sink. When the input contains GPU tensors, RunMat gathers the data back to host memory before performing the conversion. Providers do not need bespoke kernels—the CPU path is authoritative and ensures identical formatting across devices."
+    "`string` is a residency sink. Automatically resident values gather through their owning provider before host conversion. Explicit `gpuArray` input is registered and enforced as a separate RunMat-only extension, so compatibility mode does not silently accept undocumented device intent."
   ]
 }

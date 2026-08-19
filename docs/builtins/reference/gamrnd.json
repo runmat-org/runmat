@@ -8,7 +8,7 @@
     "reduction": false,
     "precisions": ["f64"],
     "broadcasting": "matlab",
-    "notes": "RunMat currently generates samples on the host RNG path."
+    "notes": "RunMat currently generates samples on the host RNG path and restores documented floating gpuArray output to the input provider."
   },
   "fusion": { "elementwise": false, "reduction": false, "max_inputs": 4, "constants": "inline" },
   "requires_feature": null,
@@ -21,7 +21,9 @@
     "`a` and `b` support scalar expansion and matching array shapes.",
     "Without explicit size arguments, the output shape is the scalar-expanded parameter shape.",
     "With explicit size arguments, nonscalar parameters must match the requested shape.",
-    "`a` must be nonnegative and `b` must be positive."
+    "`a` must be nonnegative and `b` must be positive.",
+    "MATLAB-compatible mode accepts documented single and double parameters and size controls. Native typed-integer parameters or dimensions are separately declared RunMat extensions; admitted numerical parameters must be exactly representable at the binary64 sampling boundary.",
+    "Automatic internal residency may gather transparently. Documented explicit floating gpuArray input preserves its provider ownership and output residency."
   ],
   "examples": [
     {

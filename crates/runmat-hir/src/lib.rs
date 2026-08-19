@@ -1,4 +1,5 @@
 pub use runmat_builtins::Type;
+pub use runmat_parser::{IntegerLiteral, IntegerLiteralClass};
 
 mod diagnostic;
 mod error;

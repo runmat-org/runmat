@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Reads tensor metadata from handles; falls back to host when provider metadata is missing."
+    "notes": "Reads normalized shape metadata directly from host values or resident handles without downloading payloads."
   },
   "fusion": {
     "elementwise": false,
@@ -31,9 +31,10 @@
   "behaviors": [
     "Scalars and vectors return `2`, because MATLAB treats them as `1×1` or `1×N`.",
     "Matrices return `2` unless they have trailing dimensions beyond the second.",
-    "N-D arrays return the length of their dimension vector after trailing singleton dimensions are preserved.",
+    "N-D arrays return the effective rank after trailing singleton dimensions are ignored, with a minimum result of `2`.",
     "Character arrays, string arrays, logical arrays, complex arrays, and cell arrays all follow their MATLAB array shape metadata.",
-    "GPU tensors report their rank without gathering when the provider populates shape metadata on the handle. When metadata is missing, RunMat downloads the tensor once to preserve correctness.",
+    "GPU tensors report rank from handle shape metadata without gathering payloads; an absent shape is normalized as scalar metadata and returns `2`.",
+    "All eight integer classes return a host double scalar and their payload storage is never read.",
     "Objects, scalars, and other non-array values return `2`, consistent with MATLAB's scalar rules."
   ],
   "examples": [
@@ -75,11 +76,11 @@
     },
     {
       "question": "Does `ndims` ignore trailing singleton dimensions?",
-      "answer": "No. MATLAB preserves trailing singletons when reporting the rank. If your tensor was explicitly created with size `10×1×1×4`, `ndims` returns `4`."
+      "answer": "Yes. MATLAB ignores trailing singleton dimensions while retaining a minimum rank of two. A `2×3×1×1` value reports `2`, while `10×1×1×4` reports `4` because its fourth dimension is nonsingleton."
     },
     {
       "question": "How does `ndims` behave for GPU tensors?",
-      "answer": "The runtime inspects shape metadata stored in the GPU tensor handle. When the provider populates that field, no gathering occurs. If metadata is absent, RunMat downloads the tensor to keep the answer correct."
+      "answer": "The runtime inspects shape metadata stored in the GPU tensor handle and does not download the payload. An absent shape is treated as scalar metadata and therefore reports `2`."
     },
     {
       "question": "Can I call `ndims` on cell arrays and structs?",
@@ -133,6 +134,6 @@
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/introspection/ndims.rs"
   },
   "gpu_behavior": [
-    "`ndims` is a metadata query. When the input resides on the GPU, RunMat inspects the shape stored in `GpuTensorHandle.shape`. No kernels are launched, no buffers are allocated, and residency is not altered. If a provider leaves the shape empty, the runtime downloads the tensor a single time to reconstruct its dimensions before returning a host scalar. The builtin therefore preserves fusion pipelines while still providing MATLAB-compatible answers."
+    "`ndims` is a metadata query. When the input resides on the GPU, RunMat inspects `GpuTensorHandle.shape`; no kernel launches, downloads, buffer allocations, or residency changes are required, including for integer payloads."
   ]
 }

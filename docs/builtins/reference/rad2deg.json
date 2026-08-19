@@ -18,7 +18,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "GPU inputs can be gathered to the host for the reference implementation. Fusion can keep compatible elementwise expressions on the active provider."
+    "notes": "GPU inputs use an exact owner-aware fallback when a direct hook is unavailable, preserve single or double result class, and restore the result to the input owner. Fusion can keep compatible floating elementwise expressions on the active provider."
   },
   "fusion": {
     "elementwise": true,
@@ -34,7 +34,7 @@
   "description": "`d = rad2deg(r)` converts each angle in `r` from radians to degrees using `r * 180 / pi`. It applies element-wise across scalar, vector, matrix, and N-D inputs using MATLAB-compatible typing and shape rules.",
   "behaviors": [
     "Operates element-wise on scalars, vectors, matrices, and N-D tensors.",
-    "Integer and logical inputs are promoted to double precision before conversion.",
+    "The compatibility target documents single and double inputs. In RunMat mode, typed-integer and logical inputs are separately gated extensions; integers are accepted only when exactly representable as binary64 and then promoted to double before conversion.",
     "Complex inputs are scaled component-wise, matching ordinary multiplication by `180/pi`.",
     "Output shape matches the input shape.",
     "String inputs are unsupported and raise a builtin-scoped error."

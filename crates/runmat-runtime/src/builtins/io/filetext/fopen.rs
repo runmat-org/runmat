@@ -93,7 +93,7 @@ const FOPEN_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents double query identifiers; typed integer identifiers are checked exactly as one gated RunMat extension.",
+        notes: "The compatibility target documents double query identifiers; typed integer identifiers are checked exactly as one gated RunMat extension.",
     }];
 pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor {
@@ -104,7 +104,7 @@ pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "A successful query returns host character metadata; integer identifiers never cross a floating mirror.",
+        notes: "A successful query returns host character metadata; integer identifiers are validated exactly.",
     }];
 
 const FOPEN_OUTPUT_FID: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {

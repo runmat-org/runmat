@@ -314,7 +314,7 @@ pub const GETFIELD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2]
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::HostAndGpu,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Direct field retrieval clones the stored value without numeric conversion or provider access. Host subarray selection gathers native numeric storage rather than a floating mirror.",
+        notes: "Direct field retrieval clones the stored value without numeric conversion or provider access. Host subarray selection preserves the source numeric class and exact values.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "value = getfield(S, {integer_idx}, field, ..., {integer_idxN})",
@@ -381,6 +381,21 @@ fn is_undefined_function(err: &RuntimeError) -> bool {
     builtin_path = "crate::builtins::structs::core::getfield"
 )]
 async fn getfield_builtin(base: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    getfield_impl(base, rest, true).await
+}
+
+pub(crate) async fn getfield_internal(
+    base: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    getfield_impl(base, rest, false).await
+}
+
+async fn getfield_impl(
+    base: Value,
+    rest: Vec<Value>,
+    enforce_public_builtin_extension: bool,
+) -> crate::BuiltinResult<Value> {
     let parsed = parse_arguments(rest)?;
 
     let mut current = base;
@@ -390,7 +405,7 @@ async fn getfield_builtin(base: Value, rest: Vec<Value>) -> crate::BuiltinResult
 
     let field_count = parsed.fields.len();
     for (field_index, step) in parsed.fields.into_iter().enumerate() {
-        current = get_field_value(current, &step.name).await?;
+        current = get_field_value(current, &step.name, enforce_public_builtin_extension).await?;
         if let Some(index) = step.index {
             current = apply_indices(current, &index, field_index + 1 < field_count).await?;
         }
@@ -1314,11 +1329,17 @@ fn index_complex_tensor(tensor: &ComplexTensor, indices: &[usize]) -> BuiltinRes
 }
 
 #[async_recursion::async_recursion(?Send)]
-async fn get_field_value(value: Value, name: &str) -> BuiltinResult<Value> {
-    if matches!(
-        &value,
-        Value::Object(_) | Value::HandleObject(_) | Value::Listener(_) | Value::MException(_)
-    ) {
+async fn get_field_value(
+    value: Value,
+    name: &str,
+    enforce_public_builtin_extension: bool,
+) -> BuiltinResult<Value> {
+    if enforce_public_builtin_extension
+        && matches!(
+            &value,
+            Value::Object(_) | Value::HandleObject(_) | Value::Listener(_) | Value::MException(_)
+        )
+    {
         crate::compatibility::ensure_builtin_extension_enabled(
             &GETFIELD_OBJECT_FAMILY_EXTENSION,
             BUILTIN_NAME,
@@ -1327,7 +1348,9 @@ async fn get_field_value(value: Value, name: &str) -> BuiltinResult<Value> {
     match value {
         Value::Struct(st) => get_struct_field(&st, name),
         Value::Object(obj) => get_object_field(&obj, name).await,
-        Value::HandleObject(handle) => get_handle_field(&handle, name).await,
+        Value::HandleObject(handle) => {
+            get_handle_field(&handle, name, enforce_public_builtin_extension).await
+        }
         Value::Listener(listener) => get_listener_field(&listener, name),
         Value::MException(ex) => get_exception_field(&ex, name),
         Value::Cell(cell) if is_struct_array(&cell) => {
@@ -1421,7 +1444,11 @@ async fn get_object_field(obj: &ObjectInstance, name: &str) -> BuiltinResult<Val
 }
 
 #[async_recursion::async_recursion(?Send)]
-async fn get_handle_field(handle: &HandleRef, name: &str) -> BuiltinResult<Value> {
+async fn get_handle_field(
+    handle: &HandleRef,
+    name: &str,
+    enforce_public_builtin_extension: bool,
+) -> BuiltinResult<Value> {
     if !crate::is_handle_valid(handle) {
         return Err(getfield_error_with_message(
             format!("Invalid or deleted handle object '{}'.", handle.class_name),
@@ -1434,7 +1461,14 @@ async fn get_handle_field(handle: &HandleRef, name: &str) -> BuiltinResult<Value
             &GETFIELD_ERROR_INVALID_HANDLE,
         )
     })?;
-    get_field_value(target, name).await
+    get_field_value(target, name, enforce_public_builtin_extension).await
+}
+
+/// Resolve ordinary dot-member access without applying the compatibility gate
+/// for the public `getfield(object, name)` RunMat extension. MATLAB class and
+/// handle dot syntax is a language operation, not a call to that extension.
+pub(crate) async fn get_member_value(value: Value, name: &str) -> BuiltinResult<Value> {
+    get_field_value(value, name, false).await
 }
 
 fn get_listener_field(listener: &Listener, name: &str) -> BuiltinResult<Value> {
@@ -2036,10 +2070,11 @@ pub(crate) mod tests {
             shape: vec![2, 1],
             device_id: u32::MAX - 1,
             buffer_id: u64::MAX - 1,
-        };
-        runmat_accelerate_api::set_handle_integer_type(
-            &handle,
-            runmat_accelerate_api::IntegerElementType::U64,
+            descriptor: Default::default(),
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::U64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
         );
         let mut st = StructValue::new();
         st.fields
@@ -2048,7 +2083,6 @@ pub(crate) mod tests {
         let result = run_getfield(Value::Struct(st), vec![Value::from("values")])
             .expect("direct resident field");
         assert_eq!(result, Value::GpuTensor(handle.clone()));
-        runmat_accelerate_api::clear_handle_integer_type(&handle);
     }
 
     #[test]

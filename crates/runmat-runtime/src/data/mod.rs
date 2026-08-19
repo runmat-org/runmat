@@ -1,3 +1,4 @@
+use runmat_value::{ComplexStorage, ComplexTensor, IntegerComplexStorage};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
@@ -53,6 +54,8 @@ pub struct DataArrayPayload {
     pub dtype: String,
     pub shape: Vec<usize>,
     pub values: DataArrayValues,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imaginary_values: Option<DataArrayValues>,
 }
 
 /// The persisted backing values of a data-array payload.
@@ -384,6 +387,21 @@ impl DataArrayValues {
             NumericStorage::U64(values) => Self::U64(values),
         }
     }
+
+    fn into_numeric_storage(self) -> NumericStorage {
+        match self {
+            Self::F64(values) => NumericStorage::F64(values),
+            Self::F32(values) => NumericStorage::F32(values),
+            Self::I8(values) => NumericStorage::I8(values),
+            Self::I16(values) => NumericStorage::I16(values),
+            Self::I32(values) => NumericStorage::I32(values),
+            Self::I64(values) => NumericStorage::I64(values),
+            Self::U8(values) => NumericStorage::U8(values),
+            Self::U16(values) => NumericStorage::U16(values),
+            Self::U32(values) => NumericStorage::U32(values),
+            Self::U64(values) => NumericStorage::U64(values),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -480,15 +498,19 @@ impl DataArrayPayload {
             dtype,
             shape,
             values,
+            imaginary_values: None,
         })
     }
 
     pub fn from_value(dtype: String, value: &Value) -> BuiltinResult<Self> {
-        let (shape, values) = data_values_from_value(value)?;
+        let (shape, values, imaginary_values) = data_values_from_value(value)?;
         Ok(Self {
             dtype: dtype.clone(),
             shape,
             values: values.cast_to_dtype(&dtype)?,
+            imaginary_values: imaginary_values
+                .map(|values| values.cast_to_dtype(&dtype))
+                .transpose()?,
         })
     }
 
@@ -497,30 +519,73 @@ impl DataArrayPayload {
         if scalar.values.len() != 1 {
             return Err(data_error("expected numeric scalar"));
         }
+        let imaginary_scalar = scalar
+            .imaginary_values
+            .as_ref()
+            .map(|values| values.get(0))
+            .transpose()?;
         let scalar = scalar.values.get(0)?;
         let len = checked_shape_element_count(&shape)?;
         let mut values = DataArrayValues::zeros(&dtype, len)?;
+        let mut imaginary_values = imaginary_scalar
+            .map(|_| DataArrayValues::zeros(&dtype, len))
+            .transpose()?;
         for index in 0..len {
             values.set(index, scalar)?;
+            if let (Some(values), Some(scalar)) = (&mut imaginary_values, imaginary_scalar) {
+                values.set(index, scalar)?;
+            }
         }
         Ok(Self {
             dtype,
             shape,
             values,
+            imaginary_values,
         })
     }
 
     pub fn normalize_for_dtype(mut self, dtype: &str) -> BuiltinResult<Self> {
         self.values = self.values.cast_to_dtype(dtype)?;
+        self.imaginary_values = self
+            .imaginary_values
+            .map(|values| values.cast_to_dtype(dtype))
+            .transpose()?;
         self.dtype = dtype.to_string();
         Ok(self)
     }
 
     pub fn into_value(self) -> BuiltinResult<Value> {
-        self.values
-            .into_tensor(self.shape)
-            .map(Value::Tensor)
-            .map_err(|err| data_error(format!("invalid data payload: {err}")))
+        let Some(imaginary_values) = self.imaginary_values else {
+            return self
+                .values
+                .into_tensor(self.shape)
+                .map(Value::Tensor)
+                .map_err(|err| data_error(format!("invalid data payload: {err}")));
+        };
+        let real = self.values.into_numeric_storage();
+        let imag = imaginary_values.into_numeric_storage();
+        let storage = match (real, imag) {
+            (NumericStorage::F64(real), NumericStorage::F64(imag)) => {
+                ComplexStorage::F64(real.into_iter().zip(imag).collect())
+            }
+            (NumericStorage::F32(real), NumericStorage::F32(imag)) => {
+                ComplexStorage::F32(real.into_iter().zip(imag).collect())
+            }
+            (real, imag) => {
+                let real = real.into_integer_storage().map_err(|_| {
+                    data_error("complex data payload components have mismatched storage classes")
+                })?;
+                let imag = imag.into_integer_storage().map_err(|_| {
+                    data_error("complex data payload components have mismatched storage classes")
+                })?;
+                ComplexStorage::Integer(IntegerComplexStorage::new(real, imag).map_err(
+                    |error| data_error(format!("invalid complex data payload: {error}")),
+                )?)
+            }
+        };
+        ComplexTensor::from_complex_storage(storage, self.shape)
+            .map(Value::ComplexTensor)
+            .map_err(|error| data_error(format!("invalid complex data payload: {error}")))
     }
 }
 
@@ -535,7 +600,9 @@ fn checked_shape_element_count(shape: &[usize]) -> BuiltinResult<usize> {
     })
 }
 
-fn data_values_from_value(value: &Value) -> BuiltinResult<(Vec<usize>, DataArrayValues)> {
+fn data_values_from_value(
+    value: &Value,
+) -> BuiltinResult<(Vec<usize>, DataArrayValues, Option<DataArrayValues>)> {
     match value {
         Value::Tensor(tensor) => {
             let storage = tensor
@@ -543,23 +610,56 @@ fn data_values_from_value(value: &Value) -> BuiltinResult<(Vec<usize>, DataArray
                 .into_numeric_storage()
                 .map_err(|error| data_error(format!("invalid numeric tensor storage: {error}")))?;
             let values = DataArrayValues::from_numeric_storage(storage);
-            Ok((tensor.shape.clone(), values))
+            Ok((tensor.shape.clone(), values, None))
         }
-        Value::Num(value) => Ok((vec![1, 1], DataArrayValues::F64(vec![*value]))),
-        Value::Int(IntValue::I8(value)) => Ok((vec![1, 1], DataArrayValues::I8(vec![*value]))),
-        Value::Int(IntValue::I16(value)) => Ok((vec![1, 1], DataArrayValues::I16(vec![*value]))),
-        Value::Int(IntValue::I32(value)) => Ok((vec![1, 1], DataArrayValues::I32(vec![*value]))),
-        Value::Int(IntValue::I64(value)) => Ok((vec![1, 1], DataArrayValues::I64(vec![*value]))),
-        Value::Int(IntValue::U8(value)) => Ok((vec![1, 1], DataArrayValues::U8(vec![*value]))),
-        Value::Int(IntValue::U16(value)) => Ok((vec![1, 1], DataArrayValues::U16(vec![*value]))),
-        Value::Int(IntValue::U32(value)) => Ok((vec![1, 1], DataArrayValues::U32(vec![*value]))),
-        Value::Int(IntValue::U64(value)) => Ok((vec![1, 1], DataArrayValues::U64(vec![*value]))),
-        Value::ComplexTensor(tensor) if tensor.integer_storage().is_some() => Err(data_error(
-            "data arrays do not support typed complex integer values; refusing lossy serialization",
+        Value::Num(value) => Ok((vec![1, 1], DataArrayValues::F64(vec![*value]), None)),
+        Value::Int(IntValue::I8(value)) => {
+            Ok((vec![1, 1], DataArrayValues::I8(vec![*value]), None))
+        }
+        Value::Int(IntValue::I16(value)) => {
+            Ok((vec![1, 1], DataArrayValues::I16(vec![*value]), None))
+        }
+        Value::Int(IntValue::I32(value)) => {
+            Ok((vec![1, 1], DataArrayValues::I32(vec![*value]), None))
+        }
+        Value::Int(IntValue::I64(value)) => {
+            Ok((vec![1, 1], DataArrayValues::I64(vec![*value]), None))
+        }
+        Value::Int(IntValue::U8(value)) => {
+            Ok((vec![1, 1], DataArrayValues::U8(vec![*value]), None))
+        }
+        Value::Int(IntValue::U16(value)) => {
+            Ok((vec![1, 1], DataArrayValues::U16(vec![*value]), None))
+        }
+        Value::Int(IntValue::U32(value)) => {
+            Ok((vec![1, 1], DataArrayValues::U32(vec![*value]), None))
+        }
+        Value::Int(IntValue::U64(value)) => {
+            Ok((vec![1, 1], DataArrayValues::U64(vec![*value]), None))
+        }
+        Value::Complex(real, imag) => Ok((
+            vec![1, 1],
+            DataArrayValues::F64(vec![*real]),
+            Some(DataArrayValues::F64(vec![*imag])),
         )),
-        Value::ComplexTensor(_) | Value::Complex(_, _) => Err(data_error(
-            "data arrays do not support complex numeric values",
-        )),
+        Value::ComplexTensor(tensor) => {
+            let shape = tensor.shape.clone();
+            let (real, imag) = match tensor.clone().into_complex_storage() {
+                ComplexStorage::F64(values) => {
+                    let (real, imag): (Vec<_>, Vec<_>) = values.into_iter().unzip();
+                    (DataArrayValues::F64(real), DataArrayValues::F64(imag))
+                }
+                ComplexStorage::F32(values) => {
+                    let (real, imag): (Vec<_>, Vec<_>) = values.into_iter().unzip();
+                    (DataArrayValues::F32(real), DataArrayValues::F32(imag))
+                }
+                ComplexStorage::Integer(storage) => (
+                    DataArrayValues::from_integer_storage(storage.real),
+                    DataArrayValues::from_integer_storage(storage.imag),
+                ),
+            };
+            Ok((shape, real, Some(imag)))
+        }
         _ => Err(data_error(
             "DataArray.write supports tensor or numeric scalar values",
         )),
@@ -814,6 +914,19 @@ pub async fn write_array_payload_async(
             dtype: payload.dtype.clone(),
             shape: chunk_extent.clone(),
             values: collect_chunk_values(payload, &chunk_start, &chunk_extent)?,
+            imaginary_values: payload
+                .imaginary_values
+                .as_ref()
+                .map(|values| {
+                    collect_chunk_component_values(
+                        values,
+                        &payload.dtype,
+                        &payload.shape,
+                        &chunk_start,
+                        &chunk_extent,
+                    )
+                })
+                .transpose()?,
         };
         let key = chunk_key(&coords);
         let object_id = format!("obj_{}", key.replace('.', "_"));
@@ -957,6 +1070,7 @@ async fn read_array_payload_chunked_slice_async(
 
     let mut values =
         DataArrayValues::zeros(&meta.dtype, checked_shape_element_count(slice_shape)?)?;
+    let mut imaginary_values: Option<DataArrayValues> = None;
     for chunk in index.chunks {
         let coords = chunk_coords_from_entry(&chunk, meta.shape.len())?;
         let chunk_start = chunk_start_for_coords(&coords, &meta.chunk_shape);
@@ -1005,6 +1119,16 @@ async fn read_array_payload_chunked_slice_async(
                 }
                 let dst_linear = linear_index_column_major(&dst, slice_shape)?;
                 values.set(dst_linear, payload.values.get(src_linear)?)?;
+                if let Some(payload_imaginary) = &payload.imaginary_values {
+                    let target = match &mut imaginary_values {
+                        Some(values) => values,
+                        None => imaginary_values.insert(DataArrayValues::zeros(
+                            &meta.dtype,
+                            checked_shape_element_count(slice_shape)?,
+                        )?),
+                    };
+                    target.set(dst_linear, payload_imaginary.get(src_linear)?)?;
+                }
             }
             if !advance_index(&mut local, &chunk_extent) {
                 break;
@@ -1016,6 +1140,7 @@ async fn read_array_payload_chunked_slice_async(
         dtype: meta.dtype.clone(),
         shape: slice_shape.to_vec(),
         values,
+        imaginary_values,
     })
 }
 
@@ -1038,6 +1163,7 @@ async fn read_array_payload_chunked_async(
     })?;
     let mut values =
         DataArrayValues::zeros(&meta.dtype, checked_shape_element_count(&meta.shape)?)?;
+    let mut imaginary_values: Option<DataArrayValues> = None;
     for chunk in index.chunks {
         let chunk_path = root.join(&chunk.data_path);
         let bytes = fs::read_async(&chunk_path).await.map_err(|err| {
@@ -1076,6 +1202,16 @@ async fn read_array_payload_chunked_async(
             let src_linear = linear_index_column_major(&local, &chunk_extent)?;
             let dst_linear = linear_index_column_major(&global, &meta.shape)?;
             values.set(dst_linear, payload.values.get(src_linear)?)?;
+            if let Some(payload_imaginary) = &payload.imaginary_values {
+                let target = match &mut imaginary_values {
+                    Some(values) => values,
+                    None => imaginary_values.insert(DataArrayValues::zeros(
+                        &meta.dtype,
+                        checked_shape_element_count(&meta.shape)?,
+                    )?),
+                };
+                target.set(dst_linear, payload_imaginary.get(src_linear)?)?;
+            }
             if !advance_index(&mut local, &chunk_extent) {
                 break;
             }
@@ -1085,6 +1221,7 @@ async fn read_array_payload_chunked_async(
         dtype: meta.dtype.clone(),
         shape: meta.shape.clone(),
         values,
+        imaginary_values,
     })
 }
 
@@ -1197,15 +1334,31 @@ fn collect_chunk_values(
     chunk_start: &[usize],
     chunk_extent: &[usize],
 ) -> BuiltinResult<DataArrayValues> {
+    collect_chunk_component_values(
+        &payload.values,
+        &payload.dtype,
+        &payload.shape,
+        chunk_start,
+        chunk_extent,
+    )
+}
+
+fn collect_chunk_component_values(
+    source: &DataArrayValues,
+    dtype: &str,
+    full_shape: &[usize],
+    chunk_start: &[usize],
+    chunk_extent: &[usize],
+) -> BuiltinResult<DataArrayValues> {
     let mut local = vec![0usize; chunk_extent.len()];
-    let mut values = DataArrayValues::zeros(&payload.dtype, 0)?;
+    let mut values = DataArrayValues::zeros(dtype, 0)?;
     loop {
         let mut global = Vec::with_capacity(chunk_extent.len());
         for dim in 0..chunk_extent.len() {
             global.push(chunk_start[dim] + local[dim]);
         }
-        let linear = linear_index_column_major(&global, &payload.shape)?;
-        values.push(payload.values.get(linear)?)?;
+        let linear = linear_index_column_major(&global, full_shape)?;
+        values.push(source.get(linear)?)?;
         if !advance_index(&mut local, chunk_extent) {
             break;
         }
@@ -1304,11 +1457,17 @@ fn extract_slice_payload(
     shape: &[usize],
 ) -> BuiltinResult<DataArrayPayload> {
     let mut values = DataArrayValues::zeros(&payload.dtype, 0)?;
+    let mut imaginary_values = payload
+        .imaginary_values
+        .as_ref()
+        .map(|_| DataArrayValues::zeros(&payload.dtype, 0))
+        .transpose()?;
     if shape.is_empty() {
         return Ok(DataArrayPayload {
             dtype: payload.dtype.clone(),
             shape: Vec::new(),
             values,
+            imaginary_values,
         });
     }
     let mut local = vec![0usize; shape.len()];
@@ -1319,6 +1478,9 @@ fn extract_slice_payload(
         }
         let linear = linear_index_column_major(&global, &payload.shape)?;
         values.push(payload.values.get(linear)?)?;
+        if let (Some(source), Some(target)) = (&payload.imaginary_values, &mut imaginary_values) {
+            target.push(source.get(linear)?)?;
+        }
         if !advance_index(&mut local, shape) {
             break;
         }
@@ -1327,6 +1489,7 @@ fn extract_slice_payload(
         dtype: payload.dtype.clone(),
         shape: shape.to_vec(),
         values,
+        imaginary_values,
     })
 }
 
@@ -1809,6 +1972,7 @@ mod tests {
                 dtype: dtype.to_string(),
                 shape: vec![1, 2],
                 values: values.clone(),
+                imaginary_values: None,
             };
             let bytes = serde_json::to_vec(&payload).expect("encode typed payload");
             let decoded: DataArrayPayload = serde_json::from_slice(&bytes).expect("decode payload");
@@ -1830,6 +1994,7 @@ mod tests {
             dtype: "f32".to_string(),
             shape: vec![1, 3],
             values: values.clone(),
+            imaginary_values: None,
         };
         let bytes = serde_json::to_vec(&payload).expect("encode single payload");
         let decoded: DataArrayPayload =
@@ -1895,15 +2060,24 @@ mod tests {
             IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]),
         )
         .expect("matching typed complex components");
-        let complex = runmat_value::ComplexTensor::new_integer(storage, vec![1, 2])
+        let complex = runmat_value::ComplexTensor::new_integer(storage.clone(), vec![1, 2])
             .expect("typed complex tensor");
 
-        let error =
+        let payload =
             DataArrayPayload::from_value("uint64".to_string(), &Value::ComplexTensor(complex))
-                .expect_err("data persistence must not coerce typed complex integers through f64");
-        assert!(error
-            .to_string()
-            .contains("typed complex integer values; refusing lossy serialization"));
+                .expect("encode paired integer payload");
+        assert_eq!(
+            payload.imaginary_values,
+            Some(DataArrayValues::U64(vec![u64::MAX, 1_u64 << 63]))
+        );
+        let bytes = serde_json::to_vec(&payload).expect("serialize paired payload");
+        let decoded: DataArrayPayload =
+            serde_json::from_slice(&bytes).expect("deserialize paired payload");
+        let Value::ComplexTensor(decoded) = decoded.into_value().expect("decode paired payload")
+        else {
+            panic!("expected paired complex tensor");
+        };
+        assert_eq!(decoded.integer_storage(), Some(&storage));
     }
 
     #[test]

@@ -31,12 +31,13 @@
   "description": "`orderfields(S, ...)` reorders struct-field definitions using alphabetical order, another struct's field order, explicit field-name lists, or permutation vectors, following MATLAB-compatible behavior.",
   "behaviors": [
     "Works with scalar structs and struct arrays (RunMat stores struct arrays internally as cell arrays of structs).",
-    "The default behaviour `orderfields(S)` sorts field names alphabetically using MATLAB's case-insensitive ordering.",
+    "The default behavior `orderfields(S)` sorts valid field names in documented ASCII order, with uppercase letters before lowercase letters.",
     "`orderfields(S, referenceStruct)` matches the order of `referenceStruct`. Both structs must contain the same field names.",
     "`orderfields(S, {'b','a','c'})` or `orderfields(S, string(['b','a','c']))` uses the supplied list of field names.",
     "`orderfields(S, [2 1 3])` reorders fields using a permutation vector that references the current field order.",
+    "Permutation scalars and vectors accept all eight integer classes and are validated exactly; a one-field structure therefore accepts an exact typed scalar `1`.",
     "`[T, P] = orderfields(S, ___)` returns the reordered struct (or struct array) `T` and a permutation vector `P` whose elements are the original 1-based field positions. Reuse `P` to apply the same order to other structs that share the field set.",
-    "The function never copies field contents unnecessarily—values (including GPU handles) are re-used and remain resident.",
+    "Integer field contents retain exact class, shape, and value, and nested GPU handles retain residency/provenance; field reordering performs no payload gather or floating materialization.",
     "Errors are raised when requested field names do not match the struct, when indices are invalid, or when the input is not a struct."
   ],
   "examples": [

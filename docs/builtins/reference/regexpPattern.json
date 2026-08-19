@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "No GPU kernel is registered for this compatibility builtin; GPU-resident inputs are gathered to host memory before evaluation."
+    "notes": "Regular-expression text is host-only; numeric resident handles reject without implicit text conversion or provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -54,7 +54,8 @@
   ],
   "behaviors": [
     "Create a regular expression string pattern.",
-    "Regular expression pattern objects are accepted by matches, contains, startsWith, endsWith, erase, replace, and boundary helpers."
+    "Regular expression pattern objects are accepted by matches, contains, startsWith, endsWith, erase, replace, and boundary helpers.",
+    "Integer and other numeric inputs have no semantic role and reject without conversion; this includes resident numeric handles."
   ],
   "examples": [
     "regexpPattern(\"A\\d+\") creates a regular-expression pattern object."

@@ -14,7 +14,7 @@
     "reduction": true,
     "precisions": ["f64"],
     "broadcasting": "none",
-    "notes": "gpuArray inputs are gathered to the CPU reference path."
+    "notes": "Automatic internal residency gathers transparently. Explicit gpuArray input is a mode-gated RunMat extension and uses the CPU reference path when enabled."
   },
   "fusion": {
     "elementwise": false,
@@ -25,7 +25,7 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::stats::summary::hypothesis::tests",
-    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+    "integration": "crates/runmat-vm/tests/stats_ml.rs; crates/runmat-vm/tests/integer_json_join_and_statistical_semantics.rs"
   },
   "description": "`kstest(x)` performs a one-sample Kolmogorov-Smirnov test of whether the sample in `x` could come from a standard normal distribution. `[h,p,ksstat,cv] = kstest(...)` also returns an approximate p-value, the KS statistic, and an approximate critical value.",
   "behaviors": [
@@ -35,7 +35,8 @@
     "`kstest(x,\"CDF\",cdf)` accepts a two-column numeric matrix whose first column contains sample points and whose second column contains CDF probabilities in `[0,1]`. Rows are sorted by sample point, duplicate sample points are collapsed to the largest probability at that point, and probabilities must be nondecreasing after normalization. Sample values must lie inside the table's x range. Values are linearly interpolated between table rows.",
     "`\"CDF\"` also accepts `\"normcdf\"`, `\"normal\"`, `\"norm\"`, or a `@normcdf` function handle for the standard normal CDF.",
     "The p-values use standard large-sample approximations. For two-sided tests, `cv` is returned for `Alpha` in `[0.01,0.20]`; for one-sided tests, `cv` is returned for `Alpha` in `[0.005,0.10]`. Outside those ranges, `cv` is `NaN`, matching MATLAB's documented critical-value limitations.",
-    "Continuous probability distribution objects for `\"CDF\"` are not supported until RunMat's `makedist`/`fitdist` distribution object surface exists."
+    "Continuous probability distribution objects for `\"CDF\"` are not supported until RunMat's `makedist`/`fitdist` distribution object surface exists.",
+    "Typed-integer sample and CDF-table data are RunMat-only extensions. Admitted values must be exactly representable as double before the statistical boundary; integer `Alpha` has no valid value in the required open interval `(0,1)` and is rejected."
   ],
   "examples": [
     {

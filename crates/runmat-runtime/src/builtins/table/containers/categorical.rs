@@ -11,6 +11,22 @@ pub(crate) fn categorical_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     let labels = categorical_labels(&source)?;
     let category_plan =
         categorical_category_plan(&source, &labels, parsed.valueset.as_ref(), parsed.catnames)?;
+    categorical_object_from_plan(
+        &source,
+        labels,
+        category_plan,
+        parsed.ordinal,
+        parsed.protected.unwrap_or(false),
+    )
+}
+
+fn categorical_object_from_plan(
+    source: &Value,
+    labels: Vec<String>,
+    category_plan: CategoryPlan,
+    ordinal: bool,
+    protected: bool,
+) -> BuiltinResult<Value> {
     let mut codes = Vec::with_capacity(labels.len());
     for label in labels {
         if let Some(idx) = category_plan
@@ -27,7 +43,7 @@ pub(crate) fn categorical_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     object.properties.insert(
         "Codes".to_string(),
         Value::Tensor(
-            Tensor::new(codes, value_shape_or_column(&source)?).map_err(invalid_variable)?,
+            Tensor::new(codes, value_shape_or_column(source)?).map_err(invalid_variable)?,
         ),
     );
     object.properties.insert(
@@ -42,18 +58,218 @@ pub(crate) fn categorical_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     );
     object
         .properties
-        .insert("Ordinal".to_string(), Value::Bool(parsed.ordinal));
-    object.properties.insert(
-        "Protected".to_string(),
-        Value::Bool(parsed.ordinal || parsed.protected.unwrap_or(false)),
-    );
+        .insert("Ordinal".to_string(), Value::Bool(ordinal));
+    object
+        .properties
+        .insert("Protected".to_string(), Value::Bool(ordinal || protected));
     Ok(Value::Object(object))
 }
 
-pub(in crate::builtins::table) fn ordinal_from_args(mut args: Vec<Value>) -> BuiltinResult<Value> {
-    args.push(Value::from("Ordinal"));
-    args.push(Value::Bool(true));
-    categorical_from_args(args)
+pub(in crate::builtins::table) fn ordinal_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args.is_empty() {
+        return Err(invalid_argument("ordinal: X is required"));
+    }
+    if args.len() == 1 {
+        let mut categorical_args = args;
+        categorical_args.push(Value::from("Ordinal"));
+        categorical_args.push(Value::Bool(true));
+        return categorical_from_args(categorical_args);
+    }
+    if args.len() > 4 {
+        return Err(invalid_argument(
+            "ordinal: expected X, optional labels, optional levels, or empty levels plus edges",
+        ));
+    }
+    let source = &args[0];
+    let category_names = categorical_category_names(&args[1])?;
+    match args.len() {
+        2 => ordinal_from_inferred_levels(source, category_names),
+        3 => ordinal_from_explicit_levels(source, &args[2], category_names),
+        4 => ordinal_from_edges(source, &args[2], &args[3], category_names),
+        _ => unreachable!("ordinal arity checked above"),
+    }
+}
+
+fn ordinal_from_inferred_levels(
+    source: &Value,
+    category_names: Vec<String>,
+) -> BuiltinResult<Value> {
+    let labels = categorical_labels(source)?;
+    let mut lookup = labels
+        .iter()
+        .filter(|label| !label.is_empty())
+        .cloned()
+        .collect::<Vec<_>>();
+    sort_categorical_values(&mut lookup, categorical_numeric_dtype(source))?;
+    lookup.dedup();
+    let plan = ordinal_category_plan(lookup, category_names)?;
+    categorical_object_from_plan(source, labels, plan, true, true)
+}
+
+fn ordinal_from_explicit_levels(
+    source: &Value,
+    levels: &Value,
+    category_names: Vec<String>,
+) -> BuiltinResult<Value> {
+    ensure_ordinal_vector(levels, "levels")?;
+    let labels = categorical_labels(source)?;
+    let lookup = categorical_labels(levels)?;
+    ensure_unique_valueset(&lookup, true)?;
+    let plan = ordinal_category_plan(lookup, category_names)?;
+    categorical_object_from_plan(source, labels, plan, true, true)
+}
+
+fn ordinal_category_plan(
+    lookup: Vec<String>,
+    category_names: Vec<String>,
+) -> BuiltinResult<CategoryPlan> {
+    if lookup.len() != category_names.len() {
+        return Err(invalid_argument(
+            "ordinal: labels must contain one entry for every level",
+        ));
+    }
+    let categories = unique_nonempty(category_names.clone())?;
+    let codes = category_names
+        .iter()
+        .map(|label| {
+            categories
+                .iter()
+                .position(|category| category == label)
+                .expect("validated nonempty category name")
+        })
+        .collect();
+    Ok(CategoryPlan {
+        lookup,
+        codes,
+        categories,
+    })
+}
+
+fn ordinal_from_edges(
+    source: &Value,
+    empty_levels: &Value,
+    edges: &Value,
+    category_names: Vec<String>,
+) -> BuiltinResult<Value> {
+    if value_element_count(empty_levels) != Some(0) {
+        return Err(invalid_argument(
+            "ordinal: the third argument must be an empty levels array when edges are supplied",
+        ));
+    }
+    ensure_ordinal_vector(edges, "edges")?;
+    let source_values = ordinal_numeric_values(source, "X")?;
+    let edge_values = ordinal_numeric_values(edges, "edges")?;
+    if edge_values.len() != category_names.len().saturating_add(1) {
+        return Err(invalid_argument(
+            "ordinal: edges must contain one more element than labels",
+        ));
+    }
+    use crate::builtins::logical::rel::integer_comparison::compare_numeric_scalars_exact;
+    if edge_values.windows(2).any(|pair| {
+        compare_numeric_scalars_exact(pair[0], pair[1]) != Some(std::cmp::Ordering::Less)
+    }) {
+        return Err(invalid_argument(
+            "ordinal: edges must be finite and strictly increasing",
+        ));
+    }
+    let categories = unique_nonempty(category_names.clone())?;
+    let bin_codes = category_names
+        .iter()
+        .map(|label| {
+            categories
+                .iter()
+                .position(|category| category == label)
+                .expect("validated nonempty ordinal label")
+        })
+        .collect::<Vec<_>>();
+    let mut codes = Vec::with_capacity(source_values.len());
+    for value in source_values {
+        let mut selected = None;
+        for bin in 0..category_names.len() {
+            let lower = compare_numeric_scalars_exact(value, edge_values[bin]);
+            let upper = compare_numeric_scalars_exact(value, edge_values[bin + 1]);
+            let lower_inclusive = matches!(
+                lower,
+                Some(std::cmp::Ordering::Equal | std::cmp::Ordering::Greater)
+            );
+            let upper_inclusive =
+                bin + 1 == category_names.len() && upper == Some(std::cmp::Ordering::Equal);
+            if lower_inclusive && (upper == Some(std::cmp::Ordering::Less) || upper_inclusive) {
+                selected = Some(bin_codes[bin]);
+                break;
+            }
+        }
+        codes.push(selected.map_or(f64::NAN, |code| (code + 1) as f64));
+    }
+    categorical_object_from_codes(source, codes, categories, true, true)
+}
+
+fn categorical_object_from_codes(
+    source: &Value,
+    codes: Vec<f64>,
+    categories: Vec<String>,
+    ordinal: bool,
+    protected: bool,
+) -> BuiltinResult<Value> {
+    let mut object = ObjectInstance::new(CATEGORICAL_CLASS.to_string());
+    object.properties.insert(
+        "Codes".to_string(),
+        Value::Tensor(
+            Tensor::new(codes, value_shape_or_column(source)?).map_err(invalid_variable)?,
+        ),
+    );
+    object.properties.insert(
+        "Categories".to_string(),
+        Value::StringArray(
+            StringArray::new(categories.clone(), vec![1, categories.len()])
+                .map_err(invalid_variable)?,
+        ),
+    );
+    object
+        .properties
+        .insert("Ordinal".to_string(), Value::Bool(ordinal));
+    object
+        .properties
+        .insert("Protected".to_string(), Value::Bool(ordinal || protected));
+    Ok(Value::Object(object))
+}
+
+fn ordinal_numeric_values(value: &Value, context: &str) -> BuiltinResult<Vec<NumericScalar>> {
+    match value {
+        Value::Num(value) => Ok(vec![NumericScalar::F64(*value)]),
+        Value::Int(value) => Ok(vec![NumericScalar::from(value.clone())]),
+        Value::Tensor(tensor) => (0..tensor.len())
+            .map(|index| {
+                tensor.numeric_value_at(index).ok_or_else(|| {
+                    invalid_argument(format!("ordinal: {context} has invalid numeric storage"))
+                })
+            })
+            .collect(),
+        _ => Err(invalid_argument(format!(
+            "ordinal: {context} must be a real numeric array"
+        ))),
+    }
+}
+
+fn ensure_ordinal_vector(value: &Value, context: &str) -> BuiltinResult<()> {
+    let shape = value_shape_or_column(value)?;
+    let non_singleton = shape.iter().filter(|&&dimension| dimension > 1).count();
+    if non_singleton > 1 {
+        return Err(invalid_argument(format!(
+            "ordinal: {context} must be a vector"
+        )));
+    }
+    Ok(())
+}
+
+fn value_element_count(value: &Value) -> Option<usize> {
+    match value {
+        Value::Tensor(tensor) => Some(tensor.len()),
+        Value::StringArray(array) => Some(array.data.len()),
+        Value::LogicalArray(array) => Some(array.data.len()),
+        Value::Cell(cell) => Some(cell.data.len()),
+        _ => None,
+    }
 }
 
 #[derive(Clone, Copy)]

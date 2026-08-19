@@ -61,7 +61,7 @@
       "output": "mag = [3.1623 5.1962]"
     },
     {
-      "description": "Use the RunMat character-input extension",
+      "description": "Computing hypotenuse values from character codes",
       "input": "codes = hypot('A', zeros(1, 1))",
       "output": "codes = 65.0000"
     },

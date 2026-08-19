@@ -34,7 +34,8 @@
     "Struct arrays require a leading cell array of one-based indices, e.g. `setfield(S,{2},\"field\",value)` or `setfield(S,{1,3},\"field\",value)`, and accept the keyword `end`.",
     "You can index into a field's contents before traversing deeper by placing a cell array of indices immediately after the field name: `setfield(S,\"values\",{1,2},\"leaf\",x)` matches `S.values{1,2}.leaf = x`.",
     "MATLAB-style objects honour property metadata: private setters raise access errors, static properties cannot be written through instances, and dependent properties forward to `set.<name>` methods when available.",
-    "The function returns the updated struct or object. For value types the result is a new copy; handle objects still point at the same instance, and the handle is returned for chaining."
+    "The function returns the updated struct or object. For value types the result is a new copy; handle objects still point at the same instance, and the handle is returned for chaining.",
+    "Assigned values retain their complete class and payload, including all eight integer classes. Numeric selectors inside index cells accept integer classes and are validated as exact one-based structural indices before host indexing."
   ],
   "examples": [
     {

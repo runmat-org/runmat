@@ -759,13 +759,19 @@ async fn eye_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> Result<Value
             } else {
                 provider
                     .eye(&shape_vec)
-                    .inspect(|gpu| {
-                        runmat_accelerate_api::set_handle_precision(gpu, expected_precision);
-                        runmat_accelerate_api::set_handle_storage(
-                            gpu,
-                            runmat_accelerate_api::GpuTensorStorage::Real,
-                        );
-                        runmat_accelerate_api::set_handle_logical(gpu, false);
+                    .map(|mut gpu| {
+                        gpu.descriptor.element_type = Some(match expected_precision {
+                            runmat_accelerate_api::ProviderPrecision::F32 => {
+                                runmat_accelerate_api::NumericElementType::F32
+                            }
+                            runmat_accelerate_api::ProviderPrecision::F64 => {
+                                runmat_accelerate_api::NumericElementType::F64
+                            }
+                        });
+                        gpu.descriptor.storage =
+                            Some(runmat_accelerate_api::GpuTensorStorage::Real);
+                        runmat_accelerate_api::set_handle_logical(&gpu, false);
+                        gpu
                     })
                     .map_err(|error| error.to_string())
             }
@@ -825,14 +831,9 @@ fn valid_eye_gpu_result(
     same_owner
         && output.device_id == prototype.device_id
         && output.shape == shape
-        && runmat_accelerate_api::handle_storage(output)
-            == runmat_accelerate_api::handle_storage(prototype)
-        && runmat_accelerate_api::handle_integer_type(output)
-            == runmat_accelerate_api::handle_integer_type(prototype)
+        && gpu_helpers::numeric_descriptor_matches_source(prototype, output)
         && runmat_accelerate_api::handle_is_logical(output)
             == runmat_accelerate_api::handle_is_logical(prototype)
-        && runmat_accelerate_api::handle_precision(output)
-            == runmat_accelerate_api::handle_precision(prototype)
 }
 
 fn identity_tensor(shape: &[usize]) -> Result<Tensor, String> {

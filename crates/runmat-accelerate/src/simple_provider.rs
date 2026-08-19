@@ -4,11 +4,13 @@ use crate::telemetry::AccelTelemetry;
 use anyhow::{anyhow, ensure, Result};
 use once_cell::sync::OnceCell;
 use runmat_accelerate_api::{
-    AccelDownloadFuture, AccelIntegerDownloadFuture, AccelProvider, AccelProviderFuture,
-    CorrcoefOptions, CovarianceOptions, FindDirection, FspecialRequest, GpuTensorHandle,
-    GpuTensorStorage, HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorOwned,
-    HostIntegerTensorView, HostTensorOwned, HostTensorView, ImfilterOptions, IntegerElementType,
-    PagefunRequest, ProviderAdamUpdateRequest, ProviderAdamUpdateResult, ProviderBandwidth,
+    AccelDownloadFuture, AccelIntegerDownloadFuture, AccelNumericDownloadFuture, AccelProvider,
+    AccelProviderFuture, CorrcoefOptions, CovarianceOptions, FindDirection, FspecialRequest,
+    GpuTensorHandle, GpuTensorStorage, HostIntegerDataOwned, HostIntegerDataView,
+    HostIntegerTensorOwned, HostIntegerTensorView, HostNumericDataOwned, HostNumericDataView,
+    HostNumericTensorOwned, HostNumericTensorView, HostTensorOwned, HostTensorView,
+    ImfilterOptions, IntegerElementType, NumericElementType, PagefunRequest,
+    ProviderAdamUpdateRequest, ProviderAdamUpdateResult, ProviderBandwidth,
     ProviderBitModulationRequest, ProviderBlackScholesPriceRequest,
     ProviderBlackScholesPriceResult, ProviderCholResult, ProviderCondNorm, ProviderConv1dOptions,
     ProviderConvMode, ProviderConvOrientation, ProviderCovarianceToCorrelationResult,
@@ -57,22 +59,290 @@ use runmat_runtime::builtins::math::reduction::{
 use std::cmp::Ordering as CmpOrdering;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{LockResult, Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
 
 const PROVIDER_DEFAULT_SEED: u64 = 0x9e3779b97f4a7c15;
 const PROVIDER_ID_BLOCK_SIZE: u64 = 1_000_000_000;
 
-static REGISTRY: OnceCell<Mutex<HashMap<u64, Vec<f64>>>> = OnceCell::new();
-static INTEGER_REGISTRY: OnceCell<Mutex<HashMap<u64, HostIntegerDataOwned>>> = OnceCell::new();
-static NEXT_PROVIDER_ID_BASE: AtomicU64 = AtomicU64::new(PROVIDER_ID_BLOCK_SIZE);
-
-fn registry() -> &'static Mutex<HashMap<u64, Vec<f64>>> {
-    REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+#[derive(Debug, Clone, PartialEq)]
+enum InProcessNumericData {
+    F64(Vec<f64>),
+    F32(Vec<f32>),
+    Integer(HostIntegerDataOwned),
 }
 
-fn integer_registry() -> &'static Mutex<HashMap<u64, HostIntegerDataOwned>> {
-    INTEGER_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+impl InProcessNumericData {
+    fn from_view(data: HostNumericDataView<'_>) -> Self {
+        match data {
+            HostNumericDataView::F64(values) => Self::F64(values.to_vec()),
+            HostNumericDataView::F32(values) => Self::F32(values.to_vec()),
+            HostNumericDataView::I8(values) => {
+                Self::Integer(HostIntegerDataOwned::I8(values.to_vec()))
+            }
+            HostNumericDataView::I16(values) => {
+                Self::Integer(HostIntegerDataOwned::I16(values.to_vec()))
+            }
+            HostNumericDataView::I32(values) => {
+                Self::Integer(HostIntegerDataOwned::I32(values.to_vec()))
+            }
+            HostNumericDataView::I64(values) => {
+                Self::Integer(HostIntegerDataOwned::I64(values.to_vec()))
+            }
+            HostNumericDataView::U8(values) => {
+                Self::Integer(HostIntegerDataOwned::U8(values.to_vec()))
+            }
+            HostNumericDataView::U16(values) => {
+                Self::Integer(HostIntegerDataOwned::U16(values.to_vec()))
+            }
+            HostNumericDataView::U32(values) => {
+                Self::Integer(HostIntegerDataOwned::U32(values.to_vec()))
+            }
+            HostNumericDataView::U64(values) => {
+                Self::Integer(HostIntegerDataOwned::U64(values.to_vec()))
+            }
+        }
+    }
+
+    fn into_host_numeric(self) -> HostNumericDataOwned {
+        match self {
+            Self::F64(values) => HostNumericDataOwned::F64(values),
+            Self::F32(values) => HostNumericDataOwned::F32(values),
+            Self::Integer(values) => values.into(),
+        }
+    }
+
+    fn byte_len(&self) -> u64 {
+        match self {
+            Self::F64(values) => std::mem::size_of_val(values.as_slice()) as u64,
+            Self::F32(values) => std::mem::size_of_val(values.as_slice()) as u64,
+            Self::Integer(values) => integer_data_bytes(values),
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            Self::F64(values) => values.len(),
+            Self::F32(values) => values.len(),
+            Self::Integer(values) => match values {
+                HostIntegerDataOwned::I8(values) => values.len(),
+                HostIntegerDataOwned::I16(values) => values.len(),
+                HostIntegerDataOwned::I32(values) => values.len(),
+                HostIntegerDataOwned::I64(values) => values.len(),
+                HostIntegerDataOwned::U8(values) => values.len(),
+                HostIntegerDataOwned::U16(values) => values.len(),
+                HostIntegerDataOwned::U32(values) => values.len(),
+                HostIntegerDataOwned::U64(values) => values.len(),
+            },
+        }
+    }
+}
+
+fn diagonalize_vector_values<T: Copy + Default>(
+    values: &[T],
+    offset: isize,
+    out_rows: usize,
+    out_cols: usize,
+) -> Result<Vec<T>> {
+    let total = out_rows
+        .checked_mul(out_cols)
+        .ok_or_else(|| anyhow!("diag: result size exceeds limits"))?;
+    let mut output = vec![T::default(); total];
+    for (index, value) in values.iter().copied().enumerate() {
+        let (row, column) = diagonal_target_index(index, offset);
+        if row < out_rows && column < out_cols {
+            output[row + column * out_rows] = value;
+        }
+    }
+    Ok(output)
+}
+
+fn extract_diagonal_values<T: Copy>(
+    values: &[T],
+    rows: usize,
+    offset: isize,
+    diagonal_len: usize,
+) -> Result<Vec<T>> {
+    let mut output = Vec::with_capacity(diagonal_len);
+    for index in 0..diagonal_len {
+        let (row, column) = diagonal_source_index(index, offset);
+        let linear = column
+            .checked_mul(rows)
+            .and_then(|base| row.checked_add(base))
+            .ok_or_else(|| anyhow!("diag: source index exceeds provider limits"))?;
+        output.push(
+            values
+                .get(linear)
+                .copied()
+                .ok_or_else(|| anyhow!("diag: source shape exceeds physical buffer length"))?,
+        );
+    }
+    Ok(output)
+}
+
+fn diagonalize_numeric_data(
+    data: &InProcessNumericData,
+    offset: isize,
+    out_rows: usize,
+    out_cols: usize,
+) -> Result<InProcessNumericData> {
+    macro_rules! diagonalize_integer {
+        ($variant:ident, $values:expr) => {
+            InProcessNumericData::Integer(HostIntegerDataOwned::$variant(
+                diagonalize_vector_values($values, offset, out_rows, out_cols)?,
+            ))
+        };
+    }
+    Ok(match data {
+        InProcessNumericData::F64(values) => InProcessNumericData::F64(diagonalize_vector_values(
+            values, offset, out_rows, out_cols,
+        )?),
+        InProcessNumericData::F32(values) => InProcessNumericData::F32(diagonalize_vector_values(
+            values, offset, out_rows, out_cols,
+        )?),
+        InProcessNumericData::Integer(values) => match values {
+            HostIntegerDataOwned::I8(values) => diagonalize_integer!(I8, values),
+            HostIntegerDataOwned::I16(values) => diagonalize_integer!(I16, values),
+            HostIntegerDataOwned::I32(values) => diagonalize_integer!(I32, values),
+            HostIntegerDataOwned::I64(values) => diagonalize_integer!(I64, values),
+            HostIntegerDataOwned::U8(values) => diagonalize_integer!(U8, values),
+            HostIntegerDataOwned::U16(values) => diagonalize_integer!(U16, values),
+            HostIntegerDataOwned::U32(values) => diagonalize_integer!(U32, values),
+            HostIntegerDataOwned::U64(values) => diagonalize_integer!(U64, values),
+        },
+    })
+}
+
+fn extract_numeric_diagonal(
+    data: &InProcessNumericData,
+    rows: usize,
+    offset: isize,
+    diagonal_len: usize,
+) -> Result<InProcessNumericData> {
+    macro_rules! extract_integer {
+        ($variant:ident, $values:expr) => {
+            InProcessNumericData::Integer(HostIntegerDataOwned::$variant(extract_diagonal_values(
+                $values,
+                rows,
+                offset,
+                diagonal_len,
+            )?))
+        };
+    }
+    Ok(match data {
+        InProcessNumericData::F64(values) => {
+            InProcessNumericData::F64(extract_diagonal_values(values, rows, offset, diagonal_len)?)
+        }
+        InProcessNumericData::F32(values) => {
+            InProcessNumericData::F32(extract_diagonal_values(values, rows, offset, diagonal_len)?)
+        }
+        InProcessNumericData::Integer(values) => match values {
+            HostIntegerDataOwned::I8(values) => extract_integer!(I8, values),
+            HostIntegerDataOwned::I16(values) => extract_integer!(I16, values),
+            HostIntegerDataOwned::I32(values) => extract_integer!(I32, values),
+            HostIntegerDataOwned::I64(values) => extract_integer!(I64, values),
+            HostIntegerDataOwned::U8(values) => extract_integer!(U8, values),
+            HostIntegerDataOwned::U16(values) => extract_integer!(U16, values),
+            HostIntegerDataOwned::U32(values) => extract_integer!(U32, values),
+            HostIntegerDataOwned::U64(values) => extract_integer!(U64, values),
+        },
+    })
+}
+
+static NUMERIC_REGISTRY: OnceCell<Mutex<HashMap<u64, InProcessNumericData>>> = OnceCell::new();
+static NEXT_PROVIDER_ID_BASE: AtomicU64 = AtomicU64::new(PROVIDER_ID_BLOCK_SIZE);
+
+fn numeric_registry() -> &'static Mutex<HashMap<u64, InProcessNumericData>> {
+    NUMERIC_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+struct F64Registry;
+
+struct F64RegistryGuard<'a>(MutexGuard<'a, HashMap<u64, InProcessNumericData>>);
+
+impl F64Registry {
+    fn lock(&self) -> LockResult<F64RegistryGuard<'_>> {
+        numeric_registry()
+            .lock()
+            .map(F64RegistryGuard)
+            .map_err(|error| PoisonError::new(F64RegistryGuard(error.into_inner())))
+    }
+}
+
+impl F64RegistryGuard<'_> {
+    fn get(&self, id: &u64) -> Option<&Vec<f64>> {
+        match self.0.get(id) {
+            Some(InProcessNumericData::F64(values)) => Some(values),
+            Some(InProcessNumericData::F32(_) | InProcessNumericData::Integer(_)) | None => None,
+        }
+    }
+
+    fn get_mut(&mut self, id: &u64) -> Option<&mut Vec<f64>> {
+        match self.0.get_mut(id) {
+            Some(InProcessNumericData::F64(values)) => Some(values),
+            Some(InProcessNumericData::F32(_) | InProcessNumericData::Integer(_)) | None => None,
+        }
+    }
+
+    fn insert(&mut self, id: u64, values: Vec<f64>) -> Option<Vec<f64>> {
+        match self.0.insert(id, InProcessNumericData::F64(values)) {
+            Some(InProcessNumericData::F64(previous)) => Some(previous),
+            Some(InProcessNumericData::F32(_) | InProcessNumericData::Integer(_)) | None => None,
+        }
+    }
+
+    #[cfg(test)]
+    fn contains_key(&self, id: &u64) -> bool {
+        matches!(self.0.get(id), Some(InProcessNumericData::F64(_)))
+    }
+}
+
+static F64_REGISTRY_VIEW: F64Registry = F64Registry;
+
+fn registry() -> &'static F64Registry {
+    &F64_REGISTRY_VIEW
+}
+
+struct IntegerRegistry;
+
+struct IntegerRegistryGuard<'a>(MutexGuard<'a, HashMap<u64, InProcessNumericData>>);
+
+impl IntegerRegistry {
+    fn lock(&self) -> LockResult<IntegerRegistryGuard<'_>> {
+        numeric_registry()
+            .lock()
+            .map(IntegerRegistryGuard)
+            .map_err(|error| PoisonError::new(IntegerRegistryGuard(error.into_inner())))
+    }
+}
+
+impl IntegerRegistryGuard<'_> {
+    fn get(&self, id: &u64) -> Option<&HostIntegerDataOwned> {
+        match self.0.get(id) {
+            Some(InProcessNumericData::Integer(values)) => Some(values),
+            Some(InProcessNumericData::F64(_) | InProcessNumericData::F32(_)) | None => None,
+        }
+    }
+
+    fn get_mut(&mut self, id: &u64) -> Option<&mut HostIntegerDataOwned> {
+        match self.0.get_mut(id) {
+            Some(InProcessNumericData::Integer(values)) => Some(values),
+            Some(InProcessNumericData::F64(_) | InProcessNumericData::F32(_)) | None => None,
+        }
+    }
+
+    fn insert(&mut self, id: u64, values: HostIntegerDataOwned) -> Option<HostIntegerDataOwned> {
+        match self.0.insert(id, InProcessNumericData::Integer(values)) {
+            Some(InProcessNumericData::Integer(previous)) => Some(previous),
+            Some(InProcessNumericData::F64(_) | InProcessNumericData::F32(_)) | None => None,
+        }
+    }
+}
+
+static INTEGER_REGISTRY_VIEW: IntegerRegistry = IntegerRegistry;
+
+fn integer_registry() -> &'static IntegerRegistry {
+    &INTEGER_REGISTRY_VIEW
 }
 
 fn owned_integer_data(data: HostIntegerDataView<'_>) -> HostIntegerDataOwned {
@@ -1690,17 +1960,87 @@ impl InProcessProvider {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(id, data);
+        self.f64_handle_for_existing_buffer(id, shape, storage)
+    }
+
+    fn allocate_f32_tensor_with_storage(
+        &self,
+        data: Vec<f32>,
+        shape: Vec<usize>,
+        storage: GpuTensorStorage,
+    ) -> GpuTensorHandle {
+        let id = self
+            .next_id
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                if current < self.id_limit {
+                    current.checked_add(1)
+                } else {
+                    None
+                }
+            })
+            .expect("in-process provider id range exhausted");
+        numeric_registry()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .insert(id, InProcessNumericData::F32(data));
+        self.f32_handle_for_existing_buffer(id, shape, storage)
+    }
+
+    fn allocate_numeric_data(
+        &self,
+        data: InProcessNumericData,
+        shape: Vec<usize>,
+        storage: GpuTensorStorage,
+    ) -> GpuTensorHandle {
+        match data {
+            InProcessNumericData::F64(values) => {
+                self.allocate_tensor_with_storage(values, shape, storage)
+            }
+            InProcessNumericData::F32(values) => {
+                self.allocate_f32_tensor_with_storage(values, shape, storage)
+            }
+            InProcessNumericData::Integer(values) => {
+                debug_assert_eq!(storage, GpuTensorStorage::Real);
+                self.allocate_integer_tensor(values, shape)
+            }
+        }
+    }
+
+    fn f64_handle_for_existing_buffer(
+        &self,
+        buffer_id: u64,
+        shape: Vec<usize>,
+        storage: GpuTensorStorage,
+    ) -> GpuTensorHandle {
         let handle = GpuTensorHandle {
             shape,
             device_id: self.device_id,
-            buffer_id: id,
+            buffer_id,
+            descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
+                NumericElementType::F64,
+                storage,
+            ),
         };
-        runmat_accelerate_api::set_handle_storage(&handle, storage);
-        runmat_accelerate_api::set_handle_logical(&handle, false);
-        runmat_accelerate_api::set_handle_precision(
-            &handle,
-            runmat_accelerate_api::ProviderPrecision::F64,
-        );
+        runmat_accelerate_api::clear_handle_metadata(&handle);
+        handle
+    }
+
+    fn f32_handle_for_existing_buffer(
+        &self,
+        buffer_id: u64,
+        shape: Vec<usize>,
+        storage: GpuTensorStorage,
+    ) -> GpuTensorHandle {
+        let handle = GpuTensorHandle {
+            shape,
+            device_id: self.device_id,
+            buffer_id,
+            descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
+                NumericElementType::F32,
+                storage,
+            ),
+        };
+        runmat_accelerate_api::clear_handle_metadata(&handle);
         handle
     }
 
@@ -1730,10 +2070,12 @@ impl InProcessProvider {
             shape,
             device_id: self.device_id,
             buffer_id: id,
+            descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
+                NumericElementType::from(element_type),
+                GpuTensorStorage::Real,
+            ),
         };
-        runmat_accelerate_api::set_handle_integer_type(&handle, element_type);
-        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::Real);
-        runmat_accelerate_api::set_handle_logical(&handle, false);
+        runmat_accelerate_api::clear_handle_metadata(&handle);
         handle
     }
 
@@ -3768,10 +4110,12 @@ impl AccelProvider for InProcessProvider {
                 shape: output_shape.to_vec(),
                 device_id: self.device_id,
                 buffer_id: id,
+                descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
+                    NumericElementType::from(integer_type),
+                    GpuTensorStorage::Real,
+                ),
             };
-            runmat_accelerate_api::set_handle_integer_type(&handle, integer_type);
-            runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::Real);
-            runmat_accelerate_api::set_handle_logical(&handle, false);
+            runmat_accelerate_api::clear_handle_metadata(&handle);
             return Ok(handle);
         }
 
@@ -3929,6 +4273,51 @@ impl AccelProvider for InProcessProvider {
         ProviderPrecision::F64
     }
 
+    fn upload_numeric(&self, host: &HostNumericTensorView) -> Result<GpuTensorHandle> {
+        host.validate()?;
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let data = InProcessNumericData::from_view(host.data);
+        self.telemetry.record_upload_bytes(data.byte_len());
+        numeric_registry()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .insert(id, data);
+        let element_type = host.element_type();
+        let handle = GpuTensorHandle {
+            shape: host.shape.to_vec(),
+            device_id: self.device_id,
+            buffer_id: id,
+            descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
+                element_type,
+                host.storage,
+            ),
+        };
+        runmat_accelerate_api::clear_handle_metadata(&handle);
+        Ok(handle)
+    }
+
+    fn download_numeric<'a>(
+        &'a self,
+        handle: &'a GpuTensorHandle,
+    ) -> AccelNumericDownloadFuture<'a> {
+        Box::pin(async move {
+            let data = numeric_registry()
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .get(&handle.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("numeric buffer not found: {}", handle.buffer_id))?;
+            self.telemetry.record_download_bytes(data.byte_len());
+            let output = HostNumericTensorOwned {
+                data: data.into_host_numeric(),
+                shape: handle.shape.clone(),
+                storage: runmat_accelerate_api::handle_storage(handle),
+            };
+            output.validate()?;
+            Ok(output)
+        })
+    }
+
     fn upload(&self, host: &HostTensorView) -> Result<GpuTensorHandle> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let mut guard = registry().lock().unwrap_or_else(|e| e.into_inner());
@@ -3939,27 +4328,48 @@ impl AccelProvider for InProcessProvider {
             shape: host.shape.to_vec(),
             device_id: self.device_id,
             buffer_id: id,
+            descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
+                match self.precision() {
+                    ProviderPrecision::F32 => NumericElementType::F32,
+                    ProviderPrecision::F64 => NumericElementType::F64,
+                },
+                GpuTensorStorage::Real,
+            ),
         };
-        runmat_accelerate_api::set_handle_precision(&handle, self.precision());
-        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::Real);
-        runmat_accelerate_api::set_handle_logical(&handle, false);
+        runmat_accelerate_api::clear_handle_metadata(&handle);
         Ok(handle)
     }
 
     fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async move {
-            let guard = registry().lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(buf) = guard.get(&h.buffer_id) {
-                let bytes = (buf.len() * std::mem::size_of::<f64>()) as u64;
-                self.telemetry.record_download_bytes(bytes);
-                Ok(HostTensorOwned {
-                    data: buf.clone(),
-                    shape: h.shape.clone(),
-                    storage: runmat_accelerate_api::handle_storage(h),
-                })
-            } else {
-                Err(anyhow::anyhow!("buffer not found: {}", h.buffer_id))
-            }
+            let data = numeric_registry()
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .get(&h.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("buffer not found: {}", h.buffer_id))?;
+            let (data, bytes) = match data {
+                InProcessNumericData::F64(values) => {
+                    let bytes = std::mem::size_of_val(values.as_slice()) as u64;
+                    (values, bytes)
+                }
+                InProcessNumericData::F32(values) => {
+                    let bytes = std::mem::size_of_val(values.as_slice()) as u64;
+                    (values.into_iter().map(f64::from).collect(), bytes)
+                }
+                InProcessNumericData::Integer(_) => {
+                    return Err(anyhow!(
+                        "integer buffer {} requires download_integer or download_numeric",
+                        h.buffer_id
+                    ));
+                }
+            };
+            self.telemetry.record_download_bytes(bytes);
+            Ok(HostTensorOwned {
+                data,
+                shape: h.shape.clone(),
+                storage: runmat_accelerate_api::handle_storage(h),
+            })
         })
     }
 
@@ -3976,10 +4386,12 @@ impl AccelProvider for InProcessProvider {
             shape: host.shape.to_vec(),
             device_id: self.device_id,
             buffer_id: id,
+            descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
+                NumericElementType::from(host.data.element_type()),
+                GpuTensorStorage::Real,
+            ),
         };
-        runmat_accelerate_api::set_handle_integer_type(&handle, host.data.element_type());
-        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::Real);
-        runmat_accelerate_api::set_handle_logical(&handle, false);
+        runmat_accelerate_api::clear_handle_metadata(&handle);
         Ok(handle)
     }
 
@@ -4008,11 +4420,9 @@ impl AccelProvider for InProcessProvider {
                 self.device_id
             ));
         }
-        let mut guard = registry().lock().unwrap_or_else(|e| e.into_inner());
-        guard.remove(&h.buffer_id);
-        integer_registry()
+        numeric_registry()
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(|error| error.into_inner())
             .remove(&h.buffer_id);
         runmat_accelerate_api::clear_handle_metadata(h);
         Ok(())
@@ -4048,7 +4458,9 @@ impl AccelProvider for InProcessProvider {
             .ok_or_else(|| anyhow!("ndgrid: tensor size exceeds provider limits"))?;
         let strides = compute_strides(request.output_shape);
         let axis_data = {
-            let guard = registry().lock().unwrap_or_else(|e| e.into_inner());
+            let guard = numeric_registry()
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
             let mut axes = Vec::with_capacity(request.output_count);
             for (dim, axis) in request.axes.iter().take(request.output_count).enumerate() {
                 ensure!(
@@ -4060,12 +4472,19 @@ impl AccelProvider for InProcessProvider {
                     .get(&axis.handle.buffer_id)
                     .cloned()
                     .ok_or_else(|| anyhow!("ndgrid: unknown buffer {}", axis.handle.buffer_id))?;
+                let data_len = match &data {
+                    InProcessNumericData::F64(values) => values.len(),
+                    InProcessNumericData::F32(values) => values.len(),
+                    InProcessNumericData::Integer(_) => {
+                        return Err(anyhow!("ndgrid: integer axes require typed host fallback"));
+                    }
+                };
                 let expected = request.output_shape.get(dim).copied().unwrap_or(1);
                 ensure!(
-                    data.len() == expected,
+                    data_len == expected,
                     "ndgrid: axis {} length {} does not match output extent {}",
                     dim + 1,
-                    data.len(),
+                    data_len,
                     expected
                 );
                 axes.push(data);
@@ -4078,24 +4497,36 @@ impl AccelProvider for InProcessProvider {
             let axis = &axis_data[dim];
             let stride = strides[dim];
             let extent = request.output_shape[dim];
-            let mut out = Vec::with_capacity(total);
-            for linear_idx in 0..total {
-                let coord = if extent == 0 {
+            let coordinate = |linear_idx: usize| {
+                if extent == 0 {
                     0
                 } else {
                     (linear_idx / stride) % extent
-                };
-                out.push(axis.get(coord).copied().unwrap_or(0.0));
-            }
-
-            let handle = self.allocate_tensor(out, request.output_shape.to_vec());
+                }
+            };
+            let handle = match axis {
+                InProcessNumericData::F64(axis) => {
+                    let mut out = Vec::with_capacity(total);
+                    for linear_idx in 0..total {
+                        out.push(axis.get(coordinate(linear_idx)).copied().unwrap_or(0.0));
+                    }
+                    self.allocate_tensor(out, request.output_shape.to_vec())
+                }
+                InProcessNumericData::F32(axis) => {
+                    let mut out = Vec::with_capacity(total);
+                    for linear_idx in 0..total {
+                        out.push(axis.get(coordinate(linear_idx)).copied().unwrap_or(0.0));
+                    }
+                    self.allocate_f32_tensor_with_storage(
+                        out,
+                        request.output_shape.to_vec(),
+                        GpuTensorStorage::Real,
+                    )
+                }
+                InProcessNumericData::Integer(_) => unreachable!("filtered above"),
+            };
             if runmat_accelerate_api::handle_is_logical(request.axes[dim].handle) {
                 runmat_accelerate_api::set_handle_logical(&handle, true);
-            }
-            if let Some(precision) =
-                runmat_accelerate_api::handle_precision(request.axes[dim].handle)
-            {
-                runmat_accelerate_api::set_handle_precision(&handle, precision);
             }
             outputs.push(handle);
         }
@@ -4472,6 +4903,10 @@ impl AccelProvider for InProcessProvider {
 
     fn diag_from_vector(&self, vector: &GpuTensorHandle, offset: isize) -> Result<GpuTensorHandle> {
         ensure_diag_shape("diag", &vector.shape)?;
+        ensure!(
+            runmat_accelerate_api::handle_storage(vector) == GpuTensorStorage::Real,
+            "diag: complex input is not supported by this provider hook"
+        );
         let (rows, cols) = rows_cols(&vector.shape);
         ensure!(
             is_vector_like(rows, cols, vector.shape.len()),
@@ -4479,10 +4914,12 @@ impl AccelProvider for InProcessProvider {
         );
 
         let len = {
-            let guard = registry().lock().unwrap();
+            let guard = numeric_registry()
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
             guard
                 .get(&vector.buffer_id)
-                .map(|data| data.len())
+                .map(InProcessNumericData::len)
                 .ok_or_else(|| anyhow!("diag: unknown buffer {}", vector.buffer_id))?
         };
         let (size, _) = diag_matrix_size(len, offset)?;
@@ -4497,6 +4934,10 @@ impl AccelProvider for InProcessProvider {
         out_cols: usize,
     ) -> Result<GpuTensorHandle> {
         ensure_diag_shape("diag", &vector.shape)?;
+        ensure!(
+            runmat_accelerate_api::handle_storage(vector) == GpuTensorStorage::Real,
+            "diag: complex input is not supported by this provider hook"
+        );
         let (rows, cols) = rows_cols(&vector.shape);
         ensure!(
             is_vector_like(rows, cols, vector.shape.len()),
@@ -4504,62 +4945,41 @@ impl AccelProvider for InProcessProvider {
         );
 
         let data = {
-            let guard = registry().lock().unwrap();
+            let guard = numeric_registry()
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
             guard
                 .get(&vector.buffer_id)
                 .cloned()
                 .ok_or_else(|| anyhow!("diag: unknown buffer {}", vector.buffer_id))?
         };
-        let total = out_rows
-            .checked_mul(out_cols)
-            .ok_or_else(|| anyhow!("diag: result size exceeds limits"))?;
-        let mut out = vec![0.0; total];
-        for (idx, &value) in data.iter().enumerate() {
-            let (row, col) = diagonal_target_index(idx, offset);
-            if row < out_rows && col < out_cols {
-                out[row + col * out_rows] = value;
-            }
-        }
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        registry().lock().unwrap().insert(id, out);
-        Ok(GpuTensorHandle {
-            shape: vec![out_rows, out_cols],
-            device_id: self.device_id,
-            buffer_id: id,
-        })
+        let output = diagonalize_numeric_data(&data, offset, out_rows, out_cols)?;
+        Ok(self.allocate_numeric_data(output, vec![out_rows, out_cols], GpuTensorStorage::Real))
     }
 
     fn diag_extract(&self, matrix: &GpuTensorHandle, offset: isize) -> Result<GpuTensorHandle> {
         ensure_diag_shape("diag", &matrix.shape)?;
+        ensure!(
+            runmat_accelerate_api::handle_storage(matrix) == GpuTensorStorage::Real,
+            "diag: complex input is not supported by this provider hook"
+        );
         let (rows, cols) = rows_cols(&matrix.shape);
         ensure!(
             !is_vector_like(rows, cols, matrix.shape.len()),
             "diag: matrix input required"
         );
         let diag_len = diagonal_length(rows, cols, offset);
-        if diag_len == 0 {
-            return self.zeros(&[0, 1]);
-        }
         let data = {
-            let guard = registry().lock().unwrap();
+            let guard = numeric_registry()
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
             guard
                 .get(&matrix.buffer_id)
                 .cloned()
                 .ok_or_else(|| anyhow!("diag: unknown buffer {}", matrix.buffer_id))?
         };
-        let mut out = Vec::with_capacity(diag_len);
-        for idx in 0..diag_len {
-            let (row, col) = diagonal_source_index(idx, offset);
-            let linear = row + col * rows;
-            out.push(*data.get(linear).unwrap_or(&0.0));
-        }
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        registry().lock().unwrap().insert(id, out);
-        Ok(GpuTensorHandle {
-            shape: vec![diag_len, 1],
-            device_id: self.device_id,
-            buffer_id: id,
-        })
+        let output = extract_numeric_diagonal(&data, rows, offset, diag_len)?;
+        Ok(self.allocate_numeric_data(output, vec![diag_len, 1], GpuTensorStorage::Real))
     }
 
     fn tril<'a>(
@@ -4735,11 +5155,7 @@ impl AccelProvider for InProcessProvider {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let mut guard = registry().lock().unwrap();
         guard.insert(id, vec![1.0; len]);
-        Ok(GpuTensorHandle {
-            shape: shape.to_vec(),
-            device_id: self.device_id,
-            buffer_id: id,
-        })
+        Ok(self.f64_handle_for_existing_buffer(id, shape.to_vec(), GpuTensorStorage::Real))
     }
 
     fn ones_like(&self, prototype: &GpuTensorHandle) -> Result<GpuTensorHandle> {
@@ -4752,11 +5168,7 @@ impl AccelProvider for InProcessProvider {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let mut guard = registry().lock().unwrap();
         guard.insert(id, data);
-        Ok(GpuTensorHandle {
-            shape,
-            device_id: self.device_id,
-            buffer_id: id,
-        })
+        Ok(self.f64_handle_for_existing_buffer(id, shape, GpuTensorStorage::Real))
     }
 
     fn eye_like(&self, prototype: &GpuTensorHandle) -> Result<GpuTensorHandle> {
@@ -4780,13 +5192,7 @@ impl AccelProvider for InProcessProvider {
             seq
         };
 
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        registry().lock().unwrap().insert(id, data);
-        Ok(GpuTensorHandle {
-            shape: vec![1, count],
-            device_id: self.device_id,
-            buffer_id: id,
-        })
+        Ok(self.allocate_tensor(data, vec![1, count]))
     }
 
     fn random_uniform(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
@@ -4802,11 +5208,7 @@ impl AccelProvider for InProcessProvider {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let mut buf_guard = registry().lock().unwrap_or_else(|e| e.into_inner());
         buf_guard.insert(id, data);
-        Ok(GpuTensorHandle {
-            shape: shape.to_vec(),
-            device_id: self.device_id,
-            buffer_id: id,
-        })
+        Ok(self.f64_handle_for_existing_buffer(id, shape.to_vec(), GpuTensorStorage::Real))
     }
 
     fn random_normal(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
@@ -4828,11 +5230,7 @@ impl AccelProvider for InProcessProvider {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(id, data);
-        Ok(GpuTensorHandle {
-            shape: shape.to_vec(),
-            device_id: self.device_id,
-            buffer_id: id,
-        })
+        Ok(self.f64_handle_for_existing_buffer(id, shape.to_vec(), GpuTensorStorage::Real))
     }
 
     fn random_exponential(&self, mu: f64, shape: &[usize]) -> Result<GpuTensorHandle> {
@@ -4850,11 +5248,7 @@ impl AccelProvider for InProcessProvider {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(id, data);
-        Ok(GpuTensorHandle {
-            shape: shape.to_vec(),
-            device_id: self.device_id,
-            buffer_id: id,
-        })
+        Ok(self.f64_handle_for_existing_buffer(id, shape.to_vec(), GpuTensorStorage::Real))
     }
 
     fn random_normrnd(&self, mu: f64, sigma: f64, shape: &[usize]) -> Result<GpuTensorHandle> {
@@ -4875,11 +5269,7 @@ impl AccelProvider for InProcessProvider {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(id, data);
-        Ok(GpuTensorHandle {
-            shape: shape.to_vec(),
-            device_id: self.device_id,
-            buffer_id: id,
-        })
+        Ok(self.f64_handle_for_existing_buffer(id, shape.to_vec(), GpuTensorStorage::Real))
     }
 
     fn random_unifrnd(&self, a: f64, b: f64, shape: &[usize]) -> Result<GpuTensorHandle> {
@@ -4896,11 +5286,7 @@ impl AccelProvider for InProcessProvider {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(id, data);
-        Ok(GpuTensorHandle {
-            shape: shape.to_vec(),
-            device_id: self.device_id,
-            buffer_id: id,
-        })
+        Ok(self.f64_handle_for_existing_buffer(id, shape.to_vec(), GpuTensorStorage::Real))
     }
 
     fn set_rng_state(&self, state: u64) -> Result<()> {
@@ -4958,50 +5344,6 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
-    fn random_integer_range(
-        &self,
-        lower: i64,
-        upper: i64,
-        shape: &[usize],
-    ) -> Result<GpuTensorHandle> {
-        ensure!(lower <= upper, "lower bound must be <= upper bound");
-        let span_i128 = (upper as i128)
-            .checked_sub(lower as i128)
-            .and_then(|delta| delta.checked_add(1))
-            .ok_or_else(|| anyhow!("integer range overflow"))?;
-        ensure!(span_i128 > 0, "integer range must be non-empty");
-        ensure!(
-            span_i128 <= (1i128 << 53),
-            "integer range exceeds 2^53 and cannot be represented exactly"
-        );
-        let span = span_i128 as u64;
-
-        let len: usize = shape.iter().copied().product();
-        let mut data = Vec::with_capacity(len);
-        if span == 1 {
-            data.resize(len, lower as f64);
-        } else if len > 0 {
-            let mut guard = rng_state().lock().unwrap_or_else(|e| e.into_inner());
-            let span_f64 = span as f64;
-            for _ in 0..len {
-                let mut offset = (next_uniform(&mut guard) * span_f64).floor() as u64;
-                if offset >= span {
-                    offset = span - 1;
-                }
-                let value = (lower as i128 + offset as i128) as f64;
-                data.push(value);
-            }
-        }
-
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        registry().lock().unwrap().insert(id, data);
-        Ok(GpuTensorHandle {
-            shape: shape.to_vec(),
-            device_id: self.device_id,
-            buffer_id: id,
-        })
-    }
-
     fn random_permutation(&self, n: usize, k: usize) -> Result<GpuTensorHandle> {
         ensure!(k <= n, "randperm: K must satisfy 0 <= K <= N");
         let k = k.min(n);
@@ -5037,11 +5379,7 @@ impl AccelProvider for InProcessProvider {
 
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         registry().lock().unwrap().insert(id, values);
-        Ok(GpuTensorHandle {
-            shape: vec![1, k],
-            device_id: self.device_id,
-            buffer_id: id,
-        })
+        Ok(self.f64_handle_for_existing_buffer(id, vec![1, k], GpuTensorStorage::Real))
     }
 
     fn random_permutation_like(
@@ -6195,11 +6533,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: y.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, y.shape.clone(), GpuTensorStorage::Real))
         })
     }
 
@@ -6329,11 +6663,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
     fn unary_asinh<'a>(
@@ -6350,11 +6680,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
     fn unary_sinh<'a>(
@@ -6430,11 +6756,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
     fn unary_acos<'a>(
@@ -6451,11 +6773,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
     fn unary_acosh<'a>(
@@ -6472,11 +6790,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
 
@@ -6535,11 +6849,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
     fn unary_atanh<'a>(
@@ -6556,11 +6866,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
 
@@ -6578,11 +6884,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
 
@@ -6600,11 +6902,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
 
@@ -6622,11 +6920,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
 
@@ -6685,11 +6979,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
 
@@ -6718,11 +7008,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
 
@@ -7043,14 +7329,7 @@ impl AccelProvider for InProcessProvider {
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
             let out: Vec<f64> = abuf.iter().map(|&x| x.ln()).collect();
             drop(guard);
-            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-            let mut guard2 = registry().lock().unwrap();
-            guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.allocate_tensor(out, a.shape.clone()))
         })
     }
 
@@ -7068,11 +7347,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
 
@@ -7090,11 +7365,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, abuf);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
 
@@ -7107,16 +7378,14 @@ impl AccelProvider for InProcessProvider {
             let abuf = guard
                 .get(&a.buffer_id)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-            let out: Vec<f64> = abuf.iter().map(|&x| (x as f32) as f64).collect();
+            let out: Vec<f32> = abuf.iter().map(|&x| x as f32).collect();
             drop(guard);
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-            let mut guard2 = registry().lock().unwrap();
-            guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            numeric_registry()
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .insert(id, InProcessNumericData::F32(out));
+            Ok(self.f32_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
 
@@ -7134,11 +7403,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
 
@@ -7166,11 +7431,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
 
@@ -7197,11 +7458,7 @@ impl AccelProvider for InProcessProvider {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let mut guard2 = registry().lock().unwrap();
         guard2.insert(id, out);
-        Ok(GpuTensorHandle {
-            shape: mantissa.shape.clone(),
-            device_id: self.device_id,
-            buffer_id: id,
-        })
+        Ok(self.f64_handle_for_existing_buffer(id, mantissa.shape.clone(), GpuTensorStorage::Real))
     }
 
     fn scalar_add(&self, a: &GpuTensorHandle, scalar: f64) -> Result<GpuTensorHandle> {
@@ -8197,11 +8454,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, vec![s]);
-            Ok(GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, vec![1, 1], GpuTensorStorage::Real))
         })
     }
 
@@ -8258,11 +8511,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape,
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, shape, GpuTensorStorage::Real))
         })
     }
 
@@ -8328,11 +8577,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, vec![p]);
-            Ok(GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, vec![1, 1], GpuTensorStorage::Real))
         })
     }
 
@@ -8384,11 +8629,7 @@ impl AccelProvider for InProcessProvider {
             } else {
                 vec![rows, 1]
             };
-            Ok(GpuTensorHandle {
-                shape,
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, shape, GpuTensorStorage::Real))
         })
     }
 
@@ -8531,11 +8772,7 @@ impl AccelProvider for InProcessProvider {
             drop(guard);
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             registry().lock().unwrap().insert(id, vec![mean]);
-            Ok(GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, vec![1, 1], GpuTensorStorage::Real))
         })
     }
 
@@ -8586,11 +8823,7 @@ impl AccelProvider for InProcessProvider {
             } else {
                 vec![rows, 1]
             };
-            Ok(GpuTensorHandle {
-                shape,
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, shape, GpuTensorStorage::Real))
         })
     }
 
@@ -8821,11 +9054,7 @@ impl AccelProvider for InProcessProvider {
             };
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             registry().lock().unwrap().insert(id, vec![median]);
-            Ok(GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, vec![1, 1], GpuTensorStorage::Real))
         })
     }
 
@@ -8896,11 +9125,7 @@ impl AccelProvider for InProcessProvider {
             } else {
                 vec![rows, 1]
             };
-            Ok(GpuTensorHandle {
-                shape,
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, shape, GpuTensorStorage::Real))
         })
     }
 
@@ -8927,11 +9152,7 @@ impl AccelProvider for InProcessProvider {
             drop(guard);
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             registry().lock().unwrap().insert(id, vec![m]);
-            Ok(GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, vec![1, 1], GpuTensorStorage::Real))
         })
     }
 
@@ -9001,16 +9222,16 @@ impl AccelProvider for InProcessProvider {
             let shape_vals = vshape.clone();
             let shape_inds = vshape;
             Ok(runmat_accelerate_api::ReduceDimResult {
-                values: GpuTensorHandle {
-                    shape: shape_vals,
-                    device_id: self.device_id,
-                    buffer_id: idv,
-                },
-                indices: GpuTensorHandle {
-                    shape: shape_inds,
-                    device_id: self.device_id,
-                    buffer_id: idi,
-                },
+                values: self.f64_handle_for_existing_buffer(
+                    idv,
+                    shape_vals,
+                    GpuTensorStorage::Real,
+                ),
+                indices: self.f64_handle_for_existing_buffer(
+                    idi,
+                    shape_inds,
+                    GpuTensorStorage::Real,
+                ),
             })
         })
     }
@@ -9028,11 +9249,7 @@ impl AccelProvider for InProcessProvider {
             drop(guard);
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             registry().lock().unwrap().insert(id, vec![m]);
-            Ok(GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, vec![1, 1], GpuTensorStorage::Real))
         })
     }
 
@@ -9102,16 +9319,16 @@ impl AccelProvider for InProcessProvider {
             let shape_vals = vshape.clone();
             let shape_inds = vshape;
             Ok(runmat_accelerate_api::ReduceDimResult {
-                values: GpuTensorHandle {
-                    shape: shape_vals,
-                    device_id: self.device_id,
-                    buffer_id: idv,
-                },
-                indices: GpuTensorHandle {
-                    shape: shape_inds,
-                    device_id: self.device_id,
-                    buffer_id: idi,
-                },
+                values: self.f64_handle_for_existing_buffer(
+                    idv,
+                    shape_vals,
+                    GpuTensorStorage::Real,
+                ),
+                indices: self.f64_handle_for_existing_buffer(
+                    idi,
+                    shape_inds,
+                    GpuTensorStorage::Real,
+                ),
             })
         })
     }
@@ -9469,11 +9686,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: vec![ar, bc],
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, vec![ar, bc], GpuTensorStorage::Real))
         })
     }
 
@@ -10104,11 +10317,11 @@ impl AccelProvider for InProcessProvider {
         if len == 0 {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             registry().lock().unwrap().insert(id, Vec::new());
-            return Ok(GpuTensorHandle {
-                shape: output_shape.to_vec(),
-                device_id: self.device_id,
-                buffer_id: id,
-            });
+            return Ok(self.f64_handle_for_existing_buffer(
+                id,
+                output_shape.to_vec(),
+                GpuTensorStorage::Real,
+            ));
         }
 
         let mut host_values: Vec<Vec<f64>> = Vec::with_capacity(inputs.len());
@@ -10153,11 +10366,7 @@ impl AccelProvider for InProcessProvider {
 
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         registry().lock().unwrap().insert(id, output);
-        Ok(GpuTensorHandle {
-            shape: output_shape.to_vec(),
-            device_id: self.device_id,
-            buffer_id: id,
-        })
+        Ok(self.f64_handle_for_existing_buffer(id, output_shape.to_vec(), GpuTensorStorage::Real))
     }
 
     fn fused_elementwise(
@@ -10202,6 +10411,175 @@ mod tests {
         IntegerElementType, ProviderBlackScholesPriceInput, ProviderNdgridAxis,
     };
     use runmat_value::{IntValue, IntegerStorage};
+
+    #[test]
+    fn shared_numeric_registry_round_trips_every_native_class_and_layout() {
+        let provider = InProcessProvider::new();
+        let cases = vec![
+            HostNumericDataOwned::F64(vec![1.0, 2.0, 3.0, 4.0]),
+            HostNumericDataOwned::F32(vec![1.0, 2.0, 3.0, 4.0]),
+            HostNumericDataOwned::I8(vec![i8::MIN, -1, 1, i8::MAX]),
+            HostNumericDataOwned::I16(vec![i16::MIN, -1, 1, i16::MAX]),
+            HostNumericDataOwned::I32(vec![i32::MIN, -1, 1, i32::MAX]),
+            HostNumericDataOwned::I64(vec![i64::MIN, -1, 1, i64::MAX]),
+            HostNumericDataOwned::U8(vec![0, 1, 2, u8::MAX]),
+            HostNumericDataOwned::U16(vec![0, 1, 2, u16::MAX]),
+            HostNumericDataOwned::U32(vec![0, 1, 2, u32::MAX]),
+            HostNumericDataOwned::U64(vec![0, 1, 9_007_199_254_740_993, u64::MAX]),
+        ];
+
+        for data in cases {
+            for (shape, storage) in [
+                (vec![1, 4], GpuTensorStorage::Real),
+                (vec![1, 2], GpuTensorStorage::ComplexInterleaved),
+            ] {
+                let expected_type = data.element_type();
+                let transfer = HostNumericTensorView {
+                    data: data.as_view(),
+                    shape: &shape,
+                    storage,
+                };
+                let handle = provider
+                    .upload_numeric(&transfer)
+                    .expect("shared native upload");
+                assert_eq!(handle.descriptor.element_type, Some(expected_type));
+                assert_eq!(handle.descriptor.storage, Some(storage));
+                runmat_accelerate_api::clear_handle_class_name(&handle);
+                assert_eq!(runmat_accelerate_api::handle_storage(&handle), storage);
+                assert_eq!(
+                    runmat_accelerate_api::handle_class_name(&handle).as_deref(),
+                    Some(expected_type.class_name())
+                );
+                assert_eq!(
+                    runmat_accelerate_api::handle_precision(&handle),
+                    expected_type.precision()
+                );
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(&handle),
+                    expected_type.integer_type()
+                );
+
+                let downloaded =
+                    block_on(provider.download_numeric(&handle)).expect("shared native download");
+                assert_eq!(downloaded.data, data);
+                assert_eq!(downloaded.shape, shape);
+                assert_eq!(downloaded.storage, storage);
+
+                provider.free(&handle).expect("free shared numeric buffer");
+                assert!(!numeric_registry()
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .contains_key(&handle.buffer_id));
+            }
+        }
+    }
+
+    #[test]
+    fn diag_hooks_preserve_native_single_and_wide_integer_storage() {
+        let provider = InProcessProvider::new();
+
+        let single = provider
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::F32(&[1.25, -2.5]),
+                shape: &[1, 2],
+                storage: GpuTensorStorage::Real,
+            })
+            .expect("single upload");
+        let single_matrix = provider
+            .diag_from_vector(&single, 0)
+            .expect("single diagonal construction");
+        assert_eq!(
+            single_matrix.descriptor.element_type,
+            Some(NumericElementType::F32)
+        );
+        let single_download =
+            block_on(provider.download_numeric(&single_matrix)).expect("single diagonal download");
+        assert_eq!(
+            single_download.data,
+            HostNumericDataOwned::F32(vec![1.25, 0.0, 0.0, -2.5])
+        );
+
+        let wide_values = [9_007_199_254_740_993, u64::MAX];
+        let wide = provider
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::U64(&wide_values),
+                shape: &[1, 2],
+                storage: GpuTensorStorage::Real,
+            })
+            .expect("wide integer upload");
+        let wide_matrix = provider
+            .diag_from_vector(&wide, 0)
+            .expect("wide integer diagonal construction");
+        assert_eq!(
+            wide_matrix.descriptor.element_type,
+            Some(NumericElementType::U64)
+        );
+        let wide_download =
+            block_on(provider.download_numeric(&wide_matrix)).expect("wide diagonal download");
+        assert_eq!(
+            wide_download.data,
+            HostNumericDataOwned::U64(vec![wide_values[0], 0, 0, wide_values[1]])
+        );
+
+        let extracted = provider
+            .diag_extract(&wide_matrix, 0)
+            .expect("wide integer diagonal extraction");
+        let extracted_download =
+            block_on(provider.download_numeric(&extracted)).expect("wide extraction download");
+        assert_eq!(
+            extracted_download.data,
+            HostNumericDataOwned::U64(wide_values.to_vec())
+        );
+
+        let mut forged_shape = wide_matrix.clone();
+        forged_shape.shape = vec![3, 3];
+        let error = provider
+            .diag_extract(&forged_shape, 0)
+            .expect_err("forged shape must not index beyond physical storage");
+        assert!(error
+            .to_string()
+            .contains("source shape exceeds physical buffer length"));
+
+        for handle in [single, single_matrix, wide, wide_matrix, extracted] {
+            provider.free(&handle).expect("free diagonal buffer");
+        }
+    }
+
+    #[test]
+    fn old_download_projects_native_single_without_storing_an_f64_mirror() {
+        let provider = InProcessProvider::new();
+        let values = [1.25_f32, -2.5, f32::MAX];
+        let handle = provider
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::F32(&values),
+                shape: &[1, 3],
+                storage: GpuTensorStorage::Real,
+            })
+            .expect("native single upload");
+
+        {
+            let guard = numeric_registry()
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            assert_eq!(
+                guard.get(&handle.buffer_id),
+                Some(&InProcessNumericData::F32(values.to_vec()))
+            );
+        }
+        let projected = block_on(provider.download(&handle)).expect("old single projection");
+        assert_eq!(
+            projected.data,
+            values.into_iter().map(f64::from).collect::<Vec<_>>()
+        );
+        assert!(matches!(
+            numeric_registry()
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .get(&handle.buffer_id),
+            Some(InProcessNumericData::F32(_))
+        ));
+        provider.free(&handle).expect("free native single buffer");
+    }
 
     #[test]
     fn conv1d_valid_empty_kernel_returns_signal_length_zeros() {
@@ -10311,12 +10689,12 @@ mod tests {
             interleaved.push(im);
         }
         let handle = provider
-            .upload(&HostTensorView {
-                data: &interleaved,
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::F64(&interleaved),
                 shape,
+                storage: GpuTensorStorage::ComplexInterleaved,
             })
             .expect("upload complex");
-        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::ComplexInterleaved);
         handle
     }
 
@@ -11042,6 +11420,59 @@ mod tests {
     }
 
     #[test]
+    fn ndgrid_preserves_native_single_storage_without_side_metadata() {
+        let provider = InProcessProvider::new();
+        let x_values = [1.25_f32, 2.5];
+        let y_values = [10.0_f32, 20.0, 30.0];
+        let x = provider
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::F32(&x_values),
+                shape: &[1, 2],
+                storage: GpuTensorStorage::Real,
+            })
+            .expect("upload native single x");
+        let y = provider
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::F32(&y_values),
+                shape: &[3, 1],
+                storage: GpuTensorStorage::Real,
+            })
+            .expect("upload native single y");
+        let axes = [
+            ProviderNdgridAxis { handle: &x },
+            ProviderNdgridAxis { handle: &y },
+        ];
+        let result = provider
+            .ndgrid(&ProviderNdgridRequest {
+                axes: &axes,
+                output_shape: &[2, 3],
+                output_count: 2,
+            })
+            .expect("native single ndgrid");
+
+        for output in &result.outputs {
+            assert_eq!(
+                output.descriptor.element_type,
+                Some(NumericElementType::F32)
+            );
+            assert_eq!(output.descriptor.storage, Some(GpuTensorStorage::Real));
+            runmat_accelerate_api::clear_handle_class_name(output);
+        }
+        let x_output = block_on(provider.download_numeric(&result.outputs[0]))
+            .expect("download native single x grid");
+        let y_output = block_on(provider.download_numeric(&result.outputs[1]))
+            .expect("download native single y grid");
+        assert_eq!(
+            x_output.data,
+            HostNumericDataOwned::F32(vec![1.25, 2.5, 1.25, 2.5, 1.25, 2.5])
+        );
+        assert_eq!(
+            y_output.data,
+            HostNumericDataOwned::F32(vec![10.0, 10.0, 20.0, 20.0, 30.0, 30.0])
+        );
+    }
+
+    #[test]
     fn interp1_evaluates_resident_linear_series() {
         let provider = InProcessProvider::new();
         let x = real_handle(&provider, &[1.0, 2.0, 3.0], &[1, 3]);
@@ -11330,9 +11761,8 @@ mod tests {
             shape: vec![1, 1],
             device_id: provider.device_id(),
             buffer_id: 9_000_000,
+            descriptor: Default::default(),
         };
-        runmat_accelerate_api::set_handle_precision(&stale, ProviderPrecision::F32);
-        runmat_accelerate_api::set_handle_storage(&stale, GpuTensorStorage::ComplexInterleaved);
         runmat_accelerate_api::set_handle_logical(&stale, true);
 
         let data = [1.0, 2.0, 3.0];
@@ -11355,7 +11785,10 @@ mod tests {
         assert!(!runmat_accelerate_api::handle_is_logical(&handle));
 
         provider.free(&handle).expect("free");
-        assert_eq!(runmat_accelerate_api::handle_precision(&handle), None);
+        assert_eq!(
+            runmat_accelerate_api::handle_precision(&handle),
+            Some(ProviderPrecision::F64)
+        );
         assert_eq!(
             runmat_accelerate_api::handle_storage(&handle),
             GpuTensorStorage::Real

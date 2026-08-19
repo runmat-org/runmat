@@ -1,9 +1,13 @@
 //! MATLAB-compatible `ne` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
@@ -16,7 +20,8 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::logical::rel::integer_comparison::{
-    integer_f64_order, try_complex_integer_equality_comparison, try_integer_comparison,
+    integer_f64_order, restore_explicit_comparison_result, select_comparison_output_source,
+    try_complex_integer_equality_comparison, try_gpu_equality_comparison, try_integer_comparison,
     IntegerComparisonError, IntegerComparisonOp,
 };
 use crate::builtins::logical::type_resolvers::logical_binary_type;
@@ -38,8 +43,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes:
-        "Prefers provider elem_ne kernels when available; otherwise inputs gather to host tensors automatically.",
+    notes: "Uses elem_ne only when both handles share an exact owner and validates the fresh logical output. Fallback gathers authoritative typed storage; explicit gpuArray intent restores a logical result while automatic residency may remain on host.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::logical::rel::ne")]
@@ -66,6 +70,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "ne";
+
+const NE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability { name: "A", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Every integer class compares with numeric data without converting authoritative integer storage through f64." },
+    BuiltinIntegerInputCapability { name: "B", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Mixed signed, unsigned, and floating comparisons preserve precision and support compatible-size expansion." },
+];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor { form: "tf = ne(integer_A, integer_or_numeric_B)", inputs: &NE_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Predicate, output_class: BuiltinIntegerOutputClassRule::Logical, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::BroadcastCompatible, notes: "Signed, unsigned, floating, logical, character, and complex components compare without precision loss; the result is logical and resident provider output is ownership-validated." }];
 
 const NE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "tf",
@@ -136,29 +147,30 @@ fn ne_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     keywords = "ne,not equal,comparison,logical,gpu",
     accel = "elementwise",
     type_resolver(logical_binary_type),
+    integer_capabilities(crate::builtins::logical::rel::ne::INTEGER_CAPABILITIES),
     descriptor(crate::builtins::logical::rel::ne::NE_DESCRIPTOR),
     builtin_path = "crate::builtins::logical::rel::ne"
 )]
 async fn ne_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {
-        if let Some(result) = try_ne_gpu(a, b).await {
+        if let Some(result) = try_gpu_equality_comparison(a, b, IntegerComparisonOp::Ne).await {
             return result;
         }
     }
-    ne_host(lhs, rhs).await
+    let output_source = select_comparison_output_source(&lhs, &rhs, BUILTIN_NAME)?;
+    let lhs = gather_ne_operand(lhs).await?;
+    let rhs = gather_ne_operand(rhs).await?;
+    let result = ne_host(lhs, rhs).await?;
+    restore_explicit_comparison_result(result, output_source.as_ref(), BUILTIN_NAME)
 }
 
-async fn try_ne_gpu(
-    a: &GpuTensorHandle,
-    b: &GpuTensorHandle,
-) -> Option<crate::BuiltinResult<Value>> {
-    let provider = runmat_accelerate_api::provider()?;
-    match provider.elem_ne(a, b).await {
-        Ok(handle) => Some(Ok(gpu_helpers::logical_gpu_value(handle))),
-        Err(err) => {
-            drop(err);
-            None
-        }
+async fn gather_ne_operand(value: Value) -> crate::BuiltinResult<Value> {
+    if matches!(value, Value::GpuTensor(_)) {
+        gpu_helpers::gather_value_async(&value)
+            .await
+            .map_err(|_| ne_error(&NE_ERROR_INVALID_INPUT))
+    } else {
+        Ok(value)
     }
 }
 
@@ -922,6 +934,64 @@ pub(crate) mod tests {
                 other => panic!("expected logical array, got {other:?}"),
             }
         });
+    }
+
+    #[test]
+    fn ne_explicit_resident_wide_integer_fallback_stays_logical_and_resident() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new_integer(
+                IntegerStorage::U64(vec![0, (1_u64 << 53) + 1, u64::MAX]),
+                vec![1, 3],
+            )
+            .expect("integer input");
+            let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload integer");
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let result = run_ne(Value::GpuTensor(handle), Value::Num(0.0)).expect("ne");
+            let Value::GpuTensor(output) = &result else {
+                panic!("explicit gpuArray result must remain resident");
+            };
+            assert!(runmat_accelerate_api::handle_is_explicit(output));
+            assert!(runmat_accelerate_api::handle_is_logical(output));
+            assert_eq!(
+                test_support::gather(result)
+                    .expect("gather")
+                    .materialize_f64(),
+                vec![0.0, 1.0, 1.0]
+            );
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn ne_wgpu_compares_wide_integer_handles_exactly_and_preserves_explicit_residency() {
+        let _accel_guard = test_support::accel_test_lock();
+        let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .expect("actual WGPU provider");
+        let lhs = Tensor::new_integer(
+            IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
+            vec![1, 2],
+        )
+        .expect("lhs");
+        let rhs = Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 53, u64::MAX]), vec![1, 2])
+            .expect("rhs");
+        let lhs = gpu_helpers::upload_tensor(provider, &lhs).expect("upload lhs");
+        let rhs = gpu_helpers::upload_tensor(provider, &rhs).expect("upload rhs");
+        let lhs = lhs.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let result = run_ne(Value::GpuTensor(lhs), Value::GpuTensor(rhs)).expect("ne");
+        let Value::GpuTensor(output) = &result else {
+            panic!("resident comparison must remain resident");
+        };
+        assert!(runmat_accelerate_api::handle_is_explicit(output));
+        assert_eq!(
+            test_support::gather(result)
+                .expect("gather")
+                .materialize_f64(),
+            vec![1.0, 0.0]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

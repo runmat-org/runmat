@@ -1,9 +1,13 @@
 //! MATLAB-compatible `single` builtin with GPU-aware semantics for RunMat.
 
 use log::trace;
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
@@ -11,6 +15,7 @@ use runmat_value::{
     CharArray, ComplexTensor, LogicalArray, NumericStorage, SparseTensor, SymbolicArray, Tensor,
     Value,
 };
+use runmat_value::{IntValue, NumericScalar};
 
 use crate::builtins::common::{
     gpu_helpers,
@@ -67,6 +72,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "single";
 
+pub const SINGLE_LIKE_OUTPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "single-like-output",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "single with a like output prototype is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SingleLikeOutputExtension"),
+};
+pub const SINGLE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [SINGLE_LIKE_OUTPUT_EXTENSION];
+
 const SINGLE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
     ty: BuiltinParamType::NumericArray,
@@ -119,6 +132,26 @@ const SINGLE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
         outputs: &SINGLE_OUTPUT,
     },
 ];
+
+const SINGLE_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer classes convert directly from native integer storage to IEEE binary32 without an intermediate binary64 materialization.",
+    }];
+pub const SINGLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = single(integer_X)",
+        inputs: &SINGLE_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "The output is native single storage with MATLAB conversion rounding; complex integer storage preserves complexity while converting each component directly.",
+    }];
 
 const SINGLE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.SINGLE.INVALID_ARGUMENT",
@@ -195,20 +228,25 @@ fn conversion_error(type_name: &str) -> RuntimeError {
     accel = "unary",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::elementwise::single::SINGLE_DESCRIPTOR),
+    extensions(SINGLE_EXTENSIONS),
+    integer_capabilities(SINGLE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::elementwise::single"
 )]
 async fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let template = parse_output_template(&rest)?;
+    if !rest.is_empty() {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SINGLE_LIKE_OUTPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let converted = match value {
-        Value::Num(n) => Ok(Value::Num(cast_f64_to_single(n))),
-        Value::Int(i) => Ok(Value::Num(cast_f64_to_single(i.to_f64()))),
-        Value::Bool(flag) => Ok(Value::Num(if flag { 1.0 } else { 0.0 })),
+        Value::Num(n) => single_scalar_value(n as f32),
+        Value::Int(i) => single_scalar_value(int_value_to_f32(&i)),
+        Value::Bool(flag) => single_scalar_value(if flag { 1.0 } else { 0.0 }),
         Value::Tensor(tensor) => single_from_tensor(tensor),
         Value::SparseTensor(sparse) => single_from_sparse_tensor(sparse),
-        Value::Complex(re, im) => Ok(Value::Complex(
-            cast_f64_to_single(re),
-            cast_f64_to_single(im),
-        )),
+        Value::Complex(re, im) => single_complex_scalar_value(re as f32, im as f32),
         Value::ComplexTensor(tensor) => single_from_complex_tensor(tensor),
         Value::LogicalArray(array) => single_from_logical_array(array),
         Value::CharArray(chars) => single_from_char_array(chars),
@@ -216,7 +254,8 @@ async fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
         Value::String(_) | Value::StringArray(_) => Err(conversion_error("string")),
         Value::Symbolic(expr) => expr
             .numeric_constant_value()
-            .map(|value| Value::Num(cast_f64_to_single(value)))
+            .map(|value| single_scalar_value(value as f32))
+            .transpose()?
             .ok_or_else(|| conversion_error("sym")),
         Value::SymbolicArray(array) => single_from_symbolic_array(array),
         Value::Cell(_) => Err(conversion_error("cell")),
@@ -242,6 +281,18 @@ async fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
     apply_output_template(converted, &template).await
 }
 
+fn single_scalar_value(value: f32) -> BuiltinResult<Value> {
+    Tensor::from_f32(vec![value], vec![1, 1])
+        .map(Value::Tensor)
+        .map_err(|error| single_error_with_detail(&SINGLE_ERROR_INTERNAL, error))
+}
+
+fn single_complex_scalar_value(real: f32, imag: f32) -> BuiltinResult<Value> {
+    ComplexTensor::from_f32(vec![(real, imag)], vec![1, 1])
+        .map(Value::ComplexTensor)
+        .map_err(|error| single_error_with_detail(&SINGLE_ERROR_INTERNAL, error))
+}
+
 fn single_from_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     single_tensor_to_host(tensor).map(Value::Tensor)
 }
@@ -252,9 +303,9 @@ fn single_from_symbolic_array(array: SymbolicArray) -> BuiltinResult<Value> {
         let value = expr
             .numeric_constant_value()
             .ok_or_else(|| conversion_error("sym"))?;
-        data.push(cast_f64_to_single(value));
+        data.push(value as f32);
     }
-    Tensor::new(data, array.shape)
+    Tensor::from_numeric_storage(NumericStorage::F32(data), array.shape)
         .map(Value::Tensor)
         .map_err(|e| single_error_with_detail(&SINGLE_ERROR_INTERNAL, e))
 }
@@ -264,11 +315,19 @@ fn single_from_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
 }
 
 fn single_from_sparse_tensor(sparse: SparseTensor) -> BuiltinResult<Value> {
-    let values = sparse
-        .materialize_f64()
-        .into_iter()
-        .map(|value| value as f32)
-        .collect();
+    let values = (0..sparse.nnz())
+        .map(|index| {
+            sparse
+                .numeric_value_at(index)
+                .map(numeric_scalar_to_f32)
+                .ok_or_else(|| {
+                    single_error_with_detail(
+                        &SINGLE_ERROR_INTERNAL,
+                        "sparse value storage is inconsistent",
+                    )
+                })
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
     SparseTensor::new_f32(
         sparse.rows,
         sparse.cols,
@@ -308,16 +367,7 @@ async fn single_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let converted = single_tensor_to_host(tensor)?;
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         let _ = provider.free(&handle);
-        let upload_data = converted
-            .clone()
-            .into_numeric_storage()
-            .map_err(|error| single_error_with_detail(&SINGLE_ERROR_INTERNAL, error))?
-            .materialize_f64();
-        let view = HostTensorView {
-            data: &upload_data,
-            shape: &converted.shape,
-        };
-        match provider.upload(&view) {
+        match gpu_helpers::upload_tensor(provider, &converted) {
             Ok(new_handle) => {
                 return Ok(Value::GpuTensor(new_handle));
             }
@@ -334,32 +384,56 @@ fn single_tensor_to_host(tensor: Tensor) -> BuiltinResult<Tensor> {
     let storage = tensor
         .into_numeric_storage()
         .map_err(|error| single_error_with_detail(&SINGLE_ERROR_INTERNAL, error))?;
-    let values = match storage {
-        NumericStorage::F32(values) => values,
-        NumericStorage::F64(values) => values.into_iter().map(|value| value as f32).collect(),
-        storage => storage
-            .materialize_f64()
-            .into_iter()
-            .map(|value| value as f32)
-            .collect(),
-    };
+    let values = storage.materialize_f32();
     Tensor::from_numeric_storage(NumericStorage::F32(values), shape)
         .map_err(|error| single_error_with_detail(&SINGLE_ERROR_INTERNAL, error))
 }
 
 fn single_complex_tensor_to_host(tensor: ComplexTensor) -> BuiltinResult<ComplexTensor> {
     let shape = tensor.shape.clone();
-    let data = tensor
-        .materialize_f64()
-        .into_iter()
-        .map(|(real, imag)| (real as f32, imag as f32))
-        .collect();
+    let data = (0..tensor.len())
+        .map(|index| {
+            tensor
+                .numeric_value_at(index)
+                .map(|(real, imag)| (numeric_scalar_to_f32(real), numeric_scalar_to_f32(imag)))
+                .ok_or_else(|| {
+                    single_error_with_detail(
+                        &SINGLE_ERROR_INTERNAL,
+                        "complex value storage is inconsistent",
+                    )
+                })
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
     ComplexTensor::from_f32(data, shape)
         .map_err(|error| single_error_with_detail(&SINGLE_ERROR_INTERNAL, error))
 }
 
-fn cast_f64_to_single(value: f64) -> f64 {
-    (value as f32) as f64
+fn int_value_to_f32(value: &IntValue) -> f32 {
+    match value {
+        IntValue::I8(value) => f32::from(*value),
+        IntValue::I16(value) => f32::from(*value),
+        IntValue::I32(value) => *value as f32,
+        IntValue::I64(value) => *value as f32,
+        IntValue::U8(value) => f32::from(*value),
+        IntValue::U16(value) => f32::from(*value),
+        IntValue::U32(value) => *value as f32,
+        IntValue::U64(value) => *value as f32,
+    }
+}
+
+fn numeric_scalar_to_f32(value: NumericScalar) -> f32 {
+    match value {
+        NumericScalar::F64(value) => value as f32,
+        NumericScalar::F32(value) => value,
+        NumericScalar::I8(value) => f32::from(value),
+        NumericScalar::I16(value) => f32::from(value),
+        NumericScalar::I32(value) => value as f32,
+        NumericScalar::I64(value) => value as f32,
+        NumericScalar::U8(value) => f32::from(value),
+        NumericScalar::U16(value) => f32::from(value),
+        NumericScalar::U32(value) => value as f32,
+        NumericScalar::U64(value) => value as f32,
+    }
 }
 
 fn char_array_to_tensor(chars: &CharArray) -> BuiltinResult<Tensor> {
@@ -439,23 +513,14 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
         Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
-            let upload_data = tensor
-                .into_numeric_storage()
-                .map_err(|error| single_error_with_detail(&SINGLE_ERROR_INTERNAL, error))?
-                .materialize_f64();
-            let view = HostTensorView {
-                data: &upload_data,
-                shape: &shape,
-            };
-            let handle = provider
-                .upload(&view)
+            let handle = gpu_helpers::upload_tensor(provider, &tensor)
                 .map_err(|e| single_error_with_detail(&SINGLE_ERROR_INTERNAL, e))?;
             Ok(Value::GpuTensor(handle))
         }
         Value::Num(n) => {
-            let tensor = Tensor::new(vec![n], vec![1, 1])
-                .map_err(|e| single_error_with_detail(&SINGLE_ERROR_INTERNAL, e))?;
+            let tensor =
+                Tensor::from_numeric_storage(NumericStorage::F32(vec![n as f32]), vec![1, 1])
+                    .map_err(|e| single_error_with_detail(&SINGLE_ERROR_INTERNAL, e))?;
             convert_to_gpu(Value::Tensor(tensor))
         }
         Value::Int(i) => convert_to_gpu(Value::Num(i.to_f64())),
@@ -543,10 +608,14 @@ pub(crate) mod tests {
     fn single_scalar_rounds_to_f32() {
         let value = Value::Num(std::f64::consts::PI);
         let result = single_builtin(value, Vec::new()).expect("single");
-        match result {
-            Value::Num(n) => assert_eq!(n, (std::f64::consts::PI as f32) as f64),
-            other => panic!("expected scalar Num, got {other:?}"),
-        }
+        let Value::Tensor(tensor) = result else {
+            panic!("expected native single scalar tensor");
+        };
+        assert_eq!(tensor.shape, vec![1, 1]);
+        assert_eq!(
+            tensor.as_f32_slice(),
+            Some(&[std::f64::consts::PI as f32][..])
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -558,7 +627,13 @@ pub(crate) mod tests {
         )
         .expect("single");
 
-        assert_eq!(result, Value::Num((std::f64::consts::PI as f32) as f64));
+        let Value::Tensor(tensor) = result else {
+            panic!("expected native single symbolic constant");
+        };
+        assert_eq!(
+            tensor.as_f32_slice(),
+            Some(&[std::f64::consts::PI as f32][..])
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -753,6 +828,7 @@ pub(crate) mod tests {
                         .map(|v| v as f64)
                         .collect();
                     assert_eq!(gathered.shape, vec![2, 2]);
+                    assert!(gathered.as_f32_slice().is_some());
                     assert_eq!(gathered.materialize_f64(), expected);
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
@@ -763,6 +839,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn single_like_host_prototype() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let result = single_builtin(
             Value::Tensor(tensor.clone()),
@@ -784,7 +861,23 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn single_like_requires_runmat_compatibility_mode() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = single_builtin(
+            Value::Int(IntValue::U64(u64::MAX)),
+            vec![Value::from("like"), Value::Num(0.0)],
+        )
+        .expect_err("single like extension must reject in strict mode");
+        assert_eq!(
+            error.identifier(),
+            SINGLE_LIKE_OUTPUT_EXTENSION.error_identifier
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn single_like_gpu_prototype() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.5, 1.5, 2.5, 3.5], vec![2, 2]).unwrap();
             let proto_view = HostTensorView {
@@ -815,6 +908,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn single_like_case_insensitive() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![1.5, 2.25], vec![2, 1]).unwrap();
         let result = single_builtin(
             Value::Tensor(tensor.clone()),

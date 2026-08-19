@@ -16,7 +16,9 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{ComplexStorage, ComplexTensor, NumericDType, Tensor, Value};
+#[cfg(test)]
+use runmat_value::NumericDType;
+use runmat_value::{ComplexStorage, ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::{gpu_helpers, tensor};
@@ -325,14 +327,8 @@ fn upload_real_gpu_output(
     provider: &dyn runmat_accelerate_api::AccelProvider,
     tensor: Tensor,
 ) -> BuiltinResult<Value> {
-    let precision = if tensor.numeric_dtype() == NumericDType::F32 {
-        runmat_accelerate_api::ProviderPrecision::F32
-    } else {
-        runmat_accelerate_api::ProviderPrecision::F64
-    };
     let handle = gpu_helpers::upload_tensor(provider, &tensor)
         .map_err(|e| cosd_error_with_detail(&COSD_ERROR_INTERNAL, e))?;
-    runmat_accelerate_api::set_handle_precision(&handle, precision);
     Ok(gpu_helpers::resident_gpu_value(handle))
 }
 
@@ -340,13 +336,7 @@ fn upload_complex_gpu_output(
     provider: &dyn runmat_accelerate_api::AccelProvider,
     tensor: ComplexTensor,
 ) -> BuiltinResult<Value> {
-    let precision = if tensor.numeric_dtype() == NumericDType::F32 {
-        runmat_accelerate_api::ProviderPrecision::F32
-    } else {
-        runmat_accelerate_api::ProviderPrecision::F64
-    };
     let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)?;
-    runmat_accelerate_api::set_handle_precision(&handle, precision);
     Ok(gpu_helpers::complex_gpu_value(handle))
 }
 

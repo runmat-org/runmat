@@ -21,7 +21,7 @@
     "unit": "builtins::strings::transform::compat::tests and builtins::strings::text_analytics::documents::tests",
     "integration": null
   },
-  "description": "`eraseURLs` erases HTTP and HTTPS URLs from documented text containers. Starting with the R2026a compatibility target, it also accepts tokenizedDocument input and removes tokens whose type is `web-address`.",
+  "description": "`eraseURLs` erases HTTP and HTTPS URLs from documented text containers. Starting with the compatibility target, it also accepts tokenizedDocument input and removes tokens whose type is `web-address`.",
   "behaviors": [
     "`newStr = eraseURLs(str)` accepts a string array, character vector, or cell array of character vectors and returns the same documented container type.",
     "`newDocuments = eraseURLs(documents)` removes web-address tokens and preserves the document shape and remaining explicit token type metadata supported by RunMat's object model.",
@@ -44,8 +44,8 @@
   ],
   "faqs": [
     {
-      "question": "When did tokenizedDocument support become part of the compatibility target?",
-      "answer": "MathWorks added tokenizedDocument input to eraseURLs in R2026a, so it is part of RunMat's pinned current compatibility surface."
+      "question": "Does eraseURLs accept tokenizedDocument input?",
+      "answer": "Yes. The compatibility target documents tokenizedDocument input, and RunMat removes tokens whose type is `web-address`."
     },
     {
       "question": "Does eraseURLs remove a bare www address?",

@@ -2,7 +2,11 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
@@ -70,6 +74,41 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "plus";
+
+pub const PLUS_LIKE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "plus-like-prototype",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "plus with a 'like' output prototype is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PlusLikePrototypeExtension"),
+};
+pub const PLUS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [PLUS_LIKE_EXTENSION];
+const PLUS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "An integer operand requires the other operand to use the same integer class or to be scalar double; complex integer addition is rejected.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "B",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Compatible dimensions expand implicitly and the nondouble integer class is preserved.",
+    },
+];
+pub const PLUS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "C = plus(A, B)",
+        inputs: &PLUS_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::BroadcastCompatible,
+        notes: "Same-class integer sums are exact and saturating. Scalar-double arithmetic uses MATLAB rounding, including the extended-precision 64-bit rule; resident paths use native kernels when supported and otherwise gather authoritative storage.",
+    }];
 
 const PLUS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "C",
@@ -247,6 +286,8 @@ fn plus_error_with_detail(
     keywords = "plus,element-wise addition,gpu,+",
     accel = "elementwise",
     type_resolver(numeric_binary_type),
+    extensions(PLUS_EXTENSIONS),
+    integer_capabilities(PLUS_INTEGER_CAPABILITIES),
     descriptor(crate::builtins::math::elementwise::plus::PLUS_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::plus"
 )]
@@ -261,6 +302,9 @@ async fn plus_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult
     }
     reject_integer_logical_operands(&lhs, &rhs, BUILTIN_NAME).map_err(builtin_error)?;
     let template = parse_output_template(&rest)?;
+    if matches!(template, OutputTemplate::Like(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(&PLUS_LIKE_EXTENSION, BUILTIN_NAME)?;
+    }
     let base = match (lhs, rhs) {
         (Value::GpuTensor(la), Value::GpuTensor(lb)) => plus_gpu_pair(la, lb).await,
         (Value::GpuTensor(la), rhs) => plus_gpu_host_left(la, rhs).await,
@@ -1499,6 +1543,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn plus_like_gpu_prototype_keeps_residency() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let lhs = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
             let rhs = Tensor::new(vec![3.0, 4.0], vec![2, 1]).unwrap();
@@ -1527,6 +1572,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn plus_like_host_gathers_gpu_value() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let lhs = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
             let rhs = Tensor::new(vec![5.0, 6.0], vec![2, 1]).unwrap();
@@ -1549,6 +1595,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn plus_like_complex_prototype_yields_complex() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let lhs = Tensor::new(vec![2.0, 3.0], vec![2, 1]).unwrap();
         let rhs = Tensor::new(vec![4.0, 5.0], vec![2, 1]).unwrap();
         let result = plus_builtin(
@@ -1588,6 +1635,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn plus_like_keyword_char_array() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let keyword = CharArray::new_row("LIKE");
             let lhs = Value::Num(2.0);

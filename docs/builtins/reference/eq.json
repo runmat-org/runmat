@@ -34,7 +34,7 @@
   },
   "description": "`eq(A, B)` (or `A == B`) compares inputs element-wise for equality. Scalar expansion and output-shape behavior follow MATLAB and RunMat logical comparison semantics. When either operand is symbolic, equality constructs a symbolic equation.",
   "behaviors": [
-    "Numeric, logical, and character inputs are compared element-wise using MATLAB's implicit expansion rules. All eight integer classes are supported, and mixed numeric comparisons retain exact integer values without conversion through a floating mirror.",
+    "Numeric, logical, and character inputs are compared element-wise using MATLAB's implicit expansion rules. All eight integer classes are supported, and mixed numeric comparisons retain exact integer values, including wide int64 and uint64 values.",
     "Complex numbers are equal only when both their real and imaginary parts match.",
     "Character arrays compare by Unicode code point; you can mix them with numeric arrays (`'A' == 65`) or strings.",
     "String scalars and string arrays compare lexically; implicit expansion works across the string dimensions.",

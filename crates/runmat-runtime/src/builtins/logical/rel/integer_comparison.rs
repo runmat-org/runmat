@@ -11,7 +11,7 @@ use crate::builtins::common::broadcast::{broadcast_shapes, BroadcastPlan};
 use crate::builtins::common::gpu_helpers;
 
 #[derive(Clone, Copy)]
-pub(crate) enum IntegerComparisonOp {
+pub enum IntegerComparisonOp {
     Eq,
     Ne,
     Lt,
@@ -21,9 +21,98 @@ pub(crate) enum IntegerComparisonOp {
 }
 
 #[derive(Debug)]
-pub(crate) enum IntegerComparisonError {
+pub enum IntegerComparisonError {
     SizeMismatch,
     Internal,
+}
+
+pub(crate) async fn try_gpu_equality_comparison(
+    lhs: &GpuTensorHandle,
+    rhs: &GpuTensorHandle,
+    operation: IntegerComparisonOp,
+) -> Option<crate::BuiltinResult<Value>> {
+    if lhs.device_id != rhs.device_id {
+        return None;
+    }
+    let provider = resolved_actual_owner(lhs)?;
+    let rhs_owner = resolved_actual_owner(rhs)?;
+    if !std::ptr::eq(provider, rhs_owner)
+        || runmat_accelerate_api::handle_precision(lhs)
+            != runmat_accelerate_api::handle_precision(rhs)
+    {
+        return None;
+    }
+    let result = match operation {
+        IntegerComparisonOp::Eq => provider.elem_eq(lhs, rhs).await,
+        IntegerComparisonOp::Ne => provider.elem_ne(lhs, rhs).await,
+        _ => unreachable!("equality helper only supports eq and ne"),
+    };
+    match result {
+        Ok(mut handle) if valid_equality_output(&handle, lhs, rhs, provider) => {
+            let provenance = [lhs, rhs]
+                .into_iter()
+                .filter_map(runmat_accelerate_api::handle_provenance)
+                .find(|provenance| {
+                    *provenance == runmat_accelerate_api::GpuHandleProvenance::Explicit
+                })
+                .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            runmat_accelerate_api::set_handle_provenance(&mut handle, provenance);
+            Some(Ok(gpu_helpers::logical_gpu_value(handle)))
+        }
+        Ok(handle) => {
+            free_rejected_gpu_handle(&handle, &[lhs, rhs]);
+            None
+        }
+        Err(_) => None,
+    }
+}
+
+pub(crate) fn select_comparison_output_source(
+    lhs: &Value,
+    rhs: &Value,
+    builtin: &str,
+) -> crate::BuiltinResult<Option<GpuTensorHandle>> {
+    gpu_helpers::select_resident_output_source(
+        [lhs, rhs].into_iter().filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle.clone()),
+            _ => None,
+        }),
+        builtin,
+    )
+}
+
+pub(crate) fn restore_explicit_comparison_result(
+    value: Value,
+    source: Option<&GpuTensorHandle>,
+    builtin: &str,
+) -> crate::BuiltinResult<Value> {
+    let Some(source) = source.filter(|handle| runmat_accelerate_api::handle_is_explicit(handle))
+    else {
+        return Ok(value);
+    };
+    let value = match value {
+        Value::Bool(bit) => Value::LogicalArray(
+            LogicalArray::new(vec![u8::from(bit)], vec![1, 1]).map_err(|error| {
+                crate::build_runtime_error(format!(
+                    "{builtin}: invalid scalar logical result: {error}"
+                ))
+                .with_builtin(builtin)
+                .build()
+            })?,
+        ),
+        value => value,
+    };
+    let restored = gpu_helpers::restore_class_preserving_value(source, value, builtin)?;
+    if !matches!(restored, Value::GpuTensor(_)) {
+        return Err(crate::build_runtime_error(format!(
+            "{builtin}: provider cannot preserve explicit gpuArray output residency"
+        ))
+        .with_builtin(builtin)
+        .with_identifier(format!("RunMat:{builtin}:GpuUploadFailed"))
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build());
+    }
+    Ok(restored)
 }
 
 /// Executes a resident ordering comparison, extracting real lanes first when
@@ -104,7 +193,15 @@ pub(crate) async fn try_gpu_ordering_comparison(
         }
     };
     let result = match result {
-        Ok(handle) if valid_ordering_output(&handle, lhs_real, rhs_real, provider) => {
+        Ok(mut handle) if valid_ordering_output(&handle, lhs_real, rhs_real, provider) => {
+            let provenance = [lhs, rhs]
+                .into_iter()
+                .filter_map(runmat_accelerate_api::handle_provenance)
+                .find(|provenance| {
+                    *provenance == runmat_accelerate_api::GpuHandleProvenance::Explicit
+                })
+                .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            runmat_accelerate_api::set_handle_provenance(&mut handle, provenance);
             Some(gpu_helpers::logical_gpu_value(handle))
         }
         Ok(handle) => {
@@ -167,6 +264,24 @@ fn valid_ordering_output(
         && resolved_actual_owner(output).is_some_and(|owner| std::ptr::eq(owner, provider))
 }
 
+fn valid_equality_output(
+    output: &GpuTensorHandle,
+    lhs: &GpuTensorHandle,
+    rhs: &GpuTensorHandle,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+) -> bool {
+    let expected_shape = broadcast_shapes("comparison", &lhs.shape, &rhs.shape).ok();
+    expected_shape.as_deref() == Some(output.shape.as_slice())
+        && output.device_id == lhs.device_id
+        && !gpu_handles_alias(output, lhs)
+        && !gpu_handles_alias(output, rhs)
+        && runmat_accelerate_api::handle_storage(output) == GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_precision(output)
+            == runmat_accelerate_api::handle_precision(lhs)
+        && runmat_accelerate_api::handle_integer_type(output).is_none()
+        && resolved_actual_owner(output).is_some_and(|owner| std::ptr::eq(owner, provider))
+}
+
 fn free_rejected_gpu_handle(handle: &GpuTensorHandle, protected: &[&GpuTensorHandle]) {
     if protected
         .iter()
@@ -182,7 +297,7 @@ fn free_rejected_gpu_handle(handle: &GpuTensorHandle, protected: &[&GpuTensorHan
 /// Performs a comparison when native integer storage is compared against other
 /// native integer storage or real numeric storage. This keeps integer values
 /// exact even when the other operand is an f64 array.
-pub(crate) fn try_integer_comparison(
+pub fn try_integer_comparison(
     lhs: &Value,
     rhs: &Value,
     operation: IntegerComparisonOp,
@@ -206,6 +321,30 @@ pub(crate) fn try_integer_comparison(
         }
     };
     Ok(Some(result))
+}
+
+/// Performs an exact host ordering comparison for real numeric/logical/character operands.
+/// Native integers remain in integer storage and mixed integer/floating comparisons use the
+/// lossless MATLAB relational ordering rules.
+pub fn try_real_ordering_comparison(
+    lhs: &Value,
+    rhs: &Value,
+    operation: IntegerComparisonOp,
+) -> Result<Option<Value>, IntegerComparisonError> {
+    let Some(lhs) = real_operand(lhs) else {
+        return Ok(None);
+    };
+    let Some(rhs) = real_operand(rhs) else {
+        return Ok(None);
+    };
+    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+        .map_err(|_| IntegerComparisonError::SizeMismatch)?;
+    let mut data = Vec::with_capacity(plan.len());
+    for (_, lhs_index, rhs_index) in plan.iter() {
+        let ordering = compare_real_values(lhs.value_at(lhs_index), rhs.value_at(rhs_index));
+        data.push(matches_optional_relation(ordering, operation) as u8);
+    }
+    logical_result(data, plan.output_shape().to_vec()).map(Some)
 }
 
 /// Performs exact equality/inequality when a complex operand or its real
@@ -251,7 +390,7 @@ pub(crate) fn try_complex_integer_equality_comparison(
 /// Performs MATLAB ordering comparisons for complex values by comparing only
 /// their real components. Integer-backed components remain exact across
 /// complex/complex and complex/real mixed-class comparisons.
-pub(crate) fn try_complex_ordering_comparison(
+pub fn try_complex_ordering_comparison(
     lhs: &Value,
     rhs: &Value,
     operation: IntegerComparisonOp,
@@ -519,6 +658,28 @@ fn compare_real_values(lhs: RealValue, rhs: RealValue) -> Option<Ordering> {
         }
         (RealValue::Float(lhs), RealValue::Float(rhs)) => lhs.partial_cmp(&rhs),
     }
+}
+
+/// Compares two native real numeric scalars without routing either integer
+/// operand through binary64. Every `f32` value is represented exactly as
+/// `f64`, so the mixed floating path retains the same ordering semantics as
+/// the array relational operators.
+pub(crate) fn compare_numeric_scalars_exact(
+    lhs: NumericScalar,
+    rhs: NumericScalar,
+) -> Option<Ordering> {
+    fn real(value: NumericScalar) -> RealValue {
+        match value {
+            NumericScalar::F64(value) => RealValue::Float(value),
+            NumericScalar::F32(value) => RealValue::Float(f64::from(value)),
+            value => RealValue::Integer(
+                value
+                    .into_int_value()
+                    .expect("nonfloating NumericScalar must contain an integer"),
+            ),
+        }
+    }
+    compare_real_values(real(lhs), real(rhs))
 }
 
 fn compare_complex_real(

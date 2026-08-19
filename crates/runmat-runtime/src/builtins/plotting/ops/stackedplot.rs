@@ -2,11 +2,16 @@
 
 use glam::Vec4;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{LineStyle, PlotElement};
+use runmat_value::NumericStorage;
 use runmat_value::{
     CellArray, NumericDType, ObjectInstance, StringArray, StructValue, Tensor, Value,
 };
@@ -143,11 +148,60 @@ pub const STACKEDPLOT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const STACKEDPLOT_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "stackedplot-explicit-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "stackedplot with an explicitly GPU-resident input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:StackedplotExplicitGpuInputExtension"),
+};
+pub const STACKEDPLOT_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [STACKEDPLOT_EXPLICIT_GPU_EXTENSION];
+const STACKEDPLOT_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X, Y, or numeric table variables",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented numeric data surface includes native integer arrays. Exact source class, shape, and values remain authoritative independently of floating render geometry.",
+    }];
+const STACKEDPLOT_INTEGER_SELECTOR_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "vars or XVariable",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target explicitly documents integer arrays as table-variable selectors. RunMat decodes them as exact one-based structural indices.",
+    }];
+pub const STACKEDPLOT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "s = stackedplot(integer_Y) or stackedplot(integer_X, integer_Y)",
+        inputs: &STACKEDPLOT_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Graphics source properties retain native storage and rendering crosses an explicit floating geometry boundary. Automatic residency gathers transparently; explicit gpuArray input is separately gated because the public page does not document it.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "s = stackedplot(tbl, integer_vars) or stackedplot(tbl, XVariable=integer_xvar)",
+        inputs: &STACKEDPLOT_INTEGER_SELECTOR_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Selectors are validated exactly as positive in-range one-based indices; selected integer variables retain their source classes and values.",
+    },
+];
+
 #[derive(Clone, Debug)]
 struct StackedLine {
     label: String,
     x: Vec<f64>,
     y: Vec<f64>,
+    x_source: Tensor,
+    y_source: Tensor,
 }
 
 #[derive(Clone, Debug)]
@@ -203,9 +257,20 @@ struct TabularInput {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::stackedplot::STACKEDPLOT_DESCRIPTOR),
+    extensions(crate::builtins::plotting::stackedplot::STACKEDPLOT_EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::stackedplot::STACKEDPLOT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::stackedplot"
 )]
 pub fn stackedplot_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
+    if args
+        .iter()
+        .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &STACKEDPLOT_EXPLICIT_GPU_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let (target, args) = split_parent(args)?;
     let (series, options) = parse_stackedplot_args(args)?;
     render_stackedplot(series, options, target)
@@ -348,20 +413,16 @@ fn parse_matrix_call(args: &[Value]) -> BuiltinResult<(Vec<StackedSeries>, Stack
     let (mut options, style_tokens) = parse_options(&args[data_end..], true)?;
     apply_style_tokens(&mut options, &style_tokens)?;
 
-    let (x, y, explicit_x) = if data_end == 2 {
-        (
-            numeric_vector(&args[0], "X")?,
-            numeric_tensor(&args[1], "Y")?,
-            true,
-        )
+    let (x, x_source, y, explicit_x) = if data_end == 2 {
+        let x_source = numeric_tensor(&args[0], "X")?;
+        let x = numeric_vector_from_tensor(&x_source, "X")?;
+        (x, x_source, numeric_tensor(&args[1], "Y")?, true)
     } else {
         let y = numeric_tensor(&args[0], "Y")?;
         let rows = plotted_row_count(&y);
-        (
-            (1..=rows).map(|idx| idx as f64).collect::<Vec<_>>(),
-            y,
-            false,
-        )
+        let x = (1..=rows).map(|idx| idx as f64).collect::<Vec<_>>();
+        let x_source = Tensor::new(x.clone(), vec![rows, 1]).map_err(stacked_err)?;
+        (x, x_source, y, false)
     };
     let rows = plotted_row_count(&y);
     if rows != x.len() {
@@ -370,7 +431,7 @@ fn parse_matrix_call(args: &[Value]) -> BuiltinResult<(Vec<StackedSeries>, Stack
             x.len()
         )));
     }
-    let columns = tensor_plot_columns(&y)?;
+    let columns = tensor_plot_column_sources(&y)?;
     if columns.len() > MAX_STACKED_VARIABLES {
         return Err(stacked_err(format!(
             "stackedplot supports at most {MAX_STACKED_VARIABLES} variables"
@@ -389,13 +450,15 @@ fn parse_matrix_call(args: &[Value]) -> BuiltinResult<(Vec<StackedSeries>, Stack
         options.x_label = if explicit_x { "X" } else { "Rows" }.into();
     }
     let mut series = Vec::with_capacity(columns.len());
-    for (col, y) in columns.into_iter().enumerate() {
+    for (col, (y, y_source)) in columns.into_iter().enumerate() {
         series.push(StackedSeries {
             label: labels[col].clone(),
             lines: vec![StackedLine {
                 label: labels[col].clone(),
                 x: x.clone(),
                 y,
+                x_source: x_source.clone(),
+                y_source,
             }],
         });
     }
@@ -429,7 +492,7 @@ fn parse_table_call(
             .map_err(|err| stacked_err(format!("failed to read table variables: {err}")))?;
         let height = table_height(object)
             .map_err(|err| stacked_err(format!("failed to read table height: {err}")))?;
-        let x = table_x_values(
+        let (x, x_source) = table_x_values(
             object,
             &variables,
             height,
@@ -463,7 +526,8 @@ fn parse_table_call(
                 )));
             }
             let column_count = tensor_plot_column_count(&tensor);
-            for (col, y) in tensor_plot_columns(&tensor)?.into_iter().enumerate() {
+            for (col, (y, y_source)) in tensor_plot_column_sources(&tensor)?.into_iter().enumerate()
+            {
                 let variable_label = if column_count == 1 {
                     name.clone()
                 } else {
@@ -486,6 +550,8 @@ fn parse_table_call(
                         label: line_label,
                         x: x.clone(),
                         y,
+                        x_source: x_source.clone(),
+                        y_source,
                     },
                     options.combine_matching_names,
                 );
@@ -532,30 +598,35 @@ fn table_x_values(
     options: &StackedOptions,
     input_index: usize,
     input_count: usize,
-) -> BuiltinResult<Vec<f64>> {
+) -> BuiltinResult<(Vec<f64>, Tensor)> {
     let x_variable = table_x_variable_for_input(options, input_index, input_count)?;
     if object.is_class("timetable") && x_variable.is_some() {
         return Err(stacked_err(
             "XVariable is only supported for table inputs; timetable row times are used automatically",
         ));
     }
-    let x = if let Some(name) = x_variable {
+    let source = if let Some(name) = x_variable {
         let value = variables
             .fields
             .get(&name)
             .ok_or_else(|| stacked_err(format!("XVariable `{name}` is not in the table")))?;
-        numeric_vector_from_value(value, "XVariable")?
+        numeric_tensor_from_value(value, "XVariable")?
     } else if let Some(row_times) = timetable_row_times(object)
         .map_err(|err| stacked_err(format!("failed to read timetable RowTimes: {err}")))?
     {
-        numeric_vector_from_value(&row_times, "RowTimes")?
+        numeric_tensor_from_value(&row_times, "RowTimes")?
     } else {
-        (1..=height).map(|idx| idx as f64).collect()
+        Tensor::new(
+            (1..=height).map(|idx| idx as f64).collect(),
+            vec![height, 1],
+        )
+        .map_err(stacked_err)?
     };
+    let x = numeric_vector_from_tensor(&source, "x-axis values")?;
     if x.len() != height {
         return Err(stacked_err("x-axis values must match table height"));
     }
-    Ok(x)
+    Ok((x, source))
 }
 
 fn table_x_variable_for_input(
@@ -678,9 +749,17 @@ fn render_stackedplot(
         .and_then(|series| series.lines.first())
         .map(|line| line.x.clone())
         .unwrap_or_default();
+    let x_source = series
+        .first()
+        .and_then(|series| series.lines.first())
+        .map(|line| line.x_source.clone());
     let y_data = series
         .iter()
         .flat_map(|series| series.lines.iter().map(|line| line.y.clone()))
+        .collect::<Vec<_>>();
+    let y_sources = series
+        .iter()
+        .flat_map(|series| series.lines.iter().map(|line| line.y_source.clone()))
         .collect::<Vec<_>>();
     let mut series_for_render = Some(series);
     let options_for_render = options.clone();
@@ -737,6 +816,8 @@ fn render_stackedplot(
         line_labels,
         x_data,
         y_data,
+        x_source,
+        y_sources,
         display_variables,
         source_table: options.source_table,
         x_variable: options.x_variable,
@@ -774,8 +855,8 @@ pub(crate) fn get_stackedplot_property(
                 "CombineMatchingNames",
                 Value::Bool(state.combine_matching_names),
             );
-            st.insert("XData", vector_value(state.x_data.clone())?);
-            st.insert("YData", matrix_from_columns(&state.y_data)?);
+            st.insert("XData", stacked_x_data_value(state)?);
+            st.insert("YData", stacked_y_data_value(state)?);
             st.insert("XLabel", Value::String(state.x_label.clone()));
             st.insert("Title", Value::String(state.title.clone()));
             st.insert(
@@ -801,8 +882,8 @@ pub(crate) fn get_stackedplot_property(
             "sourcetable" => source_table_value(state.source_table.as_ref()),
             "xvariable" => string_or_row_value(&state.x_variable),
             "combinematchingnames" => Ok(Value::Bool(state.combine_matching_names)),
-            "xdata" => vector_value(state.x_data.clone()),
-            "ydata" => matrix_from_columns(&state.y_data),
+            "xdata" => stacked_x_data_value(state),
+            "ydata" => stacked_y_data_value(state),
             "xlabel" => Ok(Value::String(state.x_label.clone())),
             "title" => Ok(Value::String(state.title.clone())),
             "visible" => Ok(Value::String(
@@ -979,14 +1060,18 @@ fn numeric_tensor_from_value(value: &Value, name: &str) -> BuiltinResult<Tensor>
                 .ok_or_else(|| stacked_err(format!("{name}: categorical Codes are missing")))?;
             numeric_tensor_from_value(codes, name)
         }
-        Value::GpuTensor(_) => Err(stacked_err(
-            "gpuArray inputs are not supported for stackedplot column splitting yet",
-        )),
+        Value::GpuTensor(handle) => {
+            super::common::gather_tensor_from_gpu(handle.clone(), BUILTIN_NAME)
+        }
         Value::Num(value) => {
             Tensor::new_with_dtype(vec![*value], vec![1, 1], NumericDType::F64).map_err(stacked_err)
         }
-        Value::Int(value) => {
-            Tensor::new_with_dtype(vec![value.to_f64()], vec![1, 1], NumericDType::F64)
+        Value::Int(runmat_value::IntValue::I64(value)) => {
+            Tensor::from_numeric_storage(NumericStorage::I64(vec![*value]), vec![1, 1])
+                .map_err(stacked_err)
+        }
+        Value::Int(runmat_value::IntValue::U64(value)) => {
+            Tensor::from_numeric_storage(NumericStorage::U64(vec![*value]), vec![1, 1])
                 .map_err(stacked_err)
         }
         Value::Bool(value) => Tensor::new_with_dtype(
@@ -1005,17 +1090,22 @@ fn numeric_tensor_from_value(value: &Value, name: &str) -> BuiltinResult<Tensor>
     }
 }
 
+#[cfg(test)]
 fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
     numeric_vector_from_value(value, name)
 }
 
 fn numeric_vector_from_value(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
     let tensor = numeric_tensor_from_value(value, name)?;
-    let len = tensor_utils::tensor_element_len(&tensor);
+    numeric_vector_from_tensor(&tensor, name)
+}
+
+fn numeric_vector_from_tensor(tensor: &Tensor, name: &str) -> BuiltinResult<Vec<f64>> {
+    let len = tensor_utils::tensor_element_len(tensor);
     if tensor.rows() != len && tensor.cols() != len {
         return Err(stacked_err(format!("{name} must be a vector")));
     }
-    Ok(tensor_utils::tensor_into_values_f64(tensor))
+    Ok(tensor_utils::tensor_values_f64(tensor))
 }
 
 fn plotted_row_count(tensor: &Tensor) -> usize {
@@ -1034,22 +1124,40 @@ fn tensor_plot_column_count(tensor: &Tensor) -> usize {
     }
 }
 
+#[cfg(test)]
 fn tensor_plot_columns(tensor: &Tensor) -> BuiltinResult<Vec<Vec<f64>>> {
-    if tensor.rows() == 1 || tensor.cols() == 1 {
-        return Ok(vec![tensor_utils::tensor_values_f64(tensor)]);
-    }
-    let cols = tensor.cols().max(1);
-    (0..cols).map(|col| tensor_column(tensor, col)).collect()
+    tensor_plot_column_sources(tensor).map(|columns| {
+        columns
+            .into_iter()
+            .map(|(values, _source)| values)
+            .collect()
+    })
 }
 
-fn tensor_column(tensor: &Tensor, col: usize) -> BuiltinResult<Vec<f64>> {
-    let rows = tensor.rows();
-    let mut out = Vec::with_capacity(rows);
-    for row in 0..rows {
-        let index = row + col * rows;
-        out.push(tensor_utils::tensor_value_f64(tensor, index));
+fn tensor_plot_column_sources(tensor: &Tensor) -> BuiltinResult<Vec<(Vec<f64>, Tensor)>> {
+    if tensor.rows() == 1 || tensor.cols() == 1 {
+        return Ok(vec![(
+            tensor_utils::tensor_values_f64(tensor),
+            tensor.clone(),
+        )]);
     }
-    Ok(out)
+    let cols = tensor.cols().max(1);
+    (0..cols)
+        .map(|col| tensor_column_source(tensor, col))
+        .collect()
+}
+
+fn tensor_column_source(tensor: &Tensor, col: usize) -> BuiltinResult<(Vec<f64>, Tensor)> {
+    let rows = tensor.rows();
+    let indices = (0..rows).map(|row| row + col * rows).collect::<Vec<_>>();
+    let storage = tensor
+        .clone()
+        .into_numeric_storage()
+        .map_err(stacked_err)?
+        .gather(&indices)
+        .map_err(stacked_err)?;
+    let source = Tensor::from_numeric_storage(storage, vec![rows, 1]).map_err(stacked_err)?;
+    Ok((tensor_utils::tensor_values_f64(&source), source))
 }
 
 fn variable_selector(value: &Value) -> BuiltinResult<Vec<String>> {
@@ -1077,13 +1185,43 @@ fn variable_selector(value: &Value) -> BuiltinResult<Vec<String>> {
             .iter()
             .map(|value| text_scalar(value, "variable selector"))
             .collect(),
-        Value::Tensor(tensor) => Ok(tensor_utils::tensor_values_f64(tensor)
-            .iter()
-            .map(|v| {
-                let index = *v as usize;
-                format!("Var{index}")
+        Value::Tensor(tensor) => (0..tensor.len())
+            .map(|offset| {
+                let scalar = tensor
+                    .numeric_value_at(offset)
+                    .ok_or_else(|| stacked_err("variable selector index is out of bounds"))?;
+                let index = match scalar {
+                    runmat_value::NumericScalar::F64(value) => {
+                        if !value.is_finite()
+                            || value < 1.0
+                            || value.fract() != 0.0
+                            || value > usize::MAX as f64
+                        {
+                            return Err(stacked_err(
+                                "variable selector indices must be positive integers",
+                            ));
+                        }
+                        value as usize
+                    }
+                    runmat_value::NumericScalar::F32(value) => {
+                        if !value.is_finite() || value < 1.0 || value.fract() != 0.0 {
+                            return Err(stacked_err(
+                                "variable selector indices must be positive integers",
+                            ));
+                        }
+                        value as usize
+                    }
+                    integer => integer
+                        .into_int_value()
+                        .and_then(|value| value.try_to_usize())
+                        .filter(|value| *value >= 1)
+                        .ok_or_else(|| {
+                            stacked_err("variable selector indices must be positive integers")
+                        })?,
+                };
+                Ok(format!("Var{index}"))
             })
-            .collect()),
+            .collect(),
         _ => Err(stacked_err(
             "variable selector must be text, string array, char array, or cellstr",
         )),
@@ -1159,6 +1297,52 @@ fn parse_limits(value: &Value, name: &str) -> BuiltinResult<(f64, f64)> {
         )));
     }
     Ok((lo, hi))
+}
+
+fn stacked_x_data_value(state: &StackedPlotHandleState) -> BuiltinResult<Value> {
+    state
+        .x_source
+        .clone()
+        .map(Value::Tensor)
+        .map(Ok)
+        .unwrap_or_else(|| vector_value(state.x_data.clone()))
+}
+
+fn stacked_y_data_value(state: &StackedPlotHandleState) -> BuiltinResult<Value> {
+    if state.y_sources.len() != state.y_data.len() || state.y_sources.is_empty() {
+        return matrix_from_columns(&state.y_data);
+    }
+    let rows = state.y_sources[0].len();
+    let dtype = state.y_sources[0].numeric_dtype();
+    if state
+        .y_sources
+        .iter()
+        .all(|source| source.len() == rows && source.numeric_dtype() == dtype)
+    {
+        let mut storage = NumericStorage::zeros(dtype, rows * state.y_sources.len());
+        for (column, source) in state.y_sources.iter().enumerate() {
+            for row in 0..rows {
+                storage
+                    .set_value(
+                        row + column * rows,
+                        source
+                            .numeric_value_at(row)
+                            .ok_or_else(|| stacked_err("YData source index is out of bounds"))?,
+                    )
+                    .map_err(stacked_err)?;
+            }
+        }
+        return Tensor::from_numeric_storage(storage, vec![rows, state.y_sources.len()])
+            .map(Value::Tensor)
+            .map_err(stacked_err);
+    }
+    CellArray::new(
+        state.y_sources.iter().cloned().map(Value::Tensor).collect(),
+        1,
+        state.y_sources.len(),
+    )
+    .map(Value::Cell)
+    .map_err(stacked_err)
 }
 
 fn vector_value(data: Vec<f64>) -> BuiltinResult<Value> {
@@ -1333,6 +1517,114 @@ mod tests {
         assert_eq!(
             tensor_plot_columns(&y).expect("plot columns"),
             vec![vec![10.0, 20.0], vec![30.0, 40.0]]
+        );
+    }
+
+    #[test]
+    fn stackedplot_variable_selectors_decode_every_integer_class_without_floating_rounding() {
+        for storage in [
+            runmat_value::IntegerStorage::I8(vec![1]),
+            runmat_value::IntegerStorage::I16(vec![1]),
+            runmat_value::IntegerStorage::I32(vec![1]),
+            runmat_value::IntegerStorage::I64(vec![1]),
+            runmat_value::IntegerStorage::U8(vec![1]),
+            runmat_value::IntegerStorage::U16(vec![1]),
+            runmat_value::IntegerStorage::U32(vec![1]),
+            runmat_value::IntegerStorage::U64(vec![1]),
+        ] {
+            let selector = Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).unwrap());
+            assert_eq!(variable_selector(&selector).unwrap(), vec!["Var1"]);
+        }
+        let wide = 9_007_199_254_740_993_u64;
+        let selector = Value::Tensor(
+            Tensor::new_integer(runmat_value::IntegerStorage::U64(vec![wide]), vec![1, 1]).unwrap(),
+        );
+        assert_eq!(
+            variable_selector(&selector).unwrap(),
+            vec![format!("Var{wide}")]
+        );
+    }
+
+    #[test]
+    fn stackedplot_graphics_properties_preserve_wide_integer_source_storage() {
+        let _guard = setup();
+        let wide = 9_007_199_254_740_993_u64;
+        let x = Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![wide, wide + 2]),
+            vec![1, 2],
+        )
+        .expect("XData");
+        let y = Tensor::new_integer(
+            runmat_value::IntegerStorage::I16(vec![-3, 4, 5, 6]),
+            vec![2, 2],
+        )
+        .expect("YData");
+        let handle =
+            stackedplot_builtin(vec![Value::Tensor(x), Value::Tensor(y)]).expect("stackedplot");
+        let Value::Tensor(x) =
+            get_builtin(vec![Value::Num(handle), Value::from("XData")]).expect("XData")
+        else {
+            panic!("expected XData tensor");
+        };
+        let Value::Tensor(y) =
+            get_builtin(vec![Value::Num(handle), Value::from("YData")]).expect("YData")
+        else {
+            panic!("expected YData tensor");
+        };
+        assert_eq!(
+            x.integer_storage(),
+            Some(&runmat_value::IntegerStorage::U64(vec![wide, wide + 2]))
+        );
+        assert_eq!(
+            y.integer_storage(),
+            Some(&runmat_value::IntegerStorage::I16(vec![-3, 4, 5, 6]))
+        );
+        assert_eq!(y.shape, vec![2, 2]);
+    }
+
+    #[test]
+    fn stackedplot_automatic_integer_residency_gathers_exactly_in_compatibility_mode() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let _guard = setup();
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let wide = 9_007_199_254_740_993_u64;
+            let source = Tensor::new_integer(
+                runmat_value::IntegerStorage::U64(vec![wide, wide + 1]),
+                vec![1, 2],
+            )
+            .unwrap();
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &source)
+                .expect("upload integer source");
+            let chart = stackedplot_builtin(vec![Value::GpuTensor(handle.clone())])
+                .expect("automatic residency must remain transparent");
+            let Value::Tensor(y) =
+                get_builtin(vec![Value::Num(chart), Value::from("YData")]).expect("YData")
+            else {
+                panic!("expected YData tensor");
+            };
+            assert_eq!(
+                y.integer_storage(),
+                Some(&runmat_value::IntegerStorage::U64(vec![wide, wide + 1]))
+            );
+            provider.free(&handle).ok();
+        });
+    }
+
+    #[test]
+    fn stackedplot_explicit_gpu_input_is_gated_before_provider_access() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 2],
+            device_id: 0,
+            buffer_id: 9_451_001,
+            descriptor: Default::default(),
+        };
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let error = stackedplot_builtin(vec![Value::GpuTensor(handle)])
+            .expect_err("explicit GPU intent must be gated");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:StackedplotExplicitGpuInputExtension")
         );
     }
 

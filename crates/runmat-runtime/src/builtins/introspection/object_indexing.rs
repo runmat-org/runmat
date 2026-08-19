@@ -2,6 +2,11 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_types::MemberAccess;
 use runmat_value::{NumericScalar, Value};
@@ -79,6 +84,26 @@ pub const SUBSREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &SUBSREF_ERRORS,
 };
 
+const SUBSREF_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "payload subscripts",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Integer selectors may be carried in the indexing payload passed to an overloaded object method.",
+    }];
+pub const SUBSREF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "out = subsref(obj, kind, integer_payload)",
+        inputs: &SUBSREF_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "RunMat forwards authoritative selector values to the object's subsref implementation without numeric conversion. The method determines output class and overflow behavior; integer primitive receivers are not object dispatch targets.",
+    }];
+
 const SUBSASGN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "obj",
     ty: BuiltinParamType::Any,
@@ -150,6 +175,34 @@ pub const SUBSASGN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &SUBSASGN_ERRORS,
 };
 
+const SUBSASGN_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "payload subscripts",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Integer selectors may be carried in the indexing payload passed to an overloaded object method.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "rhs",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Assigned integer values are forwarded to the object's subsasgn implementation with their exact class, shape, and residency.",
+    },
+];
+pub const SUBSASGN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "obj = subsasgn(obj, kind, integer_payload, integer_rhs)",
+        inputs: &SUBSASGN_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "RunMat forwards selectors and the authoritative integer right-hand side without conversion. The class method owns assignment conversion, overflow, and returned-receiver semantics.",
+    }];
+
 const NUM_ARGUMENTS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "n",
     ty: BuiltinParamType::NumericScalar,
@@ -209,10 +262,18 @@ const NUM_ARGUMENTS_ERROR_CONTEXT: BuiltinErrorDescriptor = BuiltinErrorDescript
     message: "numArgumentsFromSubscript: invalid indexing context",
 };
 
-const NUM_ARGUMENTS_ERRORS: [BuiltinErrorDescriptor; 3] = [
+const NUM_ARGUMENTS_ERROR_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.NUM_ARGUMENTS_FROM_SUBSCRIPT.COUNT_NOT_EXACT_DOUBLE",
+    identifier: Some("RunMat:numArgumentsFromSubscript:CountNotExactDouble"),
+    when: "The computed argument count cannot be represented exactly by the documented double scalar output.",
+    message: "numArgumentsFromSubscript: result exceeds exact double range",
+};
+
+const NUM_ARGUMENTS_ERRORS: [BuiltinErrorDescriptor; 4] = [
     NUM_ARGUMENTS_ERROR_ARGUMENT,
     NUM_ARGUMENTS_ERROR_SUBSTRUCT,
     NUM_ARGUMENTS_ERROR_CONTEXT,
+    NUM_ARGUMENTS_ERROR_COUNT,
 ];
 
 pub const NUM_ARGUMENTS_FROM_SUBSCRIPT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -221,6 +282,35 @@ pub const NUM_ARGUMENTS_FROM_SUBSCRIPT_DESCRIPTOR: BuiltinDescriptor = BuiltinDe
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &NUM_ARGUMENTS_ERRORS,
 };
+
+const NUM_ARGUMENTS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The indexing target may be an array of any integer class; ordinary array cases use only exact shape and container metadata.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "S.subs",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Integer scalar and vector subscripts are validated directly from authoritative storage, including full-width positive uint64 selectors, without binary64 conversion.",
+    },
+];
+
+pub const NUM_ARGUMENTS_FROM_SUBSCRIPT_INTEGER_CAPABILITIES:
+    [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor {
+    form: "n = numArgumentsFromSubscript(integer_A, S_with_integer_subscripts, indexingContext)",
+    inputs: &NUM_ARGUMENTS_INTEGER_INPUTS,
+    computation_domain: BuiltinIntegerComputationDomain::Structural,
+    output_class: BuiltinIntegerOutputClassRule::Double,
+    overflow: BuiltinIntegerOverflowRule::Error,
+    backend: BuiltinIntegerBackendRule::HostAndGpu,
+    overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+    notes: "Metadata-decidable target extents do not gather resident payloads. The structural count crosses to double only after exact-range validation.",
+}];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum IndexingContext {
@@ -657,10 +747,8 @@ pub(crate) async fn dispatch_subsref(
                             _ => None,
                         };
                         if let Some(field) = field {
-                            return crate::call_builtin_async_with_outputs(
-                                "getfield",
-                                &[receiver, Value::String(field)],
-                                crate::current_requested_outputs(),
+                            return crate::builtins::structs::core::getfield::get_member_value(
+                                receiver, &field,
                             )
                             .await;
                         }
@@ -748,6 +836,9 @@ pub(crate) async fn dispatch_subsasgn(
     summary = "Dispatch overloaded object indexing reads.",
     keywords = "subsref,indexing,classdef,object",
     descriptor(crate::builtins::introspection::object_indexing::SUBSREF_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::introspection::object_indexing::SUBSREF_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::introspection::object_indexing"
 )]
 pub async fn subsref_builtin(
@@ -764,6 +855,9 @@ pub async fn subsref_builtin(
     summary = "Dispatch overloaded object indexing writes.",
     keywords = "subsasgn,indexing,classdef,object",
     descriptor(crate::builtins::introspection::object_indexing::SUBSASGN_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::introspection::object_indexing::SUBSASGN_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::introspection::object_indexing"
 )]
 pub async fn subsasgn_builtin(
@@ -782,6 +876,9 @@ pub async fn subsasgn_builtin(
     keywords = "numArgumentsFromSubscript,substruct,subsref,subsasgn,indexing,classdef,object",
     descriptor(
         crate::builtins::introspection::object_indexing::NUM_ARGUMENTS_FROM_SUBSCRIPT_DESCRIPTOR
+    ),
+    integer_capabilities(
+        crate::builtins::introspection::object_indexing::NUM_ARGUMENTS_FROM_SUBSCRIPT_INTEGER_CAPABILITIES
     ),
     builtin_path = "crate::builtins::introspection::object_indexing"
 )]
@@ -805,9 +902,23 @@ pub async fn num_arguments_from_subscript_builtin(
         }
     }
     let levels = parse_subscript_levels(&subscript)?;
-    Ok(Value::Num(
-        default_num_arguments(&target, &levels, context)? as f64,
-    ))
+    Ok(Value::Num(exact_count_as_f64(default_num_arguments(
+        &target, &levels, context,
+    )?)?))
+}
+
+fn exact_count_as_f64(count: usize) -> crate::BuiltinResult<f64> {
+    if count != 0 {
+        let significant_bits = usize::BITS - count.leading_zeros();
+        let discarded_bits = significant_bits.saturating_sub(f64::MANTISSA_DIGITS);
+        if count.trailing_zeros() < discarded_bits {
+            return Err(num_args_error(
+                &NUM_ARGUMENTS_ERROR_COUNT,
+                format!("argument count {count} cannot be represented exactly as double"),
+            ));
+        }
+    }
+    Ok(count as f64)
 }
 
 #[cfg(test)]
@@ -859,6 +970,25 @@ mod tests {
             single_subscript_count(&Value::Num(0.0), &Value::Int(IntValue::I64(-1)), 0, true)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn num_arguments_integer_metadata_and_double_boundary_are_explicit() {
+        assert_eq!(NUM_ARGUMENTS_FROM_SUBSCRIPT_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(
+            NUM_ARGUMENTS_FROM_SUBSCRIPT_INTEGER_CAPABILITIES[0].output_class,
+            BuiltinIntegerOutputClassRule::Double
+        );
+        #[cfg(target_pointer_width = "64")]
+        {
+            assert_eq!(
+                exact_count_as_f64(9_007_199_254_740_992).expect("exact count"),
+                9_007_199_254_740_992.0
+            );
+            let error =
+                exact_count_as_f64(9_007_199_254_740_993).expect_err("count is not exact binary64");
+            assert_eq!(error.identifier(), NUM_ARGUMENTS_ERROR_COUNT.identifier);
+        }
     }
 
     #[test]
@@ -941,6 +1071,7 @@ mod tests {
             shape: vec![2, 3],
             device_id: 0,
             buffer_id: 99,
+            descriptor: Default::default(),
         });
         let descriptor = substruct(
             crate::OBJECT_INDEX_BRACE,
@@ -995,6 +1126,7 @@ mod tests {
             shape: vec![usize::MAX, 2],
             device_id: 0,
             buffer_id: 99,
+            descriptor: Default::default(),
         });
         let descriptor = substruct(
             crate::OBJECT_INDEX_BRACE,

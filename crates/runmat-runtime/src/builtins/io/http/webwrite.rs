@@ -1,12 +1,17 @@
 //! MATLAB-compatible `webwrite` builtin for HTTP/HTTPS uploads.
 
+use runmat_value::NumericScalar;
 use std::collections::VecDeque;
 use std::time::Duration;
 
 use base64::engine::general_purpose::STANDARD as BASE64_ENGINE;
 use base64::Engine;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
@@ -25,9 +30,72 @@ use crate::builtins::io::json::jsondecode::decode_json_text;
 use crate::call_builtin_async;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-const DEFAULT_TIMEOUT_SECONDS: f64 = 60.0;
+const DEFAULT_TIMEOUT_SECONDS: f64 = 5.0;
+const MAX_TIMEOUT_SECONDS: f64 = 2147.483647;
 const DEFAULT_USER_AGENT: &str = "RunMat webwrite/0.0";
 const BUILTIN_NAME: &str = "webwrite";
+
+const EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "webwrite-explicit-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "passing explicit gpuArray values to host-only webwrite is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:WebwriteExplicitGpuInputExtension"),
+};
+pub const WEBWRITE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [EXPLICIT_GPU_EXTENSION];
+
+const POST_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "PostValue",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+    notes: "Integer scalars and vectors are form-encoded directly from authoritative storage, including full-width signed and unsigned values.",
+}];
+const DATA_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "data",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+    notes: "A numeric scalar used as JSON data, or integer values nested in a documented structure or cell payload, are serialized as exact JSON integers.",
+}];
+const TIMEOUT_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "options.Timeout",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+    notes: "A positive integer timeout is bounded before conversion to the host HTTP duration.",
+}];
+pub const WEBWRITE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "response = webwrite(url, post_name, integer_post_value, ...)",
+        inputs: &POST_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Default comma-separated form encoding preserves every integer element exactly; response type is determined independently by the service and content options.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "response = webwrite(url, integer_data_or_nested_integer_data, options)",
+        inputs: &DATA_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Documented JSON numeric data is serialized without binary64 materialization. Binary byte uploads remain a separate byte-range conversion contract.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "response = webwrite(url, data, options) with integer options.Timeout",
+        inputs: &TIMEOUT_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The bounded timeout crosses the host duration boundary; explicit gpuArray arguments are separately gated before provider access while automatic residency gathers transparently.",
+    },
+];
 
 const WEBWRITE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "response",
@@ -300,9 +368,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     type_resolver(crate::builtins::io::type_resolvers::webwrite_type),
     descriptor(crate::builtins::io::http::webwrite::WEBWRITE_DESCRIPTOR),
+    extensions(crate::builtins::io::http::webwrite::WEBWRITE_EXTENSIONS),
+    integer_capabilities(crate::builtins::io::http::webwrite::WEBWRITE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::http::webwrite"
 )]
 async fn webwrite_builtin(url: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if crate::builtins::common::validation::value_contains_explicit_gpu(&url)
+        || rest
+            .iter()
+            .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &EXPLICIT_GPU_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let gathered_url = gather_if_needed_async(&url)
         .await
         .map_err(webwrite_flow_with_context)?;
@@ -821,14 +901,18 @@ fn parse_content_type(value: &Value) -> BuiltinResult<ContentTypeHint> {
 fn parse_timeout(value: &Value) -> BuiltinResult<Duration> {
     let seconds = numeric_scalar(
         value,
-        "webwrite: Timeout must be a finite, non-negative scalar numeric value",
+        "webwrite: Timeout must be a positive scalar numeric value within the supported range or Inf",
     )?;
-    if !seconds.is_finite() || seconds < 0.0 {
+    if seconds <= 0.0 || (seconds.is_finite() && seconds > MAX_TIMEOUT_SECONDS) {
         return Err(webwrite_error(
-            "webwrite: Timeout must be a finite, non-negative scalar numeric value",
+            "webwrite: Timeout must be a positive scalar numeric value within the supported range or Inf",
         ));
     }
-    Ok(Duration::from_secs_f64(seconds))
+    Ok(Duration::from_secs_f64(if seconds.is_infinite() {
+        MAX_TIMEOUT_SECONDS
+    } else {
+        seconds
+    }))
 }
 
 fn parse_request_method(value: &Value) -> BuiltinResult<HttpMethod> {
@@ -984,39 +1068,61 @@ fn value_to_query_string(value: &Value, name: &str) -> BuiltinResult<String> {
         Value::Int(i) => Ok(i.decimal_string()),
         Value::Bool(b) => Ok(if *b { "true".into() } else { "false".into() }),
         Value::Tensor(tensor) => {
-            if tensor_utils::is_scalar_tensor(tensor) {
-                Ok(tensor
-                    .integer_storage()
-                    .and_then(|storage| storage.value_at(0))
-                    .map_or_else(
-                        || format!("{}", tensor_utils::tensor_value_f64(tensor, 0)),
-                        |value| value.decimal_string(),
-                    ))
-            } else {
+            if tensor.shape.len() > 2 || (tensor.rows() > 1 && tensor.cols() > 1) {
                 Err(webwrite_error(format!(
-                    "webwrite: query parameter '{}' must be scalar",
+                    "webwrite: query parameter '{}' must be a scalar or vector",
                     name
                 )))
+            } else {
+                Ok((0..tensor.len())
+                    .map(|index| {
+                        format_numeric_scalar(
+                            tensor
+                                .numeric_value_at(index)
+                                .expect("query tensor index must exist"),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(","))
             }
         }
         Value::LogicalArray(array) => {
-            if array.len() == 1 {
-                Ok(if array.data[0] != 0 {
-                    "true".into()
-                } else {
-                    "false".into()
-                })
-            } else {
+            if array.shape.len() > 2
+                || (array.shape.first().copied().unwrap_or(1) > 1
+                    && array.shape.get(1).copied().unwrap_or(1) > 1)
+            {
                 Err(webwrite_error(format!(
-                    "webwrite: query parameter '{}' must be scalar",
+                    "webwrite: query parameter '{}' must be a scalar or vector",
                     name
                 )))
+            } else {
+                Ok(array
+                    .data
+                    .iter()
+                    .map(|value| if *value != 0 { "true" } else { "false" })
+                    .collect::<Vec<_>>()
+                    .join(","))
             }
         }
         _ => Err(webwrite_error(format!(
             "webwrite: unsupported value type for query parameter '{}'",
             name
         ))),
+    }
+}
+
+fn format_numeric_scalar(value: NumericScalar) -> String {
+    match value {
+        NumericScalar::F64(value) => value.to_string(),
+        NumericScalar::F32(value) => value.to_string(),
+        NumericScalar::I8(value) => value.to_string(),
+        NumericScalar::I16(value) => value.to_string(),
+        NumericScalar::I32(value) => value.to_string(),
+        NumericScalar::I64(value) => value.to_string(),
+        NumericScalar::U8(value) => value.to_string(),
+        NumericScalar::U16(value) => value.to_string(),
+        NumericScalar::U32(value) => value.to_string(),
+        NumericScalar::U64(value) => value.to_string(),
     }
 }
 
@@ -1288,6 +1394,21 @@ pub(crate) mod tests {
         assert!(labels.contains(&"response = webwrite(url, data)"));
         assert!(labels.contains(&"response = webwrite(url, data, optionsStruct)"));
         assert!(labels.contains(&"response = webwrite(url, data, name, value, ...)"));
+    }
+
+    #[test]
+    fn webwrite_post_values_preserve_exact_integer_vectors() {
+        let value = Value::Tensor(
+            Tensor::new_integer(
+                runmat_value::IntegerStorage::I64(vec![i64::MIN, (1_i64 << 53) + 1]),
+                vec![1, 2],
+            )
+            .expect("integer post vector"),
+        );
+        assert_eq!(
+            value_to_query_string(&value, "id").expect("post encoding"),
+            "-9223372036854775808,9007199254740993"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -25,12 +25,13 @@
   "tested": {
     "integration": "runmat-ignition/tests/datetime.rs"
   },
-  "description": "`year(dt)` extracts year numbers from datetime scalars or arrays and returns doubles with shape behavior matching MATLAB datetime component access.",
+  "description": "`year(t)` extracts year numbers from datetime values and retained legacy date inputs, returning double values with the input shape.",
   "behaviors": [
-    "`year(t)` accepts datetime scalars and datetime arrays.",
+    "`year(t)` accepts datetime scalars and arrays. The optional year type is `'iso'` or `'gregorian'`.",
+    "For compatibility with existing code, serial date numbers and text dates are also accepted; an optional date format can be supplied for legacy input.",
     "The output shape matches the input shape.",
     "The returned values are numeric doubles, even when the years are mathematically integers.",
-    "Passing a non-datetime value raises a datetime-specific error."
+    "RunMat mode additionally accepts single-precision and native integer legacy serial-date storage."
   ],
   "examples": [
     {

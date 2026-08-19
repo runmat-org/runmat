@@ -17,7 +17,7 @@
       "double"
     ],
     "broadcasting": "none",
-    "notes": "`meshc` combines the shared wireframe surface path with the modern contour path instead of using a parallel legacy composite implementation."
+    "notes": "`meshc` combines the shared wireframe and contour paths, retaining native coordinate storage for the returned surface properties while treating contour generation and rendering as explicit floating boundaries."
   },
   "fusion": {
     "elementwise": false,
@@ -32,6 +32,8 @@
   "description": "`meshc` combines a wireframe `mesh` surface with contour overlays on the base plane. Composite handle and plotting behavior follow MATLAB semantics.",
   "behaviors": [
     "`meshc` shares the same wireframe surface semantics as `mesh` for the primary surface object.",
+    "The primary surface's `XData`, `YData`, and `ZData` retain native `single`, `double`, or integer class and exact host values, including an owner-aware snapshot of resident inputs.",
+    "The documented independent color-array and leading-axes forms are not implemented yet; this remains a general graphics-surface gap.",
     "The returned handle is the surface handle for the wireframe component of the composite.",
     "Contour overlays are produced through the shared contour path.",
     "View state, colormaps, and subplot-local metadata all flow through the shared axes model.",

@@ -33,7 +33,8 @@
     "`sprand(m, n, density)` creates an `m x n` sparse matrix with approximately `round(m*n*density)` stored entries.",
     "`density` must be finite and between `0` and `1`.",
     "`sprand(m, n, density, rc)` accepts a scalar reciprocal-condition target or a vector of singular values in `[0,1]`. RunMat starts from the requested singular profile and applies random orthogonal plane rotations to add sparse fill while preserving that profile.",
-    "A trailing `\"double\"` typename is accepted for MATLAB compatibility. `\"single\"` sparse storage is rejected until RunMat has native single-precision sparse matrices.",
+    "A trailing `\"double\"` or `\"single\"` typename selects the sparse output class.",
+    "All eight integer classes are documented for the pattern input `S`. Typed integer dimensions, density, and condition controls are RunMat extensions; dimensions are structural, while numerical controls reject if binary64 conversion would round.",
     "Large requested sparse patterns, condition-profile dense intermediates, and excessive plane-rotation work are rejected before allocating or running unbounded work."
   ],
   "examples": [
@@ -70,14 +71,14 @@
   "syntax": {
     "example": {
       "description": "Supported forms",
-      "input": "R = sprand(S)\nR = sprand(S, \"double\")\nR = sprand(m, n, density)\nR = sprand(m, n, density, \"double\")\nR = sprand(m, n, density, rc)\nR = sprand(m, n, density, rc, \"double\")",
-      "output": "`R` is a sparse double matrix."
+      "input": "R = sprand(S)\nR = sprand(S, typename)\nR = sprand(m, n, density)\nR = sprand(m, n, density, typename)\nR = sprand(m, n, density, rc)\nR = sprand(m, n, density, rc, typename)",
+      "output": "`R` is a sparse double matrix by default or sparse single when `typename` is `\"single\"`."
     },
     "points": [
       "The output is host-resident sparse CSC storage.",
       "`rc` can be a scalar reciprocal condition number or a vector of singular values with length at most `min(m,n)`.",
       "The `rc` form is bounded by dense working-storage and plane-rotation work limits.",
-      "Only `\"double\"` sparse storage is currently supported."
+      "The output typename is `\"double\"` or `\"single\"`."
     ]
   },
   "gpu_residency": "`sprand` runs on the host RNG and produces a host sparse matrix."

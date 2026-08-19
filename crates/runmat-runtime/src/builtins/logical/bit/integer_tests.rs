@@ -61,10 +61,11 @@ fn bitand_rejects_unsupported_resident_forms_before_provider_access() {
         shape: vec![1, 1],
         device_id: u32::MAX,
         buffer_id: u64::MAX - 70,
-    };
-    runmat_accelerate_api::set_handle_integer_type(
-        &signed,
-        runmat_accelerate_api::IntegerElementType::I32,
+        descriptor: Default::default(),
+    }
+    .with_numeric_descriptor(
+        runmat_accelerate_api::NumericElementType::I32,
+        runmat_accelerate_api::GpuTensorStorage::Real,
     );
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
     let error = block_on(bitand_builtin(vec![
@@ -81,10 +82,11 @@ fn bitand_rejects_unsupported_resident_forms_before_provider_access() {
         shape: vec![1, 1],
         device_id: u32::MAX,
         buffer_id: u64::MAX - 71,
-    };
-    runmat_accelerate_api::set_handle_integer_type(
-        &unsigned,
-        runmat_accelerate_api::IntegerElementType::U8,
+        descriptor: Default::default(),
+    }
+    .with_numeric_descriptor(
+        runmat_accelerate_api::NumericElementType::U8,
+        runmat_accelerate_api::GpuTensorStorage::Real,
     );
     let error = block_on(bitand_builtin(vec![
         Value::GpuTensor(unsigned),
@@ -251,10 +253,11 @@ fn bitor_rejects_unsupported_resident_forms_before_provider_access() {
         shape: vec![1, 1],
         device_id: u32::MAX,
         buffer_id: u64::MAX - 72,
-    };
-    runmat_accelerate_api::set_handle_integer_type(
-        &signed,
-        runmat_accelerate_api::IntegerElementType::I32,
+        descriptor: Default::default(),
+    }
+    .with_numeric_descriptor(
+        runmat_accelerate_api::NumericElementType::I32,
+        runmat_accelerate_api::GpuTensorStorage::Real,
     );
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
     let error = block_on(bitor_builtin(vec![
@@ -271,10 +274,11 @@ fn bitor_rejects_unsupported_resident_forms_before_provider_access() {
         shape: vec![1, 1],
         device_id: u32::MAX,
         buffer_id: u64::MAX - 73,
-    };
-    runmat_accelerate_api::set_handle_integer_type(
-        &unsigned,
-        runmat_accelerate_api::IntegerElementType::U8,
+        descriptor: Default::default(),
+    }
+    .with_numeric_descriptor(
+        runmat_accelerate_api::NumericElementType::U8,
+        runmat_accelerate_api::GpuTensorStorage::Real,
     );
     let error = block_on(bitor_builtin(vec![
         Value::GpuTensor(unsigned),
@@ -425,10 +429,11 @@ fn bitshift_rejects_unsupported_resident_forms_before_provider_access() {
         shape: vec![1, 1],
         device_id: u32::MAX,
         buffer_id: u64::MAX - 74,
-    };
-    runmat_accelerate_api::set_handle_integer_type(
-        &signed_value,
-        runmat_accelerate_api::IntegerElementType::I32,
+        descriptor: Default::default(),
+    }
+    .with_numeric_descriptor(
+        runmat_accelerate_api::NumericElementType::I32,
+        runmat_accelerate_api::GpuTensorStorage::Real,
     );
     let error = block_on(bitshift_builtin(vec![
         Value::GpuTensor(signed_value),
@@ -444,10 +449,11 @@ fn bitshift_rejects_unsupported_resident_forms_before_provider_access() {
         shape: vec![1, 1],
         device_id: u32::MAX,
         buffer_id: u64::MAX - 75,
-    };
-    runmat_accelerate_api::set_handle_integer_type(
-        &unsigned_value,
-        runmat_accelerate_api::IntegerElementType::U8,
+        descriptor: Default::default(),
+    }
+    .with_numeric_descriptor(
+        runmat_accelerate_api::NumericElementType::U8,
+        runmat_accelerate_api::GpuTensorStorage::Real,
     );
     let error = block_on(bitshift_builtin(vec![
         Value::GpuTensor(unsigned_value.clone()),
@@ -463,6 +469,7 @@ fn bitshift_rejects_unsupported_resident_forms_before_provider_access() {
         shape: vec![1, 1],
         device_id: u32::MAX,
         buffer_id: u64::MAX - 76,
+        descriptor: Default::default(),
     };
     let error = block_on(bitshift_builtin(vec![
         Value::GpuTensor(double_value),
@@ -1300,16 +1307,152 @@ fn wgpu_gathered_bit_position_shapes_use_scalar_or_exact_size_rules() {
 
     let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload");
     let positions = Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("same-size positions");
-    let Value::Tensor(output) = block_on(bitget_builtin(vec![
+    let output = block_on(bitget_builtin(vec![
         Value::GpuTensor(handle),
         Value::Tensor(positions),
     ]))
-    .expect("wgpu same-size bitget") else {
-        panic!("expected typed tensor result");
-    };
+    .expect("wgpu same-size bitget");
+    assert!(matches!(output, Value::GpuTensor(_)));
+    let output = test_support::gather(output).expect("gather bitget result");
     assert_eq!(
         output.integer_storage(),
         Some(&IntegerStorage::U8(vec![1, 1]))
+    );
+}
+
+#[test]
+fn remaining_direct_bit_functions_preserve_supported_gpu_residency() {
+    test_support::with_test_provider(|provider| {
+        let input = Tensor::new_integer(IntegerStorage::U8(vec![0b1010, 0b0101]), vec![1, 2])
+            .expect("input");
+        let other = Tensor::new_integer(IntegerStorage::U8(vec![0b1100, 0b0011]), vec![1, 2])
+            .expect("other");
+
+        let left = gpu_helpers::upload_tensor(provider, &input).expect("left upload");
+        let right = gpu_helpers::upload_tensor(provider, &other).expect("right upload");
+        let xor = block_on(bitxor_builtin(vec![
+            Value::GpuTensor(left),
+            Value::GpuTensor(right),
+        ]))
+        .expect("bitxor");
+        assert!(matches!(xor, Value::GpuTensor(_)));
+        assert_eq!(
+            test_support::gather(xor)
+                .expect("xor gather")
+                .integer_storage(),
+            Some(&IntegerStorage::U8(vec![0b0110, 0b0110]))
+        );
+
+        let source = gpu_helpers::upload_tensor(provider, &input).expect("cmp upload");
+        let complement = block_on(bitcmp_builtin(vec![Value::GpuTensor(source)])).expect("bitcmp");
+        assert!(matches!(complement, Value::GpuTensor(_)));
+        assert_eq!(
+            test_support::gather(complement)
+                .expect("complement gather")
+                .integer_storage(),
+            Some(&IntegerStorage::U8(vec![0b1111_0101, 0b1111_1010]))
+        );
+
+        let source = gpu_helpers::upload_tensor(provider, &input).expect("get upload");
+        let bits = block_on(bitget_builtin(vec![
+            Value::GpuTensor(source),
+            Value::Num(2.0),
+        ]))
+        .expect("bitget");
+        assert!(matches!(bits, Value::GpuTensor(_)));
+        assert_eq!(
+            test_support::gather(bits)
+                .expect("bitget gather")
+                .integer_storage(),
+            Some(&IntegerStorage::U8(vec![1, 0]))
+        );
+
+        let source = gpu_helpers::upload_tensor(provider, &input).expect("set upload");
+        let cleared = block_on(bitset_builtin(vec![
+            Value::GpuTensor(source),
+            Value::Num(2.0),
+            Value::Bool(false),
+        ]))
+        .expect("bitset");
+        assert!(matches!(cleared, Value::GpuTensor(_)));
+        assert_eq!(
+            test_support::gather(cleared)
+                .expect("bitset gather")
+                .integer_storage(),
+            Some(&IntegerStorage::U8(vec![0b1000, 0b0101]))
+        );
+    });
+}
+
+#[cfg(feature = "wgpu")]
+#[test]
+fn remaining_direct_bit_functions_and_idivide_preserve_actual_wgpu_residency() {
+    let _guard = test_support::accel_test_lock();
+    if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+    )
+    .is_err()
+    {
+        return;
+    }
+    let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+    let input =
+        Tensor::new_integer(IntegerStorage::U8(vec![0b1010, 0b0101]), vec![1, 2]).expect("input");
+    let other =
+        Tensor::new_integer(IntegerStorage::U8(vec![0b1100, 0b0011]), vec![1, 2]).expect("other");
+
+    let left = gpu_helpers::upload_tensor(provider, &input).expect("left upload");
+    let right = gpu_helpers::upload_tensor(provider, &other).expect("right upload");
+    let xor = block_on(bitxor_builtin(vec![
+        Value::GpuTensor(left),
+        Value::GpuTensor(right),
+    ]))
+    .expect("bitxor");
+    assert!(matches!(xor, Value::GpuTensor(_)));
+    assert_eq!(
+        test_support::gather(xor)
+            .expect("xor gather")
+            .integer_storage(),
+        Some(&IntegerStorage::U8(vec![0b0110, 0b0110]))
+    );
+
+    let source = gpu_helpers::upload_tensor(provider, &input).expect("cmp upload");
+    let complement = block_on(bitcmp_builtin(vec![Value::GpuTensor(source)])).expect("bitcmp");
+    assert!(matches!(complement, Value::GpuTensor(_)));
+
+    let source = gpu_helpers::upload_tensor(provider, &input).expect("get upload");
+    let bits = block_on(bitget_builtin(vec![
+        Value::GpuTensor(source),
+        Value::Num(2.0),
+    ]))
+    .expect("bitget");
+    assert!(matches!(bits, Value::GpuTensor(_)));
+
+    let source = gpu_helpers::upload_tensor(provider, &input).expect("set upload");
+    let cleared = block_on(bitset_builtin(vec![
+        Value::GpuTensor(source),
+        Value::Num(2.0),
+        Value::Bool(false),
+    ]))
+    .expect("bitset");
+    assert!(matches!(cleared, Value::GpuTensor(_)));
+
+    let dividend =
+        Tensor::new_integer(IntegerStorage::U8(vec![10, 11]), vec![1, 2]).expect("dividend");
+    let divisor = Tensor::new_integer(IntegerStorage::U8(vec![3]), vec![1, 1]).expect("divisor");
+    let dividend = gpu_helpers::upload_tensor(provider, &dividend).expect("dividend upload");
+    let divisor = gpu_helpers::upload_tensor(provider, &divisor).expect("divisor upload");
+    let quotient = block_on(idivide_builtin(vec![
+        Value::GpuTensor(dividend),
+        Value::GpuTensor(divisor),
+    ]))
+    .expect("idivide");
+    assert!(matches!(quotient, Value::GpuTensor(_)));
+    assert_eq!(
+        test_support::gather(quotient)
+            .expect("quotient gather")
+            .integer_storage(),
+        Some(&IntegerStorage::U8(vec![3, 3]))
     );
 }
 
@@ -1761,6 +1904,46 @@ fn idivide_rejects_zero_mixed_class_and_invalid_double_inputs() {
 }
 
 #[test]
+fn idivide_rejects_the_unrepresentable_signed_minimum_quotient() {
+    let overflow = block_on(idivide_builtin(vec![
+        Value::Int(IntValue::I64(i64::MIN)),
+        Value::Int(IntValue::I64(-1)),
+    ]))
+    .expect_err("int64 minimum divided by negative one must not wrap");
+    assert_eq!(overflow.identifier(), ERROR_OVERFLOW.identifier);
+}
+
+#[test]
+fn idivide_preserves_exact_supported_gpu_residency() {
+    test_support::with_test_provider(|provider| {
+        let dividend = Tensor::new_integer(
+            IntegerStorage::U64(vec![(1_u64 << 63) + 12, u64::MAX - 1]),
+            vec![1, 2],
+        )
+        .expect("dividend");
+        let divisor =
+            Tensor::new_integer(IntegerStorage::U64(vec![2, 3]), vec![1, 2]).expect("divisor");
+        let dividend = gpu_helpers::upload_tensor(provider, &dividend).expect("dividend upload");
+        let divisor = gpu_helpers::upload_tensor(provider, &divisor).expect("divisor upload");
+        let result = block_on(idivide_builtin(vec![
+            Value::GpuTensor(dividend),
+            Value::GpuTensor(divisor),
+        ]))
+        .expect("resident idivide");
+        assert!(matches!(result, Value::GpuTensor(_)));
+        assert_eq!(
+            test_support::gather(result)
+                .expect("result gather")
+                .integer_storage(),
+            Some(&IntegerStorage::U64(vec![
+                ((1_u64 << 63) + 12) / 2,
+                (u64::MAX - 1) / 3,
+            ]))
+        );
+    });
+}
+
+#[test]
 fn swapbytes_preserves_integer_scalar_classes() {
     assert_eq!(
         block_on(swapbytes_builtin(Value::Int(IntValue::U16(0x1234)))).expect("swapbytes"),
@@ -1837,5 +2020,25 @@ fn swapbytes_reinterprets_floating_point_bytes() {
     assert_eq!(
         out,
         Value::Num(f64::from_bits(value.to_bits().swap_bytes()))
+    );
+}
+
+#[test]
+fn swapbytes_declares_exact_integer_contract_and_gates_explicit_gpu_fallback() {
+    assert_eq!(SWAPBYTES_INTEGER_CAPABILITIES.len(), 1);
+    assert_eq!(SWAPBYTES_INTEGER_CAPABILITIES[0].inputs[0].classes.len(), 8);
+    let handle = runmat_accelerate_api::GpuTensorHandle {
+        shape: vec![1, 1],
+        device_id: u32::MAX,
+        buffer_id: u64::MAX - 454,
+        descriptor: Default::default(),
+    };
+    let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+    let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+    let error = block_on(swapbytes_builtin(Value::GpuTensor(handle)))
+        .expect_err("strict mode rejects explicit GPU fallback before provider access");
+    assert_eq!(
+        error.identifier(),
+        SWAPBYTES_EXPLICIT_GPU_EXTENSION.error_identifier
     );
 }

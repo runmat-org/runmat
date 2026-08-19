@@ -21,6 +21,11 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 #[cfg(test)]
 use runmat_value::IntegerStorage;
@@ -83,6 +88,27 @@ pub const TRANSPOSE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &TRANSPOSE_ERRORS,
 };
+
+const TRANSPOSE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer classes are documented matrix inputs. Transpose reorders elements without arithmetic or conversion.",
+    }];
+
+pub const TRANSPOSE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "B = transpose(integer_A)",
+        inputs: &TRANSPOSE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Dense, sparse, empty, host, and supported resident inputs preserve exact integer class, shape, and values; provider fallback gathers and restores through the input handle's owner.",
+    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::ops::transpose")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -176,6 +202,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "transpose",
     type_resolver(matrix_transpose_type),
     descriptor(crate::builtins::math::linalg::ops::transpose::TRANSPOSE_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::math::linalg::ops::transpose::TRANSPOSE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::math::linalg::ops::transpose"
 )]
 async fn transpose_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {

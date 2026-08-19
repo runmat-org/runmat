@@ -5,6 +5,11 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexTensor, IntValue, IntegerStorage, NumericStorage, Tensor, Value,
@@ -80,6 +85,26 @@ const SIGN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescri
     outputs: &SIGN_OUTPUT,
 }];
 
+const SIGN_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight real integer classes are read and transformed directly in authoritative native storage.",
+    }];
+pub const SIGN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = sign(integer_X)",
+        inputs: &SIGN_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Signed values map to -1, 0, or 1 and unsigned values to 0 or 1 in the input class; unsupported resident hooks gather exact typed storage.",
+    }];
+
 const SIGN_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.SIGN.INVALID_INPUT",
     identifier: Some("RunMat:sign:InvalidInput"),
@@ -123,6 +148,7 @@ fn sign_error_with_detail(
     accel = "unary",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::elementwise::sign::SIGN_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::elementwise::sign::SIGN_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::elementwise::sign"
 )]
 async fn sign_builtin(value: Value) -> BuiltinResult<Value> {
@@ -156,8 +182,6 @@ async fn sign_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 "GPU provider unavailable for complex input",
             ));
         };
-        let precision = runmat_accelerate_api::handle_precision(&handle)
-            .unwrap_or_else(|| provider.precision());
         let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
             .await
             .map_err(|err| sign_error_with_detail(&SIGN_ERROR_INTERNAL, err))?;
@@ -178,7 +202,6 @@ async fn sign_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         };
         let out = gpu_helpers::upload_complex_tensor(provider, &tensor)
             .map_err(|err| sign_error_with_detail(&SIGN_ERROR_INTERNAL, err))?;
-        runmat_accelerate_api::set_handle_precision(&out, precision);
         return Ok(gpu_helpers::complex_gpu_value(out));
     }
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
@@ -677,11 +700,9 @@ pub(crate) mod tests {
                 data: &raw,
                 shape: &shape,
             };
-            let handle = provider.upload(&view).expect("upload");
-            runmat_accelerate_api::set_handle_storage(
-                &handle,
-                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            );
+            let mut handle = provider.upload(&view).expect("upload");
+            handle.descriptor.storage =
+                Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
             let err = sign_builtin(Value::GpuTensor(handle))
                 .expect_err("odd complex buffer should reject");
             assert!(

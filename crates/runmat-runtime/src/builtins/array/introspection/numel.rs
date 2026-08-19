@@ -8,7 +8,11 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ResolveContext, Type,
 };
@@ -53,13 +57,63 @@ fn numel_type(args: &[Type], _context: &ResolveContext) -> Type {
     if args.is_empty() {
         Type::Unknown
     } else {
-        Type::Int
+        Type::Num
     }
 }
 
+const NUMEL_DIMENSIONS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "numel-dimension-selectors",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "numel(A, dim, ...) dimension-selector syntax is a RunMat extension; MATLAB's public numel syntax accepts only A",
+    error_identifier: Some("RunMat:compatibility:NumelDimensionSelectorsExtension"),
+};
+
+pub const NUMEL_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [NUMEL_DIMENSIONS_EXTENSION];
+
+const NUMEL_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Every integer scalar and array class is counted from shape metadata; element values are never converted or inspected.",
+    }];
+
+const NUMEL_INTEGER_DIMENSION_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "dim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "RunMat's additional scalar, variadic, and vector dimension selectors parse all eight integer classes exactly as positive structural indices.",
+    }];
+
+pub const NUMEL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "n = numel(integer_A)",
+        inputs: &NUMEL_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "The documented double count is produced only when the exact usize count is representable as binary64; coherent resident shape metadata avoids payload gather.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "n = numel(A, integer_dim, ...)",
+        inputs: &NUMEL_INTEGER_DIMENSION_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "This compatibility-gated RunMat extension multiplies selected extents with checked usize arithmetic and then requires an exact double result.",
+    },
+];
+
 const NUMEL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "n",
-    ty: BuiltinParamType::IntegerScalar,
+    ty: BuiltinParamType::NumericScalar,
     arity: BuiltinParamArity::Required,
     default: None,
     description: "Number of elements selected from input.",
@@ -103,7 +157,7 @@ const NUMEL_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     },
 ];
 
-const NUMEL_ERRORS: [BuiltinErrorDescriptor; 7] = [
+const NUMEL_ERRORS: [BuiltinErrorDescriptor; 8] = [
     BuiltinErrorDescriptor {
         code: "RM.NUMEL.DIM_ARG_TYPE",
         identifier: None,
@@ -146,7 +200,15 @@ const NUMEL_ERRORS: [BuiltinErrorDescriptor; 7] = [
         when: "No dimensions are provided after parsing.",
         message: "numel: dimension list must contain at least one element",
     },
+    NUMEL_ERROR_COUNT_NOT_EXACT,
 ];
+
+const NUMEL_ERROR_COUNT_NOT_EXACT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.NUMEL.COUNT_NOT_EXACT_DOUBLE",
+    identifier: Some("RunMat:numel:CountNotExactDouble"),
+    when: "The element count cannot be represented exactly by the documented double scalar output.",
+    message: "numel: result exceeds exact double range",
+};
 
 pub const NUMEL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &NUMEL_SIGNATURES,
@@ -163,12 +225,18 @@ pub const NUMEL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "metadata",
     type_resolver(numel_type),
     descriptor(crate::builtins::array::introspection::numel::NUMEL_DESCRIPTOR),
+    extensions(crate::builtins::array::introspection::numel::NUMEL_EXTENSIONS),
+    integer_capabilities(crate::builtins::array::introspection::numel::NUMEL_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::introspection::numel"
 )]
 async fn numel_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
-        return Ok(Value::Num(value_numel(&value).await? as f64));
+        return Ok(Value::Num(exact_numel_count_as_f64(
+            value_numel(&value).await?,
+        )?));
     }
+
+    crate::compatibility::ensure_builtin_extension_enabled(&NUMEL_DIMENSIONS_EXTENSION, "numel")?;
 
     let dims = parse_dimension_args(&rest)?;
     let shape = value_dimensions(&value).await?;
@@ -176,10 +244,31 @@ async fn numel_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
     let mut product = 1usize;
     for dim in dims {
         let extent = dimension_extent(&shape, dim);
-        product = product.saturating_mul(extent);
+        product = product.checked_mul(extent).ok_or_else(|| {
+            crate::runtime_descriptor_error_with_detail(
+                "numel",
+                &NUMEL_ERROR_COUNT_NOT_EXACT,
+                "selected dimension product exceeds the host structural range",
+            )
+        })?;
     }
 
-    Ok(Value::Num(product as f64))
+    Ok(Value::Num(exact_numel_count_as_f64(product)?))
+}
+
+fn exact_numel_count_as_f64(count: usize) -> crate::BuiltinResult<f64> {
+    if count != 0 {
+        let significant_bits = usize::BITS - count.leading_zeros();
+        let discarded_bits = significant_bits.saturating_sub(f64::MANTISSA_DIGITS);
+        if count.trailing_zeros() < discarded_bits {
+            return Err(crate::runtime_descriptor_error_with_detail(
+                "numel",
+                &NUMEL_ERROR_COUNT_NOT_EXACT,
+                format!("element count {count} cannot be represented exactly as double"),
+            ));
+        }
+    }
+    Ok(count as f64)
 }
 
 fn parse_dimension_args(args: &[Value]) -> crate::BuiltinResult<Vec<usize>> {
@@ -260,14 +349,43 @@ pub(crate) mod tests {
     use runmat_value::{CellArray, CharArray, IntegerStorage, Tensor};
 
     #[test]
-    fn numel_type_returns_int() {
+    fn numel_type_returns_double() {
         assert_eq!(
             numel_type(
                 &[Type::Tensor { shape: None }],
                 &ResolveContext::new(Vec::new())
             ),
-            Type::Int
+            Type::Num
         );
+    }
+
+    #[test]
+    fn numel_integer_metadata_and_extension_gate_match_public_syntax() {
+        assert_eq!(NUMEL_INTEGER_CAPABILITIES.len(), 2);
+        assert_eq!(NUMEL_EXTENSIONS.len(), 1);
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let err = numel_builtin(
+            Value::Int(runmat_value::IntValue::U8(1)),
+            vec![Value::Num(1.0)],
+        )
+        .expect_err("dimension syntax must be gated");
+        assert_eq!(
+            err.identifier(),
+            NUMEL_DIMENSIONS_EXTENSION.error_identifier
+        );
+        drop(strict);
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn numel_double_boundary_rejects_unrepresentable_structural_count() {
+        assert_eq!(
+            exact_numel_count_as_f64(9_007_199_254_740_992).expect("exact count"),
+            9_007_199_254_740_992.0
+        );
+        let err = exact_numel_count_as_f64(9_007_199_254_740_993)
+            .expect_err("count is not exact binary64");
+        assert_eq!(err.identifier(), NUMEL_ERROR_COUNT_NOT_EXACT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -310,6 +428,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numel_selected_dimensions_multiplies_extents() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![0.0; 24], vec![2, 3, 4]).unwrap();
         let args = vec![Value::from(1.0), Value::from(2.0)];
         let result = numel_builtin(Value::Tensor(tensor), args).expect("numel");
@@ -319,6 +438,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numel_dimension_vector_argument_supported() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![0.0; 24], vec![2, 3, 4]).unwrap();
         let dims = Tensor::new(vec![1.0, 3.0], vec![1, 2]).unwrap();
         let result =
@@ -361,6 +481,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numel_dimension_must_be_positive_integer() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();
         let err = numel_builtin(Value::Tensor(tensor), vec![Value::from(0.0)])
             .expect_err("expected dimension error");
@@ -373,6 +494,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numel_dimension_vector_requires_vector_shape() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![0.0; 8], vec![2, 2, 2]).unwrap();
         let dims = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let err = numel_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)])
@@ -387,6 +509,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numel_dimension_arguments_must_be_numeric() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();
         let err = numel_builtin(Value::Tensor(tensor), vec![Value::from("omitnan")])
             .expect_err("expected numeric argument error");

@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Uses unary_round for plain rounding and round_digits for decimal-place or significant-digit rounding when the active provider implements those hooks; otherwise falls back to host semantics."
+    "notes": "The MATLAB-compatible gpuArray surface is the one-input form, which uses the owning provider's unary_round hook when available. RunMat-only digit-aware forms may use round_digits; provider gaps gather through the same owner before host execution."
   },
   "fusion": {
     "elementwise": true,
@@ -32,13 +32,14 @@
   },
   "description": "`round(X)` rounds numeric values to the nearest integers using MATLAB-compatible half-away-from-zero behavior. Additional forms support rounding to decimal places or significant digits.",
   "behaviors": [
-    "`round(X)` rounds each element of `X` to the nearest integer; ties (e.g., `±0.5`) round away from zero.",
+    "`round(X)` rounds floating elements to the nearest integer with ties away from zero; integer arrays are returned unchanged with exact native class and storage.",
     "`round(X, N)` rounds to `N` decimal digits when `N` is positive and to powers of ten when `N` is negative.",
     "`round(X, N, 'significant')` rounds to `N` significant digits. `N` must be a positive integer.",
     "Logical inputs are promoted to double before rounding; `round(true)` returns `1`.",
     "Complex inputs are rounded component-wise (`round(a + bi) = round(a) + i·round(b)`), matching MATLAB.",
     "Non-finite values (`NaN`, `Inf`, `-Inf`) propagate unchanged regardless of precision arguments.",
-    "Character arrays are treated as their numeric code points and return double tensors of the same size."
+    "Character arrays are treated as their numeric code points and return double tensors of the same size.",
+    "The documented integer surface is the one-input identity form. Multi-input forms reject integer `X`. RunMat mode additionally accepts a typed-integer `N` for floating `X`, while strict MATLAB mode rejects that control extension; `N` is read exactly from native storage and must fit the supported signed range."
   ],
   "examples": [
     {
@@ -63,7 +64,7 @@
     },
     {
       "description": "Rounding GPU tensors and gathering the results",
-      "input": "G = gpuArray(linspace(-2.5, 2.5, 6));\nrounded = round(G, 2);\nhostValues = gather(rounded)",
+      "input": "G = gpuArray(linspace(-2.5, 2.5, 6));\nrounded = round(G);\nhostValues = gather(rounded)",
       "output": "hostValues = [-3 -2 -1 1 2 3]"
     }
   ],
@@ -90,7 +91,7 @@
     },
     {
       "question": "Will rounding stay on the GPU?",
-      "answer": "`round(X)` stays on the GPU when the provider implements `unary_round`. `round(X, N)` and `round(X, N, 'significant')` also stay resident when the provider implements the `round_digits` hook; otherwise RunMat gathers and uses the host implementation."
+      "answer": "The MATLAB-compatible GPU form is `round(X)`, which stays resident when the owning provider implements `unary_round`; an integer gpuArray is already integral and remains unchanged. Digit-aware forms are host/RunMat-extension paths and do not claim MATLAB gpuArray compatibility."
     },
     {
       "question": "Can I round logical or character arrays?",
@@ -151,9 +152,9 @@
     "label": "`crates/runmat-runtime/src/builtins/math/rounding/round.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/rounding/round.rs"
   },
-  "gpu_residency": "You usually do **not** need to call `gpuArray` manually. RunMat's planner keeps tensors on the GPU when the provider exposes the required kernels and it is profitable to do so. `round` takes advantage of this mechanism for the plain `round(X)` form through `unary_round` and for digit-aware forms through `round_digits`. If a provider lacks the relevant hook, RunMat gathers to the host to preserve MATLAB semantics.",
+  "gpu_residency": "The MATLAB-compatible `round(X)` form stays resident when the input handle's owning provider exposes `unary_round`; integer gpuArray input is already integral and remains unchanged. RunMat-only digit-aware forms may use `round_digits`. Provider gaps gather through the owning provider before host execution.",
   "gpu_behavior": [
-    "When a tensor already resides on the GPU, RunMat checks whether the active acceleration provider implements `unary_round` for `round(X)` or `round_digits` for `round(X, N)` and `round(X, N, 'significant')`. If available, the operation executes entirely on the device; otherwise RunMat gathers tensors to the host before rounding to keep semantics aligned with MATLAB."
+    "For `round(X)`, RunMat asks the input handle's owning provider for `unary_round`; RunMat-only digit-aware forms may ask that owner for `round_digits`. A missing hook triggers one owner-specific host gather, and any resident result path remains tied to the same provider."
   ],
   "syntax": {
     "example": {

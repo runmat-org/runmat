@@ -904,17 +904,17 @@ pub(crate) mod tests {
             shape: vec![1, 2],
             device_id: u32::MAX,
             buffer_id: u64::MAX - 388,
-        };
-        runmat_accelerate_api::set_handle_integer_type(
-            &resident,
-            runmat_accelerate_api::IntegerElementType::U64,
+            descriptor: Default::default(),
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::U64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
         );
         let gpu = cell_builtin(vec![Value::GpuTensor(resident.clone())]).unwrap_err();
         assert_eq!(
             gpu.identifier(),
             Some("RunMat:compatibility:CellGpuSizeExtension")
         );
-        runmat_accelerate_api::clear_handle_integer_type(&resident);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

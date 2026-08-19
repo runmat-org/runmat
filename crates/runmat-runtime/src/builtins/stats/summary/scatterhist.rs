@@ -2,7 +2,11 @@
 
 use glam::Vec4;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ResolveContext, Type,
 };
@@ -113,6 +117,104 @@ pub const SCATTERHIST_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
 };
+
+const SCATTERHIST_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "scatterhist-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "scatterhist accepts typed-integer observation data as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ScatterhistIntegerDataExtension"),
+};
+const SCATTERHIST_INTEGER_GROUP_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "scatterhist-integer-group",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "scatterhist accepts typed-integer Group labels as a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:ScatterhistIntegerGroupExtension"),
+    };
+const SCATTERHIST_INTEGER_OPTION_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "scatterhist-integer-option",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "scatterhist accepts typed-integer numeric option values as a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:ScatterhistIntegerOptionExtension"),
+    };
+const SCATTERHIST_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "scatterhist-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "scatterhist accepts interactive gpuArray arguments as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ScatterhistGpuInputExtension"),
+};
+pub const SCATTERHIST_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    SCATTERHIST_INTEGER_DATA_EXTENSION,
+    SCATTERHIST_INTEGER_GROUP_EXTENSION,
+    SCATTERHIST_INTEGER_OPTION_EXTENSION,
+    SCATTERHIST_GPU_INPUT_EXTENSION,
+];
+const SCATTERHIST_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "x",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double observations; typed integers require exact binary64 representation before histogram and rendering computation.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The same checked boundary applies independently to Y observations.",
+    },
+];
+const SCATTERHIST_INTEGER_GROUP_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Group",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer group identity is retained exactly, including wide int64 and uint64 values, and converted only to textual legend labels.",
+    }];
+const SCATTERHIST_INTEGER_OPTION_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "NBins or numeric style/control value",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents these numeric controls as single or double. Exact structural flags/bin counts remain integer until validation; renderer-domain sizes, widths, bandwidths, and RGB values require checked binary64 conversion.",
+    }];
+pub const SCATTERHIST_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = scatterhist(integer_x, integer_y, ...)",
+        inputs: &SCATTERHIST_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The RunMat-only observation extension crosses once into double histogram/statistical geometry after exactness checks; the public result is a vector of double graphics handles.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = scatterhist(x,y,\"Group\",integer_group)",
+        inputs: &SCATTERHIST_INTEGER_GROUP_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Grouping compares exact native values and therefore does not collapse distinct wide integers through double.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = scatterhist(x,y,option_name,integer_value,...)",
+        inputs: &SCATTERHIST_INTEGER_OPTION_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Each RunMat-only typed option is gated before gather; exact structural controls and checked renderer-domain conversions are distinguished by option role.",
+    },
+];
 
 #[derive(Clone, Debug)]
 struct ScatterhistOptions {
@@ -243,12 +345,17 @@ fn internal(message: impl Into<String>) -> RuntimeError {
     suppress_auto_output = true,
     type_resolver(scatterhist_type),
     descriptor(crate::builtins::stats::summary::scatterhist::SCATTERHIST_DESCRIPTOR),
+    extensions(crate::builtins::stats::summary::scatterhist::SCATTERHIST_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::stats::summary::scatterhist::SCATTERHIST_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::stats::summary::scatterhist"
 )]
 pub(crate) async fn scatterhist_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     if args.len() < 2 {
         return Err(invalid("scatterhist: expected x and y inputs"));
     }
+    validate_integer_and_resident_boundaries(&args).await?;
     let args = gather_values(args).await?;
     let (x, y, rest) = parse_xy_and_rest(args)?;
     let options = parse_options(rest, x.len())?;
@@ -258,6 +365,60 @@ pub(crate) async fn scatterhist_builtin(args: Vec<Value>) -> BuiltinResult<Value
         Tensor::new(axes.to_vec(), vec![3, 1])
             .map_err(|err| internal(format!("scatterhist: {err}")))?,
     ))
+}
+
+async fn validate_integer_and_resident_boundaries(args: &[Value]) -> BuiltinResult<()> {
+    if args
+        .iter()
+        .any(|value| matches!(value, Value::GpuTensor(_)))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SCATTERHIST_GPU_INPUT_EXTENSION,
+            NAME,
+        )?;
+    }
+    for value in args.iter().take(2) {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            value,
+            &SCATTERHIST_INTEGER_DATA_EXTENSION,
+            NAME,
+            "observation",
+        )
+        .await?;
+    }
+    for pair in args.get(2..).unwrap_or_default().chunks_exact(2) {
+        let Some(key) = value_as_string(&pair[0]) else {
+            continue;
+        };
+        if !crate::builtins::common::validation::value_has_native_integer_class(&pair[1]) {
+            continue;
+        }
+        let key = key.trim().to_ascii_lowercase();
+        if key == "parent" {
+            return Err(invalid(
+                "scatterhist: typed integer values are not graphics Parent handles",
+            ));
+        }
+        let extension = if key == "group" {
+            &SCATTERHIST_INTEGER_GROUP_EXTENSION
+        } else {
+            &SCATTERHIST_INTEGER_OPTION_EXTENSION
+        };
+        crate::compatibility::ensure_builtin_extension_enabled(extension, NAME)?;
+        if !matches!(
+            key.as_str(),
+            "group" | "nbins" | "legend" | "plotgroup" | "kernel"
+        ) {
+            crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+                &pair[1],
+                &SCATTERHIST_INTEGER_OPTION_EXTENSION,
+                NAME,
+                "option",
+            )
+            .await?;
+        }
+    }
+    Ok(())
 }
 
 async fn gather_values(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
@@ -1494,6 +1655,7 @@ mod tests {
 
     #[test]
     fn scatterhist_accepts_typed_integer_data_and_options() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = lock_plot_registry();
         ensure_plot_test_env();
         reset_hold_state_for_run();
@@ -1696,7 +1858,9 @@ mod tests {
         let mut y_count = 0.0;
         for (plot, axes) in figure.plots().zip(figure.plot_axes_indices()) {
             match (plot, *axes) {
-                (PlotElement::Scatter(scatter), 1) => scatter_points += scatter.x_data.len(),
+                (PlotElement::Scatter(scatter), 1) => {
+                    scatter_points += scatter.host_xy_f64().unwrap().unwrap().0.len()
+                }
                 (PlotElement::Bar(bar), 3) => {
                     x_count = bar.values().unwrap().iter().map(|v| v.abs()).sum()
                 }

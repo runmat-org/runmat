@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Host implementation uses the default D65/sRGB conversion path and clips out-of-gamut RGB values."
+    "notes": "Host implementation uses the default D65/sRGB conversion path. Floating output retains out-of-gamut values; integer OutputType clips during class conversion."
   },
   "fusion": {
     "elementwise": false,
@@ -27,11 +27,11 @@
   "tested": {
     "unit": "builtins::image::color::lab2rgb::tests"
   },
-  "description": "`lab2rgb(LAB)` converts L*a*b* image or colormap data to sRGB values under D65 assumptions. It follows MATLAB-compatible channel and output-shape behavior for supported numeric inputs.",
+  "description": "`lab2rgb(LAB)` converts single or double L*a*b* image or colormap data to sRGB values under D65 assumptions. `OutputType` selects double, single, uint8, or uint16 output.",
   "behaviors": [
     "Accepts MxNx3 Lab images and Nx3 Lab colormaps.",
-    "Out-of-gamut RGB values are clipped to [0,1].",
-    "Name-value options are not implemented in this Tier 1 version."
+    "Floating output preserves out-of-gamut RGB values; uint8 and uint16 output clips to [0,1] while converting to native integer storage.",
+    "The OutputType name-value option accepts double, single, uint8, or uint16."
   ],
   "examples": [
     {

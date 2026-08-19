@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "No GPU kernel is registered for this compatibility builtin; GPU-resident inputs are gathered to host memory before evaluation."
+    "notes": "Text and pattern inputs are host-only; numeric resident handles reject without implicit text conversion or provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -60,7 +60,8 @@
     }
   ],
   "behaviors": [
-    "Return true when text fully matches a pattern."
+    "Return true when text fully matches a pattern.",
+    "Integer and other numeric inputs have no semantic role and reject without conversion; the documented logical IgnoreCase option is not an integer call form."
   ],
   "examples": [
     "matches(\"A12\", regexpPattern(\"A\\d+\")) returns true."

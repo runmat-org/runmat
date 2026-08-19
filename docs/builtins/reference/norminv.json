@@ -6,16 +6,18 @@
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
-    "precisions": ["f64"],
+    "precisions": ["f32", "f64"],
     "broadcasting": "elementwise",
-    "notes": "GPU inputs are gathered to host for compatibility until a provider hook exists."
+    "notes": "Resident inputs use checked host fallback and return through the exact owner only when it can preserve the required single/double class. Incompatible automatic residency may finish on host; incompatible explicit gpuArray intent errors."
   },
   "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
   "requires_feature": null,
-  "tested": { "unit": "builtins::stats::summary::distributions::tests", "integration": null },
+  "tested": { "unit": "builtins::stats::summary::distributions::tests", "integration": "crates/runmat-vm/tests/integer_normal_distribution_and_regression_semantics.rs" },
   "description": "`norminv(p)` returns the standard normal quantile. `norminv(p,mu)` and `norminv(p,mu,sigma)` return the quantile for a normal distribution with mean `mu` and standard deviation `sigma`.",
   "behaviors": [
     "`p`, `mu`, and `sigma` may be scalars or matching-size numeric arrays.",
+    "MATLAB-compatible numeric inputs are single or double. Typed integers and logical values in any numeric role are independently gated RunMat extensions.",
+    "Admitted integer values must be exactly representable as double. Any single floating input selects single output; otherwise output is double.",
     "`p` outside `[0,1]` or nonpositive `sigma` produces `NaN` elementwise.",
     "`p = 0` and `p = 1` return infinite tails."
   ],

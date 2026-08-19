@@ -329,6 +329,10 @@ impl WgpuProvider {
         );
         let total_u32 = total_len as u32;
         let strides = column_major_strides_checked(request.output_shape)?;
+        let expected_element_type = match self.precision {
+            NumericPrecision::F32 => runmat_accelerate_api::NumericElementType::F32,
+            NumericPrecision::F64 => runmat_accelerate_api::NumericElementType::F64,
+        };
         let entries = {
             let guard = self.buffers.lock().expect("buffer mutex poisoned");
             let mut entries = Vec::with_capacity(request.output_count);
@@ -344,6 +348,12 @@ impl WgpuProvider {
                 ensure!(
                     entry.storage != GpuTensorStorage::ComplexInterleaved,
                     "ndgrid: complex axes are not supported"
+                );
+                ensure!(
+                    entry.element_type == expected_element_type,
+                    "ndgrid: axis physical type {} does not match provider type {}",
+                    entry.element_type.class_name(),
+                    expected_element_type.class_name()
                 );
                 let expected = request.output_shape.get(dim).copied().unwrap_or(1);
                 ensure!(

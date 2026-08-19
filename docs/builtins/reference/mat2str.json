@@ -8,13 +8,13 @@
     "matlab",
     "compatibility"
   ],
-  "summary": "Convert numeric, logical, character, and string values to MATLAB expression text.",
+  "summary": "Convert a numeric or logical matrix to MATLAB expression text.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "No GPU kernel is registered for this compatibility builtin; GPU-resident inputs are gathered to host memory before evaluation."
+    "notes": "No GPU form is documented. Automatically resident values gather transparently; explicit gpuArray input is rejected."
   },
   "fusion": {
     "elementwise": false,
@@ -28,24 +28,108 @@
     "unit": "builtins::strings::core::compat::tests",
     "integration": null
   },
-  "description": "s = mat2str(A) - Convert numeric, logical, character, and string values to MATLAB expression text.",
+  "description": "`mat2str(A)` converts a numeric or logical matrix to a character-vector expression. An optional positive precision controls significant digits, and a final `'class'` flag includes the input class constructor.",
   "signatures": [
     {
       "label": "s = mat2str(A)",
       "inputs": [
         {
-          "name": "text",
+          "name": "A",
           "ty": "Any",
           "arity": "Required",
           "default": null,
-          "description": "Input text."
+          "description": "Numeric or logical matrix to serialize."
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "ty": "Any",
+          "arity": "Required",
+          "default": null,
+          "description": "Output value."
+        }
+      ]
+    },
+    {
+      "label": "s = mat2str(A, n)",
+      "inputs": [
+        {
+          "name": "A",
+          "ty": "Any",
+          "arity": "Required",
+          "default": null,
+          "description": "Numeric or logical matrix to serialize."
         },
         {
-          "name": "arg",
-          "ty": "Any",
-          "arity": "Variadic",
+          "name": "n",
+          "ty": "IntegerScalar",
+          "arity": "Required",
           "default": null,
-          "description": "Additional arguments."
+          "description": "Positive number of significant digits."
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "ty": "Any",
+          "arity": "Required",
+          "default": null,
+          "description": "Output value."
+        }
+      ]
+    },
+    {
+      "label": "s = mat2str(A, 'class')",
+      "inputs": [
+        {
+          "name": "A",
+          "ty": "Any",
+          "arity": "Required",
+          "default": null,
+          "description": "Numeric or logical matrix to serialize."
+        },
+        {
+          "name": "class",
+          "ty": "StringScalar",
+          "arity": "Required",
+          "default": "\"class\"",
+          "description": "Include the input class constructor in the expression."
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "ty": "Any",
+          "arity": "Required",
+          "default": null,
+          "description": "Output value."
+        }
+      ]
+    },
+    {
+      "label": "s = mat2str(A, n, 'class')",
+      "inputs": [
+        {
+          "name": "A",
+          "ty": "Any",
+          "arity": "Required",
+          "default": null,
+          "description": "Numeric or logical matrix to serialize."
+        },
+        {
+          "name": "n",
+          "ty": "IntegerScalar",
+          "arity": "Optional",
+          "default": null,
+          "description": "Optional positive number of significant digits."
+        },
+        {
+          "name": "class",
+          "ty": "StringScalar",
+          "arity": "Required",
+          "default": "\"class\"",
+          "description": "Include the input class constructor in the expression."
         }
       ],
       "outputs": [
@@ -60,10 +144,13 @@
     }
   ],
   "behaviors": [
-    "Convert numeric, logical, character, and string values to MATLAB expression text."
+    "All eight integer classes serialize directly from exact native storage without crossing binary64.",
+    "The `'class'` form wraps the expression in the actual input constructor, such as `uint16([256 512])`.",
+    "Typed integer precision controls and nonnumeric text input are explicitly gated RunMat extensions."
   ],
   "examples": [
-    "mat2str([1 2; 3 4]) returns \"[1 2;3 4]\"."
+    "mat2str([1 2; 3 4]) returns the character vector `'[1 2;3 4]'`.",
+    "mat2str(uint16([256 512]), 'class') returns `'uint16([256 512])'`."
   ],
   "faqs": [],
   "links": [

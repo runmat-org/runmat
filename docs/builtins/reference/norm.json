@@ -18,7 +18,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "RunMat gathers to the host when specialized provider hooks are unavailable; providers may add custom norm kernels in the future."
+    "notes": "Floating gpuArray input uses the exact owning provider's norm hook when available; validated host fallback restores a same-precision scalar to that owner. Integer and logical resident data are gated RunMat extensions and bypass floating provider hooks."
   },
   "fusion": {
     "elementwise": false,
@@ -32,8 +32,12 @@
     "gpu": "builtins::math::linalg::solve::norm::tests::norm_gpu_roundtrip_matches_cpu",
     "wgpu": "builtins::math::linalg::solve::norm::tests::norm_wgpu_matches_cpu"
   },
-  "description": "`norm(X)` returns vector or matrix magnitudes. Default norms, alternate `p`/keyword options (including Frobenius and nuclear), and domain restrictions follow MATLAB semantics.",
-  "behaviors": [],
+  "description": "`norm(X)` returns vector or matrix magnitudes. MATLAB-compatible data is single or double; all eight native integer classes and logical data are independently gated RunMat extensions.",
+  "behaviors": [
+    "Single input returns a single scalar tensor; double input returns double. RunMat integer and logical extensions return double.",
+    "Typed-integer data remains authoritative until one checked binary64 norm boundary; values outside the exact binary64 integer range reject rather than round. If an owner cannot represent the required double output, automatic residency may finish on host while explicit gpuArray intent errors.",
+    "Positive real scalar orders and the documented norm keywords are accepted subject to vector-versus-matrix restrictions. Logical order selectors, zero norm, and nuclear norm are separately gated RunMat extensions."
+  ],
   "examples": [
     {
       "description": "Computing the Euclidean norm of a vector",
@@ -73,7 +77,7 @@
     },
     {
       "question": "Does `norm` support fractional powers?",
-      "answer": "Yes. For vectors you can pass any non-zero real scalar `p`, including fractional values. MATLAB’s special cases (`p = 0`, `Inf`, `-Inf`) are also supported."
+      "answer": "Positive real scalar orders, including supported fractional vector orders, use the compatibility surface. Zero norm is available only when RunMat extensions are enabled; `Inf` and `-Inf` retain their documented meanings."
     },
     {
       "question": "Can I use `norm` on complex matrices?",
@@ -81,7 +85,7 @@
     },
     {
       "question": "When should I use `'fro'` versus `'nuc'`?",
-      "answer": "`'fro'` returns the square root of the sum of squares (robust and inexpensive). `'nuc'` sums singular values and is particularly useful in low-rank optimization problems."
+      "answer": "`'fro'` is part of the compatibility surface and returns the square root of the sum of squares. `'nuc'` sums singular values but is a separately gated RunMat extension."
     },
     {
       "question": "Why does `norm` of an empty matrix return `0`?",
@@ -93,7 +97,7 @@
     },
     {
       "question": "Will the result stay on the GPU?",
-      "answer": "The current in-process provider gathers the tensor to host memory. Providers that implement custom norm kernels can keep the computation entirely on device without user-visible changes."
+      "answer": "RunMat uses a validated provider norm hook for supported floating inputs. Otherwise it gathers without consuming the source handle and restores the same-precision scalar to the exact owner when that owner can represent it."
     }
   ],
   "links": [
@@ -148,6 +152,6 @@
   },
   "gpu_residency": "```matlab:runnable\nG = gpuArray([3 4 12]);\nmag = norm(G);      % falls back to CPU today; future providers can stay on device\n```\nExpected output:\n```matlab\nmag = 13\n```",
   "gpu_behavior": [
-    "When an acceleration provider is active, RunMat keeps GPU inputs resident. If the provider exposes a dedicated norm hook in the future it can execute entirely on the device. Until then RunMat gathers the input tensor to the host, computes the norm with the shared CPU implementation, and returns the scalar result. This mirrors MATLAB semantics while guaranteeing correctness even in the absence of specialized kernels."
+    "Floating inputs use the exact owner's norm hook when it returns a fresh, correctly shaped and typed result. Unsupported hooks fall back to a non-consuming gather and class-preserving restoration. Integer and logical resident inputs are admitted only in RunMat mode and always take the checked host boundary instead of being mislabeled for a floating provider hook."
   ]
 }

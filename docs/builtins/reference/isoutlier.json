@@ -3,6 +3,7 @@
   "category": "stats/summary",
   "keywords": ["isoutlier", "outlier", "median", "quartiles", "mean", "statistics"],
   "summary": "Detect outliers in numeric arrays.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": ["f32", "f64"], "broadcasting": "none", "notes": "Supported floating gpuArray forms use an owning-provider host fallback and preserve explicit residency. GPU movmedian, SamplePoints, and DataVariables restrictions are enforced before gather."},
   "signatures": [
     "TF = isoutlier(A)",
     "TF = isoutlier(A,method)",
@@ -15,7 +16,9 @@
     "`\"quartiles\"` uses 1.5 interquartile ranges by default.",
     "`\"percentiles\"` accepts a two-element percentile vector and does not use `ThresholdFactor`.",
     "`ThresholdFactor` is supported for median, mean, quartiles, movmedian, and movmean methods.",
-    "Table, timetable, `SamplePoints`, `DataVariables`, and `OutlierLocations` forms are reported as unsupported for `isoutlier` in this numeric-array implementation."
+    "Typed-integer data, dimensions, moving windows, and threshold controls are independently declared RunMat extensions. Values entering floating detection must be exactly representable as double.",
+    "Table, timetable, `SamplePoints`, `DataVariables`, and `OutlierLocations` forms are reported as unsupported for `isoutlier` in this numeric-array implementation.",
+    "Automatic internal residency may gather transparently; documented explicit floating gpuArray forms preserve logical and threshold output residency."
   ],
   "examples": [
     {
@@ -30,5 +33,7 @@
   "links": [
     { "label": "filloutliers", "url": "./filloutliers" },
     { "label": "fillmissing", "url": "./fillmissing" }
-  ]
+  ],
+  "tested": {"unit": "builtins::stats::summary::outliers::tests", "integration": "crates/runmat-vm/tests/integer_statistical_semantics.rs"},
+  "source": {"label": "`crates/runmat-runtime/src/builtins/stats/summary/outliers.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/outliers.rs"}
 }

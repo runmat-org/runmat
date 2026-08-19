@@ -33,10 +33,10 @@
   "description": "`imag(X)` returns the imaginary component of each element in `X`. Real inputs produce zeros with matching shape, consistent with MATLAB semantics.",
   "behaviors": [
     "Complex scalars, vectors, matrices, and higher-dimensional tensors return only their imaginary components.",
-    "Purely real inputs (double, single, logical) produce zeros of type double that match the input size.",
+    "Purely real inputs produce zeros that match the input shape. Double, single, and all eight integer classes retain their numeric class; logical and character inputs produce double zeros.",
     "Character arrays are converted to double and therefore produce zero-filled numeric arrays of the same size.",
     "String arrays are unsupported and raise an error (`imag` expects numeric, logical, or character data).",
-    "Sparse arrays are currently densified; native sparse support is planned."
+    "Sparse arrays currently return dense results."
   ],
   "examples": [
     {
@@ -67,7 +67,7 @@
   "faqs": [
     {
       "question": "Does `imag` modify purely real inputs?",
-      "answer": "No. Purely real, logical, and character inputs become zero-valued doubles of the same size."
+      "answer": "No. Purely real numeric inputs produce zeros of the same class and shape. Logical and character inputs produce double zeros."
     },
     {
       "question": "How does `imag` handle complex zeros?",

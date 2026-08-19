@@ -907,7 +907,6 @@ mod tests {
         crate::builtins::common::test_support::with_test_provider(|provider| {
             let mu = Tensor::from_f32(vec![2.0, 3.0], vec![2, 1]).expect("single mu");
             let input = gpu_helpers::upload_tensor(provider, &mu).expect("upload single mu");
-            runmat_accelerate_api::set_handle_precision(&input, ProviderPrecision::F32);
             let output =
                 block_on(exprnd_builtin(vec![Value::GpuTensor(input)])).expect("resident exprnd");
             let Value::Tensor(output) = output else {

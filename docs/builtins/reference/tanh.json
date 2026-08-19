@@ -33,12 +33,13 @@
   "description": "`y = tanh(x)` evaluates hyperbolic tangent element-wise. It follows MATLAB-compatible shape, broadcasting, and complex-value behavior across scalar and array inputs.",
   "behaviors": [
     "Operates on scalars, vectors, matrices, and N-D tensors with MATLAB-compatible implicit expansion.",
-    "Logical and integer inputs are promoted to double precision before evaluation so downstream arithmetic keeps MATLAB's numeric semantics.",
+    "Documented real and complex `single` arrays return `single`; documented `double` arrays return `double`.",
+    "Typed integers, logical arrays, and character arrays are independently gated RunMat extensions. Admitted integers must be exactly representable at the deliberate double transcendental boundary.",
     "Complex values follow the analytic extension `tanh(a + bi) = sinh(a + bi) / cosh(a + bi)`, propagating `NaN`/`Inf` components component-wise.",
-    "Character arrays are interpreted through their Unicode code points and return dense double arrays that mirror MATLAB's behavior.",
+    "In RunMat extension mode, character arrays are interpreted through their Unicode code points and return dense double arrays.",
     "Inputs that already live on the GPU stay resident when the provider implements `unary_tanh`; otherwise RunMat gathers to the host, computes, and reapplies residency hints for later operations.",
     "Empty inputs and singleton dimensions are preserved without introducing extraneous allocations.",
-    "String and string-array arguments raise descriptive errors to match MATLAB's numeric-only contract for the hyperbolic family."
+    "String and string-array arguments raise descriptive errors. MATLAB's documented direct table and timetable calculation form is not implemented yet."
   ],
   "examples": [
     {
@@ -96,7 +97,7 @@
     },
     {
       "question": "How does `tanh` treat logical arrays?",
-      "answer": "Logical arrays are promoted to `0.0` or `1.0` doubles before evaluation, matching MATLAB's behavior for the hyperbolic family."
+      "answer": "Only in RunMat extension mode. MATLAB-compatible mode follows the documented single/double input domain and rejects logical arrays before evaluation."
     },
     {
       "question": "What happens with empty or singleton dimensions?",

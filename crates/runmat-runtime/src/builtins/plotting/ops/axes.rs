@@ -390,6 +390,7 @@ mod tests {
             shape: vec![1, 3],
             device_id: 0,
             buffer_id: 9_360_001,
+            descriptor: Default::default(),
         });
         let error = axes_builtin(vec![Value::String("DataAspectRatio".into()), resident])
             .expect_err("resident property must reject");

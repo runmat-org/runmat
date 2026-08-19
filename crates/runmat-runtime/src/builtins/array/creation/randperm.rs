@@ -6,6 +6,11 @@ use runmat_builtins::{
     BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
     BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
 
@@ -295,6 +300,26 @@ pub const RANDPERM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &RANDPERM_ERRORS,
 };
 
+const RANDPERM_INTEGER_COUNT_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "n or k",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Both counts accept all eight documented integer classes and are decoded exactly before bounded allocation.",
+    }];
+pub const RANDPERM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "p = randperm(integer_n[,integer_k])",
+        inputs: &RANDPERM_INTEGER_COUNT_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::FunctionSpecific,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Ordinary calls return a double row vector; the one-input GPU form is separately resident, while explicit double/like selectors remain declared RunMat extensions.",
+    }];
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::randperm")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "randperm",
@@ -315,6 +340,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     type_resolver(randperm_type),
     descriptor(crate::builtins::array::creation::randperm::RANDPERM_DESCRIPTOR),
     extensions(crate::builtins::array::creation::randperm::RANDPERM_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::array::creation::randperm::RANDPERM_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::array::creation::randperm"
 )]
 async fn randperm_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -574,8 +602,6 @@ fn validate_size_argument(
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{random, test_support};
-    #[cfg(feature = "wgpu")]
-    use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_value::IntegerStorage;
@@ -898,11 +924,11 @@ pub(crate) mod tests {
         };
 
         let host =
-            block_on(download_handle_async(provider, &gpu_handle)).expect("download permutation");
+            test_support::gather(Value::GpuTensor(gpu_handle.clone())).expect("gather permutation");
         assert_eq!(host.shape, vec![1, 7]);
-        assert_eq!(host.data.len(), 7);
+        assert_eq!(host.len(), 7);
 
-        let mut sorted = host.data.clone();
+        let mut sorted = host.materialize_f64();
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
         for window in sorted.windows(2) {
             assert_ne!(
@@ -910,11 +936,12 @@ pub(crate) mod tests {
                 "duplicate value detected in permutation"
             );
         }
-        for value in host.data {
+        for value in host.materialize_f64() {
             assert!(
                 (1.0..=12.0).contains(&value),
                 "value {value} outside expected range 1..12"
             );
         }
+        provider.free(&gpu_handle).expect("free permutation");
     }
 }

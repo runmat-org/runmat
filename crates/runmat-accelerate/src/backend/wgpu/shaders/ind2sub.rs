@@ -52,8 +52,17 @@ pub fn build_ind2sub_shader(
     .unwrap();
     writeln!(shader, "const EPSILON: {scalar_ty} = {epsilon};").unwrap();
     writeln!(shader, "const ONE: {scalar_ty} = {scalar_ty}(1.0);").unwrap();
-    writeln!(shader, "const TOTAL_F: {scalar_ty} = {scalar_ty}({total});").unwrap();
-    writeln!(shader, "const TOTAL: u32 = {total}u;").unwrap();
+    let max_u32 = if scalar_ty == "f32" {
+        "4294967040.0"
+    } else {
+        "4294967295.0"
+    };
+    writeln!(
+        shader,
+        "const MAX_KERNEL_INDEX: {scalar_ty} = {scalar_ty}({max_u32});"
+    )
+    .unwrap();
+    let _ = total;
     // Finite check helper using x==x (not NaN) and a large bound.
     let max_val = if scalar_ty == "f32" {
         "3.4028234663852886e38"
@@ -106,7 +115,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
         set_error(3u, 0u);
         return;
     }}
-    if (rounded > TOTAL_F) {{
+    if (rounded > MAX_KERNEL_INDEX) {{
         set_error(4u, 0u);
         return;
     }}
@@ -121,9 +130,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
     .unwrap();
 
     for (idx, _) in dims.iter().enumerate() {
+        let expression = if idx + 1 == dims.len() {
+            format!("zero_based / STRIDE_{idx}")
+        } else {
+            format!("(zero_based / STRIDE_{idx}) % DIM_{idx}")
+        };
         writeln!(
             shader,
-            "    let coord_{idx}: u32 = (zero_based / STRIDE_{idx}) % DIM_{idx};
+            "    let coord_{idx}: u32 = {expression};
     output{idx}.data[idx] = {scalar_ty}(coord_{idx} + 1u);"
         )
         .unwrap();

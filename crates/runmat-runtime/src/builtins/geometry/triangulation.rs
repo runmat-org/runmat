@@ -1108,10 +1108,11 @@ mod tests {
                 shape: vec![3, 2],
                 device_id: 0,
                 buffer_id: 9_307_001,
-            };
-            runmat_accelerate_api::set_handle_integer_type(
-                &resident_points,
-                runmat_accelerate_api::IntegerElementType::U16,
+                descriptor: Default::default(),
+            }
+            .with_numeric_descriptor(
+                runmat_accelerate_api::NumericElementType::U16,
+                runmat_accelerate_api::GpuTensorStorage::Real,
             );
             let error = block_on(delaunay_tri_builtin(vec![Value::GpuTensor(
                 resident_points.clone(),
@@ -1121,16 +1122,16 @@ mod tests {
                 error.identifier(),
                 Some("RunMat:compatibility:DelaunayTriIntegerCoordinatesExtension")
             );
-            runmat_accelerate_api::clear_handle_integer_type(&resident_points);
 
             let resident_topology = runmat_accelerate_api::GpuTensorHandle {
                 shape: vec![0, 2],
                 device_id: 0,
                 buffer_id: 9_307_002,
-            };
-            runmat_accelerate_api::set_handle_integer_type(
-                &resident_topology,
-                runmat_accelerate_api::IntegerElementType::U16,
+                descriptor: Default::default(),
+            }
+            .with_numeric_descriptor(
+                runmat_accelerate_api::NumericElementType::U16,
+                runmat_accelerate_api::GpuTensorStorage::Real,
             );
             let error = block_on(delaunay_tri_builtin(vec![
                 tensor(&[0.0, 1.0, 0.0, 0.0, 0.0, 1.0], 3, 2),
@@ -1141,7 +1142,6 @@ mod tests {
                 error.identifier(),
                 Some("RunMat:compatibility:DelaunayTriIntegerTopologyExtension")
             );
-            runmat_accelerate_api::clear_handle_integer_type(&resident_topology);
         }
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(true);

@@ -96,3 +96,45 @@ count_metric \
   crates \
   'HostIntegerTensorView' \
   crates
+
+count_metric \
+  unified_numeric_provider_view \
+  crates \
+  'HostNumericTensorView' \
+  crates
+
+count_metric \
+  unified_numeric_provider_owned \
+  crates \
+  'HostNumericTensorOwned' \
+  crates
+
+count_metric \
+  simple_provider_split_registry_declarations \
+  crates/runmat-accelerate/src/simple_provider.rs \
+  'static (REGISTRY|INTEGER_REGISTRY)[^[:alnum:]_]' \
+  crates/runmat-accelerate/src/simple_provider.rs
+
+count_metric \
+  simple_provider_unified_registry_declaration \
+  crates/runmat-accelerate/src/simple_provider.rs \
+  'static NUMERIC_REGISTRY[^[:alnum:]_]' \
+  crates/runmat-accelerate/src/simple_provider.rs
+
+count_metric \
+  wgpu_split_integer_type_field \
+  crates/runmat-accelerate/src/backend/wgpu/provider/backend_types.rs \
+  'pub\(super\)[[:space:]]+integer_type:[[:space:]]*Option<' \
+  crates/runmat-accelerate/src/backend/wgpu/provider/backend_types.rs
+
+count_metric \
+  wgpu_unified_numeric_element_field \
+  crates/runmat-accelerate/src/backend/wgpu/provider/backend_types.rs \
+  '(^|[[:space:]])element_type:[[:space:]]*runmat_accelerate_api::NumericElementType' \
+  crates/runmat-accelerate/src/backend/wgpu/provider/backend_types.rs
+
+count_metric \
+  wgpu_shared_numeric_transfer_overrides \
+  crates/runmat-accelerate/src/backend/wgpu/provider/trait_impl.rs \
+  'fn (upload_numeric|download_numeric)' \
+  crates/runmat-accelerate/src/backend/wgpu/provider/trait_impl.rs

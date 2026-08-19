@@ -49,7 +49,7 @@ const DLMWRITE_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents all eight integer matrix classes; default formatting serializes authoritative values exactly.",
+        notes: "The compatibility target documents all eight integer matrix classes; default formatting serializes authoritative values exactly.",
     }];
 const DLMWRITE_INTEGER_PRECISION_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -58,7 +58,7 @@ const DLMWRITE_INTEGER_PRECISION_INPUTS: [BuiltinIntegerInputCapability; 1] =
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
         notes:
-            "R2026a documents all eight integer classes for the positive significant-digit count.",
+            "The compatibility target documents all eight integer classes for the positive significant-digit count.",
     }];
 const DLMWRITE_INTEGER_OFFSET_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {

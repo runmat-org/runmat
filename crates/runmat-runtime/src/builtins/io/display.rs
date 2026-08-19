@@ -166,7 +166,7 @@ pub async fn display_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinRe
     let lines = format_for_display(&host_value);
     if !lines.is_empty() {
         let body = match display_label() {
-            Some(label) => format_display_body(&label, &lines),
+            Some(label) => format_display_body(&label, &host_value, &lines),
             None => lines.join("\n"),
         };
         record_console_line(ConsoleStream::Stdout, body);
@@ -212,11 +212,42 @@ fn is_simple_identifier(text: &str) -> bool {
         && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
 
-fn format_display_body(label: &str, lines: &[String]) -> String {
+fn format_display_body(label: &str, value: &Value, lines: &[String]) -> String {
+    if let Some(summary) = implicit_integer_summary(value) {
+        return format!("{label} = {summary}\n{}", lines.join("\n"));
+    }
     match lines {
         [] => format!("{label} ="),
         [single] if !single.contains('\n') => format!("{label} = {single}"),
         _ => format!("{label} =\n{}", lines.join("\n")),
+    }
+}
+
+fn implicit_integer_summary(value: &Value) -> Option<String> {
+    match value {
+        Value::Int(value) => Some(value.class_name().to_string()),
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() && !tensor.is_empty() => {
+            if tensor.len() == 1 {
+                return Some(tensor.numeric_dtype().class_name().to_string());
+            }
+            let shape = tensor.shape.as_slice();
+            let dimensions = shape
+                .iter()
+                .map(usize::to_string)
+                .collect::<Vec<_>>()
+                .join("×");
+            let kind = match shape {
+                [1, columns] if *columns > 1 => " row vector",
+                [rows, 1] if *rows > 1 => " column vector",
+                _ if shape.len() > 2 => " array",
+                _ => "",
+            };
+            Some(format!(
+                "{dimensions} {}{kind}",
+                tensor.numeric_dtype().class_name()
+            ))
+        }
+        _ => None,
     }
 }
 
@@ -226,6 +257,7 @@ mod tests {
     use crate::console::{reset_thread_buffer, take_thread_buffer};
     use futures::executor::block_on;
     use runmat_types::{SourceId, Span};
+    use runmat_value::IntegerStorage;
     use runmat_value::{IntValue, ObjectInstance, Tensor};
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -265,7 +297,7 @@ mod tests {
     }
 
     #[test]
-    fn display_retains_typed_empty_representation() {
+    fn display_retains_bare_double_empty_representation() {
         reset_thread_buffer();
         block_on(display_builtin(
             Value::Tensor(Tensor::zeros(vec![0, 0])),
@@ -276,6 +308,15 @@ mod tests {
     }
 
     #[test]
+    fn display_reports_typed_integer_empty_class_and_shape() {
+        reset_thread_buffer();
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U8(Vec::new()), vec![0, 5]).expect("typed empty");
+        block_on(display_builtin(Value::Tensor(tensor), Vec::new())).unwrap();
+        assert_eq!(stdout_text(), "ans = 0×5 empty uint8 matrix\n");
+    }
+
+    #[test]
     fn display_formats_wide_integer_exactly_under_ans_header() {
         reset_thread_buffer();
         block_on(display_builtin(
@@ -283,9 +324,22 @@ mod tests {
             Vec::new(),
         ))
         .expect("display");
-        let text = stdout_text();
-        assert!(text.contains("ans ="));
-        assert!(text.contains(&u64::MAX.to_string()));
+        assert_eq!(stdout_text(), format!("ans = uint64\n{}\n", u64::MAX));
+    }
+
+    #[test]
+    fn display_reports_integer_row_vector_class_and_shape() {
+        reset_thread_buffer();
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![72_057_594_037_539_387, 72_057_594_037_927_935]),
+            vec![1, 2],
+        )
+        .expect("integer row vector");
+        block_on(display_builtin(Value::Tensor(tensor), Vec::new())).unwrap();
+        assert_eq!(
+            stdout_text(),
+            "ans = 1×2 uint64 row vector\n72057594037539387  72057594037927935\n"
+        );
     }
 
     #[test]

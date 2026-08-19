@@ -19,6 +19,8 @@
     "When the first argument is a numeric scalar, it is treated as the upper limit `n`.",
     "Population vectors preserve their row or column orientation.",
     "Weights are supported for sampling with replacement, matching MATLAB's documented restriction.",
+    "The documented numeric range, population, count, and weight classes are single and double, while replacement is logical. Typed-integer range limits, populations, counts, replacement flags, and weights are five independently gated RunMat-mode extensions.",
+    "Typed-integer populations preserve exact native class, orientation, and supported owner residency; weights cross a checked binary64 probability boundary, while range limits, counts, and replacement flags remain structural.",
     "Numeric, logical, string, and char population vectors are supported."
   ],
   "examples": [

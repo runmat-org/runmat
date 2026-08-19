@@ -7,6 +7,11 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_plot::core::BoundingBox;
 use runmat_plot::gpu::scatter2::{
@@ -16,6 +21,7 @@ use runmat_plot::gpu::ScalarType;
 use runmat_plot::plots::scatter::{MarkerStyle, ScatterGpuStyle};
 use runmat_plot::plots::surface::ColorMap;
 use runmat_plot::plots::LineStyle;
+use runmat_plot::plots::NumericPlotData;
 use runmat_plot::plots::ScatterPlot;
 #[cfg(test)]
 use runmat_value::Tensor;
@@ -27,18 +33,19 @@ use crate::builtins::common::spec::{
 };
 use std::convert::TryFrom;
 
-use super::common::{gather_tensor_from_gpu, numeric_pair};
+use super::common::{gather_tensor_from_gpu, numeric_plot_data_pair};
 use super::gpu_helpers::axis_bounds;
 use super::op_common::line_inputs::NumericInput as ScatterInput;
 use super::op_common::{apply_axes_target, split_leading_axes_handle};
 use super::perf::scatter_target_points;
 use super::plotting_error;
+#[cfg(test)]
+use super::point::convert_scalar_color_values;
 use super::point::{
-    convert_rgb_color_matrix, convert_rgb_color_matrix_async, convert_scalar_color_values,
-    convert_scalar_color_values_async, convert_size_vector, convert_size_vector_async,
-    default_marker_diameter_px, map_scalar_values_to_colors, marker_area_points2_to_diameter_px,
-    validate_gpu_color_matrix, validate_gpu_vector_length, PointArgs, PointColorArg, PointGpuColor,
-    PointSizeArg,
+    convert_rgb_color_matrix, convert_rgb_color_matrix_async, convert_scalar_color_values_async,
+    convert_size_vector, convert_size_vector_async, default_marker_diameter_px,
+    map_scalar_values_to_colors, marker_area_points2_to_diameter_px, validate_gpu_color_matrix,
+    validate_gpu_vector_length, PointArgs, PointColorArg, PointGpuColor, PointSizeArg,
 };
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{LineStyleParseOptions, MarkerColor};
@@ -74,6 +81,34 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "scatter";
+
+const SCATTER_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "X/Y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Coordinate data accept all eight integer classes and retain native class, shape, and exact values as graphics-object source properties.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "S/C rendering data",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Marker areas and numeric color data accept all integer classes and cross explicitly into floating rendering metadata.",
+    },
+];
+pub const SCATTER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "h = scatter(integer_X, integer_Y [, integer_S, integer_C], ...)",
+        inputs: &SCATTER_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "XData/YData and figure persistence retain native storage. Marker sizing, colormap normalization, and rendering are explicit floating boundaries; integer gpuArray coordinates gather exactly because the direct WGPU scatter path is floating-only.",
+    }];
 
 const SCATTER_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "h",
@@ -470,6 +505,7 @@ fn map_scatter_internal(err: RuntimeError) -> RuntimeError {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::scatter::SCATTER_DESCRIPTOR),
+    integer_capabilities(crate::builtins::plotting::scatter::SCATTER_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::scatter"
 )]
 pub async fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<f64> {
@@ -489,10 +525,49 @@ pub async fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::Bui
     let rest = args;
     let style_args = PointArgs::parse(rest, LineStyleParseOptions::scatter())
         .map_err(map_scatter_invalid_argument)?;
-    let mut x_input =
-        Some(ScatterInput::from_value(x, BUILTIN_NAME).map_err(map_scatter_invalid_argument)?);
-    let mut y_input =
-        Some(ScatterInput::from_value(y, BUILTIN_NAME).map_err(map_scatter_invalid_argument)?);
+    let x_input =
+        ScatterInput::from_value(x, BUILTIN_NAME).map_err(map_scatter_invalid_argument)?;
+    let y_input =
+        ScatterInput::from_value(y, BUILTIN_NAME).map_err(map_scatter_invalid_argument)?;
+    let point_count = x_input.len();
+    let mut resolved_style = resolve_scatter_style_async(point_count, &style_args, "scatter")
+        .await
+        .map_err(map_scatter_invalid_argument)?;
+    let plot = if !resolved_style.requires_cpu {
+        if let (Some(x_gpu), Some(y_gpu)) = (x_input.gpu_handle(), y_input.gpu_handle()) {
+            match build_scatter_gpu_plot(x_gpu, y_gpu, &resolved_style) {
+                Ok(plot) => Some(plot),
+                Err(err) => {
+                    warn!("scatter GPU path unavailable: {err}");
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let plot = match plot {
+        Some(plot) => plot,
+        None => {
+            let x_tensor = x_input
+                .into_tensor_async("scatter")
+                .await
+                .map_err(map_scatter_invalid_argument)?;
+            let y_tensor = y_input
+                .into_tensor_async("scatter")
+                .await
+                .map_err(map_scatter_invalid_argument)?;
+            ensure_host_marker_metadata_async(&mut resolved_style, point_count)
+                .await
+                .map_err(map_scatter_invalid_argument)?;
+            let (x_data, y_data) = numeric_plot_data_pair(x_tensor, y_tensor, "scatter")
+                .map_err(map_scatter_invalid_argument)?;
+            build_scatter_plot_numeric(x_data, y_data, &mut resolved_style)
+                .map_err(map_scatter_invalid_argument)?
+        }
+    };
     let opts = PlotRenderOptions {
         title: "Scatter Plot",
         x_label: "X",
@@ -502,42 +577,12 @@ pub async fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::Bui
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
     let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
+    let mut plot = Some(plot);
     let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
-        let style_args = style_args.clone();
-        let point_count = x_input.as_ref().map(|input| input.len()).unwrap_or(0);
-        let mut resolved_style = resolve_scatter_style(point_count, &style_args, "scatter")
-            .map_err(map_scatter_invalid_argument)?;
-        let x_arg = x_input.take().expect("scatter x consumed once");
-        let y_arg = y_input.take().expect("scatter y consumed once");
-
-        if !resolved_style.requires_cpu {
-            if let (Some(x_gpu), Some(y_gpu)) = (x_arg.gpu_handle(), y_arg.gpu_handle()) {
-                match build_scatter_gpu_plot(x_gpu, y_gpu, &resolved_style) {
-                    Ok(plot) => {
-                        let plot_index = figure.add_scatter_plot_on_axes(plot, axes);
-                        *plot_index_slot.borrow_mut() = Some((axes, plot_index));
-                        return Ok(());
-                    }
-                    Err(err) => {
-                        warn!("scatter GPU path unavailable: {err}");
-                    }
-                }
-            }
-        }
-
-        let (x_tensor, y_tensor) = (
-            x_arg
-                .into_tensor("scatter")
-                .map_err(map_scatter_invalid_argument)?,
-            y_arg
-                .into_tensor("scatter")
-                .map_err(map_scatter_invalid_argument)?,
+        let plot_index = figure.add_scatter_plot_on_axes(
+            plot.take().expect("scatter plot consumed exactly once"),
+            axes,
         );
-        let (x_data, y_data) =
-            numeric_pair(x_tensor, y_tensor, "scatter").map_err(map_scatter_invalid_argument)?;
-        let scatter = build_scatter_plot(x_data, y_data, &mut resolved_style)
-            .map_err(map_scatter_invalid_argument)?;
-        let plot_index = figure.add_scatter_plot_on_axes(scatter, axes);
         *plot_index_slot.borrow_mut() = Some((axes, plot_index));
         Ok(())
     });
@@ -573,6 +618,44 @@ fn build_scatter_plot(
     ensure_host_marker_metadata(style, x.len())?;
 
     let mut scatter = ScatterPlot::new(x, y)
+        .map_err(|err| scatter_err(format!("scatter: {err}")))?
+        .with_style(style.uniform_color, style.marker_size, style.marker_style)
+        .with_label(style.label.clone());
+    scatter.colormap = style.colormap.clone();
+    scatter.set_edge_color(style.edge_color);
+    scatter.set_edge_thickness(style.edge_thickness);
+    scatter.set_filled(style.filled);
+    scatter.set_edge_color_from_vertex(style.marker_edge_flat);
+
+    if let Some(sizes) = style.per_point_sizes.take() {
+        scatter.set_sizes(sizes);
+    }
+    if let Some(colors) = style.per_point_colors.take() {
+        scatter.set_colors(colors);
+    }
+    if let Some(values) = style.color_values.take() {
+        scatter.set_color_values(values, style.color_limits.take());
+    }
+    Ok(scatter)
+}
+
+fn build_scatter_plot_numeric(
+    x: NumericPlotData,
+    y: NumericPlotData,
+    style: &mut ScatterResolvedStyle,
+) -> BuiltinResult<ScatterPlot> {
+    if x.len() != y.len() {
+        return Err(scatter_err(
+            "scatter: X and Y inputs must share the same length",
+        ));
+    }
+    if x.is_empty() {
+        return Err(scatter_err("scatter: inputs cannot be empty"));
+    }
+
+    ensure_host_marker_metadata(style, x.len())?;
+
+    let mut scatter = ScatterPlot::from_numeric_data(x, y)
         .map_err(|err| scatter_err(format!("scatter: {err}")))?
         .with_style(style.uniform_color, style.marker_size, style.marker_style)
         .with_label(style.label.clone());
@@ -766,6 +849,7 @@ fn finalize_scatter_style(
     Ok(())
 }
 
+#[cfg(test)]
 fn resolve_scatter_style(
     point_count: usize,
     args: &PointArgs,
@@ -979,6 +1063,13 @@ fn build_scatter_gpu_plot(
     y: &GpuTensorHandle,
     style: &ScatterResolvedStyle,
 ) -> BuiltinResult<ScatterPlot> {
+    if runmat_accelerate_api::handle_integer_type(x).is_some()
+        || runmat_accelerate_api::handle_integer_type(y).is_some()
+    {
+        return Err(scatter_err(
+            "scatter: integer gpuArray source requires exact host property retention",
+        ));
+    }
     let context = super::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
 
     let x_ref = runmat_accelerate_api::export_wgpu_buffer(x)
@@ -1164,6 +1255,31 @@ fn ensure_host_marker_metadata(
             let value = Value::Tensor(tensor);
             style.per_point_colors =
                 Some(convert_rgb_color_matrix(&value, point_count, "scatter")?);
+        }
+    }
+    Ok(())
+}
+
+async fn ensure_host_marker_metadata_async(
+    style: &mut ScatterResolvedStyle,
+    point_count: usize,
+) -> BuiltinResult<()> {
+    if style.per_point_sizes.is_none() {
+        if let Some(handle) = style.gpu_sizes.clone() {
+            let tensor = super::common::gather_tensor_from_gpu_async(handle, "scatter").await?;
+            let value = Value::Tensor(tensor);
+            style.per_point_sizes =
+                Some(convert_size_vector_async(&value, point_count, "scatter").await?);
+        }
+    }
+    if style.per_point_colors.is_none() {
+        if let Some(gpu_color) = style.gpu_colors.as_ref() {
+            let tensor =
+                super::common::gather_tensor_from_gpu_async(gpu_color.handle.clone(), "scatter")
+                    .await?;
+            let value = Value::Tensor(tensor);
+            style.per_point_colors =
+                Some(convert_rgb_color_matrix_async(&value, point_count, "scatter").await?);
         }
     }
     Ok(())
@@ -1355,8 +1471,9 @@ pub(crate) mod tests {
         let PlotElement::Scatter(plot) = fig.plots().next().unwrap() else {
             panic!("expected scatter")
         };
-        assert_eq!(plot.x_data, vec![1.0]);
-        assert_eq!(plot.y_data, vec![2.0]);
+        let (x, y) = plot.host_xy_f64().unwrap().unwrap();
+        assert_eq!(x, vec![1.0]);
+        assert_eq!(y, vec![2.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

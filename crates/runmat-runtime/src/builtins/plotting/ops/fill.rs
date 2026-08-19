@@ -276,7 +276,11 @@ fn handles_value(handles: Vec<f64>) -> Value {
 fn error(detail: impl AsRef<str>) -> RuntimeError {
     build_runtime_error(format!("fill: {}", detail.as_ref()))
         .with_builtin(BUILTIN_NAME)
-        .with_identifier("RunMat:fill:InvalidArgument")
+        .with_identifier(
+            INVALID
+                .identifier
+                .expect("fill invalid-argument descriptor identifier"),
+        )
         .build()
 }
 

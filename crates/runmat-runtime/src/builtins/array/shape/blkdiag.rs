@@ -160,7 +160,7 @@ const BLKDIAG_SPARSE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "RunMat can structurally assemble same-class sparse integer blocks without a floating mirror; the public sparse numeric storage domain is single, double, or logical.",
+        notes: "RunMat can structurally assemble same-class sparse integer blocks while preserving their exact values; the public sparse numeric storage domain is single, double, or logical.",
     }];
 
 const BLKDIAG_COMPLEX_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
@@ -1341,14 +1341,6 @@ fn upload_gpu_result(
             let handle = gpu_helpers::upload_tensor(provider, &tensor)
                 .map_err(|err| error_with_detail(&ERROR_GPU, err))?;
             runmat_accelerate_api::set_handle_logical(&handle, false);
-            runmat_accelerate_api::set_handle_storage(
-                &handle,
-                runmat_accelerate_api::GpuTensorStorage::Real,
-            );
-            runmat_accelerate_api::set_handle_precision(
-                &handle,
-                tensor_precision(tensor.numeric_dtype()),
-            );
             Ok(gpu_helpers::resident_gpu_value(handle))
         }
         Value::Num(value) => {
@@ -1362,14 +1354,6 @@ fn upload_gpu_result(
                 .upload(&view)
                 .map_err(|err| error_with_detail(&ERROR_GPU, err))?;
             runmat_accelerate_api::set_handle_logical(&handle, false);
-            runmat_accelerate_api::set_handle_storage(
-                &handle,
-                runmat_accelerate_api::GpuTensorStorage::Real,
-            );
-            runmat_accelerate_api::set_handle_precision(
-                &handle,
-                runmat_accelerate_api::ProviderPrecision::F64,
-            );
             Ok(gpu_helpers::resident_gpu_value(handle))
         }
         Value::LogicalArray(array) => {
@@ -1396,21 +1380,6 @@ fn upload_gpu_result(
             &ERROR_GPU,
             format!("cannot upload blkdiag result {other:?}"),
         )),
-    }
-}
-
-fn tensor_precision(dtype: NumericDType) -> runmat_accelerate_api::ProviderPrecision {
-    match dtype {
-        NumericDType::F32 => runmat_accelerate_api::ProviderPrecision::F32,
-        NumericDType::F64
-        | NumericDType::I8
-        | NumericDType::I16
-        | NumericDType::I32
-        | NumericDType::I64
-        | NumericDType::U8
-        | NumericDType::U16
-        | NumericDType::U32
-        | NumericDType::U64 => runmat_accelerate_api::ProviderPrecision::F64,
     }
 }
 
@@ -2062,26 +2031,8 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let a = Tensor::new_with_dtype(vec![1.25], vec![1, 1], NumericDType::F32).unwrap();
             let b = Tensor::new_with_dtype(vec![2.5], vec![1, 1], NumericDType::F32).unwrap();
-            let ha = provider
-                .upload(&HostTensorView {
-                    data: &a.materialize_f64(),
-                    shape: &a.shape,
-                })
-                .unwrap();
-            let hb = provider
-                .upload(&HostTensorView {
-                    data: &b.materialize_f64(),
-                    shape: &b.shape,
-                })
-                .unwrap();
-            runmat_accelerate_api::set_handle_precision(
-                &ha,
-                runmat_accelerate_api::ProviderPrecision::F32,
-            );
-            runmat_accelerate_api::set_handle_precision(
-                &hb,
-                runmat_accelerate_api::ProviderPrecision::F32,
-            );
+            let ha = gpu_helpers::upload_tensor(provider, &a).unwrap();
+            let hb = gpu_helpers::upload_tensor(provider, &b).unwrap();
             let value = call(vec![Value::GpuTensor(ha), Value::GpuTensor(hb)]).unwrap();
             let Value::GpuTensor(handle) = value else {
                 panic!("expected gpu tensor");

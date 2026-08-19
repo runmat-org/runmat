@@ -18,7 +18,7 @@
     "reduction": false,
     "precisions": ["f64"],
     "broadcasting": "none",
-    "notes": "GPU inputs are gathered to host. The regularized GLM solver runs on CPU."
+    "notes": "Automatic internal residency gathers transparently. Explicit gpuArray input is a mode-gated RunMat extension; the regularized GLM solver runs on CPU."
   },
   "fusion": {
     "elementwise": false,
@@ -29,7 +29,7 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::stats::ml::lassoglm::tests",
-    "integration": "runmat-vm stats_ml::lassoglm_surface_executes_from_scripts"
+    "integration": "runmat-vm stats_ml::lassoglm_surface_executes_from_scripts; crates/runmat-vm/tests/integer_json_join_and_statistical_semantics.rs"
   },
   "description": "`lassoglm(X,Y,distr)` fits a regularized generalized linear model for predictor matrix `X`, response `Y`, and distribution `distr`. Columns of `B` correspond to ascending `Lambda` values, and `[B,FitInfo] = lassoglm(...)` returns MATLAB-compatible fit metadata.",
   "behaviors": [
@@ -41,7 +41,8 @@
     "`Standardize` and `Intercept` follow MATLAB's model form. `Weights` accepts a nonnegative observation-weight vector with positive total weight, and `Offset` accepts one finite offset per observation.",
     "`RelTol`, `MaxIter`, and statset-style `Options` control solver convergence. `Options.MaxIter`, `Options.TolX`, and `Options.TolFun` are honored; enabled parallel options are rejected because RunMat's solver is CPU-local.",
     "`CV` supports `\"resubstitution\"` and positive integer K-fold cross-validation. K-fold fits add `SE`, `LambdaMinDeviance`, `Lambda1SE`, `IndexMinDeviance`, and `Index1SE` fields to `FitInfo`.",
-    "`BinomialSize` supports scalar or per-observation trial counts for binomial probability responses. `Link` is accepted only for canonical supported links (`identity`, `logit`, or `log` according to distribution), `EstDisp` currently accepts `\"off\"`, and unsupported values are rejected instead of silently changing the model."
+    "`BinomialSize` supports scalar or per-observation trial counts for binomial probability responses. `Link` is accepted only for canonical supported links (`identity`, `logit`, or `log` according to distribution), `EstDisp` currently accepts `\"off\"`, and unsupported values are rejected instead of silently changing the model.",
+    "Typed-integer X, Y, numeric parameters, direct controls, and honored nested `Options` fields are independently classified RunMat-only extensions. Integer values remain exact until a checked double solver boundary; values not exactly representable as double reject rather than round."
   ],
   "examples": [
     {

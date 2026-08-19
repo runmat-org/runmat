@@ -15,5 +15,6 @@ pub(in crate::builtins::table) use rows::*;
 pub(crate) use timetable::timetable_row_times;
 pub(in crate::builtins::table) use timetable::{
     array2timetable_row_times, is_time_like_value, parse_array2timetable_options,
-    parse_timetable_options, set_timetable_row_times, split_timetable_constructor_args,
+    parse_table2timetable_options, set_timetable_row_times, split_timetable_constructor_args,
+    table2timetable_generated_row_times, validate_explicit_row_times, Array2TimetableOptions,
 };

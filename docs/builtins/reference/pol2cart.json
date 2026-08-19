@@ -35,6 +35,7 @@
   },
   "description": "`[x,y] = pol2cart(theta,rho)` converts polar coordinates to Cartesian coordinates. `[x,y,z] = pol2cart(theta,rho,z)` converts cylindrical coordinates and returns the elevation after MATLAB-style implicit expansion.",
   "behaviors": [
+    "Typed-integer `theta`, `rho`, or `z` inputs are independent RunMat-mode extensions and must be exactly representable in double before the coordinate transform.",
     "Inputs must be real floating-point scalars, vectors, matrices, or N-D tensors.",
     "`theta`, `rho`, and optional `z` must have the same size or compatible sizes for implicit expansion.",
     "`x` is computed as `rho .* cos(theta)` and `y` is computed as `rho .* sin(theta)`.",

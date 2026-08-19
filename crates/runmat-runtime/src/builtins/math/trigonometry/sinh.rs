@@ -2,7 +2,11 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
@@ -18,6 +22,48 @@ use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "sinh";
+pub const SINH_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "sinh-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "sinh with typed-integer input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SinhIntegerInputExtension"),
+};
+pub const SINH_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "sinh-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "sinh with logical input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SinhLogicalInputExtension"),
+};
+pub const SINH_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "sinh-character-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "sinh with character input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SinhCharacterInputExtension"),
+};
+pub const SINH_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    SINH_INTEGER_INPUT_EXTENSION,
+    SINH_LOGICAL_INPUT_EXTENSION,
+    SINH_CHARACTER_INPUT_EXTENSION,
+];
+const SINH_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight real integer classes require exact binary64 representability before hyperbolic evaluation.",
+    }];
+pub const SINH_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = sinh(integer_X)",
+        inputs: &SINH_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "RunMat mode validates native integer storage before conversion; large finite inputs may naturally overflow to Inf and resident fallback returns through the owner.",
+    }];
 
 const SINH_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
@@ -126,9 +172,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::trigonometry::sinh::SINH_DESCRIPTOR),
+    extensions(SINH_EXTENSIONS),
+    integer_capabilities(SINH_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::trigonometry::sinh"
 )]
 async fn sinh_builtin(value: Value) -> BuiltinResult<Value> {
+    ensure_sinh_extensions(&value).await?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "sinh")?;
     match value {
         Value::GpuTensor(handle) => sinh_gpu(handle).await,
@@ -141,6 +190,31 @@ async fn sinh_builtin(value: Value) -> BuiltinResult<Value> {
         Value::String(_) | Value::StringArray(_) => Err(sinh_error(&SINH_ERROR_INVALID_INPUT)),
         other => sinh_real(other),
     }
+}
+
+async fn ensure_sinh_extensions(value: &Value) -> BuiltinResult<()> {
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        value,
+        &SINH_INTEGER_INPUT_EXTENSION,
+        BUILTIN_NAME,
+        "X",
+    )
+    .await?;
+    if matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SINH_LOGICAL_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if matches!(value, Value::CharArray(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SINH_CHARACTER_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
 }
 
 async fn sinh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
@@ -281,6 +355,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sinh_reads_typed_integer_tensor_storage_exactly() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new_integer(
             runmat_value::IntegerStorage::I16(vec![-1, 0, 1]),
             vec![3, 1],
@@ -303,6 +378,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sinh_int_value_promotes() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let value = Value::Int(IntValue::I32(1));
         let result = sinh_builtin(value).expect("sinh");
         match result {
@@ -327,6 +403,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sinh_char_array_roundtrip() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let chars = CharArray::new("abc".chars().collect(), 1, 3).unwrap();
         let result = sinh_builtin(Value::CharArray(chars)).expect("sinh");
         match result {

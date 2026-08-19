@@ -5,6 +5,12 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
@@ -222,6 +228,77 @@ pub const STARTSWITH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &STARTSWITH_ERRORS,
 };
 
+const STARTSWITH_POSITIONAL_IGNORE_CASE_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "startswith-positional-ignore-case",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "startsWith with a positional IgnoreCase flag is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:StartsWithPositionalIgnoreCaseExtension"),
+    };
+
+const STARTSWITH_NUMERIC_IGNORE_CASE_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "startswith-numeric-ignore-case",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "startsWith with a numeric IgnoreCase value is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:StartsWithNumericIgnoreCaseExtension"),
+    };
+
+const STARTSWITH_TEXT_IGNORE_CASE_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "startswith-text-ignore-case",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "startsWith with a textual IgnoreCase value is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:StartsWithTextIgnoreCaseExtension"),
+    };
+
+const STARTSWITH_RESIDENT_IGNORE_CASE_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "startswith-resident-ignore-case",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "startsWith with a resident IgnoreCase value is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:StartsWithResidentIgnoreCaseExtension"),
+    };
+
+pub const STARTSWITH_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    STARTSWITH_POSITIONAL_IGNORE_CASE_EXTENSION,
+    STARTSWITH_NUMERIC_IGNORE_CASE_EXTENSION,
+    STARTSWITH_TEXT_IGNORE_CASE_EXTENSION,
+    STARTSWITH_RESIDENT_IGNORE_CASE_EXTENSION,
+];
+
+const STARTSWITH_INTEGER_IGNORE_CASE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "IgnoreCase",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "RunMat mode accepts exact scalar integer zero as false and every nonzero integer as true; MATLAB-compatible mode requires the documented logical name-value form.",
+    }];
+
+pub const STARTSWITH_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "tf = startsWith(str, pat, 'IgnoreCase', integer_value)",
+        inputs: &STARTSWITH_INTEGER_IGNORE_CASE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Predicate,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "Integer flags are compatibility-gated controls. Subject and pattern remain host text, multiple patterns are alternatives, and output has the subject shape.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "tf = startsWith(str, pat, integer_ignore_case)",
+        inputs: &STARTSWITH_INTEGER_IGNORE_CASE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Predicate,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The positional integer flag requires both positional and numeric RunMat extension gates; a resident flag additionally requires the resident-control gate before gather.",
+    },
+];
+
 fn startswith_error_with_message(
     message: impl Into<String>,
     error: &'static BuiltinErrorDescriptor,
@@ -245,6 +322,10 @@ fn remap_startswith_flow(err: RuntimeError) -> RuntimeError {
     accel = "sink",
     type_resolver(logical_text_match_type),
     descriptor(crate::builtins::strings::search::startswith::STARTSWITH_DESCRIPTOR),
+    extensions(crate::builtins::strings::search::startswith::STARTSWITH_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::strings::search::startswith::STARTSWITH_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::strings::search::startswith"
 )]
 async fn startswith_builtin(
@@ -252,18 +333,12 @@ async fn startswith_builtin(
     pattern: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    let text = gather_if_needed_async(&text)
-        .await
-        .map_err(remap_startswith_flow)?;
-    let pattern = gather_if_needed_async(&pattern)
-        .await
-        .map_err(remap_startswith_flow)?;
-    let ignore_case = parse_ignore_case(BUILTIN_NAME, &rest).map_err(|err| {
-        startswith_error_with_message(err.message().to_string(), &STARTSWITH_ERROR_INVALID_OPTION)
-    })?;
+    reject_resident_numeric_text(&text)?;
+    reject_resident_numeric_text(&pattern)?;
     let subject = TextCollection::from_subject(BUILTIN_NAME, text).map_err(|err| {
         startswith_error_with_message(err.message().to_string(), &STARTSWITH_ERROR_INVALID_INPUT)
     })?;
+    let ignore_case = validate_startswith_options(rest).await?;
     if matches!(pattern, Value::Object(_)) {
         let regex = pattern_regex(&pattern, BUILTIN_NAME).map_err(|err| {
             startswith_error_with_message(
@@ -277,6 +352,135 @@ async fn startswith_builtin(
         startswith_error_with_message(err.message().to_string(), &STARTSWITH_ERROR_INVALID_INPUT)
     })?;
     evaluate_startswith(&subject, &patterns, ignore_case)
+}
+
+async fn validate_startswith_options(rest: Vec<Value>) -> BuiltinResult<bool> {
+    if rest.len() > 2 {
+        return Err(startswith_error_with_message(
+            "startsWith: expected at most one 'IgnoreCase' name-value pair",
+            &STARTSWITH_ERROR_INVALID_OPTION,
+        ));
+    }
+    if rest.len() == 2 {
+        let option_name = super::text_utils::value_to_owned_string(&rest[0]);
+        if !option_name.is_some_and(|name| name.eq_ignore_ascii_case("IgnoreCase")) {
+            return Err(startswith_error_with_message(
+                "startsWith: unknown option; supported option is 'IgnoreCase'",
+                &STARTSWITH_ERROR_INVALID_OPTION,
+            ));
+        }
+    }
+    if let Some(value) = option_value(&rest) {
+        validate_ignore_case_shape(value)?;
+    }
+    let has_resident = rest
+        .iter()
+        .any(|value| crate::dispatcher::value_contains_gpu(value));
+    let parsed_host = if has_resident {
+        None
+    } else {
+        Some(parse_ignore_case(BUILTIN_NAME, &rest).map_err(|err| {
+            startswith_error_with_message(
+                err.message().to_string(),
+                &STARTSWITH_ERROR_INVALID_OPTION,
+            )
+        })?)
+    };
+
+    if rest.len() == 1 {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &STARTSWITH_POSITIONAL_IGNORE_CASE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    let value = option_value(&rest);
+    if value.is_some_and(is_numeric_ignore_case_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &STARTSWITH_NUMERIC_IGNORE_CASE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if value.is_some_and(is_text_ignore_case_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &STARTSWITH_TEXT_IGNORE_CASE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if has_resident {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &STARTSWITH_RESIDENT_IGNORE_CASE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+
+    if let Some(ignore_case) = parsed_host {
+        return Ok(ignore_case);
+    }
+
+    let mut host = Vec::with_capacity(rest.len());
+    for value in rest {
+        host.push(
+            gather_if_needed_async(&value)
+                .await
+                .map_err(remap_startswith_flow)?,
+        );
+    }
+    parse_ignore_case(BUILTIN_NAME, &host).map_err(|err| {
+        startswith_error_with_message(err.message().to_string(), &STARTSWITH_ERROR_INVALID_OPTION)
+    })
+}
+
+fn option_value(rest: &[Value]) -> Option<&Value> {
+    match rest {
+        [value] => Some(value),
+        [_, value] => Some(value),
+        _ => None,
+    }
+}
+
+fn validate_ignore_case_shape(value: &Value) -> BuiltinResult<()> {
+    let element_count = match value {
+        Value::GpuTensor(handle) => tensor::element_count(&handle.shape),
+        Value::Tensor(tensor) => tensor.len(),
+        Value::LogicalArray(array) => array.data.len(),
+        _ => 1,
+    };
+    if element_count != 1 {
+        let message = if matches!(value, Value::LogicalArray(_)) {
+            "startsWith: option values must be scalar logicals"
+        } else {
+            "startsWith: IgnoreCase must be a scalar"
+        };
+        return Err(startswith_error_with_message(
+            message,
+            &STARTSWITH_ERROR_INVALID_OPTION,
+        ));
+    }
+    Ok(())
+}
+
+fn is_numeric_ignore_case_value(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Num(_) | Value::Int(_) | Value::Tensor(_) | Value::GpuTensor(_)
+    )
+}
+
+fn is_text_ignore_case_value(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_)
+    )
+}
+
+fn reject_resident_numeric_text(value: &Value) -> BuiltinResult<()> {
+    if crate::dispatcher::value_contains_gpu(value) {
+        return Err(startswith_error_with_message(
+            STARTSWITH_ERROR_INVALID_INPUT.message,
+            &STARTSWITH_ERROR_INVALID_INPUT,
+        ));
+    }
+    Ok(())
 }
 
 fn evaluate_startswith_regex(
@@ -524,6 +728,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn startswith_ignore_case_string_flag() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let result = run_startswith(
             Value::String("RunMat".into()),
             Value::String("run".into()),
@@ -539,6 +744,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn startswith_ignore_case_numeric_flag() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let result = run_startswith(
             Value::String("RunMat".into()),
             Value::String("run".into()),
@@ -554,6 +760,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn startswith_ignore_case_positional_value() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let result = run_startswith(
             Value::String("RunMat".into()),
             Value::String("run".into()),
@@ -582,6 +789,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn startswith_ignore_case_tensor_value() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
         let result = run_startswith(
             Value::String("RunMat".into()),
@@ -595,6 +803,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn startswith_ignore_case_typed_integer_tensor_reads_exact_storage() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor =
             Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("integer tensor");
         let result = run_startswith(

@@ -32,13 +32,14 @@
     "unit": "builtins::plotting::scatterplot::tests",
     "integration": "scatter GPU/rendering coverage is inherited from builtins::plotting::scatter and runmat-plot renderer tests"
   },
-  "description": "`scatterplot` visualizes complex samples by plotting `real(x)` on the x-axis and `imag(x)` on the y-axis. It supports MATLAB-compatible forms for decimation, offset, marker styling, and target axes selection.",
+  "description": "`scatterplot` visualizes complex samples by plotting `real(x)` on the x-axis and `imag(x)` on the y-axis. It supports MATLAB-compatible forms for decimation, offset, marker styling, and selection of an existing scatter figure.",
   "behaviors": [
     "`scatterplot(x)` plots every complex sample using a constellation-friendly default marker.",
     "`scatterplot(x, n)` plots every `n`-th sample.",
     "`scatterplot(x, n, offset)` starts at the zero-based offset before applying decimation, matching MATLAB's `x(offset+1:n:end)` behavior.",
     "`scatterplot(x, n, offset, marker)` forwards the marker LineSpec to `scatter`.",
-    "`scatterplot(x, n, offset, marker, ax)` targets an existing axes handle.",
+    "`scatterplot(x, n, offset, marker, scatfig)` selects an existing Figure handle, matching the Communications Toolbox form; it is not an axes handle.",
+    "MATLAB documents single/double samples and double integer-valued `n`/`offset`. RunMat mode additionally admits real typed-integer samples and typed-integer controls through explicit exact-binary64 checks; strict MATLAB mode rejects those extensions.",
     "The generated plot uses equal x/y scaling and grid lines so constellation geometry is not visually distorted."
   ],
   "examples": [
@@ -51,8 +52,8 @@
       "input": "rx = randn(1000, 1) + 1i*randn(1000, 1);\nscatterplot(rx, 4, 0, 'gx');"
     },
     {
-      "description": "Target a subplot axes",
-      "input": "ax = subplot(1, 2, 1);\nx = [1+1i; 1-1i; -1+1i; -1-1i];\nscatterplot(x, 1, 0, 'b.', ax);"
+      "description": "Add samples to an existing scatter figure",
+      "input": "h = scatterplot([1+1i; 1-1i]);\nscatterplot([-1+1i; -1-1i], 1, 0, 'b.', h);"
     }
   ],
   "faqs": [

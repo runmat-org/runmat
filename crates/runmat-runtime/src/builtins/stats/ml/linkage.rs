@@ -4,7 +4,11 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ResolveContext, Type,
 };
@@ -18,6 +22,75 @@ const NAME: &str = "linkage";
 const EPS: f64 = 1.0e-12;
 const MAX_OBSERVATIONS: usize = 700;
 const MAX_CONDENSED_DISTANCES: usize = MAX_OBSERVATIONS * (MAX_OBSERVATIONS - 1) / 2;
+
+const INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "linkage-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "linkage with typed-integer observation or distance data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LinkageIntegerDataExtension"),
+};
+
+const INTEGER_DISTANCE_PARAMETER_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "linkage-integer-distance-parameter",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "linkage with typed-integer pdist distance parameters is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:LinkageIntegerDistanceParameterExtension"),
+    };
+
+const EXPLICIT_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "linkage-explicit-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "linkage host fallback for explicit gpuArray inputs is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LinkageExplicitGpuInputExtension"),
+};
+
+pub const LINKAGE_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    INTEGER_DATA_EXTENSION,
+    INTEGER_DISTANCE_PARAMETER_EXTENSION,
+    EXPLICIT_GPU_INPUT_EXTENSION,
+];
+
+const INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X or y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer observations or condensed distances are gated before gather and checked for exact binary64 representation.",
+    }];
+
+const INTEGER_DISTANCE_PARAMETER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "pdist DistParameter",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer Minkowski exponents, standardized scales, and covariance entries are checked before entering floating distance arithmetic.",
+    }];
+
+pub const LINKAGE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Z = linkage(integer_X_or_y, ___)",
+        inputs: &INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat-only integer data crosses a checked binary64 distance boundary. Z remains a homogeneous floating matrix: columns 1 and 2 are integer-valued cluster labels and column 3 is distance. Public documentation does not resolve single/double propagation.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Z = linkage(X, method, {metric, integer_DistParameter})",
+        inputs: &INTEGER_DISTANCE_PARAMETER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Distance parameters are numeric algorithm inputs, not structural integer controls; lossy integer-to-double conversion rejects.",
+    },
+];
 
 const OUTPUT_Z: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Z",
@@ -152,11 +225,15 @@ struct LinkageOptions {
     keywords = "linkage,hierarchical,cluster,clustering,dendrogram,statistics,machine learning",
     type_resolver(linkage_type),
     descriptor(crate::builtins::stats::ml::linkage::LINKAGE_DESCRIPTOR),
+    extensions(crate::builtins::stats::ml::linkage::LINKAGE_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::ml::linkage::LINKAGE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::ml::linkage"
 )]
 async fn linkage_builtin(input: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_extensions(&input, &rest)?;
     let tensor = value_to_tensor(input).await?;
     let options = parse_options(rest)?;
+    ensure_exact_metric_integer_boundaries(&options.metric_args).await?;
     let is_condensed_vector = tensor.rows == 1 || tensor.shape.len() == 1;
     let (observations, distances) = if is_condensed_vector {
         if !options.metric_args.is_empty() {
@@ -211,7 +288,119 @@ async fn value_to_tensor(value: Value) -> BuiltinResult<Tensor> {
             "linkage: input must be a numeric vector or 2-D matrix",
         ));
     }
+    ensure_exact_integer_tensor(&tensor, "X or y")?;
     Ok(tensor)
+}
+
+fn is_typed_integer(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn contains_typed_integer(value: &Value) -> bool {
+    match value {
+        Value::Cell(cell) => cell.data.iter().any(contains_typed_integer),
+        Value::Struct(value) => value.fields.values().any(contains_typed_integer),
+        Value::Object(value) => value.properties.values().any(contains_typed_integer),
+        Value::Closure(value) => value.captures.iter().any(contains_typed_integer),
+        Value::OutputList(values) => values.iter().any(contains_typed_integer),
+        _ => is_typed_integer(value),
+    }
+}
+
+fn contains_explicit_gpu(value: &Value) -> bool {
+    match value {
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_explicit(handle),
+        Value::Cell(cell) => cell.data.iter().any(contains_explicit_gpu),
+        Value::Struct(value) => value.fields.values().any(contains_explicit_gpu),
+        Value::Object(value) => value.properties.values().any(contains_explicit_gpu),
+        Value::Closure(value) => value.captures.iter().any(contains_explicit_gpu),
+        Value::OutputList(values) => values.iter().any(contains_explicit_gpu),
+        _ => false,
+    }
+}
+
+fn has_typed_integer_distance_parameter(rest: &[Value]) -> bool {
+    if rest
+        .iter()
+        .any(|value| matches!(value, Value::Cell(_)) && contains_typed_integer(value))
+    {
+        return true;
+    }
+    rest.windows(2).any(|pair| {
+        keyword_of(&pair[0]).is_some_and(|metric| {
+            matches!(
+                metric.to_ascii_lowercase().as_str(),
+                "minkowski"
+                    | "seuclidean"
+                    | "standardizedeuclidean"
+                    | "standardized euclidean"
+                    | "mahalanobis"
+                    | "mahal"
+            )
+        }) && contains_typed_integer(&pair[1])
+    })
+}
+
+fn ensure_extensions(input: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    if is_typed_integer(input) {
+        crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_DATA_EXTENSION, NAME)?;
+    }
+    if has_typed_integer_distance_parameter(rest) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INTEGER_DISTANCE_PARAMETER_EXTENSION,
+            NAME,
+        )?;
+    }
+    if contains_explicit_gpu(input) || rest.iter().any(contains_explicit_gpu) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &EXPLICIT_GPU_INPUT_EXTENSION,
+            NAME,
+        )?;
+    }
+    Ok(())
+}
+
+fn ensure_exact_integer_tensor(tensor: &Tensor, role: &str) -> BuiltinResult<()> {
+    let Some(storage) = tensor.integer_storage() else {
+        return Ok(());
+    };
+    if storage
+        .exact_values()
+        .iter()
+        .any(|integer| !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(integer))
+    {
+        return Err(invalid(format!(
+            "linkage: integer {role} values must be exactly representable as double"
+        )));
+    }
+    Ok(())
+}
+
+async fn ensure_exact_metric_integer_boundaries(values: &[Value]) -> BuiltinResult<()> {
+    for value in values {
+        if !contains_typed_integer(value) {
+            continue;
+        }
+        let gathered = gather_if_needed_async(value)
+            .await
+            .map_err(|err| invalid(format!("linkage: {err}")))?;
+        match gathered {
+            Value::Int(integer) => {
+                if !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(&integer) {
+                    return Err(invalid(
+                        "linkage: integer distance parameter values must be exactly representable as double",
+                    ));
+                }
+            }
+            Value::Tensor(tensor) => {
+                ensure_exact_integer_tensor(&tensor, "distance parameter")?;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 fn parse_options(args: Vec<Value>) -> BuiltinResult<LinkageOptions> {
@@ -698,6 +887,7 @@ mod tests {
 
     #[test]
     fn linkage_condensed_vector_reads_typed_integer_storage_exactly() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let y = typed_integer_tensor_value(IntegerStorage::I16(vec![1, 4, 6, 5, 7, 2]), vec![1, 6]);
         let Value::Tensor(z) =
             block_on(linkage_builtin(y, vec![Value::String("complete".into())])).unwrap()
@@ -874,5 +1064,111 @@ mod tests {
         ))
         .unwrap_err();
         assert!(err.to_string().contains("must be 'on' or 'off'"));
+    }
+
+    #[test]
+    fn linkage_integer_roles_are_independently_gated() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let data_error = block_on(linkage_builtin(
+            typed_integer_tensor_value(IntegerStorage::U16(vec![1, 2, 3]), vec![1, 3]),
+            vec![],
+        ))
+        .unwrap_err();
+        assert_eq!(
+            data_error.identifier(),
+            Some("RunMat:compatibility:LinkageIntegerDataExtension")
+        );
+
+        let metric = Value::Cell(
+            CellArray::new(
+                vec![
+                    Value::from("minkowski"),
+                    Value::Int(runmat_value::IntValue::U16(3)),
+                ],
+                1,
+                2,
+            )
+            .unwrap(),
+        );
+        let parameter_error = block_on(linkage_builtin(
+            tensor_value(vec![0.0, 1.0, 2.0], 3, 1),
+            vec![Value::from("average"), metric],
+        ))
+        .unwrap_err();
+        assert_eq!(
+            parameter_error.identifier(),
+            Some("RunMat:compatibility:LinkageIntegerDistanceParameterExtension")
+        );
+    }
+
+    #[test]
+    fn linkage_rejects_lossy_integer_data_and_distance_parameters() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let data_error = block_on(linkage_builtin(
+            typed_integer_tensor_value(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1]),
+            vec![],
+        ))
+        .unwrap_err();
+        assert!(data_error
+            .message()
+            .contains("exactly representable as double"));
+
+        let metric = Value::Cell(
+            CellArray::new(
+                vec![
+                    Value::from("minkowski"),
+                    Value::Int(runmat_value::IntValue::U64((1_u64 << 53) + 1)),
+                ],
+                1,
+                2,
+            )
+            .unwrap(),
+        );
+        let parameter_error = block_on(linkage_builtin(
+            tensor_value(vec![0.0, 1.0, 2.0], 3, 1),
+            vec![Value::from("average"), metric],
+        ))
+        .unwrap_err();
+        assert!(parameter_error
+            .message()
+            .contains("exactly representable as double"));
+    }
+
+    #[test]
+    fn linkage_explicit_gpu_fallback_is_gated_before_download() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 3],
+            device_id: 0,
+            buffer_id: 9_426_001,
+            descriptor: Default::default(),
+        };
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let error =
+            block_on(linkage_builtin(Value::GpuTensor(handle.clone()), vec![])).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:LinkageExplicitGpuInputExtension")
+        );
+        runmat_accelerate_api::clear_handle_metadata(&handle);
+    }
+
+    #[test]
+    fn linkage_automatic_residency_gathers_transparently() {
+        use crate::builtins::common::{gpu_helpers, test_support};
+
+        test_support::with_test_provider(|provider| {
+            let input = tensor(vec![0.0, 1.0, 2.0], 3, 1);
+            let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload");
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let Value::Tensor(output) = block_on(linkage_builtin(Value::GpuTensor(handle), vec![]))
+                .expect("automatic residency may gather transparently")
+            else {
+                panic!("linkage remains a host implementation");
+            };
+            assert_matrix_close(&output, &[[1.0, 2.0, 1.0], [3.0, 4.0, 1.0]]);
+        });
     }
 }

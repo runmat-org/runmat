@@ -1,14 +1,158 @@
 use super::*;
 use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinExtensionDescriptor, BuiltinExtensionMode,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinIntegerBackendRule,
     BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
+use runmat_builtins::{
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::NumericDType;
 
 const ARRAY_DATASTORE_BUILTIN_NAME: &str = "arrayDatastore";
+
+pub const VARTYPE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "vartype accepts one host string scalar or character vector naming a variable class; integer and resident numeric values reject before provider access or selector construction.",
+};
+
+pub(in crate::builtins::table) const TIMERANGE_NUMERIC_BOUNDS_EXTENSION:
+    BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "timerange-numeric-bounds",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "timerange with numeric row-time bounds is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TimerangeNumericBoundsExtension"),
+};
+const TIMERANGE_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "timerange-explicit-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "timerange with explicitly GPU-resident input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TimerangeExplicitGpuInputExtension"),
+};
+pub const TIMERANGE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    TIMERANGE_NUMERIC_BOUNDS_EXTENSION,
+    TIMERANGE_EXPLICIT_GPU_EXTENSION,
+];
+const TIMERANGE_INTEGER_BOUND_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "start or end numeric row-time bound",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Public timerange bounds are datetime, duration, or supported event filters. Numeric row-time bounds remain available only in RunMat mode.",
+    }];
+pub const TIMERANGE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "S = timerange(integer_start, integer_end [, interval_type])",
+        inputs: &TIMERANGE_INTEGER_BOUND_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Predicate,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Numeric extension bounds retain their native scalar identity and compare with numeric timetable row times through exact mixed-class ordering rather than f64 conversion.",
+    }];
+
+const TIMERANGE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "S",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Timetable row-time subscript selector.",
+}];
+const TIMERANGE_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "startTime",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Beginning of the selected row-time interval.",
+    },
+    BuiltinParamDescriptor {
+        name: "endTime",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "End of the selected row-time interval.",
+    },
+    BuiltinParamDescriptor {
+        name: "intervalType",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("openright"),
+        description: "One of openright, openleft, open, or closed.",
+    },
+];
+const TIMERANGE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "S = timerange(startTime, endTime, intervalType)",
+    inputs: &TIMERANGE_INPUTS,
+    outputs: &TIMERANGE_OUTPUT,
+}];
+pub const TIMERANGE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &TIMERANGE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &[],
+};
+
+pub(crate) const TABLE_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "table-gpu-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "table with an explicit interactive GPU variable is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:TableGpuInputExtension"),
+    };
+pub const TABLE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [TABLE_GPU_INPUT_EXTENSION];
+const TABLE_INTEGER_VARIABLE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "var1,...,varN",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Any table variable may use one of the eight real integer classes and retains its own class and authoritative payload.",
+    }];
+const TABLE_INTEGER_SIZE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "sz",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented two-element numeric size vector is decoded exactly from native storage and its second element must match VariableTypes.",
+    }];
+pub const TABLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "T = table(integer_var1, ..., integer_varN, Name=Value...)",
+        inputs: &TABLE_INTEGER_VARIABLE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Host and automatically resident variables become host table variables with exact classes and values preserved; unsupported explicit GPU intent is independently gated before gather.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "T = table(Size=integer_sz, VariableTypes=integer_type_names, Name=Value...)",
+        inputs: &TABLE_INTEGER_SIZE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "int8 through uint64 VariableTypes allocate zero-filled authoritative native columns directly; floating VariableTypes allocate native f64 or f32 columns.",
+    },
+];
+
+pub const ROWFILTER_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "rowfilter is constructed from variable names, Parquet metadata/datastores, tables, or timetables; direct typed-integer arrays have no public data or control role and reject before gather. Integer columns nested in a tabular source remain opaque authoritative payloads while the filter captures row-selection metadata.",
+    };
 
 pub(crate) const ARRAY_DATASTORE_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor =
     BuiltinExtensionDescriptor {
@@ -21,6 +165,26 @@ pub(crate) const ARRAY_DATASTORE_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor
 
 pub const ARRAY_DATASTORE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
     [ARRAY_DATASTORE_GPU_INPUT_EXTENSION];
+
+const PARQUET_DATASTORE_INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "ReadSize, BlockSize, location, or other constructor argument",
+        classes: &[],
+        availability: BuiltinIntegerInputAvailability::Rejected,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented ReadSize and BlockSize numeric datatype is double, while locations and other constructor options are text, logical, or objects. Typed-integer host or resident arguments reject before gather and cannot be silently ignored.",
+    }];
+pub const PARQUET_DATASTORE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "pds = parquetDatastore(location, typed_integer_argument...)",
+        inputs: &PARQUET_DATASTORE_INTEGER_CONTROL_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The constructor records supported host metadata only. Integer Parquet columns belong to parquetread/read datastore operations, not to this constructor input surface.",
+    }];
 
 const ARRAY_DATASTORE_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -92,6 +256,14 @@ pub(crate) const CATEGORICAL_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor =
 
 pub const CATEGORICAL_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
     [CATEGORICAL_GPU_INPUT_EXTENSION];
+
+const ORDINAL_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ordinal-explicit-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ordinal host construction for explicit gpuArray input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:OrdinalExplicitGpuInputExtension"),
+};
+const ORDINAL_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ORDINAL_GPU_INPUT_EXTENSION];
 
 const CATEGORICAL_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -180,6 +352,79 @@ pub const CATEGORICAL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor;
     },
 ];
 
+const ORDINAL_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented numeric input accepts all eight integer classes; exact native values determine sorted ordinal levels and labels.",
+    }];
+const ORDINAL_INTEGER_LEVEL_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Integer source values retain exact identity while levels are assigned.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "levels",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Explicit numeric levels accept all eight integer classes and are matched through the same exact categorical construction path.",
+    },
+];
+const ORDINAL_INTEGER_EDGE_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented numeric source accepts all eight integer classes and is compared directly with each bin edge.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "edges",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented numeric edge vector accepts all eight integer classes; strict ordering and half-open bin membership use exact mixed-class numeric comparison.",
+    },
+];
+pub const ORDINAL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = ordinal(integer_X)",
+        inputs: &ORDINAL_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Exact integer identity determines levels and codes before default labels cross the documented display-only five-significant-digit boundary; colliding display labels reject. Automatic residency gathers transparently, while explicit gpuArray input is gated.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = ordinal(integer_X, labels, integer_levels)",
+        inputs: &ORDINAL_INTEGER_LEVEL_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Source and level vectors preserve exact signedness, width, and value identity until the opaque ordinal metadata object is assembled.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = ordinal(integer_X, labels, [], integer_edges)",
+        inputs: &ORDINAL_INTEGER_EDGE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Strictly increasing integer edges are compared exactly; bins are left-closed and right-open except that the last bin includes the final edge, and duplicate textual labels merge bins.",
+    },
+];
+
 pub(crate) const DICTIONARY_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor =
     BuiltinExtensionDescriptor {
         id: "dictionary-gpu-input",
@@ -221,7 +466,7 @@ pub const DICTIONARY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 
         overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Construction, duplicate resolution, lookup, assignment, and removal compare authoritative configured-class integer values without a binary64 mirror; the result is a host dictionary object.",
+        notes: "Construction, duplicate resolution, lookup, assignment, and removal compare configured-class integer values exactly; the result is a host dictionary object.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "d = dictionary(gpuArray(integer_keys_or_values), ...)",
@@ -243,18 +488,142 @@ pub const DICTIONARY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::struct_type),
     descriptor(crate::builtins::table::TABLE_DESCRIPTOR),
+    extensions(crate::builtins::table::builtins::constructors::TABLE_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::table::builtins::constructors::TABLE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn table_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     ensure_table_class_registered();
+    if args
+        .iter()
+        .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TABLE_GPU_INPUT_EXTENSION,
+            "table",
+        )?;
+    }
     let gathered = gather_values(&args).await?;
     let (variables, options) = split_table_constructor_args(gathered)?;
+    if options.size.is_some() || options.variable_types.is_some() {
+        return preallocated_table(variables, options);
+    }
     let names = if let Some(names) = options.variable_names {
         names
     } else {
         generated_variable_names(variables.len())
     };
     table_from_columns_with_properties(names, variables, options.row_names)
+}
+
+fn preallocated_table(
+    variables: Vec<Value>,
+    options: TableConstructorOptions,
+) -> BuiltinResult<Value> {
+    let (names, columns, row_names, _) = preallocated_table_columns(variables, options, "table")?;
+    table_from_columns_with_properties(names, columns, row_names)
+}
+
+pub(in crate::builtins::table) type PreallocatedTableColumns =
+    (Vec<String>, Vec<Value>, Option<Vec<String>>, usize);
+
+pub(in crate::builtins::table) fn preallocated_table_columns(
+    variables: Vec<Value>,
+    options: TableConstructorOptions,
+    context: &str,
+) -> BuiltinResult<PreallocatedTableColumns> {
+    if !variables.is_empty() {
+        return Err(invalid_argument(format!(
+            "{context}: Size/VariableTypes preallocation cannot be combined with data variables"
+        )));
+    }
+    let size = options
+        .size
+        .as_ref()
+        .ok_or_else(|| invalid_argument(format!("{context}: preallocation requires Size")))?;
+    let variable_types = options.variable_types.as_ref().ok_or_else(|| {
+        invalid_argument(format!("{context}: preallocation requires VariableTypes"))
+    })?;
+    let [rows, width] = table_preallocation_size(size)?;
+    if variable_types.len() != width {
+        return Err(invalid_argument(format!(
+            "{context}: VariableTypes has {} entries but Size requests {width} variables",
+            variable_types.len()
+        )));
+    }
+    let mut columns = Vec::with_capacity(width);
+    for type_name in variable_types {
+        let dtype = table_preallocation_numeric_dtype(type_name).ok_or_else(|| {
+            invalid_argument(format!(
+                "{context}: preallocation type '{type_name}' is not yet supported; use double, single, or a built-in integer type"
+            ))
+        })?;
+        columns.push(Value::Tensor(
+            crate::builtins::common::tensor::zeros_with_dtype(&[rows, 1], dtype)
+                .map_err(invalid_variable)?,
+        ));
+    }
+    let names = options
+        .variable_names
+        .unwrap_or_else(|| generated_variable_names(width));
+    Ok((names, columns, options.row_names, rows))
+}
+
+fn table_preallocation_size(value: &Value) -> BuiltinResult<[usize; 2]> {
+    let Value::Tensor(tensor) = value else {
+        return Err(invalid_argument(
+            "table: Size must be a two-element numeric vector",
+        ));
+    };
+    if tensor.len() != 2 || (tensor.rows() != 1 && tensor.cols() != 1) {
+        return Err(invalid_argument(
+            "table: Size must be a two-element numeric vector",
+        ));
+    }
+    let mut size = [0usize; 2];
+    for (index, output) in size.iter_mut().enumerate() {
+        let scalar = tensor
+            .numeric_value_at(index)
+            .ok_or_else(|| invalid_argument("table: Size contains a missing value"))?;
+        *output = match scalar {
+            runmat_value::NumericScalar::F64(value) => table_size_float(value)?,
+            runmat_value::NumericScalar::F32(value) => table_size_float(f64::from(value))?,
+            integer => integer
+                .into_int_value()
+                .and_then(|value| value.try_to_usize())
+                .ok_or_else(|| {
+                    invalid_argument("table: Size values must be nonnegative platform integers")
+                })?,
+        };
+    }
+    Ok(size)
+}
+
+fn table_size_float(value: f64) -> BuiltinResult<usize> {
+    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 || value >= usize::MAX as f64 {
+        return Err(invalid_argument(
+            "table: Size values must be nonnegative platform integers",
+        ));
+    }
+    Ok(value as usize)
+}
+
+fn table_preallocation_numeric_dtype(type_name: &str) -> Option<NumericDType> {
+    match type_name.trim().to_ascii_lowercase().as_str() {
+        "double" => Some(NumericDType::F64),
+        "single" => Some(NumericDType::F32),
+        "int8" => Some(NumericDType::I8),
+        "int16" => Some(NumericDType::I16),
+        "int32" => Some(NumericDType::I32),
+        "int64" => Some(NumericDType::I64),
+        "uint8" => Some(NumericDType::U8),
+        "uint16" => Some(NumericDType::U16),
+        "uint32" => Some(NumericDType::U32),
+        "uint64" => Some(NumericDType::U64),
+        _ => None,
+    }
 }
 
 #[runtime_builtin(
@@ -289,10 +658,23 @@ pub(crate) async fn categorical_builtin(args: Vec<Value>) -> BuiltinResult<Value
     keywords = "ordinal,categorical,categories,statistics",
     accel = "cpu",
     descriptor(crate::builtins::table::TABLE_VARIADIC_DESCRIPTOR),
+    extensions(crate::builtins::table::builtins::constructors::ORDINAL_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::table::builtins::constructors::ORDINAL_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn ordinal_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     ensure_table_class_registered();
+    if args
+        .iter()
+        .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ORDINAL_GPU_INPUT_EXTENSION,
+            "ordinal",
+        )?;
+    }
     let args = gather_values(&args).await?;
     ordinal_from_args(args)
 }
@@ -328,40 +710,68 @@ pub(crate) async fn dictionary_builtin(args: Vec<Value>) -> BuiltinResult<Value>
     summary = "Create a timetable row-time range selector.",
     keywords = "timerange,timetable,row times",
     accel = "cpu",
-    descriptor(crate::builtins::table::TABLE_VARIADIC_DESCRIPTOR),
+    descriptor(crate::builtins::table::builtins::constructors::TIMERANGE_DESCRIPTOR),
+    extensions(crate::builtins::table::builtins::constructors::TIMERANGE_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::table::builtins::constructors::TIMERANGE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn timerange_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     ensure_table_class_registered();
-    if args.len() > 3 {
+    if !(2..=3).contains(&args.len()) {
         return Err(invalid_argument(
             "timerange: expected start, end, and optional inclusivity",
         ));
     }
+    if args[..2].iter().any(timerange_argument_is_numeric) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TIMERANGE_NUMERIC_BOUNDS_EXTENSION,
+            "timerange",
+        )?;
+    }
+    if args
+        .iter()
+        .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TIMERANGE_EXPLICIT_GPU_EXTENSION,
+            "timerange",
+        )?;
+    }
     let gathered = gather_values(&args).await?;
+    let inclusivity = gathered
+        .get(2)
+        .map(|value| scalar_text(value, "timerange inclusivity"))
+        .transpose()?
+        .unwrap_or_else(|| "openright".to_string());
+    if !["openright", "openleft", "open", "closed"]
+        .iter()
+        .any(|candidate| candidate.eq_ignore_ascii_case(inclusivity.trim()))
+    {
+        return Err(invalid_argument(format!(
+            "timerange: unsupported inclusivity '{inclusivity}'"
+        )));
+    }
     let mut object = ObjectInstance::new(TIMERANGE_CLASS.to_string());
-    object.properties.insert(
-        "Start".to_string(),
-        gathered
-            .first()
-            .cloned()
-            .unwrap_or_else(|| Value::String(String::new())),
-    );
-    object.properties.insert(
-        "End".to_string(),
-        gathered
-            .get(1)
-            .cloned()
-            .unwrap_or_else(|| Value::String(String::new())),
-    );
+    object
+        .properties
+        .insert("Start".to_string(), gathered[0].clone());
+    object
+        .properties
+        .insert("End".to_string(), gathered[1].clone());
     object.properties.insert(
         "Inclusivity".to_string(),
-        gathered
-            .get(2)
-            .cloned()
-            .unwrap_or_else(|| Value::from("closed")),
+        Value::String(inclusivity.to_ascii_lowercase()),
     );
     Ok(Value::Object(object))
+}
+
+fn timerange_argument_is_numeric(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Num(_) | Value::Int(_) | Value::Tensor(_) | Value::GpuTensor(_)
+    )
 }
 
 #[runtime_builtin(
@@ -371,15 +781,26 @@ pub(crate) async fn timerange_builtin(args: Vec<Value>) -> BuiltinResult<Value> 
     keywords = "vartype,table,selector,variable type",
     accel = "cpu",
     descriptor(crate::builtins::table::TABLE_COMPAT_DESCRIPTOR),
+    integer_audit(crate::builtins::table::builtins::constructors::VARTYPE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn vartype_builtin(value: Value) -> BuiltinResult<Value> {
     ensure_table_class_registered();
+    if crate::builtins::common::validation::value_has_native_integer_class(&value)
+        || matches!(value, Value::GpuTensor(_))
+    {
+        return Err(invalid_argument(
+            "vartype: type must be a host string scalar or character vector",
+        ));
+    }
     let value = gather_if_needed_async(&value)
         .await
         .map_err(map_control_flow)?;
+    let kind = scalar_text(&value, "vartype type")?;
     let mut object = ObjectInstance::new(VARTYPE_CLASS.to_string());
-    object.properties.insert("Type".to_string(), value);
+    object
+        .properties
+        .insert("Type".to_string(), Value::String(kind));
     Ok(Value::Object(object))
 }
 
@@ -390,10 +811,19 @@ pub(crate) async fn vartype_builtin(value: Value) -> BuiltinResult<Value> {
     keywords = "rowfilter,table,rows,filter",
     accel = "cpu",
     descriptor(crate::builtins::table::TABLE_VARIADIC_DESCRIPTOR),
+    integer_audit(crate::builtins::table::builtins::constructors::ROWFILTER_INTEGER_AUDIT),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn rowfilter_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     ensure_table_class_registered();
+    if args.iter().any(|value| {
+        crate::builtins::common::validation::value_has_native_integer_class(value)
+            || matches!(value, Value::GpuTensor(_))
+    }) {
+        return Err(invalid_argument(
+            "rowfilter: typed numeric arrays are not valid rowfilter constructor inputs",
+        ));
+    }
     let args = gather_values(&args).await?;
     let mut object = ObjectInstance::new(ROWFILTER_CLASS.to_string());
     object.properties.insert(
@@ -593,20 +1023,109 @@ pub(crate) async fn file_datastore_builtin(args: Vec<Value>) -> BuiltinResult<Va
     keywords = "parquetDatastore,datastore,parquet,table",
     accel = "cpu",
     descriptor(crate::builtins::table::TABLE_VARIADIC_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::table::builtins::constructors::PARQUET_DATASTORE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn parquet_datastore_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     ensure_table_class_registered();
+    if args.iter().any(parquet_value_contains_typed_integer) {
+        return Err(invalid_argument(
+            "parquetDatastore: typed-integer constructor arguments are not supported",
+        ));
+    }
     let args = gather_values(&args).await?;
+    let Some(files) = args.first().cloned() else {
+        return Err(invalid_argument(
+            "parquetDatastore: files location is required",
+        ));
+    };
+    if (args.len() - 1) % 2 != 0 {
+        return Err(invalid_argument(
+            "parquetDatastore: name-value options must be provided in pairs",
+        ));
+    }
+    let mut read_size = Value::from("rowgroup");
+    let mut block_size = Value::Num(128_000_000.0);
+    let mut idx = 1usize;
+    while idx < args.len() {
+        let name = scalar_text(&args[idx], "parquetDatastore option")?;
+        let value = args[idx + 1].clone();
+        if name.eq_ignore_ascii_case("ReadSize") {
+            read_size = match &value {
+                Value::String(text)
+                    if text.eq_ignore_ascii_case("file")
+                        || text.eq_ignore_ascii_case("rowgroup") =>
+                {
+                    value
+                }
+                Value::CharArray(_) | Value::StringArray(_) => {
+                    let text = scalar_text(&value, "ReadSize")?;
+                    if !text.eq_ignore_ascii_case("file") && !text.eq_ignore_ascii_case("rowgroup")
+                    {
+                        return Err(invalid_argument("parquetDatastore: ReadSize must be 'file', 'rowgroup', or a positive double integer"));
+                    }
+                    Value::String(text)
+                }
+                _ => {
+                    Value::Num(array_datastore_positive_double_integer(&value, "ReadSize")? as f64)
+                }
+            };
+        } else if name.eq_ignore_ascii_case("BlockSize") {
+            block_size =
+                Value::Num(array_datastore_positive_double_integer(&value, "BlockSize")? as f64);
+        } else {
+            return Err(invalid_argument(format!(
+                "parquetDatastore: unsupported option '{name}'"
+            )));
+        }
+        idx += 2;
+    }
     let mut object = ObjectInstance::new(PARQUET_DATASTORE_CLASS.to_string());
-    object.properties.insert(
-        "Files".to_string(),
-        args.first().cloned().unwrap_or_else(|| {
-            Value::StringArray(StringArray::new(Vec::new(), vec![0, 1]).unwrap())
-        }),
-    );
+    object.properties.insert("Files".to_string(), files);
+    object.properties.insert("ReadSize".to_string(), read_size);
+    object
+        .properties
+        .insert("BlockSize".to_string(), block_size);
     Ok(Value::Object(object))
 }
+
+fn parquet_value_contains_typed_integer(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+        || matches!(value, Value::Cell(cell) if cell.data.iter().any(parquet_value_contains_typed_integer))
+        || matches!(value, Value::Struct(structure) if structure.fields.values().any(parquet_value_contains_typed_integer))
+        || matches!(value, Value::Object(object) if object.properties.values().any(parquet_value_contains_typed_integer))
+}
+
+const UITABLE_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "uitable-explicit-gpu-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "uitable with explicitly GPU-resident data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:UitableExplicitGpuDataExtension"),
+};
+pub const UITABLE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [UITABLE_EXPLICIT_GPU_EXTENSION];
+const UITABLE_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Data",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The Data property accepts every numeric type and retains the exact integer class, shape, and values in the UI component object.",
+    }];
+pub const UITABLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "ui = uitable(..., Data=integer_data, ...)",
+        inputs: &UITABLE_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Host integer data remains exact in the Data property. Automatically resident data gathers transparently through its owner; explicit gpuArray data is a separately gated extension.",
+    }];
 
 #[runtime_builtin(
     name = "uitable",
@@ -615,10 +1134,23 @@ pub(crate) async fn parquet_datastore_builtin(args: Vec<Value>) -> BuiltinResult
     keywords = "uitable,ui,table,Data",
     accel = "cpu",
     descriptor(crate::builtins::table::TABLE_VARIADIC_DESCRIPTOR),
+    extensions(crate::builtins::table::builtins::constructors::UITABLE_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::table::builtins::constructors::UITABLE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn uitable_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     ensure_table_class_registered();
+    if args
+        .iter()
+        .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &UITABLE_EXPLICIT_GPU_EXTENSION,
+            "uitable",
+        )?;
+    }
     let args = gather_values(&args).await?;
     let mut object = ObjectInstance::new(UITABLE_CLASS.to_string());
     let data = parse_named_option(&args, "Data")

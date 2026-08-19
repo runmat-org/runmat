@@ -593,8 +593,8 @@ fn parse_name_value_pairs(
             "linewidth" => {
                 let width = value_as_f64(&pair[1])
                     .ok_or_else(|| ctx_err(opts, "LineWidth must be numeric"))?;
-                if width <= 0.0 {
-                    return Err(ctx_err(opts, "LineWidth must be positive"));
+                if !width.is_finite() || width <= 0.0 {
+                    return Err(ctx_err(opts, "LineWidth must be finite and positive"));
                 }
                 options.line_width = Some(width as f32);
             }

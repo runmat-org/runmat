@@ -53,7 +53,8 @@
     }
   ],
   "behaviors": [
-    "Split text at newline boundaries."
+    "Split text at newline boundaries.",
+    "Integer semantics: `splitlines` has no numeric input role. Numeric, logical, symbolic, and provider-resident values are rejected before gather or provider access."
   ],
   "examples": [
     "splitlines(\"a\\nb\") returns a two-element string array."

@@ -2,7 +2,11 @@
 
 use runmat_builtins::shape_rules::element_count_if_known;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     LiteralValue, ResolveContext, Type,
 };
@@ -166,6 +170,33 @@ pub const SPHERE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &SPHERE_ERRORS,
 };
 
+const SPHERE_TYPED_N_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "sphere-typed-face-count",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "sphere with a typed-integer face count is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SphereTypedFaceCountExtension"),
+};
+pub const SPHERE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [SPHERE_TYPED_N_EXTENSION];
+const SPHERE_INTEGER_N_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "n",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target calls n a positive integer but does not enumerate typed storage classes. RunMat accepts every exact nonnegative integer class behind a compatibility gate; ordinary host double integer values remain documented behavior.",
+    }];
+pub const SPHERE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[X,Y,Z] = sphere(integer_n)",
+        inputs: &SPHERE_INTEGER_N_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The typed face count is a gated RunMat extension. It is decoded exactly, checked against allocation bounds, and controls only output shape; coordinate generation and statement-form plotting use host double values.",
+    }];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::sphere")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "sphere",
@@ -262,6 +293,8 @@ fn sphere_error(
     suppress_auto_output = true,
     type_resolver(sphere_type),
     descriptor(crate::builtins::plotting::sphere::SPHERE_DESCRIPTOR),
+    extensions(crate::builtins::plotting::sphere::SPHERE_EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::sphere::SPHERE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::sphere"
 )]
 async fn sphere_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -270,6 +303,15 @@ async fn sphere_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             &SPHERE_ERROR_OUTPUT_COUNT,
             "requested output count exceeds [X,Y,Z]",
         ));
+    }
+
+    if let [value] = args.as_slice() {
+        if crate::builtins::common::validation::value_has_native_integer_class(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &SPHERE_TYPED_N_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
     }
 
     let n = match args.as_slice() {
@@ -584,6 +626,21 @@ mod tests {
         )
         .expect("large n");
         assert!(block_on(parse_n_value(&Value::Tensor(too_large))).is_err());
+    }
+
+    #[test]
+    fn sphere_typed_integer_dimension_is_gated_before_generation() {
+        let n = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U8(vec![4]),
+            vec![1, 1],
+        )
+        .expect("typed n");
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let err = call(vec![Value::Tensor(n)]).expect_err("typed n must be gated");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:compatibility:SphereTypedFaceCountExtension")
+        );
     }
 
     #[test]

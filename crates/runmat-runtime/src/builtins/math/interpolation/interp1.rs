@@ -5,7 +5,11 @@ use runmat_accelerate_api::{
     ProviderInterp1Method, ProviderInterp1Request,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ResolveContext, Type,
 };
@@ -277,6 +281,95 @@ pub const INTERP1_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &INTERP1_ERRORS,
 };
 
+const INTERP1_INTEGER_SAMPLE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "interp1-integer-sample",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "interp1 with typed-integer sample locations or values is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Interp1IntegerSampleExtension"),
+};
+const INTERP1_INTEGER_QUERY_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "interp1-integer-query",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "interp1 with typed-integer query coordinates is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Interp1IntegerQueryExtension"),
+};
+const INTERP1_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "interp1-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "interp1 with logical numeric input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Interp1LogicalInputExtension"),
+};
+const INTERP1_INTEGER_EXTRAPOLATION_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "interp1-integer-extrapolation",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "interp1 with a typed-integer extrapolation value is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:Interp1IntegerExtrapolationExtension"),
+    };
+pub const INTERP1_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    INTERP1_INTEGER_SAMPLE_EXTENSION,
+    INTERP1_INTEGER_QUERY_EXTENSION,
+    INTERP1_LOGICAL_INPUT_EXTENSION,
+    INTERP1_INTEGER_EXTRAPOLATION_EXTENSION,
+];
+const INTERP1_INTEGER_SAMPLE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X or Y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes:
+            "All values must be exactly representable before the binary64 interpolation boundary.",
+    }];
+const INTERP1_INTEGER_QUERY_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Xq",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All coordinates must be exactly representable before the binary64 interpolation boundary.",
+    }];
+const INTERP1_INTEGER_EXTRAPOLATION_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "extrapolation value",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The scalar fill value must be exactly representable before interpolation.",
+    }];
+pub const INTERP1_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Vq = interp1(integer_X_or_Y, ..., Xq)",
+        inputs: &INTERP1_INTEGER_SAMPLE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat retains typed-integer samples as a checked extension; MATLAB-compatible modes retain the documented floating and temporal surface.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Vq = interp1(X, Y, integer_Xq)",
+        inputs: &INTERP1_INTEGER_QUERY_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer queries are classified before provider dispatch or gather and then cross one checked binary64 boundary.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Vq = interp1(..., method, integer_extrapolation_value)",
+        inputs: &INTERP1_INTEGER_EXTRAPOLATION_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "RunMat accepts this broader scalar fill form only after compatibility and exactness checks that precede provider access or gather.",
+    },
+];
+
 fn interp1_error_with_message(
     message: impl Into<String>,
     error: &'static BuiltinErrorDescriptor,
@@ -360,9 +453,14 @@ fn interp1_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     sink = true,
     type_resolver(interp1_type),
     descriptor(crate::builtins::math::interpolation::interp1::INTERP1_DESCRIPTOR),
+    extensions(crate::builtins::math::interpolation::interp1::INTERP1_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::math::interpolation::interp1::INTERP1_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::math::interpolation::interp1"
 )]
 async fn interp1_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    preflight_interp1_inputs(&args).await?;
     if let Some(output) = try_interp1_gpu(&args).await? {
         return Ok(output);
     }
@@ -391,6 +489,80 @@ async fn interp1_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
                 .map_err(|err| interp1_map_error(err, &INTERP1_ERROR_INTERNAL))
         }
     }
+}
+
+async fn preflight_interp1_inputs(args: &[Value]) -> crate::BuiltinResult<()> {
+    use crate::builtins::common::validation::{
+        native_integer_value_is_exact_f64_async, value_has_logical_class,
+        value_has_native_integer_class,
+    };
+    if args.len() < 2 {
+        return Ok(());
+    }
+    let explicit = args.len() >= 3 && !third_arg_is_option(args);
+    let (samples, query) = if explicit {
+        (&args[..2], &args[2])
+    } else {
+        (&args[..1], &args[1])
+    };
+    for value in samples {
+        if value_has_native_integer_class(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &INTERP1_INTEGER_SAMPLE_EXTENSION,
+                NAME,
+            )?;
+            if !native_integer_value_is_exact_f64_async(value).await? {
+                return Err(interp1_error_with_message(
+                    "interp1: integer samples must be exactly representable as double",
+                    &INTERP1_ERROR_INVALID_INPUT,
+                ));
+            }
+        }
+    }
+    if value_has_native_integer_class(query) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INTERP1_INTEGER_QUERY_EXTENSION,
+            NAME,
+        )?;
+        if !native_integer_value_is_exact_f64_async(query).await? {
+            return Err(interp1_error_with_message(
+                "interp1: integer query coordinates must be exactly representable as double",
+                &INTERP1_ERROR_INVALID_INPUT,
+            ));
+        }
+    }
+    if samples
+        .iter()
+        .chain(std::iter::once(query))
+        .any(value_has_logical_class)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INTERP1_LOGICAL_INPUT_EXTENSION,
+            NAME,
+        )?;
+    }
+    let option_start = if explicit { 3 } else { 2 };
+    for option in args.iter().skip(option_start) {
+        if value_has_native_integer_class(option) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &INTERP1_INTEGER_EXTRAPOLATION_EXTENSION,
+                NAME,
+            )?;
+            if !native_integer_value_is_exact_f64_async(option).await? {
+                return Err(interp1_error_with_message(
+                    "interp1: integer extrapolation value must be exactly representable as double",
+                    &INTERP1_ERROR_INVALID_INPUT,
+                ));
+            }
+        }
+        if value_has_logical_class(option) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &INTERP1_LOGICAL_INPUT_EXTENSION,
+                NAME,
+            )?;
+        }
+    }
+    Ok(())
 }
 
 struct GpuInterp1Series<'a> {
@@ -442,27 +614,122 @@ async fn try_interp1_gpu(args: &[Value]) -> crate::BuiltinResult<Option<Value>> 
         return Ok(None);
     }
 
-    let Some(provider) = runmat_accelerate_api::provider_for_handle(series.y) else {
-        return Ok(None);
+    let provider = gpu_helpers::exact_provider_for_handle(series.y).ok_or_else(|| {
+        interp1_error_with_message(
+            "interp1: no acceleration provider owns the resident Y input",
+            &INTERP1_ERROR_INTERNAL,
+        )
+    })?;
+    let series_shape = series.y.shape.clone();
+    let series_metadata = gpu_helpers::snapshot_handle_metadata(series.y);
+    let resident_query_metadata = match query_value {
+        Value::GpuTensor(handle) => Some((handle, gpu_helpers::snapshot_handle_metadata(handle))),
+        _ => None,
     };
-    let Ok(x_handle) = provider.upload(&HostTensorView {
+    let series_precision = runmat_accelerate_api::handle_precision(series.y);
+    if series_precision != Some(provider.precision())
+        || !valid_interp1_gpu_input(series.y, &series_shape, series_precision, provider, &[])
+    {
+        return Err(interp1_error_with_message(
+            "interp1: resident Y has contradictory floating metadata",
+            &INTERP1_ERROR_INTERNAL,
+        ));
+    }
+    let mut provenance = runmat_accelerate_api::handle_provenance(series.y)
+        .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+    let x_shape = [1, series.sample_len];
+    let x_upload = provider.upload(&HostTensorView {
         data: &series.x,
-        shape: &[1, series.sample_len],
-    }) else {
-        return Ok(None);
+        shape: &x_shape,
+    });
+    gpu_helpers::restore_handle_metadata(series.y, &series_metadata);
+    if let Some((handle, metadata)) = resident_query_metadata.as_ref() {
+        gpu_helpers::restore_handle_metadata(handle, metadata);
+    }
+    let x_handle = match x_upload {
+        Ok(handle) => handle,
+        Err(error) => {
+            return Err(interp1_error_with_message(
+                format!("interp1: X upload failed: {error}"),
+                &INTERP1_ERROR_INTERNAL,
+            ));
+        }
     };
+    let mut x_protected = vec![series.y];
+    if let Some((handle, _)) = resident_query_metadata.as_ref() {
+        x_protected.push(handle);
+    }
+    if !valid_interp1_gpu_input(series.y, &series_shape, series_precision, provider, &[])
+        || !valid_interp1_gpu_input(
+            &x_handle,
+            &x_shape,
+            series_precision,
+            provider,
+            &x_protected,
+        )
+    {
+        gpu_helpers::free_unprotected_exact_owner(&x_handle, &x_protected);
+        return Err(interp1_error_with_message(
+            "interp1: provider returned an invalid X upload",
+            &INTERP1_ERROR_INTERNAL,
+        ));
+    }
+    let x_metadata = gpu_helpers::snapshot_handle_metadata(&x_handle);
 
-    let query = match gpu_query_points(query_value, provider).await {
+    let query_result = gpu_query_points(query_value, provider).await;
+    gpu_helpers::restore_handle_metadata(series.y, &series_metadata);
+    gpu_helpers::restore_handle_metadata(&x_handle, &x_metadata);
+    if let Some((handle, metadata)) = resident_query_metadata.as_ref() {
+        gpu_helpers::restore_handle_metadata(handle, metadata);
+    }
+    let query = match query_result {
         Ok(Some(query)) => query,
         Ok(None) => {
-            let _ = provider.free(&x_handle);
+            gpu_helpers::free_unprotected_exact_owner(&x_handle, &x_protected);
             return Ok(None);
         }
         Err(err) => {
-            let _ = provider.free(&x_handle);
+            gpu_helpers::free_unprotected_exact_owner(&x_handle, &x_protected);
             return Err(err);
         }
     };
+    let owned_query_protected = [series.y, &x_handle];
+    let borrowed_query_protected = [&x_handle];
+    let query_protected: &[&GpuTensorHandle] = if query.owned {
+        &owned_query_protected
+    } else {
+        &borrowed_query_protected
+    };
+    if !valid_interp1_gpu_input(series.y, &series_shape, series_precision, provider, &[])
+        || !valid_interp1_gpu_input(&x_handle, &x_shape, series_precision, provider, &[series.y])
+        || !valid_interp1_gpu_input(
+            &query.handle,
+            &query.shape,
+            series_precision,
+            provider,
+            query_protected,
+        )
+    {
+        if query.owned && gpu_helpers::same_gpu_handle(&query.handle, &x_handle) {
+            gpu_helpers::free_unprotected_exact_owner(&x_handle, &[series.y]);
+        } else {
+            if query.owned {
+                gpu_helpers::free_unprotected_exact_owner(&query.handle, &[series.y, &x_handle]);
+            }
+            gpu_helpers::free_unprotected_exact_owner(&x_handle, &[series.y, &query.handle]);
+        }
+        return Err(interp1_error_with_message(
+            "interp1: invalid resident Xq input",
+            &INTERP1_ERROR_INTERNAL,
+        ));
+    }
+    let query_metadata = gpu_helpers::snapshot_handle_metadata(&query.handle);
+    if !query.owned
+        && runmat_accelerate_api::handle_provenance(&query.handle)
+            == Some(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+    {
+        provenance = runmat_accelerate_api::GpuHandleProvenance::Explicit;
+    }
 
     let output_shape =
         interp1_gpu_output_shape(&query.shape, series.series_count, &series.trailing_shape);
@@ -482,27 +749,107 @@ async fn try_interp1_gpu(args: &[Value]) -> crate::BuiltinResult<Option<Value>> 
         },
     };
     let result = provider.interp1(&request).await;
-    let _ = provider.free(&x_handle);
+    gpu_helpers::restore_handle_metadata(series.y, &series_metadata);
+    gpu_helpers::restore_handle_metadata(&x_handle, &x_metadata);
+    gpu_helpers::restore_handle_metadata(&query.handle, &query_metadata);
+    let valid = result.as_ref().is_ok_and(|output| {
+        valid_interp1_gpu_output(
+            output,
+            &output_shape,
+            series.y,
+            &x_handle,
+            &query.handle,
+            provider,
+            series_precision,
+        )
+    });
+    gpu_helpers::free_unprotected_exact_owner(&x_handle, &[series.y, &query.handle]);
     if query.owned {
-        let _ = provider.free(&query.handle);
+        gpu_helpers::free_unprotected_exact_owner(&query.handle, &[series.y, &x_handle]);
     }
 
-    let Ok(output) = result else {
-        return Ok(None);
-    };
-    if let Some(precision) = runmat_accelerate_api::handle_precision(series.y) {
-        runmat_accelerate_api::set_handle_precision(&output, precision);
+    match result {
+        Ok(mut output) if valid => {
+            runmat_accelerate_api::set_handle_provenance(&mut output, provenance);
+            Ok(Some(gpu_helpers::resident_gpu_value(output)))
+        }
+        Ok(output) => {
+            gpu_helpers::free_unprotected_exact_owner(
+                &output,
+                &[series.y, &x_handle, &query.handle],
+            );
+            Err(interp1_error_with_message(
+                "interp1: provider returned an invalid interpolation result",
+                &INTERP1_ERROR_INTERNAL,
+            ))
+        }
+        Err(error) if error.to_string() == "interp1 not supported by provider" => Ok(None),
+        Err(error) => Err(build_runtime_error(format!(
+            "interp1: provider execution failed: {error}"
+        ))
+        .with_builtin(NAME)
+        .with_identifier(
+            INTERP1_ERROR_INTERNAL
+                .identifier
+                .expect("interp1 internal descriptor identifier"),
+        )
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build()),
     }
-    runmat_accelerate_api::set_handle_storage(&output, GpuTensorStorage::Real);
-    runmat_accelerate_api::clear_handle_logical(&output);
-    Ok(Some(gpu_helpers::resident_gpu_value(output)))
+}
+
+fn valid_interp1_gpu_output(
+    output: &GpuTensorHandle,
+    output_shape: &[usize],
+    y: &GpuTensorHandle,
+    x: &GpuTensorHandle,
+    xq: &GpuTensorHandle,
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    expected_precision: Option<runmat_accelerate_api::ProviderPrecision>,
+) -> bool {
+    output.shape == output_shape
+        && output.device_id == y.device_id
+        && ![y, x, xq]
+            .iter()
+            .any(|input| gpu_helpers::same_gpu_handle(input, output))
+        && gpu_helpers::exact_provider_for_handle(output)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+        && runmat_accelerate_api::handle_storage(output) == GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_precision(output) == expected_precision
+        && runmat_accelerate_api::handle_integer_type(output).is_none()
+        && !runmat_accelerate_api::handle_is_logical(output)
+        && gpu_helpers::gpu_class_metadata_matches(output, expected_precision, None, false)
+}
+
+fn valid_interp1_gpu_input(
+    handle: &GpuTensorHandle,
+    expected_shape: &[usize],
+    expected_precision: Option<runmat_accelerate_api::ProviderPrecision>,
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    protected: &[&GpuTensorHandle],
+) -> bool {
+    handle.shape == expected_shape
+        && handle.device_id == provider.device_id()
+        && !protected
+            .iter()
+            .any(|input| gpu_helpers::same_gpu_handle(input, handle))
+        && gpu_helpers::exact_provider_for_handle(handle)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+        && runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_precision(handle) == expected_precision
+        && runmat_accelerate_api::handle_integer_type(handle).is_none()
+        && !runmat_accelerate_api::handle_is_logical(handle)
+        && gpu_helpers::gpu_class_metadata_matches(handle, expected_precision, None, false)
 }
 
 fn implicit_gpu_series(value: &Value) -> crate::BuiltinResult<Option<GpuInterp1Series<'_>>> {
     let Value::GpuTensor(handle) = value else {
         return Ok(None);
     };
-    if runmat_accelerate_api::handle_storage(handle) != GpuTensorStorage::Real {
+    if runmat_accelerate_api::handle_storage(handle) != GpuTensorStorage::Real
+        || runmat_accelerate_api::handle_integer_type(handle).is_some()
+        || runmat_accelerate_api::handle_is_logical(handle)
+    {
         return Ok(None);
     }
     let Some((sample_len, series_count, trailing_shape)) = gpu_y_layout(handle, None)? else {
@@ -527,6 +874,8 @@ async fn explicit_gpu_series<'a>(
     };
     if matches!(x_value, Value::GpuTensor(_))
         || runmat_accelerate_api::handle_storage(handle) != GpuTensorStorage::Real
+        || runmat_accelerate_api::handle_integer_type(handle).is_some()
+        || runmat_accelerate_api::handle_is_logical(handle)
     {
         return Ok(None);
     }
@@ -589,7 +938,10 @@ async fn gpu_query_points(
 ) -> crate::BuiltinResult<Option<GpuInterp1Query>> {
     match value {
         Value::GpuTensor(handle) => {
-            if runmat_accelerate_api::handle_storage(handle) != GpuTensorStorage::Real {
+            if runmat_accelerate_api::handle_storage(handle) != GpuTensorStorage::Real
+                || runmat_accelerate_api::handle_integer_type(handle).is_some()
+                || runmat_accelerate_api::handle_is_logical(handle)
+            {
                 return Ok(None);
             }
             let len = handle
@@ -602,10 +954,13 @@ async fn gpu_query_points(
                         &INTERP1_ERROR_INVALID_INPUT,
                     )
                 })?;
-            if runmat_accelerate_api::provider_for_handle(handle).is_none()
-                || handle.device_id != provider.device_id()
+            if !gpu_helpers::exact_provider_for_handle(handle)
+                .is_some_and(|owner| std::ptr::eq(owner, provider))
             {
-                return Ok(None);
+                return Err(interp1_error_with_message(
+                    "interp1: resident Xq is not owned by the Y provider",
+                    &INTERP1_ERROR_INTERNAL,
+                ));
             }
             Ok(Some(GpuInterp1Query {
                 handle: handle.clone(),
@@ -790,12 +1145,20 @@ mod tests {
 
     #[test]
     fn interp1_reads_typed_integer_x_y_and_query_exactly() {
-        let result = run(vec![
-            int_row(IntegerStorage::I16(vec![1, 2, 3])),
-            int_row(IntegerStorage::U16(vec![10, 20, 40])),
-            int_row(IntegerStorage::I16(vec![1, 2])),
-        ])
-        .expect("interp1");
+        let args = || {
+            vec![
+                int_row(IntegerStorage::I16(vec![1, 2, 3])),
+                int_row(IntegerStorage::U16(vec![10, 20, 40])),
+                int_row(IntegerStorage::I16(vec![1, 2])),
+            ]
+        };
+        let error = run(args()).expect_err("compatible mode rejects integer samples");
+        assert_eq!(
+            error.identifier(),
+            INTERP1_INTEGER_SAMPLE_EXTENSION.error_identifier
+        );
+        let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
+        let result = run(args()).expect("RunMat integer interpolation");
         let Value::Tensor(tensor) = result else {
             panic!("expected tensor");
         };
@@ -855,6 +1218,102 @@ mod tests {
     }
 
     #[test]
+    fn interp1_gpu_explicit_query_makes_output_explicit() {
+        test_support::with_test_provider(|provider| {
+            let y = provider
+                .upload(&HostTensorView {
+                    data: &[10.0, 20.0, 40.0],
+                    shape: &[1, 3],
+                })
+                .expect("upload y");
+            let xq = provider
+                .upload(&HostTensorView {
+                    data: &[1.5],
+                    shape: &[1, 1],
+                })
+                .expect("upload xq");
+            let xq = xq.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let result = run(vec![
+                Value::GpuTensor(y.clone()),
+                Value::GpuTensor(xq.clone()),
+            ])
+            .expect("interp1");
+            let Value::GpuTensor(output) = result else {
+                panic!("expected resident output");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_provenance(&output),
+                Some(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            );
+            provider.free(&y).ok();
+            provider.free(&xq).ok();
+            provider.free(&output).ok();
+        });
+    }
+
+    #[test]
+    fn interp1_gpu_allows_same_resident_handle_for_y_and_query() {
+        test_support::with_test_provider(|provider| {
+            let y = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 2.0, 3.0],
+                    shape: &[1, 3],
+                })
+                .expect("upload y/query");
+            let metadata = gpu_helpers::snapshot_handle_metadata(&y);
+            let result = run(vec![
+                Value::GpuTensor(y.clone()),
+                Value::GpuTensor(y.clone()),
+            ])
+            .expect("same-handle Y/Xq interpolation");
+            let Value::GpuTensor(output) = result else {
+                panic!("expected resident output");
+            };
+            assert_eq!(output.shape, vec![1, 3]);
+            assert_eq!(gpu_helpers::snapshot_handle_metadata(&y), metadata);
+            let gathered = test_support::gather(Value::GpuTensor(output)).expect("gather");
+            assert_eq!(gathered.materialize_f64(), vec![1.0, 2.0, 3.0]);
+            provider.free(&y).ok();
+        });
+    }
+
+    #[test]
+    fn interp1_gpu_input_validation_rejects_alias_and_bad_class_metadata() {
+        test_support::with_test_provider(|provider| {
+            let y = provider
+                .upload(&HostTensorView {
+                    data: &[10.0, 20.0],
+                    shape: &[1, 2],
+                })
+                .expect("upload y");
+            let precision = runmat_accelerate_api::handle_precision(&y);
+            assert!(!valid_interp1_gpu_input(
+                &y,
+                &[1, 2],
+                precision,
+                provider,
+                &[&y],
+            ));
+            let other = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 2.0],
+                    shape: &[1, 2],
+                })
+                .expect("upload other");
+            runmat_accelerate_api::set_handle_class_name(&other, "uint64");
+            assert!(!valid_interp1_gpu_input(
+                &other,
+                &[1, 2],
+                precision,
+                provider,
+                &[&y],
+            ));
+            provider.free(&y).ok();
+            provider.free(&other).ok();
+        });
+    }
+
+    #[test]
     fn interp1_gpu_scalar_fill_value_uses_provider_path() {
         test_support::with_test_provider(|provider| {
             let y = provider
@@ -877,6 +1336,25 @@ mod tests {
             assert_eq!(gathered.materialize_f64(), vec![99.0]);
             let _ = provider.free(&y);
         });
+    }
+
+    #[test]
+    fn interp1_integer_extrapolation_is_independently_gated() {
+        let args = || {
+            vec![
+                row(&[10.0, 20.0]),
+                Value::Num(0.0),
+                Value::String("linear".to_string()),
+                Value::Int(runmat_value::IntValue::I16(99)),
+            ]
+        };
+        let error = run(args()).expect_err("compatible mode rejects integer extrapolation");
+        assert_eq!(
+            error.identifier(),
+            INTERP1_INTEGER_EXTRAPOLATION_EXTENSION.error_identifier
+        );
+        let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
+        assert_eq!(run(args()).expect("RunMat extrapolation"), Value::Num(99.0));
     }
 
     #[test]

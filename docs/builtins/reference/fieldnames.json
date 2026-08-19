@@ -56,7 +56,7 @@
       "output": "fields =\n    {'id'}\n    {'name'}"
     },
     {
-      "description": "Listing represented object properties in RunMat extension mode",
+      "description": "Listing represented object properties",
       "input": "% Save this class in Counter.m before running the example:\n% classdef Counter\n%     properties\n%         Value = 0\n%         Step  = 1\n%     end\n% end\nc = Counter;\nprops = fieldnames(c)",
       "output": "props =\n    {'Step'}\n    {'Value'}"
     },

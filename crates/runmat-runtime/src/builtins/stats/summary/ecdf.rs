@@ -1722,15 +1722,15 @@ mod tests {
             shape: vec![2, 1],
             device_id: 0,
             buffer_id: 9_300_041,
-        };
-        runmat_accelerate_api::set_handle_integer_type(
-            &handle,
-            runmat_accelerate_api::IntegerElementType::I16,
+            descriptor: Default::default(),
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::I16,
+            runmat_accelerate_api::GpuTensorStorage::Real,
         );
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = block_on(ecdf_builtin(vec![Value::GpuTensor(handle.clone())]))
             .expect_err("resident integer y must gate before gather");
-        runmat_accelerate_api::clear_handle_integer_type(&handle);
         assert_eq!(
             error.identifier(),
             ECDF_INTEGER_Y_EXTENSION.error_identifier
@@ -1744,6 +1744,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX - 3,
+            descriptor: Default::default(),
         });
         let prepared = block_on(runmat_accelerate::prepare_builtin_args(
             "cdfplot",

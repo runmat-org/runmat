@@ -397,7 +397,6 @@ async fn sort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
 
 /// Evaluate the `sort` builtin once and expose both outputs.
 pub async fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<SortEvaluation> {
-    crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
     let args = SortArgs::parse(rest)?;
     match value {
         Value::GpuTensor(handle) => sort_gpu(handle, &args).await,
@@ -752,8 +751,8 @@ fn sort_complex_tensor(
     let (source_indices, indices) = match &storage {
         ComplexStorage::F64(values) => complex_sort_permutation(values, &shape, dim, args),
         ComplexStorage::F32(values) => complex_sort_permutation(values, &shape, dim, args),
-        ComplexStorage::Integer(_) => {
-            sort_promoted_complex_integer_permutation(&storage, &shape, dim, args)
+        ComplexStorage::Integer(values) => {
+            complex_integer_sort_permutation(values, &shape, dim, args)
         }
     };
     let sorted_storage = storage
@@ -770,14 +769,47 @@ fn sort_complex_tensor(
     })
 }
 
-fn sort_promoted_complex_integer_permutation(
-    storage: &ComplexStorage,
+fn complex_integer_sort_permutation(
+    storage: &runmat_value::IntegerComplexStorage,
     shape: &[usize],
     dim: usize,
     args: &SortArgs,
 ) -> (Vec<usize>, Vec<f64>) {
-    let values = storage.materialize_f64();
-    complex_sort_permutation(&values, shape, dim, args)
+    let stride_before = stride_before(shape, dim);
+    let stride_after = stride_after(shape, dim);
+    let dim_len = dimension_length(shape, dim);
+    let mut source_indices = vec![0usize; storage.len()];
+    let mut indices = vec![0.0f64; storage.len()];
+    let mut buffer: Vec<(usize, usize)> = Vec::with_capacity(dim_len);
+
+    for after in 0..stride_after {
+        for before in 0..stride_before {
+            buffer.clear();
+            for k in 0..dim_len {
+                let source = before + k * stride_before + after * stride_before * dim_len;
+                buffer.push((k, source));
+            }
+            buffer.sort_by(|a, b| {
+                let a_real = storage.real.value_at(a.1).expect("validated complex index");
+                let a_imag = storage.imag.value_at(a.1).expect("validated complex index");
+                let b_real = storage.real.value_at(b.1).expect("validated complex index");
+                let b_imag = storage.imag.value_at(b.1).expect("validated complex index");
+                integer_order::compare_complex(
+                    (&a_real, &a_imag),
+                    (&b_real, &b_imag),
+                    matches!(args.direction, SortDirection::Descend),
+                    matches!(args.comparison, ComparisonMethod::Real),
+                )
+            });
+            for (position, (original_index, source)) in buffer.iter().enumerate() {
+                let target = before + position * stride_before + after * stride_before * dim_len;
+                source_indices[target] = *source;
+                indices[target] = (*original_index + 1) as f64;
+            }
+        }
+    }
+
+    (source_indices, indices)
 }
 
 fn complex_sort_permutation<T: SetFloat>(
@@ -1088,7 +1120,7 @@ impl SortArgs {
                             _ => {
                                 return Err(sort_error(
                                     &SORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING,
-                                    "sort: 'ComparisonMethod' requires a string value",
+                                    SORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING.message,
                                 ))
                             }
                         };
@@ -1170,7 +1202,7 @@ impl SortArgs {
                             _ => {
                                 return Err(sort_error(
                                     &SORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING,
-                                    "sort: 'ComparisonMethod' requires a string value",
+                                    SORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING.message,
                                 ))
                             }
                         };
@@ -1715,20 +1747,138 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn sort_rejects_typed_complex_integer_storage() {
+    fn sort_orders_typed_complex_uint64_exactly_and_preserves_storage() {
+        for input in [
+            (
+                IntegerStorage::I8(vec![3, 1]),
+                IntegerStorage::I8(vec![4, 0]),
+            ),
+            (
+                IntegerStorage::I16(vec![3, 1]),
+                IntegerStorage::I16(vec![4, 0]),
+            ),
+            (
+                IntegerStorage::I32(vec![3, 1]),
+                IntegerStorage::I32(vec![4, 0]),
+            ),
+            (
+                IntegerStorage::I64(vec![3, 1]),
+                IntegerStorage::I64(vec![4, 0]),
+            ),
+            (
+                IntegerStorage::U8(vec![3, 1]),
+                IntegerStorage::U8(vec![4, 0]),
+            ),
+            (
+                IntegerStorage::U16(vec![3, 1]),
+                IntegerStorage::U16(vec![4, 0]),
+            ),
+            (
+                IntegerStorage::U32(vec![3, 1]),
+                IntegerStorage::U32(vec![4, 0]),
+            ),
+            (
+                IntegerStorage::U64(vec![3, 1]),
+                IntegerStorage::U64(vec![4, 0]),
+            ),
+        ] {
+            let expected_real = input
+                .0
+                .from_exact_values_like(vec![
+                    input.0.value_at(1).unwrap(),
+                    input.0.value_at(0).unwrap(),
+                ])
+                .unwrap();
+            let expected_imag = input
+                .1
+                .from_exact_values_like(vec![
+                    input.1.value_at(1).unwrap(),
+                    input.1.value_at(0).unwrap(),
+                ])
+                .unwrap();
+            let tensor = ComplexTensor::new_integer(
+                IntegerComplexStorage::new(input.0, input.1).unwrap(),
+                vec![2, 1],
+            )
+            .unwrap();
+            let sorted = evaluate(Value::ComplexTensor(tensor), &[])
+                .expect("typed complex integer sort")
+                .into_sorted_value();
+            let Value::ComplexTensor(sorted) = sorted else {
+                panic!("expected typed complex integer tensor");
+            };
+            assert_eq!(
+                sorted.integer_storage(),
+                Some(&IntegerComplexStorage::new(expected_real, expected_imag).unwrap())
+            );
+        }
+
         let input = IntegerComplexStorage::new(
-            IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993]),
-            IntegerStorage::U64(vec![0, 0, 0]),
+            IntegerStorage::U64(vec![u64::MAX, u64::MAX - 1, 0]),
+            IntegerStorage::U64(vec![0, 1, u64::MAX]),
         )
         .unwrap();
         let tensor = ComplexTensor::new_integer(input, vec![3, 1]).unwrap();
-        let error = match evaluate(Value::ComplexTensor(tensor), &[]) {
-            Ok(_) => panic!("expected typed complex integer rejection"),
-            Err(error) => error,
+        let (sorted, indices) = evaluate(Value::ComplexTensor(tensor), &[])
+            .expect("typed complex integer sort")
+            .into_values();
+        let Value::ComplexTensor(sorted) = sorted else {
+            panic!("expected typed complex integer tensor");
         };
-        assert!(error
-            .to_string()
-            .contains("operations involving complex numbers with integer types are not supported"));
+        assert_eq!(
+            sorted.integer_storage(),
+            Some(
+                &IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![u64::MAX - 1, u64::MAX, 0]),
+                    IntegerStorage::U64(vec![1, 0, u64::MAX]),
+                )
+                .unwrap()
+            )
+        );
+        let Value::Tensor(indices) = indices else {
+            panic!("expected double indices");
+        };
+        assert_eq!(indices.as_f64_slice(), Some(&[2.0, 1.0, 3.0][..]));
+    }
+
+    #[test]
+    fn sort_restores_exact_typed_complex_integer_results_to_the_input_provider() {
+        test_support::with_test_provider(|provider| {
+            let input = ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![u64::MAX, u64::MAX - 1]),
+                    IntegerStorage::U64(vec![0, 1]),
+                )
+                .unwrap(),
+                vec![2, 1],
+            )
+            .unwrap();
+            let handle =
+                crate::builtins::common::gpu_helpers::upload_complex_tensor(provider, &input)
+                    .expect("typed complex upload");
+            let (sorted, indices) = evaluate(Value::GpuTensor(handle), &[])
+                .expect("resident typed complex sort")
+                .into_values();
+            let sorted = block_on(crate::builtins::common::gpu_helpers::gather_value_async(
+                &sorted,
+            ))
+            .expect("gather sorted values");
+            let indices = test_support::gather(indices).expect("gather sorted indices");
+            let Value::ComplexTensor(sorted) = sorted else {
+                panic!("expected typed complex integer tensor");
+            };
+            assert_eq!(
+                sorted.integer_storage(),
+                Some(
+                    &IntegerComplexStorage::new(
+                        IntegerStorage::U64(vec![u64::MAX - 1, u64::MAX]),
+                        IntegerStorage::U64(vec![1, 0]),
+                    )
+                    .unwrap()
+                )
+            );
+            assert_eq!(indices.as_f64_slice(), Some(&[2.0, 1.0][..]));
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

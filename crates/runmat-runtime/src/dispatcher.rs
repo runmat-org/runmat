@@ -1,11 +1,8 @@
 use crate::{build_runtime_error, create_class_object, make_cell_with_shape, RuntimeError};
-use runmat_accelerate_api::{
-    AccelProvider, GpuTensorHandle, GpuTensorStorage, HostIntegerDataOwned, HostTensorOwned,
-};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::builtin_functions;
-use runmat_value::{
-    ComplexStorage, ComplexTensor, IntegerStorage, LogicalArray, NumericDType, Tensor, Value,
-};
+
+use runmat_value::Value;
 use std::cell::RefCell;
 
 thread_local! {
@@ -84,13 +81,6 @@ pub async fn gather_if_needed_async(value: &Value) -> Result<Value, RuntimeError
     gather_if_needed_async_impl(value).await
 }
 
-pub async fn download_handle_async(
-    provider: &dyn AccelProvider,
-    handle: &GpuTensorHandle,
-) -> anyhow::Result<HostTensorOwned> {
-    provider.download(handle).await
-}
-
 fn gather_if_needed_async_impl<'a>(
     value: &'a Value,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, RuntimeError>> + 'a>> {
@@ -108,133 +98,57 @@ fn gather_if_needed_async_impl<'a>(
                     );
                     }
                 }
-                let provider =
-                    runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
+                let provider = runmat_accelerate_api::provider_for_handle(handle)
+                    .filter(|provider| provider.device_id() == handle.device_id)
+                    .ok_or_else(|| {
                         build_runtime_error("gather: no acceleration provider registered")
                             .with_identifier("RunMat:gather:ProviderUnavailable")
-                            .build()
-                    })?;
-                let is_logical = runmat_accelerate_api::handle_is_logical(handle);
-                if let Some(expected_integer_type) =
-                    runmat_accelerate_api::handle_integer_type(handle)
-                {
-                    let integer = provider.download_integer(handle).await.map_err(|err| {
-                        build_runtime_error(format!("gather: {err}"))
-                            .with_identifier("RunMat:gather:DownloadFailed")
                             .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                             .build()
                     })?;
-                    if integer.shape != handle.shape
-                        || integer.data.element_type() != expected_integer_type
-                    {
-                        return Err(provider_payload_mismatch(
-                            handle,
-                            &integer.shape,
-                            format!(
-                                "integer class {:?}, expected {:?}",
-                                integer.data.element_type(),
-                                expected_integer_type
-                            ),
-                        ));
-                    }
-                    let storage = match integer.data {
-                        HostIntegerDataOwned::I8(data) => IntegerStorage::I8(data),
-                        HostIntegerDataOwned::I16(data) => IntegerStorage::I16(data),
-                        HostIntegerDataOwned::I32(data) => IntegerStorage::I32(data),
-                        HostIntegerDataOwned::I64(data) => IntegerStorage::I64(data),
-                        HostIntegerDataOwned::U8(data) => IntegerStorage::U8(data),
-                        HostIntegerDataOwned::U16(data) => IntegerStorage::U16(data),
-                        HostIntegerDataOwned::U32(data) => IntegerStorage::U32(data),
-                        HostIntegerDataOwned::U64(data) => IntegerStorage::U64(data),
-                    };
-                    let tensor = Tensor::new_integer(storage, integer.shape).map_err(|err| {
-                        build_runtime_error(format!("gather: {err}"))
-                            .with_identifier("RunMat:gather:TensorShapeError")
-                            .build()
-                    })?;
-                    return Ok(Value::Tensor(tensor));
-                }
-                let host = download_handle_async(provider, handle)
-                    .await
-                    .map_err(|err| {
-                        build_runtime_error(format!("gather: {err}"))
-                            .with_identifier("RunMat:gather:DownloadFailed")
+                let expected_element =
+                    crate::builtins::common::gpu_helpers::expected_handle_numeric_element_type(
+                        handle,
+                    )
+                    .map_err(|error| {
+                        build_runtime_error(format!("gather: {error}"))
+                            .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
                             .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                             .build()
                     })?;
+                let host = provider.download_numeric(handle).await.map_err(|err| {
+                    build_runtime_error(format!("gather: {err}"))
+                        .with_identifier("RunMat:gather:DownloadFailed")
+                        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                        .build()
+                })?;
                 let expected_storage = runmat_accelerate_api::handle_storage(handle);
-                if host.shape != handle.shape || host.storage != expected_storage {
+                if host.shape != handle.shape
+                    || host.storage != expected_storage
+                    || host.data.element_type() != expected_element
+                {
                     return Err(provider_payload_mismatch(
                         handle,
                         &host.shape,
                         format!(
-                            "storage {:?}, expected {:?}",
-                            host.storage, expected_storage
+                            "{:?} {:?}, expected {:?} {:?}",
+                            host.data.element_type(),
+                            host.storage,
+                            expected_element,
+                            expected_storage
                         ),
                     ));
                 }
-                let runmat_accelerate_api::HostTensorOwned {
-                    data,
-                    shape,
-                    storage,
-                } = host;
-                if is_logical {
-                    let bits: Vec<u8> =
-                        data.iter().map(|&v| if v != 0.0 { 1 } else { 0 }).collect();
-                    let logical = LogicalArray::new(bits, shape).map_err(|e| {
-                        build_runtime_error(format!("gather: {e}"))
-                            .with_identifier("RunMat:gather:LogicalShapeError")
-                            .build()
-                    })?;
-                    Ok(Value::LogicalArray(logical))
-                } else if storage == GpuTensorStorage::ComplexInterleaved {
-                    let precision = runmat_accelerate_api::handle_precision(handle)
-                        .unwrap_or_else(|| provider.precision());
-                    if data.len() % 2 != 0 {
-                        return Err(provider_payload_mismatch(
-                            handle,
-                            &shape,
-                            "complex-interleaved scalar count is odd".to_string(),
-                        ));
-                    }
-                    let pairs = data.chunks_exact(2).map(|chunk| (chunk[0], chunk[1]));
-                    let storage = match precision {
-                        runmat_accelerate_api::ProviderPrecision::F32 => ComplexStorage::F32(
-                            pairs
-                                .map(|(real, imag)| (real as f32, imag as f32))
-                                .collect(),
-                        ),
-                        runmat_accelerate_api::ProviderPrecision::F64 => {
-                            ComplexStorage::F64(pairs.collect())
-                        }
-                    };
-                    let tensor =
-                        ComplexTensor::from_complex_storage(storage, shape).map_err(|e| {
-                            build_runtime_error(format!("gather: {e}"))
-                                .with_identifier("RunMat:gather:TensorShapeError")
-                                .build()
-                        })?;
-                    Ok(Value::ComplexTensor(tensor))
-                } else {
-                    let mut data = data;
-                    let precision = runmat_accelerate_api::handle_precision(handle)
-                        .unwrap_or_else(|| provider.precision());
-                    if matches!(precision, runmat_accelerate_api::ProviderPrecision::F32) {
-                        for value in &mut data {
-                            *value = (*value as f32) as f64;
-                        }
-                    }
-                    let dtype = match precision {
-                        runmat_accelerate_api::ProviderPrecision::F32 => NumericDType::F32,
-                        runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
-                    };
-                    let tensor = Tensor::new_with_dtype(data, shape, dtype).map_err(|e| {
-                        build_runtime_error(format!("gather: {e}"))
-                            .with_identifier("RunMat:gather:TensorShapeError")
-                            .build()
-                    })?;
-                    Ok(Value::Tensor(tensor))
-                }
+                crate::builtins::common::gpu_helpers::value_from_numeric_download(
+                    host,
+                    runmat_accelerate_api::handle_is_logical(handle),
+                )
+                .map_err(|error| {
+                    build_runtime_error(format!("gather: {error}"))
+                        .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
+                        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                        .build()
+                })
             }
             Value::Cell(ca) => {
                 let mut gathered = Vec::with_capacity(ca.data.len());
@@ -446,14 +360,14 @@ async fn call_builtin_async_impl(
 fn compatibility_checked_builtin_result(
     name: &str,
     args: &[Value],
-    result: Value,
+    mut result: Value,
 ) -> Result<Value, RuntimeError> {
     crate::compatibility::ensure_value_compatible(&result, name)?;
-    propagate_gpu_provenance(name, args, &result);
+    propagate_gpu_provenance(name, args, &mut result);
     Ok(result)
 }
 
-fn propagate_gpu_provenance(name: &str, args: &[Value], result: &Value) {
+fn propagate_gpu_provenance(name: &str, args: &[Value], result: &mut Value) {
     let mut saw_gpu = false;
     let mut explicit = false;
     for arg in args {
@@ -479,21 +393,24 @@ fn propagate_gpu_provenance(name: &str, args: &[Value], result: &Value) {
             crate::builtins::common::tensor::value_to_string(arg)
                 .is_some_and(|text| text.eq_ignore_ascii_case("gpuarray"))
         });
-        visit_gpu_handles(result, &mut |handle| {
+        visit_gpu_handles_mut(result, &mut |handle| {
             if explicit_constructor {
-                runmat_accelerate_api::mark_handle_explicit(handle);
+                handle.descriptor.provenance =
+                    Some(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             } else if runmat_accelerate_api::handle_provenance(handle).is_none() {
-                runmat_accelerate_api::mark_handle_automatic(handle);
+                handle.descriptor.provenance =
+                    Some(runmat_accelerate_api::GpuHandleProvenance::Automatic);
             }
         });
         return;
     }
-    visit_gpu_handles(result, &mut |handle| {
-        if explicit {
-            runmat_accelerate_api::mark_handle_explicit(handle);
-        } else {
-            runmat_accelerate_api::mark_handle_automatic(handle);
-        }
+    let provenance = if explicit {
+        runmat_accelerate_api::GpuHandleProvenance::Explicit
+    } else {
+        runmat_accelerate_api::GpuHandleProvenance::Automatic
+    };
+    visit_gpu_handles_mut(result, &mut |handle| {
+        handle.descriptor.provenance = Some(provenance);
     });
 }
 
@@ -519,6 +436,32 @@ fn visit_gpu_handles(value: &Value, visitor: &mut impl FnMut(&GpuTensorHandle)) 
         Value::OutputList(values) => values
             .iter()
             .for_each(|value| visit_gpu_handles(value, visitor)),
+        _ => {}
+    }
+}
+
+fn visit_gpu_handles_mut(value: &mut Value, visitor: &mut impl FnMut(&mut GpuTensorHandle)) {
+    match value {
+        Value::GpuTensor(handle) => visitor(handle),
+        Value::Cell(cell) => cell
+            .data
+            .iter_mut()
+            .for_each(|value| visit_gpu_handles_mut(value, visitor)),
+        Value::Struct(value) => value
+            .fields
+            .values_mut()
+            .for_each(|value| visit_gpu_handles_mut(value, visitor)),
+        Value::Object(value) => value
+            .properties
+            .values_mut()
+            .for_each(|value| visit_gpu_handles_mut(value, visitor)),
+        Value::Closure(value) => value
+            .captures
+            .iter_mut()
+            .for_each(|value| visit_gpu_handles_mut(value, visitor)),
+        Value::OutputList(values) => values
+            .iter_mut()
+            .for_each(|value| visit_gpu_handles_mut(value, visitor)),
         _ => {}
     }
 }
@@ -837,11 +780,7 @@ fn should_retry_with_gpu_gather(err: &RuntimeError, args: &[Value]) -> bool {
     if error_chain_has_identifier_prefix(err, "RunMat:compatibility:") {
         return false;
     }
-    if error_chain_has_gpu_gather_retry(err, crate::GpuGatherRetry::Requested) {
-        return true;
-    }
-    let lowered = err.message().to_ascii_lowercase();
-    lowered.contains("gpu")
+    error_chain_has_gpu_gather_retry(err, crate::GpuGatherRetry::Requested)
 }
 
 fn value_contains_explicit_gpu(value: &Value) -> bool {
@@ -908,9 +847,11 @@ mod tests {
     use super::{
         call_builtin, gather_if_needed_async, should_retry_with_gpu_gather, value_contains_gpu,
     };
+    use futures::executor::block_on;
     use runmat_accelerate_api::{GpuTensorHandle, ThreadProviderGuard};
     use runmat_types::MemberAccess;
     use runmat_value::{Closure, StructValue, Value};
+    use runmat_value::{IntegerStorage, Tensor};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -948,11 +889,52 @@ mod tests {
     }
 
     #[test]
+    fn operation_floating_projection_uses_native_download_and_rejects_integers() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let single = Tensor::from_f32(vec![1.25, -2.5], vec![1, 2]).unwrap();
+            let single_handle =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &single).unwrap();
+            let projected = block_on(
+                crate::builtins::common::gpu_helpers::download_floating_projection_async(
+                    provider,
+                    &single_handle,
+                ),
+            )
+            .unwrap();
+            assert_eq!(projected.data, vec![1.25, -2.5]);
+            assert_eq!(projected.shape, vec![1, 2]);
+
+            let integer =
+                Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]), vec![1, 2])
+                    .unwrap();
+            let integer_handle =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &integer).unwrap();
+            let error = block_on(
+                crate::builtins::common::gpu_helpers::download_floating_projection_async(
+                    provider,
+                    &integer_handle,
+                ),
+            )
+            .expect_err("floating projection must reject native integer storage");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:gpu:IntegerFloatingProjection")
+            );
+
+            for handle in [&single_handle, &integer_handle] {
+                provider.free(handle).unwrap();
+                runmat_accelerate_api::clear_handle_metadata(handle);
+            }
+        });
+    }
+
+    #[test]
     fn compatibility_errors_never_trigger_automatic_gpu_gather_retry() {
         let gpu = Value::GpuTensor(GpuTensorHandle {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: 1,
+            descriptor: Default::default(),
         });
         let compatibility_error =
             crate::build_runtime_error("example gpuArray call form is a RunMat extension")
@@ -990,16 +972,19 @@ mod tests {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: 5,
+            descriptor: Default::default(),
         };
-        runmat_accelerate_api::mark_handle_automatic(&automatic_gpu);
+        let automatic_gpu =
+            automatic_gpu.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
         let ordinary_gpu_error = crate::build_runtime_error("GPU input requires host fallback")
             .with_identifier("RunMat:example:UnsupportedGpuPath")
             .build();
-        assert!(should_retry_with_gpu_gather(
+        assert!(!should_retry_with_gpu_gather(
             &ordinary_gpu_error,
             &[Value::GpuTensor(automatic_gpu.clone())]
         ));
-        runmat_accelerate_api::mark_handle_explicit(&automatic_gpu);
+        let automatic_gpu =
+            automatic_gpu.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         assert!(!should_retry_with_gpu_gather(
             &ordinary_gpu_error,
             &[Value::GpuTensor(automatic_gpu.clone())]
@@ -1015,6 +1000,7 @@ mod tests {
                 shape: vec![1, 1],
                 device_id: 0,
                 buffer_id: 2,
+                descriptor: Default::default(),
             })]
         ));
 
@@ -1030,6 +1016,7 @@ mod tests {
                 shape: vec![1, 1],
                 device_id: 0,
                 buffer_id: 3,
+                descriptor: Default::default(),
             })]
         ));
 
@@ -1043,12 +1030,14 @@ mod tests {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: 4,
+            descriptor: Default::default(),
         };
         assert!(should_retry_with_gpu_gather(
             &wrapped_request,
             &[Value::GpuTensor(requested_handle.clone())]
         ));
-        runmat_accelerate_api::mark_handle_explicit(&requested_handle);
+        let requested_handle =
+            requested_handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         assert!(!should_retry_with_gpu_gather(
             &wrapped_request,
             &[Value::GpuTensor(requested_handle.clone())]
@@ -1062,39 +1051,64 @@ mod tests {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: 91,
+            descriptor: Default::default(),
         };
         let automatic = GpuTensorHandle {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: 92,
+            descriptor: Default::default(),
         };
         let explicit_result = GpuTensorHandle {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: 93,
+            descriptor: Default::default(),
         };
         let automatic_result = GpuTensorHandle {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: 94,
+            descriptor: Default::default(),
         };
-        runmat_accelerate_api::mark_handle_explicit(&explicit);
-        runmat_accelerate_api::mark_handle_automatic(&automatic);
+        let explicit =
+            explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let automatic =
+            automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
 
+        let mut explicit_value = Value::GpuTensor(explicit_result.clone());
         super::propagate_gpu_provenance(
             "plus",
             &[Value::GpuTensor(explicit.clone())],
-            &Value::GpuTensor(explicit_result.clone()),
+            &mut explicit_value,
         );
+        let mut automatic_value = Value::GpuTensor(automatic_result.clone());
         super::propagate_gpu_provenance(
             "plus",
             &[Value::GpuTensor(automatic.clone())],
-            &Value::GpuTensor(automatic_result.clone()),
+            &mut automatic_value,
         );
 
-        assert!(runmat_accelerate_api::handle_is_explicit(&explicit_result));
+        assert_eq!(
+            runmat_accelerate_api::handle_provenance(&explicit_result),
+            None
+        );
+        let Value::GpuTensor(explicit_value) = explicit_value else {
+            unreachable!()
+        };
+        assert_eq!(
+            explicit_value.descriptor.provenance,
+            Some(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        );
         assert_eq!(
             runmat_accelerate_api::handle_provenance(&automatic_result),
+            None
+        );
+        let Value::GpuTensor(automatic_value) = automatic_value else {
+            unreachable!()
+        };
+        assert_eq!(
+            automatic_value.descriptor.provenance,
             Some(runmat_accelerate_api::GpuHandleProvenance::Automatic)
         );
         for handle in [&explicit, &automatic, &explicit_result, &automatic_result] {
@@ -1116,6 +1130,7 @@ mod tests {
                 shape: vec![1],
                 device_id: 999,
                 buffer_id: 42,
+                descriptor: Default::default(),
             })],
         });
         assert!(value_contains_gpu(&value));
@@ -1129,6 +1144,7 @@ mod tests {
                 shape: vec![1],
                 device_id: 998,
                 buffer_id: 43,
+                descriptor: Default::default(),
             }),
         ]);
         assert!(value_contains_gpu(&value));
@@ -1143,6 +1159,7 @@ mod tests {
             // Keep device id at zero so test-only WGPU re-registration hooks are not triggered.
             device_id: 0,
             buffer_id: 44,
+            descriptor: Default::default(),
         })]);
         let err = futures::executor::block_on(gather_if_needed_async(&value))
             .expect_err("missing provider should fail nested output-list gather");
@@ -1161,6 +1178,7 @@ mod tests {
                 // Keep device id at zero so test-only WGPU re-registration hooks are not triggered.
                 device_id: 0,
                 buffer_id: 45,
+                descriptor: Default::default(),
             })],
         });
         let err = futures::executor::block_on(gather_if_needed_async(&value))

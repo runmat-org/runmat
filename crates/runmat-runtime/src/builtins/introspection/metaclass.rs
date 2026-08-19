@@ -10,7 +10,13 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
+use runmat_value::IntValue;
 use runmat_value::Value;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::metaclass")]
@@ -26,7 +32,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Metadata-only predicate. RunMat reads runtime class metadata and returns a host meta-class reference without gathering gpuArray buffers.",
+    notes: "Metadata-only predicate. RunMat reports explicit gpuArray wrapper metadata and the underlying class for internal automatic residency without gathering buffers.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::introspection::metaclass")]
@@ -72,6 +78,27 @@ pub const METACLASS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &METACLASS_ERRORS,
 };
 
+const METACLASS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "object",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Integer scalars and arrays are ordinary MATLAB values whose runtime class metadata preserves exact signedness and width; payload data is not inspected.",
+    }];
+
+pub const METACLASS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "mc = metaclass(integer_object)",
+        inputs: &METACLASS_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "RunMat returns its ClassRef representation of matlab.metadata.Class. Explicit resident values report gpuArray metadata while automatic residency remains transparent, both without gathering payload bytes.",
+    }];
+
 #[runtime_builtin(
     name = "metaclass",
     category = "introspection",
@@ -80,6 +107,9 @@ pub const METACLASS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "metadata",
     type_resolver(metaclass_type),
     descriptor(crate::builtins::introspection::metaclass::METACLASS_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::introspection::metaclass::METACLASS_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::introspection::metaclass"
 )]
 fn metaclass_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -157,9 +187,26 @@ mod tests {
         );
     }
 
+    #[test]
+    fn metaclass_reports_every_integer_class_without_payload_conversion() {
+        for (value, expected) in [
+            (IntValue::I8(i8::MIN), "int8"),
+            (IntValue::I16(i16::MIN), "int16"),
+            (IntValue::I32(i32::MIN), "int32"),
+            (IntValue::I64(i64::MIN), "int64"),
+            (IntValue::U8(u8::MAX), "uint8"),
+            (IntValue::U16(u16::MAX), "uint16"),
+            (IntValue::U32(u32::MAX), "uint32"),
+            (IntValue::U64(u64::MAX), "uint64"),
+        ] {
+            assert_eq!(call(Value::Int(value)), expected);
+        }
+        assert_eq!(METACLASS_INTEGER_CAPABILITIES.len(), 1);
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn metaclass_reports_listener_and_gpuarray_without_gather() {
+    fn metaclass_reports_listener_and_residency_provenance_without_gather() {
         assert_eq!(
             call(Value::Listener(Listener {
                 id: 7,
@@ -180,6 +227,9 @@ mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
+            assert_eq!(call(Value::GpuTensor(handle.clone())), "double");
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             assert_eq!(call(Value::GpuTensor(handle)), "gpuArray");
         });
     }

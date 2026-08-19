@@ -1,5 +1,6 @@
 //! MATLAB-compatible `str2double` builtin with GPU-aware semantics for RunMat.
 
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use std::borrow::Cow;
 
 use runmat_builtins::{
@@ -15,6 +16,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::strings::common::contains_numeric_or_resident_text_input;
 use crate::builtins::strings::type_resolvers::numeric_text_scalar_or_tensor_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -103,6 +105,13 @@ pub const STR2DOUBLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &STR2DOUBLE_ERRORS,
 };
 
+pub const STR2DOUBLE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "str2double parses string, character, or cellstr input and returns double. Integer, numeric, and provider-resident numeric inputs reject before provider access rather than being implicitly converted to text.",
+    };
+
 fn str2double_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     str2double_error_with_message(error.message, error)
 }
@@ -130,9 +139,13 @@ fn remap_str2double_flow(err: RuntimeError) -> RuntimeError {
     accel = "sink",
     type_resolver(numeric_text_scalar_or_tensor_type),
     descriptor(crate::builtins::strings::core::str2double::STR2DOUBLE_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::core::str2double::STR2DOUBLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::core::str2double"
 )]
 async fn str2double_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    if contains_numeric_or_resident_text_input(&value) {
+        return Err(str2double_error(&STR2DOUBLE_ERROR_INVALID_INPUT));
+    }
     let gathered = gather_if_needed_async(&value)
         .await
         .map_err(remap_str2double_flow)?;

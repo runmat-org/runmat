@@ -13,10 +13,11 @@
     "elementwise": false,
     "reduction": false,
     "precisions": [
+      "f32",
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "Uses the provider `lu` hook when available; otherwise gathers to the host fallback implementation."
+    "notes": "Uses the provider `lu` hook when available. All requested provider outputs are validated for exact owner, expected shape and precision, storage metadata, and non-aliasing before use."
   },
   "fusion": {
     "elementwise": false,
@@ -29,12 +30,14 @@
     "unit": "builtins::math::linalg::factor::lu::tests",
     "integration": "builtins::math::linalg::factor::lu::tests::lu_three_outputs_matches_factorization"
   },
-  "description": "`lu(A)` computes the LU factorization of real or complex matrix `A` using partial pivoting. One-, two-, and three-output forms (including permutation-vector options) follow MATLAB semantics.",
+  "description": "`lu(A)` computes the dense LU factorization of a real or complex matrix using partial pivoting. One-, two-, and three-output forms are implemented, including row-permutation matrix and vector options. Sparse four- and five-output forms are not implemented.",
   "behaviors": [
     "Partial pivoting is applied to improve numerical stability. The permutation is encoded either as a dense matrix (`'matrix'`, default) or as a pivot vector (`'vector'`).",
     "Rectangular inputs are supported. `L` is always `m × m` (unit lower-triangular), and `U` is `m × n`, where `m` and `n` are the row and column counts of `A`.",
     "Singular matrices are permitted. Zero pivots propagate into the `U` factor just as in MATLAB; MATLAB-compatible warnings are not yet emitted.",
-    "Only the first three outputs are implemented today. Column permutations (`Q`) and scaling (`R`) for the five-output sparse form are not yet available."
+    "Single inputs preserve single precision; double inputs preserve double precision for real and complex factors.",
+    "When RunMat extensions are enabled, integer and logical inputs are accepted and promoted before factorization.",
+    "Only dense one-, two-, and three-output forms are implemented. Sparse input and the sparse four- and five-output threshold, column-permutation (`Q`), and scaling (`R`/`D`) forms are not available."
   ],
   "examples": [
     {
@@ -71,7 +74,7 @@
   "faqs": [
     {
       "question": "Why does RunMat currently stop at three outputs?",
-      "answer": "Column pivoting (`Q`) and scaling (`R`) from MATLAB’s five-output sparse form are planned but not yet implemented. The dense three-output contract mirrors MATLAB’s default dense behaviour."
+      "answer": "Sparse input and the sparse four- and five-output threshold, column-permutation (`Q`), and scaling (`R`/`D`) contracts are not implemented. Dense one-, two-, and three-output forms are available."
     },
     {
       "question": "Does the permutation vector use MATLAB’s 1-based indexing?",
@@ -83,15 +86,15 @@
     },
     {
       "question": "Are complex matrices supported?",
-      "answer": "Yes. Complex inputs produce complex `L`, `U`, and `LU`. The permutation remains real because it only contains zeros and ones."
+      "answer": "Yes on the host. Complex inputs produce complex `L`, `U`, and `LU`, while the permutation remains real. Interactive complex gpuArray execution remains an implementation gap because the current LU provider contract and fallback gather path are real-only."
     },
     {
       "question": "Will the factors stay on the GPU when I pass a `gpuArray`?",
-      "answer": "Yes. When the active acceleration provider exposes the `lu` hook (WGPU today), the combined factor, `L`, `U`, and the permutation outputs remain `gpuArray` values—the provider currently performs the decomposition on the host once and reuploads the results to preserve residency. Without provider support, RunMat gathers to host memory before returning the factors."
+      "answer": "When the active provider exposes the `lu` hook, every requested factor remains on the exact input owner. On fallback, automatic residency may return host factors, while explicit residency restores all outputs to the original owner or reports an error."
     },
     {
       "question": "Can I call `lu` on logical arrays?",
-      "answer": "Yes. Logical inputs are promoted to double precision before factorization, matching MATLAB semantics."
+      "answer": "Yes, when RunMat extensions are enabled. Logical inputs are promoted before factorization; this is not presented as part of the documented MATLAB input contract."
     },
     {
       "question": "Is pivoting deterministic?",
@@ -99,7 +102,7 @@
     },
     {
       "question": "How accurate is the factorization?",
-      "answer": "The implementation uses standard double-precision arithmetic (or complex double when needed). Numerical properties therefore match MATLAB’s dense fallback (without iterative refinement)."
+      "answer": "Single inputs use single-precision real or complex factors, and double inputs use double precision. Enabled integer and logical RunMat extensions are promoted before factorization."
     },
     {
       "question": "What happens if I pass more than one option argument?",
@@ -144,9 +147,10 @@
     "label": "crates/runmat-runtime/src/builtins/math/linalg/factor/lu.rs",
     "url": "crates/runmat-runtime/src/builtins/math/linalg/factor/lu.rs"
   },
+  "gpu_residency": "When the active provider implements `lu`, all requested factors remain on the input's exact GPU owner. If provider execution is unavailable, automatically resident inputs may return host factors; explicitly resident inputs require every requested factor to be restored to the same owner or the operation returns an error.",
   "gpu_behavior": [
-    "When an acceleration provider implements the `lu` hook (the WGPU provider does), the factorization executes through that provider and the combined LU factor, `L`, `U`, and permutation outputs all remain on the device. The current WGPU backend performs the decomposition on the host once and immediately reuploads the factors so residency is preserved until dedicated kernels land.",
+    "When an acceleration provider implements the `lu` hook, the factorization executes through that provider and the combined LU factor, `L`, `U`, and permutation outputs remain on the exact input owner. Every returned handle is validated for shape, precision, real storage metadata, ownership, and non-aliasing before use.",
     "The `'vector'` option likewise returns a GPU-resident pivot vector when a provider hook is active.",
-    "If no provider hook is available, RunMat automatically gathers the input to host memory and falls back to the CPU implementation so behaviour stays MATLAB-compatible."
+    "If no provider hook is available, RunMat gathers for CPU fallback. Automatic residency may return host factors; explicit residency restores every requested factor to the original owner or fails atomically."
   ]
 }

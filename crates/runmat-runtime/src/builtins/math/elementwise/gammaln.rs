@@ -22,7 +22,6 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::builtins::math::type_resolvers::numeric_unary_type;
-use crate::dispatcher::download_handle_async;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "gammaln";
@@ -335,15 +334,8 @@ fn restore_gammaln_gpu_output(
             ))
         }
     };
-    let dtype = tensor.numeric_dtype();
     let output = gpu_helpers::upload_tensor(provider, &tensor)
         .map_err(|detail| error_with_detail(&ERROR_INTERNAL, detail))?;
-    if dtype == NumericDType::F32 {
-        runmat_accelerate_api::set_handle_precision(
-            &output,
-            runmat_accelerate_api::ProviderPrecision::F32,
-        );
-    }
     if output.shape != input.shape
         || runmat_accelerate_api::provider_for_handle(&output)
             .is_none_or(|owner| !std::ptr::eq(owner, provider))
@@ -365,12 +357,12 @@ async fn gpu_has_negative_input(
         .reduce_min(handle)
         .await
         .map_err(|e| internal_error(format!("gammaln: reduce_min failed: {e}")))?;
-    let download = download_handle_async(provider, &min_handle)
+    let download = gpu_helpers::download_native_values_async(provider, &min_handle)
         .await
         .map_err(|e| internal_error(format!("gammaln: reduce_min download failed: {e}")));
     let _ = provider.free(&min_handle);
     let host = download?;
-    Ok(host.data.iter().any(|&value| value < 0.0))
+    Ok(host.data.iter().any(|value| value.is_negative()))
 }
 
 fn gammaln_real(value: Value) -> BuiltinResult<Value> {

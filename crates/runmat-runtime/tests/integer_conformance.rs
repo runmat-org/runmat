@@ -57,6 +57,19 @@ fn integer_set_classes() -> Vec<IntegerStorage> {
     ]
 }
 
+fn integer_scalar_two(storage: &IntegerStorage) -> Value {
+    Value::Int(match storage {
+        IntegerStorage::I8(_) => IntValue::I8(2),
+        IntegerStorage::I16(_) => IntValue::I16(2),
+        IntegerStorage::I32(_) => IntValue::I32(2),
+        IntegerStorage::I64(_) => IntValue::I64(2),
+        IntegerStorage::U8(_) => IntValue::U8(2),
+        IntegerStorage::U16(_) => IntValue::U16(2),
+        IntegerStorage::U32(_) => IntValue::U32(2),
+        IntegerStorage::U64(_) => IntValue::U64(2),
+    })
+}
+
 fn expect_logical(value: Value, shape: &[usize], data: &[u8]) {
     assert_eq!(
         value,
@@ -392,13 +405,18 @@ fn registered_integer_arithmetic_rejects_logicals_before_provider_dispatch() {
         shape: vec![1, 1],
         device_id: u32::MAX,
         buffer_id: u64::MAX - 1,
-    };
+        descriptor: Default::default(),
+    }
+    .with_numeric_descriptor(
+        IntegerElementType::I64.into(),
+        runmat_accelerate_api::GpuTensorStorage::Real,
+    );
     let logical_handle = GpuTensorHandle {
         shape: vec![1, 1],
         device_id: u32::MAX,
         buffer_id: u64::MAX,
+        descriptor: Default::default(),
     };
-    runmat_accelerate_api::set_handle_integer_type(&integer_handle, IntegerElementType::I64);
     runmat_accelerate_api::set_handle_logical(&logical_handle, true);
 
     let resident_integer = Value::GpuTensor(integer_handle.clone());
@@ -420,7 +438,6 @@ fn registered_integer_arithmetic_rejects_logicals_before_provider_dispatch() {
         }
     }
 
-    runmat_accelerate_api::clear_handle_integer_type(&integer_handle);
     runmat_accelerate_api::clear_handle_logical(&logical_handle);
 }
 
@@ -591,6 +608,171 @@ fn integer_arithmetic_saturates_at_every_class_boundary() {
                 .expect("saturating minus"),
             Value::Int(saturated_subtract),
         );
+    }
+}
+
+#[test]
+fn integer_arithmetic_accepts_only_scalar_double_floating_companions() {
+    let classes = [
+        IntValue::I8(2),
+        IntValue::I16(2),
+        IntValue::I32(2),
+        IntValue::I64(2),
+        IntValue::U8(2),
+        IntValue::U16(2),
+        IntValue::U32(2),
+        IntValue::U64(2),
+    ];
+    let nonscalar_double = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
+    let scalar_single = Value::Tensor(
+        Tensor::new_with_dtype(vec![2.0], vec![1, 1], runmat_value::NumericDType::F32).unwrap(),
+    );
+    for integer in classes {
+        for builtin in ["plus", "minus", "times", "rdivide", "ldivide", "rem", "mod"] {
+            for operands in [
+                [Value::Int(integer.clone()), Value::Num(2.0)],
+                [Value::Num(2.0), Value::Int(integer.clone())],
+            ] {
+                let result = runmat_runtime::call_builtin(builtin, &operands)
+                    .unwrap_or_else(|error| panic!("{builtin} scalar double: {error}"));
+                expect_integer_class(result, integer.class_name());
+            }
+            for floating in [&nonscalar_double, &scalar_single] {
+                for operands in [
+                    [Value::Int(integer.clone()), floating.clone()],
+                    [floating.clone(), Value::Int(integer.clone())],
+                ] {
+                    let error = runmat_runtime::call_builtin(builtin, &operands)
+                        .expect_err("non-double-scalar floating companion must reject");
+                    assert!(
+                        error.message().contains(
+                            "integer arrays can only be combined with scalar double values"
+                        ),
+                        "{builtin}: {error}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn integer_division_and_remainder_rules_cover_every_class_endpoint() {
+    let signed = [
+        (
+            IntValue::I8(i8::MIN),
+            IntValue::I8(i8::MAX),
+            IntValue::I8(0),
+        ),
+        (
+            IntValue::I16(i16::MIN),
+            IntValue::I16(i16::MAX),
+            IntValue::I16(0),
+        ),
+        (
+            IntValue::I32(i32::MIN),
+            IntValue::I32(i32::MAX),
+            IntValue::I32(0),
+        ),
+        (
+            IntValue::I64(i64::MIN),
+            IntValue::I64(i64::MAX),
+            IntValue::I64(0),
+        ),
+    ];
+    for (minimum, maximum, zero) in signed {
+        assert_eq!(
+            runmat_runtime::call_builtin(
+                "rdivide",
+                &[Value::Int(maximum.clone()), Value::Num(0.0)],
+            )
+            .expect("positive signed division by zero"),
+            Value::Int(maximum.clone())
+        );
+        assert_eq!(
+            runmat_runtime::call_builtin(
+                "rdivide",
+                &[Value::Int(minimum.clone()), Value::Num(0.0)],
+            )
+            .expect("negative signed division by zero"),
+            Value::Int(minimum.clone())
+        );
+        assert_eq!(
+            runmat_runtime::call_builtin("rem", &[Value::Int(maximum.clone()), Value::Num(0.0)],)
+                .expect("typed remainder by zero"),
+            Value::Int(zero.clone())
+        );
+        assert_eq!(
+            runmat_runtime::call_builtin("mod", &[Value::Int(minimum.clone()), Value::Num(0.0)],)
+                .expect("typed modulo by zero"),
+            Value::Int(minimum)
+        );
+    }
+
+    let unsigned = [
+        (IntValue::U8(u8::MAX), IntValue::U8(0)),
+        (IntValue::U16(u16::MAX), IntValue::U16(0)),
+        (IntValue::U32(u32::MAX), IntValue::U32(0)),
+        (IntValue::U64(u64::MAX), IntValue::U64(0)),
+    ];
+    for (maximum, zero) in unsigned {
+        assert_eq!(
+            runmat_runtime::call_builtin(
+                "rdivide",
+                &[Value::Int(maximum.clone()), Value::Num(0.0)],
+            )
+            .expect("unsigned division by zero"),
+            Value::Int(maximum.clone())
+        );
+        assert_eq!(
+            runmat_runtime::call_builtin("rem", &[Value::Int(maximum.clone()), Value::Num(0.0)],)
+                .expect("unsigned remainder by zero"),
+            Value::Int(zero)
+        );
+        assert_eq!(
+            runmat_runtime::call_builtin("mod", &[Value::Int(maximum.clone()), Value::Num(0.0)],)
+                .expect("unsigned modulo by zero"),
+            Value::Int(maximum)
+        );
+    }
+}
+
+#[test]
+fn empty_integer_arithmetic_preserves_class_and_does_not_hide_type_errors() {
+    let classes = [
+        IntegerStorage::I8(Vec::new()),
+        IntegerStorage::I16(Vec::new()),
+        IntegerStorage::I32(Vec::new()),
+        IntegerStorage::I64(Vec::new()),
+        IntegerStorage::U8(Vec::new()),
+        IntegerStorage::U16(Vec::new()),
+        IntegerStorage::U32(Vec::new()),
+        IntegerStorage::U64(Vec::new()),
+    ];
+    for storage in classes {
+        let class = storage.class_name();
+        let scalar = integer_scalar_two(&storage);
+        let empty = integer_tensor(storage.clone(), vec![0, 1, 3]);
+        for builtin in [
+            "plus", "minus", "times", "rdivide", "ldivide", "power", "rem", "mod",
+        ] {
+            let result = runmat_runtime::call_builtin(builtin, &[empty.clone(), scalar.clone()])
+                .unwrap_or_else(|error| panic!("{class} {builtin}: {error}"));
+            expect_integer(result, &[0, 1, 3], storage.clone());
+        }
+
+        let unlike = if class == "uint8" {
+            integer_tensor(IntegerStorage::I8(Vec::new()), vec![0, 1, 3])
+        } else {
+            integer_tensor(IntegerStorage::U8(Vec::new()), vec![0, 1, 3])
+        };
+        for builtin in ["plus", "minus", "times", "rdivide", "rem", "mod"] {
+            let result = runmat_runtime::call_builtin(builtin, &[empty.clone(), unlike.clone()]);
+            assert!(
+                result.is_err(),
+                "{class} {builtin} unlike empty must reject"
+            );
+        }
     }
 }
 
@@ -1195,8 +1377,12 @@ fn registered_set_functions_reject_64_bit_integer_gpu_inputs_before_provider_dis
             shape: vec![2, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX - 100 - offset as u64,
-        };
-        runmat_accelerate_api::set_handle_integer_type(&handle, integer_type);
+            descriptor: Default::default(),
+        }
+        .with_numeric_descriptor(
+            integer_type.into(),
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        );
         let resident = Value::GpuTensor(handle.clone());
         let host = integer_tensor(IntegerStorage::I32(vec![1, 2]), vec![2, 1]);
         for builtin in ["ismember", "intersect", "union", "setdiff", "setxor"] {
@@ -1221,6 +1407,5 @@ fn registered_set_functions_reject_64_bit_integer_gpu_inputs_before_provider_dis
                 );
             }
         }
-        runmat_accelerate_api::clear_handle_integer_type(&handle);
     }
 }

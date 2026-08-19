@@ -31,7 +31,7 @@
   "description": "`frewind(fid)` resets the file position indicator to the beginning of the file associated with `fid`. It is equivalent to `fseek(fid, 0, 'bof')` and follows MATLAB and RunMat status/error semantics.",
   "behaviors": [
     "`frewind(fid)` rewinds the file position indicator to byte offset 0 for the file identified by `fid`.",
-    "R2026a documents a double `fid` returned by `fopen`. Typed integer, single, logical, and provider-resident identifiers are independently gated RunMat extensions and invalid identifiers raise an error.",
+    "The compatibility target documents a double `fid` returned by `fopen`. Typed integer, single, logical, and provider-resident identifiers are independently gated RunMat extensions and invalid identifiers raise an error.",
     "Standard input/output identifiers (`0`, `1`, `2`) are silently accepted and treated as a no-op; RunMat does not support seeking on those streams.",
     "`frewind` produces no output value. Assigning the result of `frewind` to a variable yields an empty output list.",
     "After `frewind`, subsequent calls to `fread`, `fgets`, or `fscanf` start from the beginning of the file."

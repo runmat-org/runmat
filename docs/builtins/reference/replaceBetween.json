@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "No GPU kernel is registered for this compatibility builtin; GPU-resident inputs are gathered to host memory before evaluation."
+    "notes": "No GPU kernel is registered. Automatic residency for numeric positions gathers transparently; explicit gpuArray host fallback is a declared RunMat extension."
   },
   "fusion": {
     "elementwise": false,
@@ -26,7 +26,7 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::strings::transform::compat::tests",
-    "integration": null
+    "integration": "crates/runmat-vm/tests/integer_label_and_text_control_semantics.rs"
   },
   "description": "s = replaceBetween(text, start, end, newText) - Replace text between positions or boundary markers.",
   "signatures": [
@@ -61,7 +61,9 @@
   ],
   "behaviors": [
     "Replace text between positions or boundary markers.",
-    "Numeric boundaries are 1-based absolute character positions.",
+    "Numeric boundaries are one-based inclusive character positions and accept every integer class through exact native validation.",
+    "Text, start, end, and replacement inputs may each be scalar or have the same size; scalar values expand across the common text shape.",
+    "Integer source or replacement values reject without implicit decimal formatting or provider access.",
     "Text and pattern boundaries replace the text between the matched delimiters and leave the delimiters in place."
   ],
   "examples": [

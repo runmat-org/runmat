@@ -168,7 +168,37 @@ const TABLE_INPUTS_VALUES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor
     default: None,
     description: "Variables to assemble as table columns.",
 }];
-const GROUPSUMMARY_INPUTS: [BuiltinParamDescriptor; 4] = [
+const TABLE_INPUTS_PREALLOCATE: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "Size",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Two-element table size vector [rows variables].",
+    },
+    BuiltinParamDescriptor {
+        name: "VariableTypes",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "String array or cellstr naming each preallocated variable type.",
+    },
+    BuiltinParamDescriptor {
+        name: "VariableNames",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Optional names for the preallocated variables.",
+    },
+    BuiltinParamDescriptor {
+        name: "RowNames",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Optional names for the preallocated rows.",
+    },
+];
+const GROUPSUMMARY_TABLE_INPUTS: [BuiltinParamDescriptor; 4] = [
     BuiltinParamDescriptor {
         name: "T",
         ty: BuiltinParamType::Any,
@@ -196,6 +226,126 @@ const GROUPSUMMARY_INPUTS: [BuiltinParamDescriptor; 4] = [
         arity: BuiltinParamArity::Optional,
         default: None,
         description: "Data variable name or names.",
+    },
+];
+const GROUPSUMMARY_TABLE_BIN_INPUTS: [BuiltinParamDescriptor; 5] = [
+    BuiltinParamDescriptor {
+        name: "T",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input table.",
+    },
+    BuiltinParamDescriptor {
+        name: "groupvars",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Grouping variable name or names.",
+    },
+    BuiltinParamDescriptor {
+        name: "groupbins",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Grouping bin specification.",
+    },
+    BuiltinParamDescriptor {
+        name: "method",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Summary method name or names.",
+    },
+    BuiltinParamDescriptor {
+        name: "datavars",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Data variable name or names, optionally followed by name-value pairs.",
+    },
+];
+const GROUPSUMMARY_ARRAY_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numeric array or cell array of numeric arrays.",
+    },
+    BuiltinParamDescriptor {
+        name: "groupvars",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Grouping array or cell array of grouping arrays.",
+    },
+    BuiltinParamDescriptor {
+        name: "method",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Summary method name or names.",
+    },
+];
+const GROUPSUMMARY_ARRAY_BIN_INPUTS: [BuiltinParamDescriptor; 5] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numeric array or cell array of numeric arrays.",
+    },
+    BuiltinParamDescriptor {
+        name: "groupvars",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Grouping array or cell array of grouping arrays.",
+    },
+    BuiltinParamDescriptor {
+        name: "groupbins",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Grouping bin specification.",
+    },
+    BuiltinParamDescriptor {
+        name: "method",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Summary method name or names.",
+    },
+    BuiltinParamDescriptor {
+        name: "nameValuePairs",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Grouping options such as IncludedEdge and IncludeEmptyGroups.",
+    },
+];
+const GROUPSUMMARY_ARRAY_OUTPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Summary values.",
+    },
+    BuiltinParamDescriptor {
+        name: "BG",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Grouping values.",
+    },
+    BuiltinParamDescriptor {
+        name: "BC",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Group counts.",
     },
 ];
 const GRPSTATS_INPUTS: [BuiltinParamDescriptor; 4] = [
@@ -449,13 +599,7 @@ const PREDICATE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "Predicate result.",
 }];
-const WRITE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "bytesWritten",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Number of bytes written.",
-}];
+const WRITE_NO_OUTPUT: [BuiltinParamDescriptor; 0] = [];
 
 const READTABLE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
@@ -559,11 +703,18 @@ const PARQUETINFO_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatur
     inputs: &PARQUETINFO_INPUTS,
     outputs: &ANY_OUTPUT,
 }];
-const TABLE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "T = table(variables...)",
-    inputs: &TABLE_INPUTS_VALUES,
-    outputs: &ANY_OUTPUT,
-}];
+const TABLE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "T = table(variables...)",
+        inputs: &TABLE_INPUTS_VALUES,
+        outputs: &ANY_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "T = table(Size=sz, VariableTypes=varTypes, Name=Value...)",
+        inputs: &TABLE_INPUTS_PREALLOCATE,
+        outputs: &ANY_OUTPUT,
+    },
+];
 const ARRAY2TABLE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
         label: "T = array2table(A)",
@@ -610,11 +761,28 @@ const ARRAY_DATASTORE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
         outputs: &ARRAY_DATASTORE_OUTPUT,
     },
 ];
-const GROUPSUMMARY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "G = groupsummary(T, groupvars, method, datavars)",
-    inputs: &GROUPSUMMARY_INPUTS,
-    outputs: &ANY_OUTPUT,
-}];
+const GROUPSUMMARY_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "G = groupsummary(T, groupvars, method, datavars)",
+        inputs: &GROUPSUMMARY_TABLE_INPUTS,
+        outputs: &ANY_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "G = groupsummary(T, groupvars, groupbins, method, datavars)",
+        inputs: &GROUPSUMMARY_TABLE_BIN_INPUTS,
+        outputs: &ANY_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = groupsummary(A, groupvars, method)",
+        inputs: &GROUPSUMMARY_ARRAY_INPUTS,
+        outputs: &GROUPSUMMARY_ARRAY_OUTPUTS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[B, BG, BC] = groupsummary(A, groupvars, groupbins, method)",
+        inputs: &GROUPSUMMARY_ARRAY_BIN_INPUTS,
+        outputs: &GROUPSUMMARY_ARRAY_OUTPUTS,
+    },
+];
 const GRPSTATS_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
     BuiltinSignatureDescriptor {
         label: "tblstats = grpstats(tbl, groupvars)",
@@ -670,9 +838,9 @@ const PREDICATE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureD
     outputs: &PREDICATE_OUTPUT,
 }];
 const WRITE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "bytesWritten = writeTabular(T, filename, ...)",
+    label: "writeTabular(T, filename, ...)",
     inputs: &VALUE_AND_ARGS_INPUTS,
-    outputs: &WRITE_OUTPUT,
+    outputs: &WRITE_NO_OUTPUT,
 }];
 const OBJECT_SUBSREF_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "out = table.subsref(obj, kind, payload)",
@@ -785,7 +953,7 @@ pub const ARRAY_DATASTORE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 pub const GROUPSUMMARY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &GROUPSUMMARY_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &TABLE_ERRORS,
 };

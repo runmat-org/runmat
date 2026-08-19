@@ -5,14 +5,22 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ResolveContext, Type,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
+#[cfg(test)]
+use runmat_value::IntegerStorage;
 use runmat_value::Value;
 
+use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::BuiltinResult;
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::tests::issparse")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -64,7 +72,13 @@ const ISSPARSE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDe
     outputs: &ISSPARSE_OUTPUT,
 }];
 
-const ISSPARSE_ERRORS: [BuiltinErrorDescriptor; 0] = [];
+const ISSPARSE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISSPARSE.INTERNAL",
+    identifier: Some("RunMat:issparse:InternalError"),
+    when: "Resident handle ownership or dtype metadata is contradictory.",
+    message: "issparse: invalid resident metadata",
+};
+const ISSPARSE_ERRORS: [BuiltinErrorDescriptor; 1] = [ISSPARSE_ERROR_INTERNAL];
 
 pub const ISSPARSE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ISSPARSE_SIGNATURES,
@@ -72,6 +86,44 @@ pub const ISSPARSE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ISSPARSE_ERRORS,
 };
+const ISSPARSE_DENSE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Dense arrays of every fixed-width integer class are not sparse.",
+    }];
+const ISSPARSE_SPARSE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed integer CSC storage is a RunMat-only value representation; MATLAB sparse numeric storage is limited to floating and logical classes.",
+    }];
+pub const ISSPARSE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "tf = issparse(dense_integer_A)",
+        inputs: &ISSPARSE_DENSE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Predicate,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Returns scalar logical false from storage metadata. Resident integer handles are validated against their exact owner without gathering.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "tf = issparse(RunMat_sparse_integer_A)",
+        inputs: &ISSPARSE_SPARSE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Predicate,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Returns scalar logical true for an already-existing RunMat sparse integer value. Creation and propagation of that value are compatibility-gated at their owning operations; this universal storage predicate does not reinterpret or hide the value.",
+    },
+];
 
 #[runtime_builtin(
     name = "issparse",
@@ -81,10 +133,37 @@ pub const ISSPARSE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "metadata",
     type_resolver(bool_scalar_type),
     descriptor(crate::builtins::logical::tests::issparse::ISSPARSE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::logical::tests::issparse::ISSPARSE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::logical::tests::issparse"
 )]
 async fn issparse_builtin(value: Value) -> BuiltinResult<Value> {
+    if let Value::GpuTensor(handle) = &value {
+        if let Some(integer) = runmat_accelerate_api::handle_integer_type(handle) {
+            let storage = runmat_accelerate_api::handle_storage(handle);
+            if gpu_helpers::exact_provider_for_handle(handle).is_none()
+                || storage != runmat_accelerate_api::GpuTensorStorage::Real
+                || runmat_accelerate_api::handle_precision(handle).is_some()
+                || runmat_accelerate_api::handle_is_logical(handle)
+                || !gpu_helpers::gpu_class_metadata_matches(handle, None, Some(integer), false)
+            {
+                return Err(issparse_internal_error(
+                    "issparse: resident integer metadata is contradictory",
+                ));
+            }
+        }
+    }
     Ok(Value::Bool(matches!(value, Value::SparseTensor(_))))
+}
+
+fn issparse_internal_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("issparse")
+        .with_identifier(
+            ISSPARSE_ERROR_INTERNAL
+                .identifier
+                .expect("internal error identifier"),
+        )
+        .build()
 }
 
 fn bool_scalar_type(_: &[Type], _context: &ResolveContext) -> Type {
@@ -164,6 +243,43 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn dense_arrays_of_all_integer_classes_report_false() {
+        let storages = [
+            IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+            IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+            IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![u8::MIN, u8::MAX]),
+            IntegerStorage::U16(vec![u16::MIN, u16::MAX]),
+            IntegerStorage::U32(vec![u32::MIN, u32::MAX]),
+            IntegerStorage::U64(vec![u64::MIN, u64::MAX]),
+        ];
+        for storage in storages {
+            let tensor = Tensor::new_integer(storage, vec![1, 2]).expect("integer tensor");
+            assert_eq!(
+                run_issparse(Value::Tensor(tensor)).expect("issparse"),
+                Value::Bool(false)
+            );
+        }
+    }
+
+    #[test]
+    fn runmat_sparse_integer_storage_reports_true_without_hiding_its_storage_kind() {
+        let sparse = SparseTensor::new_integer(
+            2,
+            2,
+            vec![0, 1, 2],
+            vec![0, 1],
+            IntegerStorage::U64(vec![1, u64::MAX]),
+        )
+        .expect("sparse integer");
+        assert_eq!(
+            run_issparse(Value::SparseTensor(sparse)).expect("issparse"),
+            Value::Bool(true)
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn containers_text_and_objects_report_false() {
@@ -225,6 +341,38 @@ pub(crate) mod tests {
             let handle = provider.upload(&view).expect("upload");
             let result = run_issparse(Value::GpuTensor(handle.clone())).expect("issparse");
             assert_eq!(result, Value::Bool(false));
+            provider.free(&handle).ok();
+        });
+    }
+
+    #[test]
+    fn resident_dense_integer_reports_false_from_exact_owner_metadata() {
+        test_support::with_test_provider(|provider| {
+            let tensor =
+                Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![2, 1])
+                    .expect("integer tensor");
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+                .expect("upload integer");
+            assert_eq!(
+                run_issparse(Value::GpuTensor(handle.clone())).expect("issparse"),
+                Value::Bool(false)
+            );
+            assert!(gpu_helpers::exact_provider_for_handle(&handle).is_some());
+            provider.free(&handle).ok();
+        });
+    }
+
+    #[test]
+    fn resident_dense_integer_rejects_contradictory_class_metadata() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1])
+                .expect("integer tensor");
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+                .expect("upload integer");
+            runmat_accelerate_api::set_handle_class_name(&handle, "double");
+            let error = run_issparse(Value::GpuTensor(handle.clone()))
+                .expect_err("contradictory class metadata must reject");
+            assert!(error.message().contains("metadata is contradictory"));
             provider.free(&handle).ok();
         });
     }

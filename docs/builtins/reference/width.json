@@ -1,0 +1,51 @@
+{
+  "title": "width",
+  "category": "table",
+  "keywords": ["width", "table", "array", "columns", "variables"],
+  "summary": "Return the number of table variables or array columns.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f32", "f64", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64"],
+    "broadcasting": "none",
+    "notes": "Resident numeric arrays are answered from handle shape metadata without gathering their elements."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 1, "constants": "inline" },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::table::builtins::predicates::tests",
+    "integration": null
+  },
+  "description": "`width(T)` returns the number of variables in a table or the number of columns in an array.",
+  "behaviors": [
+    "For a table, the result is its variable count. For an ordinary array, the result is the size of its second dimension.",
+    "All eight native integer classes follow the same structural rule; their elements are neither converted nor inspected.",
+    "The result is a host `double` scalar.",
+    "For a resident numeric array, RunMat reads the column count directly from handle shape metadata without gathering payload data."
+  ],
+  "examples": [
+    {
+      "description": "Count array columns",
+      "input": "n = width(uint16(zeros(3, 5)))",
+      "output": "n = 5"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does width gather a gpuArray?",
+      "answer": "No. RunMat obtains the column count from resident shape metadata and returns a host double scalar."
+    }
+  ],
+  "links": [
+    { "label": "height", "url": "./height" },
+    { "label": "size", "url": "./size" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/table/builtins/predicates.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/builtins/predicates.rs"
+  },
+  "gpu_residency": "Numeric payloads remain resident; only shape metadata is read.",
+  "gpu_behavior": [
+    "`width` does not dispatch a numerical kernel or gather the input. It returns the second handle dimension as a host double scalar."
+  ]
+}

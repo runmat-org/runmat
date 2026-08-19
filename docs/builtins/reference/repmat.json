@@ -38,7 +38,8 @@
     "Zero replication factors produce empty dimensions, e.g., `repmat(A, 0, 3)` yields an empty array with shape `[0 size(A,2)]`.",
     "Char and cell arrays follow MATLAB by supporting row/column tiling; additional dimensions must be `1`, while numeric, logical, complex, and string arrays support full N-D replication.",
     "Replication factors must be finite, non-negative integers; RunMat raises descriptive errors for negative, fractional, or excessively large sizes.",
-    "GPU arrays remain on the device when the acceleration provider implements the tiling hook; otherwise, RunMat gathers to host memory, tiles in software, and re-uploads the replicated tensor so downstream GPU work keeps residency."
+    "All eight integer data classes are tiled from authoritative native storage and returned in the same class; typed integer replication factors are decoded structurally without a floating round trip.",
+    "GPU arrays remain on the device when the acceleration provider implements the tiling hook; otherwise, RunMat gathers through the exact owning provider, tiles in software, and restores the replicated tensor through that same owner so class, device, and provenance remain truthful."
   ],
   "examples": [
     {

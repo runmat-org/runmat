@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Uses provider elem_le kernels when available; otherwise inputs gather back to host memory transparently."
+    "notes": "Uses a validated exact-owner elem_le path for compatible resident pairs; mixed or unsupported cases gather transparently and restore a logical result to the source provider."
   },
   "fusion": {
     "elementwise": true,
@@ -36,7 +36,9 @@
     "Numeric, logical, and character inputs compare element-wise using MATLAB's implicit expansion rules.",
     "Character arrays compare by Unicode code point; mixing them with numeric arrays behaves like comparing numeric codes (`'A' <= 65`).",
     "String scalars and string arrays compare lexically; implicit expansion works across string dimensions.",
-    "Complex inputs are not supported, matching MATLAB's behaviour.",
+    "Complex numeric inputs are ordered by their real components and return logical results.",
+    "All integer classes can be compared, including mixed numeric classes, without first collapsing exact integer values through double precision.",
+    "Categorical values use their categorical ordering when the categorical comparison path applies.",
     "Mixed numeric/string inputs raise MATLAB-compatible type errors."
   ],
   "examples": [
@@ -82,7 +84,7 @@
     },
     {
       "question": "Can I compare complex numbers with `le`?",
-      "answer": "No. MATLAB does not define relational ordering for complex numbers, so RunMat raises a MATLAB-compatible error when complex inputs are supplied."
+      "answer": "Yes. Relational ordering uses the real components of complex numeric values and returns logical results."
     },
     {
       "question": "How are strings compared?",
@@ -94,7 +96,7 @@
     },
     {
       "question": "Do I need to gather results manually after a GPU comparison?",
-      "answer": "No. When both inputs are `gpuArray` values and the provider supports `elem_le`, the result stays on the GPU. Otherwise, RunMat gathers inputs transparently and returns a host logical array."
+      "answer": "No. Compatible resident pairs use the provider's validated `elem_le` result. Mixed or unsupported cases gather transparently, compare on the host, and restore the logical result to the source provider; explicit `gpuArray` residency must be preserved."
     },
     {
       "question": "Does implicit expansion apply to string arrays?",
@@ -137,6 +139,6 @@
   },
   "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. RunMat's native auto-offload planner keeps intermediate results on the GPU when fused expressions benefit from device execution. Explicit `gpuArray` and `gather` calls remain available for compatibility with MATLAB code that manages residency manually.",
   "gpu_behavior": [
-    "When both operands are `gpuArray` values and the active acceleration provider implements the `elem_le` hook, RunMat executes the comparison entirely on the device and returns a `gpuArray` logical result. If the provider does not expose this hook, the runtime gathers the inputs to host memory automatically and performs the CPU comparison instead of failing."
+    "Compatible resident operand pairs use the exact common owner's validated `elem_le` path and return a resident logical result. If either operand is host-resident, the owners differ, or the provider path cannot represent the comparison safely, RunMat gathers resident inputs automatically, evaluates the full comparison semantics on the host, and restores the logical result to the first resident source provider. Explicit `gpuArray` inputs must remain resident or the call errors."
   ]
 }

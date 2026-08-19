@@ -182,7 +182,7 @@ const CONV_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
     BuiltinIntegerInputCapability { name: "u", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "All eight real or complex integer classes are documented; values cross the explicit floating convolution boundary before multiplication and accumulation." },
     BuiltinIntegerInputCapability { name: "v", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Mixed integer classes are documented and independently converted to the selected floating output domain." },
 ];
-pub const CONV_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "w = conv(integer_u, integer_v, shape?)", inputs: &CONV_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "The output is single when either numeric input is single and double otherwise; integer and logical inputs never produce an integer result. Full orientation follows the R2026a both-columns rule, while same/valid follow u. Resident integer inputs gather exactly through their owning provider before floating convolution and the floating result is restored to that provider." }];
+pub const CONV_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "w = conv(integer_u, integer_v, shape?)", inputs: &CONV_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "The output is single when either numeric input is single and double otherwise; integer and logical inputs never produce an integer result. Full orientation follows the compatibility target's both-columns rule, while same/valid follow u. Resident integer inputs gather exactly through their owning provider before floating convolution and the floating result is restored to that provider." }];
 
 fn conv_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     conv_error_with_message(error.message, error)
@@ -856,7 +856,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn conv_full_orientation_uses_r2026a_both_columns_rule() {
+    fn conv_full_orientation_uses_compatibility_target_both_columns_rule() {
         let row = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
         let col = Tensor::new(vec![1.0, 1.0], vec![2, 1]).unwrap();
         let Value::Tensor(mixed) =
@@ -1021,22 +1021,17 @@ pub(crate) mod tests {
     #[test]
     fn conv_rejects_native_output_with_wrong_single_precision() {
         test_support::with_test_provider(|provider| {
-            let a = provider
-                .upload(&HostTensorView {
-                    data: &[1.0, 2.0],
-                    shape: &[1, 2],
-                })
-                .unwrap();
+            let a = gpu_helpers::upload_tensor(
+                provider,
+                &runmat_value::Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).unwrap(),
+            )
+            .unwrap();
             let b = provider
                 .upload(&HostTensorView {
                     data: &[1.0, 1.0],
                     shape: &[1, 2],
                 })
                 .unwrap();
-            runmat_accelerate_api::set_handle_precision(
-                &a,
-                runmat_accelerate_api::ProviderPrecision::F32,
-            );
             let Value::Tensor(output) =
                 conv_builtin(Value::GpuTensor(a), Value::GpuTensor(b), Vec::new()).unwrap()
             else {

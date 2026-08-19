@@ -258,18 +258,16 @@ pub async fn load_member(
             if has_builtin_member_subsref_protocol(&handle.class_name) {
                 return call_object_member_subsref(Value::HandleObject(handle), field).await;
             }
-            crate::call_builtin_async_with_outputs(
-                "getfield",
-                &[Value::HandleObject(handle), Value::String(field)],
-                1,
+            crate::builtins::structs::core::getfield::get_member_value(
+                Value::HandleObject(handle),
+                &field,
             )
             .await
         }
         Value::Listener(listener) => {
-            crate::call_builtin_async_with_outputs(
-                "getfield",
-                &[Value::Listener(listener), Value::String(field)],
-                1,
+            crate::builtins::structs::core::getfield::get_member_value(
+                Value::Listener(listener),
+                &field,
             )
             .await
         }

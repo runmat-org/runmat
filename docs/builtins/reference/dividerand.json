@@ -21,7 +21,7 @@
     "RunMat normalizes ratios and uses largest remainders for allocation. The public documentation does not specify this tie-breaking algorithm.",
     "Returned indices are one-based row vectors and together form a random permutation of `1:Q`.",
     "Empty partitions are returned as `1-by-0` double tensors.",
-    "MathWorks marks `dividerand` for removal in R2026a; RunMat retains it for backward compatibility."
+    "MathWorks marks `dividerand` for removal in the compatibility target; RunMat retains it for backward compatibility."
   ],
   "examples": [
     { "description": "Default split", "input": "[trainInd,valInd,testInd] = dividerand(100)" },
@@ -33,7 +33,7 @@
       "answer": "Yes. The random permutation is drawn from RunMat's global random generator, so `rng('default')` and numeric seeds make results reproducible."
     }
   ],
-  "links": [{ "label": "rng", "url": "./rng" }, { "label": "randperm", "url": "./randperm" }, {"label": "MathWorks R2026a dividerand documentation", "url": "https://www.mathworks.com/help/deeplearning/ref/dividerand.html"}],
+  "links": [{ "label": "rng", "url": "./rng" }, { "label": "randperm", "url": "./randperm" }, {"label": "MathWorks dividerand documentation", "url": "https://www.mathworks.com/help/deeplearning/ref/dividerand.html"}],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/stats/random/sampling.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/random/sampling.rs"

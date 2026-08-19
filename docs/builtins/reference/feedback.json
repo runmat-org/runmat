@@ -28,7 +28,7 @@
     "unit": "builtins::control::feedback::tests",
     "integration": "crates/runmat-vm/tests/control.rs"
   },
-  "description": "`feedback(sys1, sys2)` returns the closed-loop SISO transfer function for negative feedback. The current public MATLAB R2026a documentation covers dynamic-system inputs, an optional sign, feed-index forms, and signal-name forms. RunMat currently implements the SISO `tf` subset with an ordinary double scalar feedback gain; broader scalar, native-single, typed-integer, logical, and resident forms are explicit RunMat extensions.",
+  "description": "`feedback(sys1, sys2)` returns the closed-loop SISO transfer function for negative feedback. The current public MathWorks documentation covers dynamic-system inputs, an optional sign, feed-index forms, and signal-name forms. RunMat currently implements the SISO `tf` subset with an ordinary double scalar feedback gain; broader scalar, native-single, typed-integer, logical, and resident forms are explicit RunMat extensions.",
   "behaviors": [
     "Supports real or complex SISO `tf` objects represented by numerator and denominator coefficient vectors.",
     "`feedback(sys1)` uses unity negative feedback as a gated RunMat-only convenience form.",
@@ -84,7 +84,7 @@
       "url": "./isstable"
     },
     {
-      "label": "MATLAB feedback documentation (R2026a)",
+      "label": "MathWorks feedback documentation",
       "url": "https://www.mathworks.com/help/control/ref/inputoutputmodel.feedback.html"
     }
   ],

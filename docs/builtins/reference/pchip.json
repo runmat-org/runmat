@@ -24,11 +24,16 @@
     "max_inputs": 3,
     "constants": "inline"
   },
+  "tested": {
+    "unit": "builtins::math::interpolation::pchip::tests",
+    "integration": "crates/runmat-vm/tests/integer_numeric_transform_semantics.rs"
+  },
   "description": "`pchip(x, y)` builds shape-preserving cubic Hermite interpolants, and `pchip(x, y, xq)` evaluates them at query points with MATLAB-compatible interpolation behavior.",
   "behaviors": [
     "Returns the same pp-structure shape used by `spline`.",
     "Uses monotonicity-preserving slopes so monotone data does not overshoot between samples.",
-    "Dense real numeric inputs are supported in the initial implementation."
+    "Dense real numeric inputs are supported in the initial implementation.",
+    "Typed-integer sample locations, sample values, and query points are independent RunMat extensions. Each must be exactly representable as binary64 before entering the interpolation domain."
   ],
   "examples": [
     {

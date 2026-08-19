@@ -3010,6 +3010,7 @@ fn analysis_run_gpu_with_provider_emits_device_ref_contract() {
                 shape: host.shape.to_vec(),
                 device_id: 11,
                 buffer_id: NEXT_BUFFER_ID.fetch_add(1, Ordering::Relaxed),
+                descriptor: Default::default(),
             })
         }
 

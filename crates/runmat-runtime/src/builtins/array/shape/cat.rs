@@ -222,18 +222,8 @@ const CAT_RESIDENT_DIMENSION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExte
     error_identifier: Some("RunMat:compatibility:CatResidentDimensionExtension"),
 };
 
-const CAT_COMPLEX_INTEGER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cat-complex-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cat with typed complex-integer data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CatComplexIntegerInputExtension"),
-};
-
-pub const CAT_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    CAT_LIKE_EXTENSION,
-    CAT_RESIDENT_DIMENSION_EXTENSION,
-    CAT_COMPLEX_INTEGER_EXTENSION,
-];
+pub const CAT_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [CAT_LIKE_EXTENSION, CAT_RESIDENT_DIMENSION_EXTENSION];
 
 const CAT_INTEGER_DIMENSION_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -257,9 +247,9 @@ const CAT_COMPLEX_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
         name: "complex A1,...,An",
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "RunMat mode can structurally concatenate paired integer real and imaginary components; the public integer domain does not expose complex-integer arrays.",
+        notes: "All eight paired complex-integer classes concatenate structurally with exact real and imaginary components.",
     }];
 
 const CAT_RESIDENT_INTEGER_DIMENSION_INPUTS: [BuiltinIntegerInputCapability; 1] =
@@ -290,7 +280,7 @@ pub const CAT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
         overflow: BuiltinIntegerOverflowRule::Saturate,
         backend: BuiltinIntegerBackendRule::HostAndGpu,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "The leftmost participating integer class dominates real numeric and logical operands. Unlike integer values and floating or logical values convert to that class with ordinary rounding and saturation. Resident data uses the provider hook where representable or exact gather/assemble/upload fallback. Public evidence leaves the narrow typed-empty class-dominance edge open.",
+        notes: "The leftmost nonempty integer class dominates real numeric and logical operands. Unlike integer values and floating or logical values convert to that class with ordinary rounding and saturation. Empty operands are omitted when a nonempty operand remains and therefore do not affect the result class. Resident data uses the provider hook where representable or exact gather/assemble/upload fallback.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "B = cat(dim,complex_integer_A1,...,An)",
@@ -298,9 +288,9 @@ pub const CAT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
         computation_domain: BuiltinIntegerComputationDomain::Structural,
         output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
         overflow: BuiltinIntegerOverflowRule::Saturate,
-        backend: BuiltinIntegerBackendRule::HostOnly,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "RunMat-only typed complex-integer concatenation applies the leftmost integer component class independently to real and imaginary parts and preserves exact paired storage.",
+        notes: "Typed complex-integer concatenation applies the leftmost integer component class independently to real and imaginary parts, preserves exact paired storage, and restores resident output to the owning provider.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "B = cat(gpuArray(integer_dim),A1,A2,...,An)",
@@ -564,9 +554,11 @@ impl LikeSpec {
     }
 
     fn ensure_device(&self, category: CatCategory) -> BuiltinResult<()> {
-        if matches!(self.device, LikeDevice::Gpu) && !matches!(category, CatCategory::Numeric) {
+        if matches!(self.device, LikeDevice::Gpu)
+            && !matches!(category, CatCategory::Numeric | CatCategory::Complex)
+        {
             return Err(cat_err(
-                "cat: GPU 'like' prototypes are only supported for numeric inputs",
+                "cat: GPU 'like' prototypes are only supported for numeric or complex inputs",
             ));
         }
         Ok(())
@@ -626,15 +618,6 @@ async fn cat_builtin(dim: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
             BUILTIN_NAME,
         )?;
     }
-    if inputs.iter().any(
-        |value| matches!(value, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some()),
-    ) {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &CAT_COMPLEX_INTEGER_EXTENSION,
-            BUILTIN_NAME,
-        )?;
-    }
-
     let dim_index = match dim {
         Value::Int(_) | Value::Num(_) | Value::Tensor(_) | Value::GpuTensor(_) => {
             match tensor::dimension_from_value_async(&dim, "cat", false)
@@ -923,7 +906,7 @@ fn leftmost_integer_target(values: &[Value]) -> Option<IntegerTarget> {
             Value::Tensor(tensor) => {
                 if let Some(storage) = tensor.integer_storage() {
                     let target = IntegerTarget::from_storage(storage);
-                    if !is_true_empty_neutral_shape(&tensor.shape) {
+                    if !is_empty_concat_shape(&tensor.shape) {
                         return Some(target);
                     }
                     empty_integer_target.get_or_insert(target);
@@ -1089,7 +1072,7 @@ fn leftmost_complex_integer_target(values: &[Value]) -> Option<IntegerTarget> {
             continue;
         };
         let target = IntegerTarget::from_storage(&storage.real);
-        if !is_true_empty_neutral_shape(&tensor.shape) {
+        if !is_empty_concat_shape(&tensor.shape) {
             return Some(target);
         }
         empty_target.get_or_insert(target);
@@ -1106,7 +1089,7 @@ fn cat_typed_complex_integer_arrays(
     like.ensure_device(CatCategory::Complex)?;
     if matches!(like.device, LikeDevice::Gpu) {
         return Err(cat_err(
-            "cat: GPU typed complex-integer output is not supported until the acceleration provider supports typed integer buffers",
+            "cat: the RunMat-only explicit GPU like form does not accept typed complex-integer output",
         ));
     }
 
@@ -1325,23 +1308,41 @@ async fn cat_gpu_values(
     values: Vec<Value>,
     like: &LikeSpec,
 ) -> BuiltinResult<Value> {
+    let has_complex_data = values.iter().any(|value| match value {
+        Value::Complex(_, _) | Value::ComplexTensor(_) => true,
+        Value::GpuTensor(handle) => {
+            runmat_accelerate_api::handle_storage(handle)
+                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        }
+        _ => false,
+    });
     let output_like = if like.explicit {
         like.clone()
     } else {
         LikeSpec {
             device: LikeDevice::Gpu,
-            category_hint: Some(CatCategory::Numeric),
+            category_hint: Some(if has_complex_data {
+                CatCategory::Complex
+            } else {
+                CatCategory::Numeric
+            }),
             explicit: false,
         }
     };
     if let Some(hint) = like.category_hint {
-        if !matches!(hint, CatCategory::Numeric) {
+        if (has_complex_data && !matches!(hint, CatCategory::Complex))
+            || (!has_complex_data && !matches!(hint, CatCategory::Numeric))
+        {
             return Err(cat_err(
                 "cat: 'like' prototype class does not match gpuArray inputs",
             ));
         }
     }
-    output_like.ensure_device(CatCategory::Numeric)?;
+    output_like.ensure_device(if has_complex_data {
+        CatCategory::Complex
+    } else {
+        CatCategory::Numeric
+    })?;
 
     let all_gpu = values
         .iter()
@@ -1356,8 +1357,9 @@ async fn cat_gpu_values(
 
     let first_handle = handles
         .first()
+        .map(|handle| (*handle).clone())
         .ok_or_else(|| cat_err("cat: no gpuArray inputs to concatenate"))?;
-    let provider = runmat_accelerate_api::provider_for_handle(first_handle)
+    let provider = runmat_accelerate_api::provider_for_handle(&first_handle)
         .ok_or_else(|| cat_err("cat: no acceleration provider is registered"))?;
     for handle in &handles {
         let Some(owner) = runmat_accelerate_api::provider_for_handle(handle) else {
@@ -1388,18 +1390,29 @@ async fn cat_gpu_values(
     for value in values {
         match value {
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-                gathered_values.push(Value::Tensor(tensor));
+                gathered_values
+                    .push(gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await?);
             }
             value => gathered_values.push(value),
         }
     }
 
     let category = determine_category(&gathered_values, &output_like)?;
+    if matches!(category, CatCategory::Complex) {
+        let host_like = LikeSpec {
+            device: LikeDevice::Host,
+            category_hint: Some(CatCategory::Complex),
+            explicit: false,
+        };
+        let result = cat_complex_arrays(dim_zero, gathered_values, &host_like)?;
+        if matches!(output_like.device, LikeDevice::Host) {
+            return Ok(result);
+        }
+        return gpu_helpers::restore_class_preserving_value(&first_handle, result, BUILTIN_NAME)
+            .map_err(|error| cat_err(error.message()));
+    }
     if !matches!(category, CatCategory::Numeric) {
-        return Err(cat_err(
-            "cat: mixed host and gpuArray concatenation currently supports numeric data",
-        ));
+        return Err(cat_err("cat: gpuArray concatenation requires numeric data"));
     }
     if let Some(target) = leftmost_integer_target(&gathered_values) {
         let tensor = build_integer_cat_tensor(target, dim_zero, gathered_values)?;
@@ -1546,10 +1559,6 @@ fn concat_column_major<T: Clone>(
 
 fn is_empty_concat_shape(shape: &[usize]) -> bool {
     shape.contains(&0)
-}
-
-fn is_true_empty_neutral_shape(shape: &[usize]) -> bool {
-    shape.contains(&0) && shape.iter().all(|&dim| dim <= 1)
 }
 
 fn normalize_shape(mut shape: Vec<usize>, dim_zero: usize) -> Vec<usize> {
@@ -1781,7 +1790,7 @@ pub(crate) mod tests {
     fn cat_integer_capability_and_extension_metadata_is_explicit() {
         let builtin = runmat_builtins::builtin_function_by_name("cat").expect("registered cat");
         assert_eq!(builtin.integer_capabilities.len(), 4);
-        assert_eq!(builtin.extensions.len(), 3);
+        assert_eq!(builtin.extensions.len(), 2);
         assert_eq!(
             builtin.integer_capabilities[0].overload,
             BuiltinIntegerOverloadKind::StructuralParameter
@@ -1792,6 +1801,10 @@ pub(crate) mod tests {
         );
         assert_eq!(
             builtin.integer_capabilities[2].inputs[0].availability,
+            BuiltinIntegerInputAvailability::Documented
+        );
+        assert_eq!(
+            builtin.integer_capabilities[3].inputs[0].availability,
             BuiltinIntegerInputAvailability::RunMatOnly
         );
         assert_eq!(
@@ -2194,7 +2207,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn cat_omits_any_empty_geometry_without_resolving_typed_empty_dominance() {
+    fn cat_omits_shaped_empty_geometry_and_uses_the_nonempty_integer_class() {
         let shaped_empty =
             Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 4]).expect("empty");
         let nonempty = Tensor::new_integer(IntegerStorage::U8(vec![1, 2, 3, 4, 5, 6]), vec![2, 3])
@@ -2211,8 +2224,113 @@ pub(crate) mod tests {
         assert_eq!(output.shape, vec![2, 3]);
         assert_eq!(
             output.integer_storage(),
-            Some(&IntegerStorage::U16(vec![1, 2, 3, 4, 5, 6]))
+            Some(&IntegerStorage::U8(vec![1, 2, 3, 4, 5, 6]))
         );
+    }
+
+    #[test]
+    fn cat_all_empty_inputs_keep_the_leftmost_integer_class() {
+        let left =
+            Tensor::new_integer(IntegerStorage::I16(Vec::new()), vec![0, 2]).expect("left empty");
+        let right =
+            Tensor::new_integer(IntegerStorage::U8(Vec::new()), vec![0, 3]).expect("right empty");
+        let result = cat_builtin(
+            Value::Int(IntValue::I32(2)),
+            vec![Value::Tensor(left), Value::Tensor(right)],
+        )
+        .expect("all-empty concatenation");
+
+        let Value::Tensor(output) = result else {
+            panic!("expected tensor");
+        };
+        assert_eq!(output.shape, vec![0, 5]);
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::I16(Vec::new()))
+        );
+    }
+
+    #[test]
+    fn cat_complex_integer_empty_inputs_follow_the_same_class_selection_rule() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let empty = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::I16(Vec::new()),
+                IntegerStorage::I16(Vec::new()),
+            )
+            .expect("empty storage"),
+            vec![1, 0],
+        )
+        .expect("empty complex integer");
+        let value = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(IntegerStorage::U8(vec![7]), IntegerStorage::U8(vec![9]))
+                .expect("value storage"),
+            vec![1, 1],
+        )
+        .expect("complex integer value");
+        let result = cat_builtin(
+            Value::Int(IntValue::I32(2)),
+            vec![Value::ComplexTensor(empty), Value::ComplexTensor(value)],
+        )
+        .expect("complex empty omission");
+        let Value::ComplexTensor(output) = result else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(
+                &IntegerComplexStorage::new(
+                    IntegerStorage::U8(vec![7]),
+                    IntegerStorage::U8(vec![9]),
+                )
+                .expect("expected storage")
+            )
+        );
+    }
+
+    #[test]
+    fn cat_mixed_host_and_gpu_complex_integers_preserves_exact_resident_output() {
+        test_support::with_test_provider(|provider| {
+            let device = ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![9_007_199_254_740_993]),
+                    IntegerStorage::U64(vec![3]),
+                )
+                .expect("device storage"),
+                vec![1, 1],
+            )
+            .expect("device value");
+            let host = ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![u64::MAX]),
+                    IntegerStorage::U64(vec![5]),
+                )
+                .expect("host storage"),
+                vec![1, 1],
+            )
+            .expect("host value");
+            let device = gpu_helpers::upload_complex_tensor(provider, &device).expect("upload");
+            let Value::GpuTensor(output) = cat_builtin(
+                Value::Int(IntValue::I32(2)),
+                vec![Value::GpuTensor(device), Value::ComplexTensor(host)],
+            )
+            .expect("cat") else {
+                panic!("expected resident complex integer");
+            };
+            let Value::ComplexTensor(gathered) =
+                block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(output)))
+                    .expect("gather")
+            else {
+                panic!("expected complex integer");
+            };
+            assert_eq!(gathered.shape, vec![1, 2]);
+            let storage = gathered.integer_storage().expect("integer storage");
+            assert_eq!(
+                storage.real,
+                IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX])
+            );
+            assert_eq!(storage.imag, IntegerStorage::U64(vec![3, 5]));
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2437,18 +2555,17 @@ pub(crate) mod tests {
                 .expect("complex storage");
         let complex =
             ComplexTensor::new_integer(complex_storage, vec![1, 1]).expect("complex integer");
-        let complex_error = cat_builtin(
+        let Value::ComplexTensor(complex_output) = cat_builtin(
             Value::Int(IntValue::I32(1)),
             vec![
                 Value::ComplexTensor(complex.clone()),
                 Value::ComplexTensor(complex),
             ],
         )
-        .expect_err("MATLAB mode rejects typed complex integer");
-        assert_eq!(
-            complex_error.identifier(),
-            CAT_COMPLEX_INTEGER_EXTENSION.error_identifier
-        );
+        .expect("typed complex integer concatenation is documented") else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(complex_output.shape, vec![2, 1]);
 
         test_support::with_test_provider(|provider| {
             let dim_values = [1_u16];

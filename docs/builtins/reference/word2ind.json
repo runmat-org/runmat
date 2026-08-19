@@ -26,13 +26,14 @@
     "unit": "builtins::strings::text_analytics::encoding::tests",
     "integration": null
   },
-  "description": "`word2ind(enc, words)` returns numeric vocabulary indices for words in a RunMat `wordEncoding` object.",
+  "description": "`word2ind(enc, words)` returns vocabulary indices for words in a `wordEncoding` object.",
   "behaviors": [
-    "`enc` must be a RunMat `wordEncoding` compatibility object.",
+    "`enc` must be a `wordEncoding` object.",
     "`words` may be a string scalar, string array, character vector, character matrix, or cell array of scalar text.",
     "The output numeric tensor preserves the input word container shape for string arrays and cell arrays. A character vector returns a scalar 1-by-1 tensor; a character matrix returns one row per input row.",
     "Indices are 1-based. Words missing from the vocabulary return `NaN`.",
-    "`word2ind(___, 'IgnoreCase', true)` performs case-insensitive vocabulary lookup and uses the first matching vocabulary entry."
+    "`word2ind(___, 'IgnoreCase', true)` performs case-insensitive vocabulary lookup and uses the first matching vocabulary entry.",
+    "The input surface is textual: native integer arrays and resident numeric arrays are rejected rather than converted to words. The returned indices are double values, with `NaN` representing missing words."
   ],
   "examples": [
     {
@@ -79,5 +80,5 @@
     "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/encoding.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/encoding.rs"
   },
-  "gpu_residency": "`word2ind` reads host text/model metadata and returns a CPU numeric tensor."
+  "gpu_residency": "`word2ind` reads host text and model metadata and returns a CPU double tensor. Numeric resident inputs are rejected before provider access because they are not valid word inputs."
 }

@@ -71,14 +71,14 @@ const DECONV_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double coefficients; RunMat mode admits exactly representable real integer coefficients.",
+        notes: "The compatibility target documents single and double coefficients; RunMat mode admits exactly representable real integer coefficients.",
     },
     BuiltinIntegerInputCapability {
         name: "denominator",
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double coefficients; RunMat mode admits exactly representable real integer coefficients.",
+        notes: "The compatibility target documents single and double coefficients; RunMat mode admits exactly representable real integer coefficients.",
     },
 ];
 pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
@@ -263,9 +263,13 @@ fn deconv_error_with_source(
 )]
 async fn deconv_builtin(numerator: Value, denominator: Value) -> crate::BuiltinResult<Value> {
     if matches!(crate::output_count::current_output_count(), Some(count) if count > 2) {
-        return Err(build_runtime_error("deconv: too many output arguments")
+        return Err(build_runtime_error(DECONV_ERROR_TOO_MANY_OUTPUTS.message)
             .with_builtin(BUILTIN_NAME)
-            .with_identifier("RunMat:deconv:TooManyOutputs")
+            .with_identifier(
+                DECONV_ERROR_TOO_MANY_OUTPUTS
+                    .identifier
+                    .expect("deconv too-many-outputs descriptor identifier"),
+            )
             .build());
     }
     let eval = evaluate(numerator, denominator).await?;
@@ -1113,8 +1117,6 @@ pub(crate) mod tests {
                     shape: &[1, 2],
                 })
                 .expect("upload integer denominator");
-            runmat_accelerate_api::set_handle_precision(&numerator, ProviderPrecision::F32);
-            runmat_accelerate_api::set_handle_precision(&denominator, ProviderPrecision::F32);
 
             let eval = evaluate(Value::GpuTensor(numerator), Value::GpuTensor(denominator))
                 .expect("evaluate");
@@ -1192,7 +1194,6 @@ pub(crate) mod tests {
                 })
                 .expect("upload logical numerator");
             runmat_accelerate_api::set_handle_logical(&numerator, true);
-            runmat_accelerate_api::set_handle_precision(&numerator, ProviderPrecision::F32);
             let denominator = provider
                 .upload(&HostTensorView {
                     data: &[1.0, 1.0],

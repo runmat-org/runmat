@@ -25,8 +25,6 @@ use runmat_builtins::{
 use runmat_value::{ComplexTensor, Value};
 
 use runmat_macros::runtime_builtin;
-#[cfg(test)]
-use runmat_value::Tensor;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::fft::fftn")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -475,6 +473,7 @@ mod tests {
     use crate::builtins::math::fft::fft::fft_complex_tensor;
     use futures::executor::block_on;
     use runmat_builtins::builtin_function_by_name;
+    use runmat_value::Tensor;
 
     fn error_message(error: crate::RuntimeError) -> String {
         error.message().to_string()

@@ -1,6 +1,6 @@
 //! MATLAB-compatible `ismatrix` builtin with GPU-aware semantics for RunMat.
 
-use crate::builtins::common::shape::value_dimensions;
+use crate::builtins::common::shape::{effective_rank, value_dimensions};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
@@ -10,6 +10,7 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ResolveContext, Type,
 };
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
@@ -23,12 +24,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::InheritInputs,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Consumes tensor shape metadata; falls back to gathering only when providers omit shape information.",
+    notes: "Consumes tensor shape metadata without provider access; an empty internal shape is normalized to scalar dimensions.",
 };
 
 #[runmat_macros::register_fusion_spec(
@@ -52,6 +53,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     type_resolver(bool_scalar_type),
     descriptor(crate::builtins::array::introspection::ismatrix::ISMATRIX_DESCRIPTOR),
+    integer_audit(crate::builtins::array::introspection::ismatrix::ISMATRIX_INTEGER_AUDIT),
     builtin_path = "crate::builtins::array::introspection::ismatrix"
 )]
 async fn ismatrix_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -92,9 +94,14 @@ pub const ISMATRIX_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ISMATRIX_ERRORS,
 };
+pub const ISMATRIX_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "ismatrix is a universal shape predicate; integer class and values are irrelevant, trailing singleton dimensions are ignored, and resident shape metadata is read without gathering payload data.",
+};
 
 async fn value_is_matrix(value: &Value) -> crate::BuiltinResult<bool> {
-    Ok(value_dimensions(value).await?.len() <= 2)
+    Ok(effective_rank(&value_dimensions(value).await?) <= 2)
 }
 
 #[cfg(test)]
@@ -141,6 +148,20 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![0.0; 8], vec![2, 2, 2]).unwrap();
         let result = ismatrix_builtin(Value::Tensor(tensor)).expect("ismatrix");
         assert_eq!(result, Value::Bool(false));
+    }
+
+    #[test]
+    fn ismatrix_ignores_trailing_singleton_dimensions() {
+        let matrix = Tensor::new(vec![0.0; 6], vec![2, 3, 1, 1]).unwrap();
+        assert_eq!(
+            ismatrix_builtin(Value::Tensor(matrix)).unwrap(),
+            Value::Bool(true)
+        );
+        let higher = Tensor::new(vec![0.0; 6], vec![2, 1, 3, 1]).unwrap();
+        assert_eq!(
+            ismatrix_builtin(Value::Tensor(higher)).unwrap(),
+            Value::Bool(false)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -280,7 +301,7 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn ismatrix_gpu_handle_without_shape_falls_back() {
+    fn ismatrix_gpu_handle_without_shape_normalizes_to_scalar_metadata() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0], vec![1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
@@ -292,23 +313,27 @@ pub(crate) mod tests {
                 shape: Vec::new(),
                 device_id: handle.device_id,
                 buffer_id: handle.buffer_id,
+                descriptor: Default::default(),
             };
-            let result = ismatrix_builtin(Value::GpuTensor(handle)).expect("ismatrix gpu fallback");
+            let result = ismatrix_builtin(Value::GpuTensor(handle)).expect("ismatrix gpu scalar");
             assert_eq!(result, Value::Bool(true));
         });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn ismatrix_gpu_handle_invalid_buffer_errors() {
+    fn ismatrix_gpu_handle_never_touches_invalid_provider_buffer() {
         test_support::with_test_provider(|provider| {
             let handle = runmat_accelerate_api::GpuTensorHandle {
                 shape: Vec::new(),
                 device_id: provider.device_id(),
                 buffer_id: u64::MAX,
+                descriptor: Default::default(),
             };
-            let err = ismatrix_builtin(Value::GpuTensor(handle)).unwrap_err();
-            assert!(err.message.contains("gather"));
+            assert_eq!(
+                ismatrix_builtin(Value::GpuTensor(handle)).expect("metadata-only predicate"),
+                Value::Bool(true)
+            );
         });
     }
 

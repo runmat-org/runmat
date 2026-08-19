@@ -1,9 +1,9 @@
 //! MATLAB-compatible `fread` builtin for RunMat.
 
-use std::io::{ErrorKind, Read, Seek, SeekFrom};
-
 #[cfg(test)]
 use runmat_accelerate_api::HostTensorView;
+use std::io::{ErrorKind, Read, Seek, SeekFrom};
+
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
@@ -88,7 +88,7 @@ const FREAD_INTEGER_ID_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents double file identifiers; typed integer identifiers are independently gated and checked exactly.",
+        notes: "The compatibility target documents double file identifiers; typed integer identifiers are independently gated and checked exactly.",
     }];
 const FREAD_INTEGER_SIZE_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -96,7 +96,7 @@ const FREAD_INTEGER_SIZE_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents double size values; typed integer scalar and two-element size controls are independently gated.",
+        notes: "The compatibility target documents double size values; typed integer scalar and two-element size controls are independently gated.",
     }];
 const FREAD_INTEGER_SKIP_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -104,7 +104,7 @@ const FREAD_INTEGER_SKIP_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents a double skip scalar; typed integer skip values are independently gated.",
+        notes: "The compatibility target documents a double skip scalar; typed integer skip values are independently gated.",
     }];
 const FREAD_INTEGER_PROTOTYPE_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -133,7 +133,7 @@ pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 5] = [
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The registry identifier is validated without a floating mirror.",
+        notes: "The registry identifier is validated exactly as an integer.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "A = fread(fileID, integer_sizeA, ...)",
@@ -2162,9 +2162,7 @@ pub(crate) mod tests {
             &self,
             host: &runmat_accelerate_api::HostTensorView,
         ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
-            let handle = self.inner.upload(host)?;
-            runmat_accelerate_api::set_handle_precision(&handle, self.precision);
-            Ok(handle)
+            self.inner.upload(host)
         }
 
         fn download<'a>(
@@ -2172,6 +2170,20 @@ pub(crate) mod tests {
             handle: &'a runmat_accelerate_api::GpuTensorHandle,
         ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
             self.inner.download(handle)
+        }
+
+        fn upload_numeric(
+            &self,
+            host: &runmat_accelerate_api::HostNumericTensorView,
+        ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+            self.inner.upload_numeric(host)
+        }
+
+        fn download_numeric<'a>(
+            &'a self,
+            handle: &'a runmat_accelerate_api::GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelNumericDownloadFuture<'a> {
+            self.inner.download_numeric(handle)
         }
 
         fn upload_integer(
@@ -2325,10 +2337,12 @@ pub(crate) mod tests {
             runmat_accelerate_api::register_provider(ambient);
         }
         let _ambient = runmat_accelerate_api::ThreadProviderGuard::set(Some(ambient));
+        let prototype_data = [0.0_f32];
         let prototype = owner
-            .upload(&HostTensorView {
-                data: &[0.0],
+            .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
+                data: runmat_accelerate_api::HostNumericDataView::F32(&prototype_data),
                 shape: &[1, 1],
+                storage: runmat_accelerate_api::GpuTensorStorage::Real,
             })
             .expect("prototype upload");
         let output = tensor_to_gpu_value(
@@ -2362,16 +2376,14 @@ pub(crate) mod tests {
                 shape: &[1, 1],
             })
             .expect("prototype upload");
-        let malformed = owner
+        let mut malformed = owner
             .upload(&HostTensorView {
                 data: &[1.0],
                 shape: &[1, 1],
             })
             .expect("malformed upload");
-        runmat_accelerate_api::set_handle_storage(
-            &malformed,
-            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-        );
+        malformed.descriptor.storage =
+            Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
         let error = validate_resident_like_output(
             &prototype,
             &malformed,
@@ -2451,6 +2463,7 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: 901,
             buffer_id: 901,
+            descriptor: Default::default(),
         });
         let precision = Value::from("uint8");
         let args = [&resident, &precision, &resident];
@@ -2471,6 +2484,7 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: 902,
             buffer_id: 902,
+            descriptor: Default::default(),
         });
         let args = [Value::from("like"), Value::Num(0.0)];
         let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);

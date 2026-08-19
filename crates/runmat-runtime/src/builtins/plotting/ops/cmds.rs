@@ -1307,6 +1307,7 @@ mod tests {
             shape: vec![1, 4],
             device_id: 0,
             buffer_id: 9_361_001,
+            descriptor: Default::default(),
         };
         let error = axis_builtin(vec![Value::GpuTensor(resident)])
             .expect_err("resident graphics limits must reject");

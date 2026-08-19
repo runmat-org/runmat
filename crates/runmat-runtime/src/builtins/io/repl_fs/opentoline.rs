@@ -3,7 +3,11 @@
 use std::path::PathBuf;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_filesystem as vfs;
@@ -19,6 +23,75 @@ use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "opentoline";
+
+const INTEGER_LINE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "opentoline-integer-line",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "opentoline with a native typed-integer line number is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:OpentolineIntegerLineExtension"),
+};
+const INTEGER_COLUMN_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "opentoline-integer-column",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "opentoline with a native typed-integer column number is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:OpentolineIntegerColumnExtension"),
+};
+const RESIDENT_POSITION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "opentoline-resident-position",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "opentoline with an explicit GPU-resident line or column is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:OpentolineResidentPositionExtension"),
+};
+
+pub const EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    INTEGER_LINE_EXTENSION,
+    INTEGER_COLUMN_EXTENSION,
+    RESIDENT_POSITION_EXTENSION,
+];
+
+const INTEGER_LINE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "line",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "[integer-audit-open] Public evidence establishes a positive line-number control but does not enumerate native typed classes; ordinary integer-valued double remains the compatibility form.",
+    }];
+const INTEGER_COLUMN_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "column",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "[integer-audit-open] Public evidence establishes an optional structural column position but does not enumerate native typed classes; ordinary integer-valued double remains the compatibility form.",
+    }];
+
+const fn position_capability(
+    form: &'static str,
+    inputs: &'static [BuiltinIntegerInputCapability],
+) -> BuiltinIntegerCapabilityDescriptor {
+    BuiltinIntegerCapabilityDescriptor {
+        form,
+        inputs,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The exact positive position controls only editor navigation. Typed-class and explicit-residency gates run before gather, file resolution, or side effects; automatic residency remains transparent.",
+    }
+}
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    position_capability(
+        "opentoline(filename, integer_line, ...)",
+        &INTEGER_LINE_INPUTS,
+    ),
+    position_capability(
+        "opentoline(filename, line, integer_column, ...)",
+        &INTEGER_COLUMN_INPUTS,
+    ),
+];
 
 const FILE_INPUT: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "filename",
@@ -146,7 +219,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Runs on the host. Filename and scalar position gpuArray inputs are gathered before resolving the editor navigation target.",
+    notes: "Runs on the host. Explicit resident line/column controls are a gated RunMat extension and gather only after compatibility classification; resident filename/option values reject without provider access.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::opentoline")]
@@ -170,6 +243,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     type_resolver(crate::builtins::io::type_resolvers::opentoline_type),
     descriptor(crate::builtins::io::repl_fs::opentoline::OPENTOLINE_DESCRIPTOR),
+    extensions(crate::builtins::io::repl_fs::opentoline::EXTENSIONS),
+    integer_capabilities(crate::builtins::io::repl_fs::opentoline::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::repl_fs::opentoline"
 )]
 async fn opentoline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -186,6 +261,10 @@ async fn opentoline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
 
+    gate_position_extensions(&args[1], &INTEGER_LINE_EXTENSION)?;
+    if let Some(column) = args.get(2) {
+        gate_position_extensions(column, &INTEGER_COLUMN_EXTENSION)?;
+    }
     let filename = filename_arg(&args[0]).await?;
     if filename.is_empty() {
         return Err(opentoline_error(
@@ -206,12 +285,26 @@ async fn opentoline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     Ok(empty_array())
 }
 
+fn gate_position_extensions(
+    value: &Value,
+    integer_extension: &BuiltinExtensionDescriptor,
+) -> BuiltinResult<()> {
+    if crate::builtins::common::validation::value_has_native_integer_class(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(integer_extension, BUILTIN_NAME)?;
+    }
+    if matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &RESIDENT_POSITION_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
+}
+
 async fn filename_arg(value: &Value) -> BuiltinResult<String> {
-    let gathered = gather_if_needed_async(value)
-        .await
-        .map_err(|err| opentoline_flow_error("opentoline", err))?;
-    match gathered {
-        Value::String(text) => Ok(text),
+    match value {
+        Value::String(text) => Ok(text.clone()),
         Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
         Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
         _ => Err(opentoline_error(&ERROR_FILENAME, ERROR_FILENAME.message)),
@@ -231,11 +324,8 @@ async fn parse_option(value: &Value) -> BuiltinResult<()> {
 }
 
 async fn text_arg(value: &Value, error: &'static BuiltinErrorDescriptor) -> BuiltinResult<String> {
-    let gathered = gather_if_needed_async(value)
-        .await
-        .map_err(|err| opentoline_flow_error("opentoline", err))?;
-    match gathered {
-        Value::String(text) => Ok(text),
+    match value {
+        Value::String(text) => Ok(text.clone()),
         Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
         Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
         _ => Err(opentoline_error(error, error.message)),
@@ -452,6 +542,76 @@ mod tests {
         let zero =
             Tensor::new_integer(runmat_value::IntegerStorage::U8(vec![0]), vec![1, 1]).unwrap();
         assert!(block_on(positive_integer_arg(&Value::Tensor(zero), "line")).is_err());
+    }
+
+    #[test]
+    fn opentoline_typed_positions_are_independently_gated_before_file_lookup() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let line_error = call(vec![
+            Value::String("definitely-missing.m".into()),
+            Value::Int(IntValue::U16(7)),
+        ])
+        .expect_err("typed line must be gated");
+        assert_eq!(
+            line_error.identifier(),
+            Some("RunMat:compatibility:OpentolineIntegerLineExtension")
+        );
+
+        let column_error = call(vec![
+            Value::String("definitely-missing.m".into()),
+            Value::Num(1.0),
+            Value::Int(IntValue::U16(3)),
+        ])
+        .expect_err("typed column must be gated");
+        assert_eq!(
+            column_error.identifier(),
+            Some("RunMat:compatibility:OpentolineIntegerColumnExtension")
+        );
+    }
+
+    #[test]
+    fn opentoline_resident_position_is_gated_without_provider_access() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::GpuTensorHandle {
+                shape: vec![1, 1],
+                device_id: u32::MAX,
+                buffer_id: u64::MAX,
+                descriptor: Default::default(),
+            }
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit),
+        );
+        let error = call(vec![Value::String("definitely-missing.m".into()), resident])
+            .expect_err("resident line must be gated");
+
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:OpentolineResidentPositionExtension")
+        );
+    }
+
+    #[test]
+    fn opentoline_automatically_resident_double_position_gathers_in_strict_mode() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("target.m");
+        std::fs::write(&path, "a = 1;\n").expect("write file");
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let line = Tensor::new(vec![1.0], vec![1, 1]).expect("line");
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &line)
+                .expect("resident line");
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let result = {
+                let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+                call(vec![
+                    Value::String(path.to_string_lossy().into_owned()),
+                    Value::GpuTensor(handle.clone()),
+                ])
+                .expect("automatic position gathers transparently")
+            };
+            assert_eq!(result, empty_array());
+            runmat_accelerate_api::clear_handle_metadata(&handle);
+        });
     }
 
     #[test]

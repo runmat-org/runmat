@@ -6,6 +6,10 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
+    BuiltinIntegerAuditKind,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     ComplexTensor, IntValue, LogicalArray, NumericStorage, SparseTensor, Tensor, Value,
@@ -110,6 +114,19 @@ pub const ISDIAG_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ISDIAG_ERRORS,
 };
 
+const ISDIAG_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "isdiag-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "isdiag with typed-integer input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:IsdiagIntegerInputExtension"),
+};
+const ISDIAG_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ISDIAG_INTEGER_INPUT_EXTENSION];
+pub const ISDIAG_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "MATLAB documents single, double, and logical input; exact integer host or resident input is a separately declared and gated RunMat extension.",
+};
+
 pub const ISTRIL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ISTRIL_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -117,11 +134,37 @@ pub const ISTRIL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ISTRIL_ERRORS,
 };
 
+const ISTRIL_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "istril-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "istril with typed-integer input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:IstrilIntegerInputExtension"),
+};
+const ISTRIL_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ISTRIL_INTEGER_INPUT_EXTENSION];
+pub const ISTRIL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "MATLAB documents single, double, and logical input; exact integer host or resident input is a separately declared and gated RunMat extension.",
+};
+
 pub const ISTRIU_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ISTRIU_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ISTRIU_ERRORS,
+};
+
+const ISTRIU_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "istriu-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "istriu with typed-integer input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:IstriuIntegerInputExtension"),
+};
+const ISTRIU_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ISTRIU_INTEGER_INPUT_EXTENSION];
+pub const ISTRIU_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "MATLAB documents single, double, and logical input; exact integer host or resident input is a separately declared and gated RunMat extension.",
 };
 
 #[runmat_macros::register_gpu_spec(
@@ -241,9 +284,19 @@ struct BuiltinContext {
     accel = "structure",
     type_resolver(logical_scalar_type),
     descriptor(crate::builtins::math::linalg::structure::diagonal_triangular::ISDIAG_DESCRIPTOR),
+    extensions(ISDIAG_EXTENSIONS),
+    integer_audit(
+        crate::builtins::math::linalg::structure::diagonal_triangular::ISDIAG_INTEGER_AUDIT
+    ),
     builtin_path = "crate::builtins::math::linalg::structure::diagonal_triangular"
 )]
 async fn isdiag_builtin(value: Value) -> BuiltinResult<Value> {
+    if value_has_integer_storage(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ISDIAG_INTEGER_INPUT_EXTENSION,
+            "isdiag",
+        )?;
+    }
     structure_predicate_builtin(
         value,
         StructurePredicate::Diagonal,
@@ -256,6 +309,14 @@ async fn isdiag_builtin(value: Value) -> BuiltinResult<Value> {
     .await
 }
 
+fn value_has_integer_storage(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(value) if value.integer_storage().is_some())
+        || matches!(value, Value::ComplexTensor(value) if value.integer_storage().is_some())
+        || matches!(value, Value::SparseTensor(value) if value.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
 #[runtime_builtin(
     name = "istril",
     category = "math/linalg/structure",
@@ -264,9 +325,19 @@ async fn isdiag_builtin(value: Value) -> BuiltinResult<Value> {
     accel = "structure",
     type_resolver(logical_scalar_type),
     descriptor(crate::builtins::math::linalg::structure::diagonal_triangular::ISTRIL_DESCRIPTOR),
+    extensions(ISTRIL_EXTENSIONS),
+    integer_audit(
+        crate::builtins::math::linalg::structure::diagonal_triangular::ISTRIL_INTEGER_AUDIT
+    ),
     builtin_path = "crate::builtins::math::linalg::structure::diagonal_triangular"
 )]
 async fn istril_builtin(value: Value) -> BuiltinResult<Value> {
+    if value_has_integer_storage(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ISTRIL_INTEGER_INPUT_EXTENSION,
+            "istril",
+        )?;
+    }
     structure_predicate_builtin(
         value,
         StructurePredicate::LowerTriangular,
@@ -287,9 +358,19 @@ async fn istril_builtin(value: Value) -> BuiltinResult<Value> {
     accel = "structure",
     type_resolver(logical_scalar_type),
     descriptor(crate::builtins::math::linalg::structure::diagonal_triangular::ISTRIU_DESCRIPTOR),
+    extensions(ISTRIU_EXTENSIONS),
+    integer_audit(
+        crate::builtins::math::linalg::structure::diagonal_triangular::ISTRIU_INTEGER_AUDIT
+    ),
     builtin_path = "crate::builtins::math::linalg::structure::diagonal_triangular"
 )]
 async fn istriu_builtin(value: Value) -> BuiltinResult<Value> {
+    if value_has_integer_storage(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ISTRIU_INTEGER_INPUT_EXTENSION,
+            "istriu",
+        )?;
+    }
     structure_predicate_builtin(
         value,
         StructurePredicate::UpperTriangular,
@@ -325,13 +406,16 @@ async fn gpu_structure_predicate(
         let Some((_rows, _cols)) = matrix_dims_or_false(&handle.shape) else {
             return Ok(false);
         };
-        if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle)
-            .or_else(runmat_accelerate_api::provider)
-        {
+        if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
+            let metadata = gpu_helpers::snapshot_handle_metadata(&handle);
             match provider.bandwidth(&handle) {
-                Ok(bandwidth) => return Ok(bandwidth_satisfies(bandwidth, predicate)),
+                Ok(bandwidth) => {
+                    gpu_helpers::restore_handle_metadata(&handle, &metadata);
+                    return Ok(bandwidth_satisfies(bandwidth, predicate));
+                }
                 Err(err) => debug!("{}: provider bandwidth fallback: {err}", ctx.name),
             }
+            gpu_helpers::restore_handle_metadata(&handle, &metadata);
         }
     }
 
@@ -433,7 +517,10 @@ async fn matrix_from_gpu(
     handle: GpuTensorHandle,
     ctx: BuiltinContext,
 ) -> BuiltinResult<MatrixInput> {
-    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
+    let owner = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+        runtime_error_with_detail(ctx, ctx.internal, "no acceleration provider owns the input")
+    })?;
+    let gathered = gpu_helpers::download_value_preserving_residency_async(owner, &handle)
         .await
         .map_err(|err| runtime_error_with_detail(ctx, ctx.internal, err))?;
     matrix_from_host_value(gathered, ctx)
@@ -649,14 +736,17 @@ mod tests {
     use crate::builtins::common::test_support;
 
     fn call_isdiag(value: Value) -> BuiltinResult<Value> {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         block_on(isdiag_builtin(value))
     }
 
     fn call_istril(value: Value) -> BuiltinResult<Value> {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         block_on(istril_builtin(value))
     }
 
     fn call_istriu(value: Value) -> BuiltinResult<Value> {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         block_on(istriu_builtin(value))
     }
 
@@ -672,6 +762,29 @@ mod tests {
         assert_eq!(ISDIAG_DESCRIPTOR.signatures[0].label, "tf = isdiag(A)");
         assert_eq!(ISTRIL_DESCRIPTOR.signatures[0].label, "tf = istril(A)");
         assert_eq!(ISTRIU_DESCRIPTOR.signatures[0].label, "tf = istriu(A)");
+    }
+
+    #[test]
+    fn compatibility_mode_rejects_integer_structure_extensions_before_execution() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let isdiag_error = block_on(isdiag_builtin(Value::Int(IntValue::I32(1))))
+            .expect_err("integer isdiag is a RunMat extension");
+        assert_eq!(
+            isdiag_error.identifier(),
+            ISDIAG_INTEGER_INPUT_EXTENSION.error_identifier
+        );
+        let istril_error = block_on(istril_builtin(Value::Int(IntValue::I32(1))))
+            .expect_err("integer istril is a RunMat extension");
+        assert_eq!(
+            istril_error.identifier(),
+            ISTRIL_INTEGER_INPUT_EXTENSION.error_identifier
+        );
+        let istriu_error = block_on(istriu_builtin(Value::Int(IntValue::I32(1))))
+            .expect_err("integer istriu is a RunMat extension");
+        assert_eq!(
+            istriu_error.identifier(),
+            ISTRIU_INTEGER_INPUT_EXTENSION.error_identifier
+        );
     }
 
     #[test]
@@ -945,6 +1058,7 @@ mod tests {
                 shape: host.shape.to_vec(),
                 device_id: self.device_id,
                 buffer_id: 1,
+                descriptor: Default::default(),
             })
         }
 
@@ -993,6 +1107,7 @@ mod tests {
             shape: vec![3, 3],
             device_id: provider.device_id(),
             buffer_id: 1,
+            descriptor: Default::default(),
         })
     }
 
@@ -1005,6 +1120,7 @@ mod tests {
                 shape: host.shape.to_vec(),
                 device_id: self.device_id(),
                 buffer_id: 1,
+                descriptor: Default::default(),
             })
         }
 
@@ -1082,11 +1198,17 @@ mod tests {
         let _guard = test_support::accel_test_lock();
         let _thread_provider =
             runmat_accelerate_api::ThreadProviderGuard::set(Some(&FALLBACK_PROVIDER));
-        let handle = Value::GpuTensor(GpuTensorHandle {
+        let handle = GpuTensorHandle {
             shape: vec![2, 2],
             device_id: FALLBACK_PROVIDER.device_id(),
             buffer_id: 1,
-        });
+            descriptor: Default::default(),
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::F64,
+            GpuTensorStorage::Real,
+        );
+        let handle = Value::GpuTensor(handle);
         assert!(!expect_bool(call_isdiag(handle.clone()).unwrap()));
         assert!(expect_bool(call_istril(handle.clone()).unwrap()));
         assert!(!expect_bool(call_istriu(handle).unwrap()));

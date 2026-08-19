@@ -10,7 +10,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Host-side compatibility builtin; GPU-resident inputs are gathered before execution."
+    "notes": "Registry access is host-side on Windows. Numeric and resident selectors are rejected without provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -23,13 +23,20 @@
     "unit": null,
     "integration": null
   },
-  "description": "Query values from the Windows registry when running on Windows.",
+  "description": "`winqueryreg` reads a named value or lists value names from the Windows registry.",
   "behaviors": [
-    "Accepts MATLAB text inputs such as string scalars and character row vectors for path, name, or URL arguments where applicable.",
-    "Runs on the host using the active RunMat filesystem, environment, or HTTP abstraction as appropriate.",
-    "Reports MATLAB-style runtime errors for unsupported argument shapes or unavailable host capabilities."
+    "Registry root, key, and value-name selectors must be host string scalars or character row vectors.",
+    "`REG_SZ` and `REG_EXPAND_SZ` values return text. `REG_DWORD` values return an exact `int32`, including values whose bit pattern represents a negative `int32`.",
+    "The leading `name` form lists value names under a key and returns them as text entries.",
+    "Native integer and resident numeric selectors reject before provider or registry access.",
+    "The builtin reports that the Windows registry is unavailable when called on another operating system."
   ],
   "examples": [],
-  "faqs": [],
+  "faqs": [
+    {
+      "question": "Why can a REG_DWORD result be negative?",
+      "answer": "The 32-bit registry payload is returned with the documented `int32` class, so its bit pattern is interpreted as a signed 32-bit integer."
+    }
+  ],
   "links": []
 }

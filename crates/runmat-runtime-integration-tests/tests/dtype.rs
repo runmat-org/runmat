@@ -180,7 +180,7 @@ fn typed_sparse_scalar_indexing_preserves_all_integer_classes() {
             let Value::SparseTensor(result) = result else {
                 panic!("expected sparse scalar result");
             };
-            let expected = if indices == &[1.0] || indices == &[1.0, 1.0] {
+            let expected = if indices == [1.0] || indices == [1.0, 1.0] {
                 storage.clone()
             } else {
                 storage.zeros_like(0)

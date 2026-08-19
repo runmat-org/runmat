@@ -224,6 +224,31 @@ fn primitive_class_registry() -> HashMap<String, RuntimeClass> {
             },
         );
     }
+    registry.insert(
+        "gpuArray".into(),
+        RuntimeClass {
+            name: "gpuArray".into(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: runmat_builtins::GPU_ARRAY_PUBLIC_METHODS
+                .iter()
+                .map(|method| {
+                    (
+                        (*method).to_owned(),
+                        RuntimeMethod {
+                            name: (*method).to_owned(),
+                            is_static: false,
+                            is_abstract: false,
+                            is_sealed: false,
+                            access: MemberAccess::Public,
+                            function_name: format!("gpuArray.{method}"),
+                            implicit_class_argument: None,
+                        },
+                    )
+                })
+                .collect(),
+        },
+    );
     if let Some(class) = registry.get_mut("matlab.metadata.DynamicProperty") {
         class.methods.insert(
             "delete".into(),

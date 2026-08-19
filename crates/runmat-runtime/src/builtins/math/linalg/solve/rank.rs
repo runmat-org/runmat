@@ -4,7 +4,11 @@ use nalgebra::{linalg::SVD, DMatrix};
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
@@ -22,6 +26,82 @@ use crate::builtins::math::linalg::type_resolvers::numeric_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "rank";
+
+pub const RANK_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "rank-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "rank with a typed-integer matrix is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RankIntegerInputExtension"),
+};
+
+pub const RANK_INTEGER_TOLERANCE_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "rank-integer-tolerance",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "rank with a typed-integer tolerance is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:RankIntegerToleranceExtension"),
+    };
+pub const RANK_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "rank-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "rank with a logical matrix is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RankLogicalInputExtension"),
+};
+pub const RANK_LOGICAL_TOLERANCE_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "rank-logical-tolerance",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "rank with a logical tolerance is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:RankLogicalToleranceExtension"),
+    };
+
+pub const RANK_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    RANK_INTEGER_INPUT_EXTENSION,
+    RANK_INTEGER_TOLERANCE_EXTENSION,
+    RANK_LOGICAL_INPUT_EXTENSION,
+    RANK_LOGICAL_TOLERANCE_EXTENSION,
+];
+
+const RANK_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The public matrix classes are single and double; RunMat mode admits real integer matrices only after an exact binary64-boundary check.",
+    }];
+
+const RANK_INTEGER_TOLERANCE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "tol",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public tolerance is a real scalar without an integer class list; RunMat mode admits typed integer tolerance values only when exactly representable as binary64.",
+    }];
+
+pub const RANK_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "k = rank(integer_A, tol?)",
+        inputs: &RANK_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The gated integer matrix crosses one checked binary64 SVD boundary; the structural rank count is returned as an exactly representable double scalar and automatic residency may restore it to the owner.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "k = rank(A, integer_tol)",
+        inputs: &RANK_INTEGER_TOLERANCE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed integer tolerance is a gated RunMat extension and crosses into the SVD threshold only after exact binary64 representability and nonnegative finite validation.",
+    },
+];
 
 const RANK_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "k",
@@ -180,11 +260,56 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "rank",
     type_resolver(numeric_scalar_type),
     descriptor(crate::builtins::math::linalg::solve::rank::RANK_DESCRIPTOR),
+    extensions(crate::builtins::math::linalg::solve::rank::RANK_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::linalg::solve::rank::RANK_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::linalg::solve::rank"
 )]
 async fn rank_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::value_has_native_integer_class(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &RANK_INTEGER_INPUT_EXTENSION,
+            NAME,
+        )?;
+    }
+    if crate::builtins::common::validation::value_has_logical_class(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &RANK_LOGICAL_INPUT_EXTENSION,
+            NAME,
+        )?;
+    }
+    for tolerance in &rest {
+        if crate::builtins::common::validation::value_has_native_integer_class(tolerance) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &RANK_INTEGER_TOLERANCE_EXTENSION,
+                NAME,
+            )?;
+            if !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(
+                tolerance,
+            )
+            .await?
+            {
+                return Err(argument_error(
+                    "rank: integer tolerance must be exactly representable as double",
+                ));
+            }
+        }
+        if crate::builtins::common::validation::value_has_logical_class(tolerance) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &RANK_LOGICAL_TOLERANCE_EXTENSION,
+                NAME,
+            )?;
+        }
+    }
     let tol = parse_tolerance_arg(NAME, &rest).map_err(argument_error)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, NAME)?;
+    if crate::builtins::common::validation::value_has_native_integer_class(&value)
+        && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(&value)
+            .await?
+    {
+        return Err(builtin_error(
+            "rank: integer input must be exactly representable as double",
+        ));
+    }
     match value {
         Value::GpuTensor(handle) => rank_gpu(handle, tol).await,
         Value::ComplexTensor(tensor) => rank_complex_tensor_value(tensor, tol),
@@ -200,11 +325,14 @@ async fn rank_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 async fn rank_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        match provider.rank(&handle, tol).await {
-            Ok(device_scalar) => return Ok(Value::GpuTensor(device_scalar)),
-            Err(_) => {
-                // Fall through to host-based fallback.
+    let owner = gpu_helpers::exact_provider_for_handle(&handle);
+    if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
+        if let Some(provider) = owner {
+            match provider.rank(&handle, tol).await {
+                Ok(device_scalar) => return Ok(Value::GpuTensor(device_scalar)),
+                Err(_) => {
+                    // Fall through to host-based fallback.
+                }
             }
         }
     }
@@ -214,7 +342,7 @@ async fn rank_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<Va
         .map_err(map_control_flow)?;
     let rank = rank_scalar_from_value(gathered, tol)?;
 
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = owner {
         match upload_rank_scalar(provider, rank) {
             Ok(uploaded) => return Ok(Value::GpuTensor(uploaded)),
             Err(err) => {
@@ -397,6 +525,33 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn rank_resident_integer_gates_then_uses_checked_owner_fallback() {
+        test_support::with_test_provider(|provider| {
+            let input =
+                Tensor::new_integer(IntegerStorage::U16(vec![1, 0, 0, 1]), vec![2, 2]).unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &input).expect("integer upload");
+            {
+                let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+                let err = rank_builtin(Value::GpuTensor(handle.clone()), Vec::new())
+                    .expect_err("strict mode must gate resident integer input");
+                assert_eq!(
+                    err.identifier(),
+                    RANK_INTEGER_INPUT_EXTENSION.error_identifier
+                );
+            }
+            let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let Value::GpuTensor(output) =
+                rank_builtin(Value::GpuTensor(handle), Vec::new()).expect("resident rank")
+            else {
+                panic!("resident fallback must restore output");
+            };
+            assert_eq!(runmat_accelerate_api::handle_integer_type(&output), None);
+            let gathered = test_support::gather(Value::GpuTensor(output)).expect("gather output");
+            assert_eq!(gathered.materialize_f64(), vec![2.0]);
+        });
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rank_default_tolerance_reduces_rank() {
@@ -500,6 +655,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rank_scalar_bool_and_int() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let bool_rank = rank_builtin(Value::Bool(false), Vec::new()).expect("rank");
         let int_rank = rank_builtin(Value::Int(IntValue::I32(5)), Vec::new()).expect("rank");
         match bool_rank {
@@ -536,7 +692,9 @@ pub(crate) mod tests {
             register_wgpu_provider, WgpuProviderOptions,
         };
 
-        let _ = register_wgpu_provider(WgpuProviderOptions::default());
+        if register_wgpu_provider(WgpuProviderOptions::default()).is_err() {
+            return;
+        }
 
         let tensor = Tensor::new(
             vec![1.0, 2.0, 3.0, 2.0, 4.0, 6.0, 3.0, 6.0, 9.0],

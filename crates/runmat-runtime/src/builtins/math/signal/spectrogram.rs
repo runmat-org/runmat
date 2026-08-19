@@ -5,7 +5,11 @@ use runmat_accelerate_api::{
     ProviderSpectralFrameMode, ProviderSpectralRange, ProviderSpectralRequest,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
@@ -249,6 +253,70 @@ pub const SPECTROGRAM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &SPECTROGRAM_ERRORS,
 };
 
+const SPECTROGRAM_INTEGER_SIGNAL_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "spectrogram-integer-signal",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "spectrogram with a typed-integer signal is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:SpectrogramIntegerSignalExtension"),
+    };
+const SPECTROGRAM_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "spectrogram-integer-numeric-control",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "spectrogram with typed-integer numeric options is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:SpectrogramIntegerNumericControlExtension"),
+    };
+pub const SPECTROGRAM_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    SPECTROGRAM_INTEGER_SIGNAL_EXTENSION,
+    SPECTROGRAM_INTEGER_CONTROL_EXTENSION,
+];
+const SPECTROGRAM_INTEGER_SIGNAL_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "x",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented signal classes are single and double; admitted typed values must be exact at the binary64 STFT boundary.",
+    }];
+const SPECTROGRAM_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 4] = [
+    spectrogram_integer_control("win"),
+    spectrogram_integer_control("nOverlap"),
+    spectrogram_integer_control("freqSpec"),
+    spectrogram_integer_control("Fs"),
+];
+const fn spectrogram_integer_control(name: &'static str) -> BuiltinIntegerInputCapability {
+    BuiltinIntegerInputCapability {
+        name,
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Public documentation establishes single and double storage for this role; RunMat gates typed input and prevents rounded conversion.",
+    }
+}
+pub const SPECTROGRAM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[s,f,t,ps] = spectrogram(integer_x, ...)",
+        inputs: &SPECTROGRAM_INTEGER_SIGNAL_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "The signal crosses an exact binary64 boundary before host STFT or provider spectral dispatch; GPU support remains provider-dependent.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "spectrogram(x, integer_win/nOverlap/freqSpec/Fs, ...)",
+        inputs: &SPECTROGRAM_INTEGER_CONTROL_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed numeric controls are gated RunMat extensions. Structural scalars are range checked, and numerical vectors enter binary64 only after exact representability is proven.",
+    },
+];
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FrequencyRange {
     Onesided,
@@ -324,6 +392,10 @@ fn spectrogram_error_with_message(
     keywords = "spectrogram,stft,psd,power spectrum,time frequency,signal processing",
     type_resolver(spectrogram_type),
     descriptor(crate::builtins::math::signal::spectrogram::SPECTROGRAM_DESCRIPTOR),
+    extensions(crate::builtins::math::signal::spectrogram::SPECTROGRAM_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::math::signal::spectrogram::SPECTROGRAM_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::math::signal::spectrogram"
 )]
 async fn spectrogram_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -337,6 +409,22 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
     crate::builtins::common::validation::reject_typed_complex_integer(&x, BUILTIN_NAME)?;
     for value in rest {
         crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
+    }
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &x,
+        &SPECTROGRAM_INTEGER_SIGNAL_EXTENSION,
+        BUILTIN_NAME,
+        "signal",
+    )
+    .await?;
+    for value in rest {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            value,
+            &SPECTROGRAM_INTEGER_CONTROL_EXTENSION,
+            BUILTIN_NAME,
+            "numeric-control",
+        )
+        .await?;
     }
     if let Value::GpuTensor(handle) = &x {
         let signal_len = gpu_vector_len(BUILTIN_NAME, "x", handle).map_err(|err| {
@@ -1067,7 +1155,7 @@ mod tests {
     }
 
     #[test]
-    fn spectrogram_scalar_detector_reads_typed_integer_storage_without_mirror() {
+    fn spectrogram_scalar_detector_reads_typed_integer_storage_exactly() {
         let scalar =
             Tensor::new_integer(IntegerStorage::I16(vec![16]), vec![1, 1]).expect("scalar");
         let vector =

@@ -346,7 +346,7 @@ fn is_text_ignore_case_value(value: &Value) -> bool {
 fn reject_resident_numeric_text(value: &Value) -> BuiltinResult<()> {
     if crate::dispatcher::value_contains_gpu(value) {
         return Err(contains_error_with_message(
-            "contains: text and pattern inputs must be text values",
+            CONTAINS_ERROR_INVALID_INPUT.message,
             &CONTAINS_ERROR_INVALID_INPUT,
         ));
     }
@@ -792,6 +792,7 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let nested = Value::Cell(CellArray::new(vec![resident], 1, 1).expect("cell"));
         for (text, pattern) in [

@@ -69,7 +69,7 @@
       "output": "w =\n   1.5286 + 1.1437i\n   1.3618 + 2.8638i"
     },
     {
-      "description": "Using the RunMat-only character-input extension (mix of complex and real results)",
+      "description": "Computing inverse hyperbolic cosine values from character codes",
       "input": "C = char([0 65]);   % includes a code point below 1\nY = acosh(C)",
       "output": "Y =\n   0.0000 + 1.5708i   4.8675 + 0.0000i"
     }

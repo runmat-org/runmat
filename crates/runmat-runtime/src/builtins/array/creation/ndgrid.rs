@@ -8,6 +8,11 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ResolveContext, Type,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     ComplexStorage, ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericDType,
@@ -39,7 +44,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Resident real/logical gpuArray vector inputs use the provider ndgrid hook when available; unsupported providers or complex axes fall back to host materialisation.",
+    notes: "Resident real/logical gpuArray vector inputs use the provider ndgrid hook when available; complex axes use exact owner-resolved gather, host expansion, and validated restoration.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::ndgrid")]
@@ -134,6 +139,27 @@ const NDGRID_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     },
 ];
 
+const NDGRID_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "x1, x2, ..., xn",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Every documented integer grid-vector class is replicated exactly and each corresponding output preserves that input class.",
+    }];
+
+pub const NDGRID_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[X1,...,Xn] = ndgrid(integer_x1, ..., integer_xn)",
+        inputs: &NDGRID_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Host axes preserve authoritative native storage independently. MATLAB documents gpuArray axes only for single and double; explicit integer gpuArray axes reject, while automatic integer residency gathers transparently to exact host grids.",
+    }];
+
 const NDGRID_ERROR_MISSING_AXIS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.NDGRID.MISSING_AXIS",
     identifier: Some("RunMat:ndgrid:MissingAxis"),
@@ -184,6 +210,7 @@ pub const NDGRID_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "array_construct",
     type_resolver(ndgrid_type),
     descriptor(crate::builtins::array::creation::ndgrid::NDGRID_DESCRIPTOR),
+    integer_capabilities(crate::builtins::array::creation::ndgrid::NDGRID_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::creation::ndgrid"
 )]
 async fn ndgrid_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -245,9 +272,7 @@ fn try_provider_outputs(
         return Ok(Some(Vec::new()));
     }
 
-    let Some(provider) = runmat_accelerate_api::provider_for_device(device_id)
-        .or_else(runmat_accelerate_api::provider)
-    else {
+    let Some(provider) = runmat_accelerate_api::provider_for_device(device_id) else {
         return Ok(None);
     };
 
@@ -306,28 +331,11 @@ fn try_provider_outputs(
 
 fn annotate_provider_output(handle: &GpuTensorHandle, class: OutputClass) {
     match class {
-        OutputClass::Real(dtype) => {
+        OutputClass::Real(_) => {
             runmat_accelerate_api::set_handle_logical(handle, false);
-            let precision = match dtype {
-                NumericDType::F32 => runmat_accelerate_api::ProviderPrecision::F32,
-                NumericDType::F64
-                | NumericDType::I8
-                | NumericDType::I16
-                | NumericDType::I32
-                | NumericDType::I64
-                | NumericDType::U8
-                | NumericDType::U16
-                | NumericDType::U32
-                | NumericDType::U64 => runmat_accelerate_api::ProviderPrecision::F64,
-            };
-            runmat_accelerate_api::set_handle_precision(handle, precision);
         }
         OutputClass::Logical => {
             runmat_accelerate_api::set_handle_logical(handle, true);
-            runmat_accelerate_api::set_handle_precision(
-                handle,
-                runmat_accelerate_api::ProviderPrecision::F64,
-            );
         }
         OutputClass::Complex => {}
     }
@@ -348,6 +356,11 @@ impl ParsedNdgrid {
 
         let mut prefer_gpu = false;
         let mut gpu_device_id = None;
+        let force_host_for_integer_residency = args.iter().any(|value| {
+            matches!(value, Value::GpuTensor(handle)
+                if runmat_accelerate_api::handle_integer_type(handle).is_some()
+                    && runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::Real)
+        });
         let mut axes = Vec::with_capacity(args.len());
         for (index, value) in args.iter().cloned().enumerate() {
             let axis = axis_from_value(value, index, &mut prefer_gpu, &mut gpu_device_id).await?;
@@ -370,7 +383,7 @@ impl ParsedNdgrid {
             .iter()
             .map(|axis| axis.len)
             .collect::<Vec<_>>();
-        let residency = if prefer_gpu {
+        let residency = if prefer_gpu && !force_host_for_integer_residency {
             OutputResidency::Gpu {
                 device_id: gpu_device_id.unwrap_or(0),
             }
@@ -453,6 +466,48 @@ async fn axis_from_value(
         }),
         Value::ComplexTensor(tensor) => axis_from_complex_tensor(tensor, index),
         Value::GpuTensor(handle) => {
+            if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
+                if runmat_accelerate_api::handle_storage(&handle)
+                    == GpuTensorStorage::ComplexInterleaved
+                {
+                    if !is_vector_shape(&handle.shape) {
+                        return Err(ndgrid_error_with_detail(
+                            &NDGRID_ERROR_INVALID_AXIS,
+                            format!(
+                                "argument {} must be a vector, got shape {:?}",
+                                index + 1,
+                                handle.shape
+                            ),
+                        ));
+                    }
+                    *prefer_gpu = true;
+                    gpu_device_id.get_or_insert(handle.device_id);
+                    return Ok(AxisData {
+                        len: vector_len_from_shape(&handle.shape),
+                        storage: AxisStorage::GpuReal {
+                            handle,
+                            class: OutputClass::Complex,
+                        },
+                    });
+                }
+                if runmat_accelerate_api::handle_is_explicit(&handle) {
+                    return Err(ndgrid_error_with_detail(
+                        &NDGRID_ERROR_INVALID_AXIS,
+                        "integer gpuArray axes are not supported",
+                    ));
+                }
+                return match gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await? {
+                    Value::Tensor(tensor) => axis_from_tensor(tensor, index),
+                    Value::Int(value) => Ok(integer_scalar_axis(value)),
+                    other => Err(ndgrid_error_with_detail(
+                        &NDGRID_ERROR_INVALID_AXIS,
+                        format!(
+                            "argument {} expected integer GPU data, got {other:?}",
+                            index + 1
+                        ),
+                    )),
+                };
+            }
             *prefer_gpu = true;
             gpu_device_id.get_or_insert(handle.device_id);
             if is_vector_shape(&handle.shape)
@@ -829,53 +884,22 @@ impl GridOutput {
         let storage = storage
             .gather(&self.indices)
             .map_err(|err| ndgrid_error_with_detail(&NDGRID_ERROR_INTERNAL, err))?;
-        let is_integer = matches!(storage, ComplexStorage::Integer(_));
         let tensor = ComplexTensor::from_complex_storage(storage, self.shape.clone())
             .map_err(|err| ndgrid_error_with_detail(&NDGRID_ERROR_INTERNAL, err))?;
         match residency {
             OutputResidency::Host => Ok(complex_tensor_into_value(tensor)),
-            OutputResidency::Gpu { .. } if is_integer => Err(ndgrid_error_with_detail(
-                &NDGRID_ERROR_INTERNAL,
-                "GPU-resident typed complex integer outputs are not supported",
-            )),
             OutputResidency::Gpu { device_id } => to_complex_gpu_tensor_value(tensor, device_id),
         }
     }
 }
 
 fn to_gpu_tensor_value(tensor: Tensor, device_id: u32) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider_for_device(device_id)
-        .or_else(runmat_accelerate_api::provider)
-    {
-        let dtype = tensor.numeric_dtype();
-        let data = tensor.materialize_f64();
-        let view = HostTensorView {
-            data: &data,
-            shape: &tensor.shape,
-        };
-        match provider.upload(&view) {
+    if let Some(provider) = runmat_accelerate_api::provider_for_device(device_id) {
+        match gpu_helpers::upload_tensor(provider, &tensor) {
             Ok(handle) => {
-                let precision = match dtype {
-                    NumericDType::F32 => runmat_accelerate_api::ProviderPrecision::F32,
-                    NumericDType::F64
-                    | NumericDType::I8
-                    | NumericDType::I16
-                    | NumericDType::I32
-                    | NumericDType::I64
-                    | NumericDType::U8
-                    | NumericDType::U16
-                    | NumericDType::U32
-                    | NumericDType::U64 => runmat_accelerate_api::ProviderPrecision::F64,
-                };
-                runmat_accelerate_api::set_handle_precision(&handle, precision);
                 return Ok(Value::GpuTensor(handle));
             }
-            Err(err) => {
-                return Err(ndgrid_error_with_detail(
-                    &NDGRID_ERROR_INTERNAL,
-                    err.to_string(),
-                ))
-            }
+            Err(err) => return Err(ndgrid_error_with_detail(&NDGRID_ERROR_INTERNAL, &err)),
         }
     }
     Err(ndgrid_error_with_detail(
@@ -887,9 +911,7 @@ fn to_gpu_tensor_value(tensor: Tensor, device_id: u32) -> BuiltinResult<Value> {
 fn to_logical_gpu_value(logical: LogicalArray, device_id: u32) -> BuiltinResult<Value> {
     let tensor = tensor::logical_to_tensor(&logical)
         .map_err(|err| ndgrid_error_with_detail(&NDGRID_ERROR_INTERNAL, err))?;
-    if let Some(provider) = runmat_accelerate_api::provider_for_device(device_id)
-        .or_else(runmat_accelerate_api::provider)
-    {
+    if let Some(provider) = runmat_accelerate_api::provider_for_device(device_id) {
         let data = tensor.as_f64_slice().ok_or_else(|| {
             ndgrid_error_with_detail(
                 &NDGRID_ERROR_INTERNAL,
@@ -917,9 +939,7 @@ fn to_logical_gpu_value(logical: LogicalArray, device_id: u32) -> BuiltinResult<
 }
 
 fn to_complex_gpu_tensor_value(tensor: ComplexTensor, device_id: u32) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider_for_device(device_id)
-        .or_else(runmat_accelerate_api::provider)
-    {
+    if let Some(provider) = runmat_accelerate_api::provider_for_device(device_id) {
         match gpu_helpers::upload_complex_tensor(provider, &tensor) {
             Ok(handle) => return Ok(gpu_helpers::complex_gpu_value(handle)),
             Err(err) => {
@@ -1206,6 +1226,75 @@ mod tests {
         }
     }
 
+    #[test]
+    fn ndgrid_automatic_integer_residency_gathers_exactly_but_explicit_rejects() {
+        test_support::with_test_provider(|provider| {
+            let axis = Tensor::new_integer(
+                IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+                vec![1, 2],
+            )
+            .expect("axis");
+            let automatic = gpu_helpers::upload_tensor(provider, &axis).expect("upload");
+            let automatic =
+                automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let evaluated =
+                eval(&[Value::GpuTensor(automatic)], Some(1)).expect("automatic gather");
+            let Value::Tensor(output) = output(&evaluated, 0).expect("host grid") else {
+                panic!("automatic integer residency must return exact host output");
+            };
+            assert_eq!(
+                output.integer_storage(),
+                Some(&IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]))
+            );
+
+            let explicit = gpu_helpers::upload_tensor(provider, &axis).expect("upload");
+            let explicit =
+                explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let error = match eval(&[Value::GpuTensor(explicit)], Some(1)) {
+                Ok(_) => panic!("explicit integer gpuArray must reject"),
+                Err(error) => error,
+            };
+            assert!(error.message().contains("integer gpuArray axes"));
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn ndgrid_wgpu_integer_residency_obeys_automatic_and_explicit_policy() {
+        let _guard = test_support::accel_test_lock();
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) else {
+            return;
+        };
+        let axis = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            vec![1, 2],
+        )
+        .expect("axis");
+
+        let automatic = gpu_helpers::upload_tensor(provider, &axis).expect("automatic upload");
+        let automatic =
+            automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+        let evaluated = eval(&[Value::GpuTensor(automatic)], Some(1)).expect("automatic gather");
+        let Value::Tensor(output) = output(&evaluated, 0).expect("exact host output") else {
+            panic!("automatic integer residency must become host output");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]))
+        );
+
+        let explicit = gpu_helpers::upload_tensor(provider, &axis).expect("explicit upload");
+        let explicit =
+            explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let error = match eval(&[Value::GpuTensor(explicit)], Some(1)) {
+            Ok(_) => panic!("explicit integer gpuArray must reject"),
+            Err(error) => error,
+        };
+        assert!(error.message().contains("integer gpuArray axes"));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ndgrid_reads_typed_integer_axis_length_from_storage_without_mirror() {
@@ -1381,20 +1470,10 @@ mod tests {
     #[test]
     fn ndgrid_gpu_inputs_use_provider_resident_outputs() {
         test_support::with_test_provider(|provider| {
-            let x = tensor(vec![1.0, 2.0], vec![1, 2]);
-            let y = tensor(vec![10.0, 20.0, 30.0], vec![1, 3]);
-            let x_handle = provider
-                .upload(&HostTensorView {
-                    data: &x.materialize_f64(),
-                    shape: &x.shape,
-                })
-                .expect("upload x");
-            let y_handle = provider
-                .upload(&HostTensorView {
-                    data: &y.materialize_f64(),
-                    shape: &y.shape,
-                })
-                .expect("upload y");
+            let x = Tensor::from_f32(vec![1.25, 2.5], vec![1, 2]).expect("single x");
+            let y = Tensor::from_f32(vec![10.0, 20.0, 30.0], vec![1, 3]).expect("single y");
+            let x_handle = gpu_helpers::upload_tensor(provider, &x).expect("upload x");
+            let y_handle = gpu_helpers::upload_tensor(provider, &y).expect("upload y");
             provider.reset_telemetry();
             let eval = eval(
                 &[
@@ -1412,9 +1491,10 @@ mod tests {
             assert_eq!(telemetry.upload_bytes, 0);
             let gathered = test_support::gather(y_out).expect("gather");
             assert_eq!(gathered.shape, vec![2, 3]);
+            assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
             assert_eq!(
-                gathered.materialize_f64(),
-                vec![10.0, 10.0, 20.0, 20.0, 30.0, 30.0]
+                gathered.as_f32_slice(),
+                Some(&[10.0, 10.0, 20.0, 20.0, 30.0, 30.0][..])
             );
         });
     }
@@ -1456,6 +1536,53 @@ mod tests {
             assert_eq!(x_after.materialize_f64(), vec![1.0, 2.0]);
             assert_eq!(y_after.shape, vec![3, 1]);
             assert_eq!(y_after.materialize_f64(), vec![10.0, 20.0, 30.0]);
+        });
+    }
+
+    #[test]
+    fn ndgrid_gpu_paired_complex_integer_axis_restores_exact_resident_output() {
+        test_support::with_test_provider(|provider| {
+            let wide = (1_u64 << 53) + 1;
+            let axis = ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![wide, u64::MAX]),
+                    IntegerStorage::U64(vec![u64::MAX, wide]),
+                )
+                .expect("paired axis storage"),
+                vec![1, 2],
+            )
+            .expect("paired axis");
+            let input = gpu_helpers::upload_complex_tensor(provider, &axis).expect("upload axis");
+            let eval = eval(&[Value::GpuTensor(input.clone())], Some(2)).expect("ndgrid");
+            let Value::GpuTensor(output) = output(&eval, 0).expect("first grid") else {
+                panic!("expected resident paired grid");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&output),
+                GpuTensorStorage::ComplexInterleaved
+            );
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&output),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            let gathered = block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(
+                output.clone(),
+            )))
+            .expect("gather paired grid");
+            let Value::ComplexTensor(gathered) = gathered else {
+                panic!("expected paired tensor");
+            };
+            let storage = gathered.integer_storage().expect("paired storage");
+            assert_eq!(
+                storage.real,
+                IntegerStorage::U64(vec![wide, u64::MAX, wide, u64::MAX])
+            );
+            assert_eq!(
+                storage.imag,
+                IntegerStorage::U64(vec![u64::MAX, wide, u64::MAX, wide])
+            );
+            provider.free(&input).expect("free input");
+            provider.free(&output).expect("free output");
         });
     }
 }

@@ -346,14 +346,22 @@ const IFFT2_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "IFFT2 execution or tensor shaping fails.",
     message: "ifft2: internal error",
 };
+const IFFT2_ERROR_PROVIDER_INTEGRITY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IFFT2.PROVIDER_INTEGRITY",
+    identifier: Some("RunMat:ifft2:ProviderIntegrity"),
+    when:
+        "The provider returns ownership, shape, or physical metadata inconsistent with the request.",
+    message: "ifft2: provider integrity error",
+};
 
-const IFFT2_ERRORS: [BuiltinErrorDescriptor; 6] = [
+const IFFT2_ERRORS: [BuiltinErrorDescriptor; 7] = [
     IFFT2_ERROR_ARG_COUNT,
     IFFT2_ERROR_INVALID_LENGTH,
     IFFT2_ERROR_INVALID_SIZE_VECTOR,
     IFFT2_ERROR_INVALID_SYMFLAG,
     IFFT2_ERROR_INVALID_INPUT,
     IFFT2_ERROR_INTERNAL,
+    IFFT2_ERROR_PROVIDER_INTEGRITY,
 ];
 
 pub const IFFT2_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -405,7 +413,11 @@ fn ifft2_provider_error(detail: impl AsRef<str>) -> RuntimeError {
         detail.as_ref()
     ))
     .with_builtin(BUILTIN_NAME)
-    .with_identifier("RunMat:ifft2:ProviderIntegrity")
+    .with_identifier(
+        IFFT2_ERROR_PROVIDER_INTEGRITY
+            .identifier
+            .expect("ifft2 provider-integrity descriptor identifier"),
+    )
     .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
     .build()
 }
@@ -1201,11 +1213,11 @@ pub(crate) mod tests {
                 shape: spectrum.shape.clone(),
                 device_id: raw.device_id,
                 buffer_id: raw.buffer_id,
+                descriptor: runmat_accelerate_api::GpuTensorDescriptor {
+                    storage: Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved),
+                    ..raw.descriptor
+                },
             };
-            runmat_accelerate_api::set_handle_storage(
-                &second,
-                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            );
 
             let gpu =
                 ifft2_builtin(Value::GpuTensor(second.clone()), Vec::new()).expect("ifft2 gpu");
@@ -1305,11 +1317,11 @@ pub(crate) mod tests {
             shape: spectrum.shape.clone(),
             device_id: raw.device_id,
             buffer_id: raw.buffer_id,
+            descriptor: runmat_accelerate_api::GpuTensorDescriptor {
+                storage: Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved),
+                ..raw.descriptor
+            },
         };
-        runmat_accelerate_api::set_handle_storage(
-            &second,
-            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-        );
 
         let gpu_val =
             ifft2_builtin(Value::GpuTensor(second.clone()), Vec::new()).expect("ifft2 gpu");

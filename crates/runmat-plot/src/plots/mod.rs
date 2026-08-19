@@ -12,6 +12,7 @@ pub mod figure;
 pub mod line;
 pub mod line3;
 pub mod mesh;
+mod numeric_data;
 pub mod patch;
 pub mod pie;
 pub mod quiver;
@@ -37,7 +38,8 @@ pub use mesh::{
     MeshDeformation, MeshEdgeMode, MeshFieldLocation, MeshPlot, MeshRegion, MeshScalarField,
     MeshTriangleRange, MeshVectorField,
 };
-pub use patch::{PatchData, PatchEdgeColorMode, PatchFaceColorMode, PatchPlot};
+pub use numeric_data::NumericPlotData;
+pub use patch::{PatchEdgeColorMode, PatchFaceColorMode, PatchPlot};
 pub use pie::PieChart;
 pub use quiver::{QuiverGpuSource, QuiverPlot};
 pub use reference_line::{ReferenceLine, ReferenceLineOrientation};

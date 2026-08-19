@@ -1,7 +1,11 @@
 //! MATLAB-compatible `pan` interaction-mode builtin.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
@@ -18,6 +22,55 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "pan";
 const PAN_CLASS_NAME: &str = "matlab.graphics.interaction.internal.pan";
+
+const INTEGER_TARGET_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pan-integer-graphics-target",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pan with a typed-integer numeric graphics-target alias is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PanIntegerGraphicsTargetExtension"),
+};
+
+pub const EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [INTEGER_TARGET_EXTENSION];
+
+const INTEGER_ENABLE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Enable",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "[integer-audit-open] the compatibility target documents numeric or logical scalar 1/0 for the Enable property but does not enumerate native numeric classes; RunMat accepts every exact integer class without floating conversion.",
+    }];
+const INTEGER_TARGET_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "target",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "MATLAB requires a Figure or Axes object; typed-integer numeric aliases are a gated RunMat graphics representation extension.",
+    }];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "set(pan_object, 'Enable', integer_zero_or_one)",
+        inputs: &INTEGER_ENABLE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The exact scalar is interpreted only as an on/off state and stored as pan-mode metadata.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "pan(integer_target, option)",
+        inputs: &INTEGER_TARGET_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The compatibility gate precedes handle decoding and any pan-state mutation; resident targets are not gathered.",
+    },
+];
 
 const PAN_OUTPUT_OBJECT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "p",
@@ -164,6 +217,8 @@ fn ensure_current_pan_figure() -> FigureHandle {
     suppress_auto_output = true,
     type_resolver(get_type),
     descriptor(crate::builtins::plotting::pan::PAN_DESCRIPTOR),
+    extensions(crate::builtins::plotting::pan::EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::pan::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::pan"
 )]
 pub fn pan_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -185,12 +240,14 @@ pub fn pan_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
                 apply_option_to_figure(ensure_current_pan_figure(), &option)?;
                 return Ok(status());
             }
+            gate_integer_target(single)?;
             let figure = existing_figure_handle(single)?;
             let snapshot =
                 pan_state_snapshot(figure, None).map_err(|err| invalid(err.to_string()))?;
             pan_object_from_snapshot(snapshot)
         }
         [target, command] => {
+            gate_integer_target(target)?;
             let target = resolve_pan_target(target)?;
             let option = super::style::value_as_string(command)
                 .ok_or_else(|| invalid("expected a pan option string"))?;
@@ -201,6 +258,16 @@ pub fn pan_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             "expected pan(), pan(option), or pan(target, option)",
         )),
     }
+}
+
+fn gate_integer_target(value: &Value) -> BuiltinResult<()> {
+    if crate::builtins::common::validation::value_has_native_integer_class(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INTEGER_TARGET_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -571,5 +638,74 @@ mod tests {
         let _guard = setup_plot_tests();
         let err = pan_builtin(vec![Value::Num(999.0)]).unwrap_err();
         assert!(err.to_string().contains("figure handle does not exist"));
+    }
+
+    #[test]
+    fn pan_enable_accepts_zero_and_one_from_every_integer_class() {
+        let _guard = setup_plot_tests();
+        let p = pan_builtin(Vec::new()).expect("pan object");
+        for (enabled, disabled) in [
+            (runmat_value::IntValue::I8(1), runmat_value::IntValue::I8(0)),
+            (
+                runmat_value::IntValue::I16(1),
+                runmat_value::IntValue::I16(0),
+            ),
+            (
+                runmat_value::IntValue::I32(1),
+                runmat_value::IntValue::I32(0),
+            ),
+            (
+                runmat_value::IntValue::I64(1),
+                runmat_value::IntValue::I64(0),
+            ),
+            (runmat_value::IntValue::U8(1), runmat_value::IntValue::U8(0)),
+            (
+                runmat_value::IntValue::U16(1),
+                runmat_value::IntValue::U16(0),
+            ),
+            (
+                runmat_value::IntValue::U32(1),
+                runmat_value::IntValue::U32(0),
+            ),
+            (
+                runmat_value::IntValue::U64(1),
+                runmat_value::IntValue::U64(0),
+            ),
+        ] {
+            set_builtin(vec![
+                p.clone(),
+                Value::String("Enable".into()),
+                Value::Int(enabled),
+            ])
+            .expect("enable pan");
+            assert_eq!(
+                get_builtin(vec![p.clone(), Value::String("Enable".into())]).unwrap(),
+                Value::String("on".into())
+            );
+            set_builtin(vec![
+                p.clone(),
+                Value::String("Enable".into()),
+                Value::Int(disabled),
+            ])
+            .expect("disable pan");
+            assert_eq!(
+                get_builtin(vec![p.clone(), Value::String("Enable".into())]).unwrap(),
+                Value::String("off".into())
+            );
+        }
+    }
+
+    #[test]
+    fn pan_typed_target_is_gated_before_handle_resolution() {
+        let _guard = setup_plot_tests();
+        let figure = current_figure_handle().as_u32();
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = pan_builtin(vec![Value::Int(runmat_value::IntValue::U32(figure))])
+            .expect_err("typed target must be gated");
+
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:PanIntegerGraphicsTargetExtension")
+        );
     }
 }

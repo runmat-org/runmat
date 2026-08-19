@@ -125,6 +125,12 @@ pub const TOKEN_DETAILS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &TOKEN_DETAILS_ERRORS,
 };
+pub const TOKEN_DETAILS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "tokenDetails accepts only tokenizedDocument objects. Its generated document, sentence, line, and dependency ordinals are table metadata stored as double columns rather than caller-provided integer data.",
+    };
 
 pub const ADD_TYPE_DETAILS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &[
@@ -186,16 +192,38 @@ fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::details::TOKEN_DETAILS_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::text_analytics::details::TOKEN_DETAILS_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::text_analytics::details"
 )]
 pub(in crate::builtins::strings::text_analytics) async fn token_details_builtin(
     documents: Value,
 ) -> BuiltinResult<Value> {
+    if direct_numeric_or_resident_input(&documents) {
+        return Err(text_analytics_error(
+            "tokenDetails",
+            "tokenDetails: expected a tokenizedDocument object",
+        ));
+    }
     let documents = gather_if_needed_async(&documents)
         .await
         .map_err(|err| text_analytics_error("tokenDetails", format!("tokenDetails: {err}")))?;
     let object = tokenized_document_object(documents, "tokenDetails")?;
     token_details_table(&object)
+}
+
+fn direct_numeric_or_resident_input(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Num(_)
+            | Value::Int(_)
+            | Value::Tensor(_)
+            | Value::Complex(_, _)
+            | Value::ComplexTensor(_)
+            | Value::LogicalArray(_)
+            | Value::Bool(_)
+            | Value::SparseTensor(_)
+            | Value::GpuTensor(_)
+    )
 }
 
 #[runtime_builtin(

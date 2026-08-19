@@ -208,7 +208,7 @@ impl BrowserExecutionService {
             }
             Ok(ProgramExecutionResponse::ExternalizedSuccess { .. }) => {
                 let message =
-                    "browser execution host cannot consume native externalized results".into();
+                    "browser execution host cannot consume native externalized results".to_string();
                 let result = Err(ExecutionServiceError::Failed(message.clone()));
                 let report = AttemptReport::Failed {
                     kind: AttemptFailureKind::Rejected,

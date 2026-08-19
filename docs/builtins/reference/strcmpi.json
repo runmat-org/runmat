@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "matlab",
-    "notes": "Runs on the host; GPU inputs are gathered automatically before comparison so results match MATLAB exactly."
+    "notes": "Text comparison runs on the host. Unsupported numeric or provider-resident inputs return scalar logical false without provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -35,7 +35,8 @@
     "**Character arrays**: Rows are compared individually. Results are column vectors whose length equals the number of rows in the character array.",
     "**Cell arrays**: Each cell is treated as a text scalar. Scalar cells expand across the other operand before comparison.",
     "**Missing strings**: Elements whose value is `missing` (`\"<missing>\"`) always compare unequal, even to other missing values, matching MATLAB.",
-    "**Result form**: Scalar comparisons return logical scalars. Otherwise the result is a logical array that matches the broadcast shape."
+    "**Result form**: Scalar comparisons return logical scalars. Otherwise the result is a logical array that matches the broadcast shape.",
+    "**Unsupported datatypes**: Integer and other unsupported numeric inputs return scalar logical `false`; they are neither gathered nor converted to strings."
   ],
   "examples": [
     {
@@ -84,11 +85,11 @@
     },
     {
       "question": "Can I compare complex numbers or numeric arrays with `strcmpi`?",
-      "answer": "No. Both arguments must contain text. Numeric inputs produce a descriptive MATLAB-style error."
+      "answer": "Numeric values are unsupported text operands. Following the documented comparison rule, `strcmpi` returns scalar logical `false` rather than converting them to text."
     },
     {
       "question": "How are GPU inputs handled?",
-      "answer": "They are gathered to the CPU automatically before comparison. Providers do not need to implement additional kernels for `strcmpi`."
+      "answer": "RunMat has no GPU text representation. A provider-resident numeric value is an unsupported text operand, so `strcmpi` returns scalar logical `false` without gathering it or accessing the provider."
     },
     {
       "question": "What is returned when both inputs are scalars?",
@@ -173,9 +174,9 @@
     "label": "`crates/runmat-runtime/src/builtins/strings/core/strcmpi.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/strcmpi.rs"
   },
-  "gpu_residency": "You rarely need to call `gpuArray` manually. When inputs already live on the GPU, RunMat gathers them before calling `strcmpi`, then returns a logical result on the host. This matches MATLAB’s behaviour while keeping the runtime simple. Subsequent GPU-aware code can explicitly transfer results back if needed.",
+  "gpu_residency": "`strcmpi` compares host text and returns host logical output. Unsupported numeric resident operands return false without provider access.",
   "gpu_behavior": [
-    "`strcmpi` is registered as an acceleration sink. When either operand resides on the GPU, RunMat gathers both to host memory before comparing them. This keeps behaviour identical to MATLAB and avoids requiring backend-specific kernels. The logical result is produced on the CPU and never remains GPU-resident."
+    "`strcmpi` is a host text comparison sink. Numeric resident operands are unsupported datatypes and return scalar logical false without gather or backend-specific kernels."
   ],
   "syntax": {
     "example": {

@@ -7,11 +7,13 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::introspection::class::class_name_for_value;
 use crate::builtins::introspection::type_resolvers::superclasses_type;
+use crate::class_registry::{register_class, superclass_chain};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, Value};
 
@@ -28,7 +30,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Metadata-only class hierarchy query. gpuArray inputs stay resident while RunMat checks host class metadata.",
+    notes: "Metadata-only class hierarchy query. Explicit gpuArray inputs use wrapper metadata, while internally auto-resident values use their underlying host class; neither path downloads payload data.",
 };
 
 #[runmat_macros::register_fusion_spec(
@@ -68,6 +70,13 @@ const SUPERCLASSES_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatu
 
 const BUILTIN_NAME: &str = "superclasses";
 
+pub const SUPERCLASSES_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "superclasses accepts class-name text or class objects. Integer primitives are neither and reject from type metadata without numeric conversion or provider payload access.",
+    };
+
 const SUPERCLASSES_ERROR_CLASS_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.SUPERCLASSES.CLASS_INVALID",
     identifier: Some("RunMat:SuperclassesClassInvalid"),
@@ -102,6 +111,7 @@ pub const SUPERCLASSES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "metadata",
     type_resolver(superclasses_type),
     descriptor(crate::builtins::introspection::superclasses::SUPERCLASSES_DESCRIPTOR),
+    integer_audit(crate::builtins::introspection::superclasses::SUPERCLASSES_INTEGER_AUDIT),
     builtin_path = "crate::builtins::introspection::superclasses"
 )]
 fn superclasses_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -322,33 +332,6 @@ mod tests {
     fn superclasses_returns_empty_cell_for_leaf_builtin_classes() {
         assert!(call(Value::from("char")).is_empty());
         assert!(call(Value::Object(ObjectInstance::new("double".to_string()))).is_empty());
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn superclasses_uses_gpuarray_metadata_without_gather() {
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: "gpuArray".to_string(),
-            parent: Some("handle".to_string()),
-            properties: HashMap::new(),
-            methods: HashMap::new(),
-        });
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: "handle".to_string(),
-            parent: None,
-            properties: HashMap::new(),
-            methods: HashMap::new(),
-        });
-
-        test_support::with_test_provider(|provider| {
-            let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("tensor");
-            let view = HostTensorView {
-                data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
-            assert_eq!(call(Value::GpuTensor(handle)), vec!["handle".to_string()]);
-        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

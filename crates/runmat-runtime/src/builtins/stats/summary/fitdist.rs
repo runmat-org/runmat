@@ -148,6 +148,59 @@ const PDF_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     },
 ];
 
+const PDF_INTEGER_X_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pdf-integer-x",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pdf with typed-integer evaluation points is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PdfIntegerXExtension"),
+};
+const PDF_INTEGER_PARAMETER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pdf-integer-parameters",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pdf with typed-integer distribution parameters is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PdfIntegerParametersExtension"),
+};
+pub const PDF_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [PDF_INTEGER_X_EXTENSION, PDF_INTEGER_PARAMETER_EXTENSION];
+const PDF_INTEGER_X_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "x",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double evaluation points. RunMat gates typed integers before provider access and requires exact conversion at the floating density boundary.",
+    }];
+const PDF_INTEGER_PARAMETER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A...D",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double named-distribution parameters. RunMat independently gates typed parameters and rejects lossy wide values.",
+    }];
+pub const PDF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "y = pdf(pd, integer_x) or pdf(name, integer_x, A...)",
+        inputs: &PDF_INTEGER_X_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Typed evaluation points are a RunMat-only floating-boundary extension; density or mass values are floating outputs, and resident fallback restores the selected floating output class through the owning provider.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "y = pdf(name, x, integer_A...D)",
+        inputs: &PDF_INTEGER_PARAMETER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Typed distribution parameters are independently gated and converted only after exactness is proved.",
+    },
+];
+
 const CDF_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
     BuiltinSignatureDescriptor {
         label: "p = cdf(pd, x)",
@@ -204,7 +257,7 @@ const CDF_INTEGER_X_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Typed-integer evaluation points are gated before provider access and enter the floating CDF boundary without an integer compatibility mirror.",
+        notes: "Typed-integer evaluation points are gated before provider access and must be exactly representable at the floating CDF boundary.",
     }];
 
 const CDF_INTEGER_PARAMETER_INPUT: [BuiltinIntegerInputCapability; 1] =
@@ -260,6 +313,61 @@ const RANDOM_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
         label: "r = random(distname, params, sz)",
         inputs: &RANDOM_NAME_INPUTS,
         outputs: &RANDOM_OUTPUTS,
+    },
+];
+
+const RANDOM_INTEGER_PARAMETER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "random-integer-parameters",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "random with typed-integer distribution parameters is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RandomIntegerParametersExtension"),
+};
+const RANDOM_INTEGER_SIZE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "random-integer-size",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "random with typed-integer size controls is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RandomIntegerSizeExtension"),
+};
+pub const RANDOM_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    RANDOM_INTEGER_PARAMETER_EXTENSION,
+    RANDOM_INTEGER_SIZE_EXTENSION,
+];
+const RANDOM_INTEGER_PARAMETER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A...D",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single/double named-distribution parameters; typed integers are gated before conversion and must be exactly representable as binary64.",
+    }];
+const RANDOM_INTEGER_SIZE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "sz1...szN or sz",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target documents single/double size controls; RunMat typed sizes are exact structural values and do not cross the distribution computation boundary.",
+    }];
+pub const RANDOM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "R = random(name,integer_A...D,...)",
+        inputs: &RANDOM_INTEGER_PARAMETER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Each typed parameter is admitted independently and converted once after exactness validation.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "R = random(pd,integer_sz) or random(name,A...D,integer_sz)",
+        inputs: &RANDOM_INTEGER_SIZE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed sizes gate before provider access and are decoded from authoritative integer storage without floating conversion.",
     },
 ];
 
@@ -325,7 +433,7 @@ const FITDIST_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents double sample data. RunMat mode admits all eight integer classes only when every observation is exactly representable at the binary64 fitting boundary.",
+        notes: "The compatibility target documents double sample data. RunMat mode admits all eight integer classes only when every observation is exactly representable at the binary64 fitting boundary.",
     }];
 const FITDIST_INTEGER_FREQUENCY_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -333,7 +441,7 @@ const FITDIST_INTEGER_FREQUENCY_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a requires nonnegative integer-valued single or double counts. RunMat mode additionally admits exact typed-integer count storage.",
+        notes: "The compatibility target requires nonnegative integer-valued single or double counts. RunMat mode additionally admits exact typed-integer count storage.",
     }];
 pub const FITDIST_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
     BuiltinIntegerCapabilityDescriptor {
@@ -539,6 +647,8 @@ pub(crate) async fn fitdist_builtin(
     keywords = "pdf,fitdist,probability distribution,density,mass,statistics",
     type_resolver(distribution_eval_type),
     descriptor(crate::builtins::stats::summary::fitdist::PDF_DESCRIPTOR),
+    extensions(crate::builtins::stats::summary::fitdist::PDF_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::summary::fitdist::PDF_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::summary::fitdist"
 )]
 pub(crate) async fn pdf_builtin(
@@ -546,8 +656,120 @@ pub(crate) async fn pdf_builtin(
     x: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    evaluate_distribution_or_name(PDF_NAME, distribution, x, rest, DistributionEvaluation::Pdf)
-        .await
+    ensure_pdf_integer_extensions(&distribution, &x, &rest).await?;
+    evaluate_pdf(distribution, x, rest).await
+}
+
+async fn ensure_pdf_integer_extensions(
+    distribution: &Value,
+    input: &Value,
+    parameters: &[Value],
+) -> BuiltinResult<()> {
+    if is_typed_integer_value(input) {
+        crate::compatibility::ensure_builtin_extension_enabled(&PDF_INTEGER_X_EXTENSION, PDF_NAME)?;
+        ensure_exact_pdf_integer_boundary(input, "x").await?;
+    }
+    if !matches!(distribution, Value::Object(_)) {
+        for parameter in parameters
+            .iter()
+            .filter(|value| is_typed_integer_value(value))
+        {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &PDF_INTEGER_PARAMETER_EXTENSION,
+                PDF_NAME,
+            )?;
+            ensure_exact_pdf_integer_boundary(parameter, "distribution parameter").await?;
+        }
+    }
+    Ok(())
+}
+
+async fn ensure_exact_pdf_integer_boundary(value: &Value, role: &str) -> BuiltinResult<()> {
+    if !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(value).await? {
+        return Err(invalid_for(
+            PDF_NAME,
+            format!("pdf: integer {role} values must be exactly representable as double"),
+        ));
+    }
+    Ok(())
+}
+
+async fn evaluate_pdf(distribution: Value, input: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if matches!(distribution, Value::Object(_)) {
+        if !rest.is_empty() {
+            return Err(invalid_for(
+                PDF_NAME,
+                "pdf: fitted distribution object form accepts exactly two inputs",
+            ));
+        }
+        let precision = cdf_output_precision(&[&input]);
+        let gpu_source = first_gpu_source(&[&input]);
+        let fit = distribution_from_value(&distribution)?;
+        let x = value_to_tensor(PDF_NAME, input).await?;
+        let shape = x.shape.clone();
+        let data = tensor::tensor_into_values_f64(x)
+            .into_iter()
+            .map(|value| pdf_scalar(&fit, value))
+            .collect();
+        return finish_pdf(shape, data, precision, gpu_source);
+    }
+
+    let kind = parse_distribution_name_for(PDF_NAME, &distribution)?;
+    let mut original_inputs = Vec::with_capacity(rest.len() + 1);
+    original_inputs.push(&input);
+    original_inputs.extend(rest.iter());
+    let precision = cdf_output_precision(&original_inputs);
+    let gpu_source = first_gpu_source(&original_inputs);
+    let x = value_to_tensor(PDF_NAME, input).await?;
+    let parameters = parse_parameter_tensors(PDF_NAME, kind, rest).await?;
+    let mut tensors = Vec::with_capacity(parameters.len() + 1);
+    tensors.push(&x);
+    tensors.extend(parameters.iter());
+    let (mut values, shape) = broadcast_tensors_for(PDF_NAME, &tensors)?;
+    let x_values = values.remove(0);
+    let mut data = Vec::with_capacity(x_values.len());
+    for index in 0..x_values.len() {
+        let fit = FittedDistribution {
+            kind,
+            parameters: values.iter().map(|parameter| parameter[index]).collect(),
+            nlogl: f64::NAN,
+            observations: f64::NAN,
+        };
+        data.push(pdf_scalar(&fit, x_values[index]));
+    }
+    finish_pdf(shape, data, precision, gpu_source)
+}
+
+fn finish_pdf(
+    shape: Vec<usize>,
+    data: Vec<f64>,
+    precision: CdfOutputPrecision,
+    gpu_source: Option<GpuTensorHandle>,
+) -> BuiltinResult<Value> {
+    let tensor = match precision {
+        CdfOutputPrecision::Double => Tensor::new(data, shape),
+        CdfOutputPrecision::Single => {
+            Tensor::from_f32(data.into_iter().map(|value| value as f32).collect(), shape)
+        }
+    }
+    .map_err(|error| internal_for(PDF_NAME, format!("pdf: {error}")))?;
+    let output = match precision {
+        CdfOutputPrecision::Double => tensor::tensor_into_value(tensor),
+        CdfOutputPrecision::Single => Value::Tensor(tensor),
+    };
+    let Some(source) = gpu_source else {
+        return Ok(output);
+    };
+    let restored = gpu_helpers::restore_class_preserving_value(&source, output, PDF_NAME)?;
+    if runmat_accelerate_api::handle_is_explicit(&source)
+        && !matches!(restored, Value::GpuTensor(_))
+    {
+        return Err(invalid_for(
+            PDF_NAME,
+            "pdf: provider cannot preserve explicit gpuArray output residency and precision",
+        ));
+    }
+    Ok(restored)
 }
 
 #[runtime_builtin(
@@ -805,13 +1027,6 @@ fn finish_cdf(
             })?;
         let handle = gpu_helpers::upload_tensor(provider, &tensor)
             .map_err(|err| invalid_for(CDF_NAME, format!("cdf: {err}")))?;
-        runmat_accelerate_api::set_handle_precision(
-            &handle,
-            match precision {
-                CdfOutputPrecision::Double => ProviderPrecision::F64,
-                CdfOutputPrecision::Single => ProviderPrecision::F32,
-            },
-        );
         return Ok(gpu_helpers::resident_gpu_value(handle));
     }
     match precision {
@@ -827,9 +1042,13 @@ fn finish_cdf(
     keywords = "random,fitdist,probability distribution,statistics",
     type_resolver(random_type),
     descriptor(crate::builtins::stats::summary::fitdist::RANDOM_DESCRIPTOR),
+    extensions(crate::builtins::stats::summary::fitdist::RANDOM_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::summary::fitdist::RANDOM_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::summary::fitdist"
 )]
 pub(crate) async fn random_builtin(distribution: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_random_extensions(&distribution, &rest).await?;
+    let gpu_source = random_gpu_source(&distribution, &rest)?;
     let (fit, shape) = if matches!(distribution, Value::Object(_)) {
         (
             distribution_from_value(&distribution)?,
@@ -840,89 +1059,96 @@ pub(crate) async fn random_builtin(distribution: Value, rest: Vec<Value>) -> Bui
     };
     let len = tensor::element_count(&shape);
     let data = random_samples(&fit, len)?;
-    finish_for(RANDOM_NAME, shape, data)
+    finish_random(shape, data, gpu_source)
+}
+
+fn random_gpu_source(
+    distribution: &Value,
+    rest: &[Value],
+) -> BuiltinResult<Option<GpuTensorHandle>> {
+    let parameter_count = if matches!(distribution, Value::Object(_)) {
+        0
+    } else {
+        parse_distribution_name_for(RANDOM_NAME, distribution)?
+            .parameter_names()
+            .len()
+    };
+    gpu_helpers::select_resident_output_source(
+        rest.iter()
+            .take(parameter_count)
+            .filter_map(|value| match value {
+                Value::GpuTensor(handle) => Some(handle.clone()),
+                _ => None,
+            }),
+        RANDOM_NAME,
+    )
+}
+
+fn finish_random(
+    shape: Vec<usize>,
+    data: Vec<f64>,
+    gpu_source: Option<GpuTensorHandle>,
+) -> BuiltinResult<Value> {
+    let tensor = Tensor::new(data, shape)
+        .map_err(|err| internal_for(RANDOM_NAME, format!("random: {err}")))?;
+    let Some(source) = gpu_source else {
+        return Ok(tensor::tensor_into_value(tensor));
+    };
+    let restored =
+        gpu_helpers::restore_class_preserving_value(&source, Value::Tensor(tensor), RANDOM_NAME)?;
+    if runmat_accelerate_api::handle_is_explicit(&source)
+        && !matches!(restored, Value::GpuTensor(_))
+    {
+        return Err(internal_for(
+            RANDOM_NAME,
+            "random: provider cannot preserve explicit gpuArray output residency",
+        ));
+    }
+    Ok(restored)
+}
+
+async fn ensure_random_extensions(distribution: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    for value in rest {
+        crate::builtins::common::validation::reject_typed_complex_integer(value, RANDOM_NAME)?;
+    }
+    let parameter_count = if matches!(distribution, Value::Object(_)) {
+        0
+    } else {
+        parse_distribution_name_for(RANDOM_NAME, distribution)?
+            .parameter_names()
+            .len()
+    };
+    for (index, value) in rest.iter().enumerate() {
+        if index < parameter_count {
+            crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+                value,
+                &RANDOM_INTEGER_PARAMETER_EXTENSION,
+                RANDOM_NAME,
+                "distribution parameter",
+            )
+            .await?;
+        } else if crate::builtins::common::validation::value_has_native_integer_class(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &RANDOM_INTEGER_SIZE_EXTENSION,
+                RANDOM_NAME,
+            )?;
+        }
+    }
+    Ok(())
 }
 
 pub(crate) async fn icdf_probability_distribution(
     distribution: Value,
     p: Value,
 ) -> BuiltinResult<Value> {
-    evaluate_distribution(distribution, p, DistributionEvaluation::Icdf).await
-}
-
-#[derive(Clone, Copy)]
-enum DistributionEvaluation {
-    Pdf,
-    Icdf,
-}
-
-async fn evaluate_distribution(
-    distribution: Value,
-    input: Value,
-    mode: DistributionEvaluation,
-) -> BuiltinResult<Value> {
     let fit = distribution_from_value(&distribution)?;
-    let x = value_to_tensor(
-        match mode {
-            DistributionEvaluation::Pdf => PDF_NAME,
-            DistributionEvaluation::Icdf => "icdf",
-        },
-        input,
-    )
-    .await?;
+    let x = value_to_tensor("icdf", p).await?;
     let shape = x.shape.clone();
     let data = tensor::tensor_into_values_f64(x)
         .into_iter()
-        .map(|value| match mode {
-            DistributionEvaluation::Pdf => pdf_scalar(&fit, value),
-            DistributionEvaluation::Icdf => icdf_scalar(&fit, value),
-        })
+        .map(|value| icdf_scalar(&fit, value))
         .collect::<Vec<_>>();
-    finish_for(
-        match mode {
-            DistributionEvaluation::Pdf => PDF_NAME,
-            DistributionEvaluation::Icdf => "icdf",
-        },
-        shape,
-        data,
-    )
-}
-
-async fn evaluate_distribution_or_name(
-    builtin: &'static str,
-    distribution: Value,
-    input: Value,
-    rest: Vec<Value>,
-    mode: DistributionEvaluation,
-) -> BuiltinResult<Value> {
-    if matches!(distribution, Value::Object(_)) {
-        if !rest.is_empty() {
-            return Err(invalid_for(
-                builtin,
-                format!("{builtin}: fitted distribution object form accepts exactly two inputs"),
-            ));
-        }
-        return evaluate_distribution(distribution, input, mode).await;
-    }
-
-    let kind = parse_distribution_name_for(builtin, &distribution)?;
-    let params = parse_named_eval_parameters(builtin, kind, rest).await?;
-    let fit = FittedDistribution {
-        kind,
-        parameters: params,
-        nlogl: f64::NAN,
-        observations: f64::NAN,
-    };
-    let x = value_to_tensor(builtin, input).await?;
-    let shape = x.shape.clone();
-    let data = tensor::tensor_into_values_f64(x)
-        .into_iter()
-        .map(|value| match mode {
-            DistributionEvaluation::Pdf => pdf_scalar(&fit, value),
-            DistributionEvaluation::Icdf => icdf_scalar(&fit, value),
-        })
-        .collect::<Vec<_>>();
-    finish_for(builtin, shape, data)
+    finish_for("icdf", shape, data)
 }
 
 async fn parse_named_eval_parameters(
@@ -2343,7 +2569,7 @@ mod tests {
 
     #[test]
     fn generic_pdf_cdf_random_name_overloads_execute() {
-        let _rng_guard = random::test_guard();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let density = block_on(pdf_builtin(
             Value::String("Normal".into()),
             mirrorless_int_tensor(IntegerStorage::I16(vec![0, 1]), vec![2, 1]),
@@ -2387,6 +2613,130 @@ mod tests {
             Value::Tensor(tensor) => assert_eq!(tensor.shape, vec![2, 3]),
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn random_restores_parameter_residency_but_not_size_control_residency() {
+        use crate::builtins::common::test_support;
+
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        test_support::with_test_provider(|provider| {
+            let parameter = Tensor::new_integer(IntegerStorage::I16(vec![0]), vec![1, 1])
+                .expect("integer parameter");
+            let parameter = gpu_helpers::upload_tensor(provider, &parameter).expect("upload");
+            let parameter =
+                parameter.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let output = block_on(random_builtin(
+                Value::String("Normal".into()),
+                vec![
+                    Value::GpuTensor(parameter),
+                    Value::Num(1.0),
+                    Value::Num(2.0),
+                ],
+            ))
+            .expect("resident random output");
+            let Value::GpuTensor(output_handle) = &output else {
+                panic!("expected resident random output");
+            };
+            assert!(runmat_accelerate_api::handle_is_explicit(output_handle));
+            let gathered = test_support::gather(output).expect("gather random output");
+            assert_eq!(gathered.shape, vec![2, 2]);
+            assert!(gathered
+                .materialize_f64()
+                .iter()
+                .all(|value| value.is_finite()));
+
+            let size =
+                Tensor::new_integer(IntegerStorage::U8(vec![2]), vec![1, 1]).expect("integer size");
+            let size = gpu_helpers::upload_tensor(provider, &size).expect("upload size");
+            let size = size.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let output = block_on(random_builtin(
+                Value::String("Normal".into()),
+                vec![Value::Num(0.0), Value::Num(1.0), Value::GpuTensor(size)],
+            ))
+            .expect("resident size control");
+            assert!(matches!(output, Value::Tensor(_)));
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn random_wgpu_parameter_residency_enforces_double_for_all_integer_classes() {
+        use crate::builtins::common::test_support;
+
+        let _accel_guard = test_support::accel_test_lock();
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let Some(provider) = runmat_accelerate_api::provider() else {
+            return;
+        };
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for storage in all_cdf_integer_storages(0) {
+            let parameter = Tensor::new_integer(storage, vec![1, 1]).expect("integer parameter");
+            let handle = gpu_helpers::upload_tensor(provider, &parameter).expect("upload");
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let result = block_on(random_builtin(
+                Value::String("Normal".into()),
+                vec![Value::GpuTensor(handle), Value::Num(1.0), Value::Num(2.0)],
+            ));
+            if provider.precision() == ProviderPrecision::F64 {
+                let output = result.expect("resident random output");
+                let Value::GpuTensor(handle) = &output else {
+                    panic!("expected resident random output");
+                };
+                assert!(runmat_accelerate_api::handle_is_explicit(handle));
+                let gathered = test_support::gather(output).expect("gather random output");
+                assert_eq!(gathered.shape, vec![2, 2]);
+                assert!(gathered
+                    .materialize_f64()
+                    .iter()
+                    .all(|value| value.is_finite()));
+            } else {
+                let error = result.expect_err("f32 owner cannot preserve double output");
+                assert!(error
+                    .message()
+                    .contains("cannot preserve explicit gpuArray"));
+            }
+        }
+    }
+
+    #[test]
+    fn pdf_broadcasts_parameters_preserves_single_and_restores_residency() {
+        use crate::builtins::common::test_support;
+
+        let density = block_on(pdf_builtin(
+            Value::String("Normal".into()),
+            Value::Tensor(Tensor::from_f32(vec![0.0, 2.0], vec![2, 1]).unwrap()),
+            vec![
+                Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap()),
+                Value::Num(1.0),
+            ],
+        ))
+        .expect("broadcast single pdf");
+        let Value::Tensor(density) = density else {
+            panic!("expected single tensor");
+        };
+        assert_eq!(density.numeric_dtype(), NumericDType::F32);
+        assert_eq!(density.shape, vec![2, 1]);
+
+        test_support::with_test_provider(|provider| {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let integer = Tensor::new_integer(IntegerStorage::I16(vec![0, 1]), vec![2, 1]).unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &integer).expect("integer upload");
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let density = block_on(pdf_builtin(
+                Value::String("Normal".into()),
+                Value::GpuTensor(handle),
+                vec![Value::Num(0.0), Value::Num(1.0)],
+            ))
+            .expect("resident integer pdf");
+            assert!(matches!(density, Value::GpuTensor(_)));
+            let gathered = test_support::gather(density).expect("gather pdf");
+            assert_eq!(gathered.shape, vec![2, 1]);
+        });
     }
 
     #[test]
@@ -2532,7 +2882,6 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let single = Tensor::from_f32(vec![1.0], vec![1, 1]).expect("single input");
             let handle = gpu_helpers::upload_tensor(provider, &single).expect("single upload");
-            runmat_accelerate_api::set_handle_precision(&handle, ProviderPrecision::F32);
             let result = block_on(cdf_builtin(
                 Value::String("Normal".into()),
                 Value::GpuTensor(handle),
@@ -2564,6 +2913,39 @@ mod tests {
                 Some("RunMat:compatibility:CdfIntegerXExtension")
             );
         });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn pdf_wgpu_fallback_preserves_residency_for_all_integer_classes() {
+        use crate::builtins::common::test_support;
+
+        let _accel_guard = test_support::accel_test_lock();
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let Some(provider) = runmat_accelerate_api::provider() else {
+            return;
+        };
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for storage in all_cdf_integer_storages(1) {
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer x");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let result = block_on(pdf_builtin(
+                Value::String("Normal".into()),
+                Value::GpuTensor(handle),
+                vec![Value::Num(0.0), Value::Num(1.0)],
+            ))
+            .expect("resident integer pdf");
+            let Value::GpuTensor(output) = &result else {
+                panic!("expected resident pdf output");
+            };
+            assert!(runmat_accelerate_api::handle_is_explicit(output));
+            let gathered = test_support::gather(result).expect("gather result");
+            assert!((gathered.materialize_f64()[0] - 0.241_970_724_519_143_37).abs() < 1.0e-12);
+        }
     }
 
     #[test]

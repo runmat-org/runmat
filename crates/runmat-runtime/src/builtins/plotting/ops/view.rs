@@ -1,9 +1,13 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{Tensor, Value};
+use runmat_value::{IntValue, IntegerStorage, NumericScalar, Tensor, Value};
 
 use super::op_common::current_axes_target;
 use super::state::{set_view_for_axes, FigureError};
@@ -12,6 +16,60 @@ use crate::builtins::plotting::type_resolvers::get_type;
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "view";
+
+const INTEGER_ANGLES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "view-integer-angles",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "view with typed-integer angles or preset storage is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ViewIntegerAnglesExtension"),
+};
+const INTEGER_AXES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "view-integer-axes-handle",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "view with a typed-integer numeric axes alias is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ViewIntegerAxesHandleExtension"),
+};
+pub const VIEW_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [INTEGER_ANGLES_EXTENSION, INTEGER_AXES_EXTENSION];
+
+const INTEGER_ANGLE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "az, el, v, or dim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public surface describes numbers and line-of-sight arrays without enumerating native integer storage; RunMat exposes typed integer angles and 2/3 presets behind one explicit extension gate.",
+    }];
+const INTEGER_AXES_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "ax",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented target is an Axes object; typed-integer numeric aliases are a gated RunMat graphics representation extension.",
+    }];
+pub const VIEW_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "angles = view(integer_angles_or_preset)",
+        inputs: &INTEGER_ANGLE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Host integer storage remains exact until each angle crosses the renderer's binary32 camera-state boundary; values that cannot be represented exactly reject before plot mutation.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "angles = view(integer_ax, ...)",
+        inputs: &INTEGER_AXES_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The compatibility gate runs before numeric handle decoding or axes-state access; resident integer handles are not gathered.",
+    },
+];
 
 const VIEW_OUTPUT_ANGLES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "angles",
@@ -211,15 +269,17 @@ fn parse_view_angles(args: &[Value]) -> crate::BuiltinResult<(f32, f32)> {
     match args.len() {
         1 => {
             let tensor = scalar_or_tensor(&args[0])?;
-            let data = tensor::tensor_values_f64(&tensor);
-            if data.len() == 1 {
-                match data[0] as i32 {
-                    2 => Ok((0.0, 90.0)),
-                    3 => Ok((-37.5, 30.0)),
-                    _ => Err(view_error(&VIEW_ERROR_INVALID_ARGUMENT)),
+            if tensor.len() == 1 {
+                let value = view_value_f32(&tensor, 0)?;
+                if value == 2.0 {
+                    Ok((0.0, 90.0))
+                } else if value == 3.0 {
+                    Ok((-37.5, 30.0))
+                } else {
+                    Err(view_error(&VIEW_ERROR_INVALID_ARGUMENT))
                 }
-            } else if data.len() == 2 {
-                Ok((data[0] as f32, data[1] as f32))
+            } else if tensor.len() == 2 {
+                Ok((view_value_f32(&tensor, 0)?, view_value_f32(&tensor, 1)?))
             } else {
                 Err(view_error(&VIEW_ERROR_INVALID_ARGUMENT))
             }
@@ -230,10 +290,7 @@ fn parse_view_angles(args: &[Value]) -> crate::BuiltinResult<(f32, f32)> {
             if !tensor::is_scalar_tensor(&az) || !tensor::is_scalar_tensor(&el) {
                 return Err(view_error(&VIEW_ERROR_INVALID_ARGUMENT));
             }
-            Ok((
-                tensor::tensor_value_f64(&az, 0) as f32,
-                tensor::tensor_value_f64(&el, 0) as f32,
-            ))
+            Ok((view_value_f32(&az, 0)?, view_value_f32(&el, 0)?))
         }
         _ => Err(view_error(&VIEW_ERROR_INVALID_ARGUMENT)),
     }
@@ -244,10 +301,53 @@ fn scalar_or_tensor(value: &Value) -> crate::BuiltinResult<Tensor> {
         Value::Num(v) => {
             Tensor::new(vec![*v], vec![1, 1]).map_err(|_| view_error(&VIEW_ERROR_INVALID_ARGUMENT))
         }
-        Value::Int(i) => Tensor::new(vec![i.to_f64()], vec![1, 1])
+        Value::Int(i) => Tensor::new_integer(IntegerStorage::from_scalar(i.clone()), vec![1, 1])
             .map_err(|_| view_error(&VIEW_ERROR_INVALID_ARGUMENT)),
         other => Tensor::try_from(other).map_err(|_| view_error(&VIEW_ERROR_INVALID_ARGUMENT)),
     }
+}
+
+fn view_value_f32(tensor: &Tensor, index: usize) -> crate::BuiltinResult<f32> {
+    let value = tensor
+        .numeric_value_at(index)
+        .ok_or_else(|| view_error(&VIEW_ERROR_INVALID_ARGUMENT))?;
+    match value {
+        NumericScalar::F64(value) => Ok(value as f32),
+        NumericScalar::F32(value) => Ok(value),
+        integer => {
+            let integer = integer
+                .into_int_value()
+                .expect("nonfloating NumericScalar is an integer");
+            exact_integer_f32(integer).ok_or_else(|| {
+                view_error_with_message(
+                    "view: integer angles must be exactly representable as single",
+                    &VIEW_ERROR_INVALID_ARGUMENT,
+                )
+            })
+        }
+    }
+}
+
+fn exact_integer_f32(value: IntValue) -> Option<f32> {
+    use num_traits::FromPrimitive;
+    let converted = value.to_f64() as f32;
+    let exact = match value {
+        IntValue::I8(value) => num_bigint::BigInt::from(value),
+        IntValue::I16(value) => num_bigint::BigInt::from(value),
+        IntValue::I32(value) => num_bigint::BigInt::from(value),
+        IntValue::I64(value) => num_bigint::BigInt::from(value),
+        IntValue::U8(value) => num_bigint::BigInt::from(value),
+        IntValue::U16(value) => num_bigint::BigInt::from(value),
+        IntValue::U32(value) => num_bigint::BigInt::from(value),
+        IntValue::U64(value) => num_bigint::BigInt::from(value),
+    };
+    (num_bigint::BigInt::from_f32(converted).as_ref() == Some(&exact)).then_some(converted)
+}
+
+fn is_typed_integer(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
 }
 
 #[runtime_builtin(
@@ -258,9 +358,27 @@ fn scalar_or_tensor(value: &Value) -> crate::BuiltinResult<Tensor> {
     suppress_auto_output = true,
     type_resolver(get_type),
     descriptor(crate::builtins::plotting::view::VIEW_DESCRIPTOR),
+    extensions(crate::builtins::plotting::view::VIEW_EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::view::VIEW_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::view"
 )]
 pub fn view_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if let Some(first) = args.first() {
+        if is_typed_integer(first)
+            && matches!(
+                crate::builtins::plotting::properties::resolve_plot_handle(first, BUILTIN_NAME),
+                Ok(crate::builtins::plotting::properties::PlotHandle::Axes(
+                    _,
+                    _
+                ))
+            )
+        {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &INTEGER_AXES_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
+    }
     let (target, rest) = parse_view_target(&args)?;
     if rest.is_empty() {
         let meta = crate::builtins::plotting::state::axes_metadata_snapshot(target.0, target.1)
@@ -270,6 +388,12 @@ pub fn view_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         return Ok(Value::Tensor(
             Tensor::new(vec![az, el], vec![1, 2]).expect("view vector"),
         ));
+    }
+    if rest.iter().any(is_typed_integer) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INTEGER_ANGLES_EXTENSION,
+            BUILTIN_NAME,
+        )?;
     }
     let (az, el) = parse_view_angles(rest)?;
     set_view_for_axes(target.0, target.1, az, el).map_err(map_view_figure_error)?;
@@ -372,6 +496,7 @@ mod tests {
 
     #[test]
     fn view_accepts_typed_integer_angle_vector() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = lock_plot_registry();
         ensure_plot_test_env();
         reset_hold_state_for_run();
@@ -388,6 +513,7 @@ mod tests {
 
     #[test]
     fn view_accepts_separate_typed_integer_angle_scalars() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = lock_plot_registry();
         ensure_plot_test_env();
         reset_hold_state_for_run();
@@ -400,6 +526,34 @@ mod tests {
         let t = Tensor::try_from(&value).unwrap();
 
         assert_eq!(t.materialize_f64(), vec![45.0, 20.0]);
+    }
+
+    #[test]
+    fn view_integer_angles_are_gated_and_exact_at_camera_boundary() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+
+        let angles = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::I32(vec![45, 20]), vec![1, 2])
+                .expect("integer angles"),
+        );
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = view_builtin(vec![angles.clone()]).expect_err("compatibility gate");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:ViewIntegerAnglesExtension")
+            );
+        }
+        {
+            let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let lossy = Value::Int(IntValue::I32(16_777_217));
+            let error = view_builtin(vec![lossy, Value::Int(IntValue::I8(0))])
+                .expect_err("lossy binary32 angle");
+            assert!(error.message().contains("exactly representable as single"));
+        }
     }
 
     #[test]

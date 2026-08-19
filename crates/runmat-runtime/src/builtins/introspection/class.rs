@@ -80,7 +80,7 @@ const CLASS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Integer scalars and arrays report their exact signedness and width; gpuArray reports its container class without inspecting or gathering payload data.",
+        notes: "Integer scalars and arrays report their exact signedness and width. Explicit gpuArray values report the wrapper class, while internal automatic residency reports the underlying numeric class without inspecting or gathering payload data.",
     }];
 
 pub const CLASS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
@@ -92,7 +92,7 @@ pub const CLASS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::HostAndGpu,
         overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "The result is a host character class name. Dense, sparse, and paired complex integer host storage is read from exact dtype metadata; resident values return gpuArray without provider access.",
+        notes: "The result is a host character class name. Dense, sparse, paired complex, and internally auto-resident integer storage is read from exact dtype metadata; only explicit resident values return gpuArray, without provider access.",
     }];
 
 #[runtime_builtin(
@@ -123,7 +123,19 @@ pub(crate) fn class_name_for_value(value: &Value) -> String {
         Value::Symbolic(_) | Value::SymbolicArray(_) => "sym".to_string(),
         Value::Cell(_) => "cell".to_string(),
         Value::Struct(_) => "struct".to_string(),
-        Value::GpuTensor(_) => "gpuArray".to_string(),
+        Value::GpuTensor(handle) => {
+            if runmat_accelerate_api::handle_is_explicit(handle) {
+                "gpuArray".to_string()
+            } else {
+                crate::builtins::common::gpu_helpers::expected_gpu_class_name(
+                    runmat_accelerate_api::handle_precision(handle),
+                    runmat_accelerate_api::handle_integer_type(handle),
+                    runmat_accelerate_api::handle_is_logical(handle),
+                )
+                .unwrap_or("double")
+                .to_string()
+            }
+        }
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
@@ -328,7 +340,7 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn class_reports_gpuarray_without_gather() {
+    fn class_distinguishes_automatic_and_explicit_residency_without_gather() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
@@ -336,8 +348,16 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let name = class_builtin(Value::GpuTensor(handle)).expect("class");
-            assert_eq!(name, "gpuArray");
+            assert_eq!(
+                class_builtin(Value::GpuTensor(handle.clone())).expect("automatic class"),
+                "double"
+            );
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            assert_eq!(
+                class_builtin(Value::GpuTensor(handle)).expect("explicit class"),
+                "gpuArray"
+            );
         });
     }
 
@@ -400,6 +420,7 @@ pub(crate) mod tests {
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("wgpu upload");
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let name = class_builtin(Value::GpuTensor(handle)).expect("class");
         assert_eq!(name, "gpuArray");
     }

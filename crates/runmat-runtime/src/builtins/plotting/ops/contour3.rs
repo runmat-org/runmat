@@ -6,8 +6,6 @@ use runmat_macros::runtime_builtin;
 use runmat_plot::plots::ColorMap;
 #[cfg(test)]
 use runmat_plot::plots::PlotElement;
-#[cfg(test)]
-use runmat_value::Tensor;
 use runmat_value::Value;
 
 use super::common::tensor_to_surface_grid_matlab_xy;
@@ -171,6 +169,7 @@ mod tests {
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, clone_figure, current_figure_handle};
     use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::Tensor;
 
     fn tensor_from(data: &[f64], rows: usize, cols: usize) -> Tensor {
         Tensor::new(data.to_vec(), vec![rows, cols]).expect("contour3 test tensor")

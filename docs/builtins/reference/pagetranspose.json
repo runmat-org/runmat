@@ -36,10 +36,10 @@
     "Equivalent to `permute(X,[2 1 3:ndims(X)])` for dense arrays.",
     "Works for scalars, vectors, matrices, and N-D arrays; only the first two axes are swapped.",
     "Complex values are not conjugated. Compose with `conj` when Hermitian page transpose semantics are needed.",
-    "Logical, character, string, and cell arrays preserve their element type while their first two dimensions are swapped.",
+    "All eight integer classes, logical, character, string, and cell arrays preserve their element type while their first two dimensions are swapped. Integer payloads, including values above `flintmax`, are permuted without a floating conversion.",
     "Sparse matrices transpose through RunMat's sparse CSC transpose path.",
     "Scalar structs are treated as 1-by-1 values and round-trip unchanged; true struct-array permutation will follow RunMat's struct-array representation when that lands.",
-    "gpuArray inputs remain device-resident when a provider is available; otherwise they fall back to host execution."
+    "gpuArray inputs remain device-resident when a provider is available; unsupported integer layouts use transparent exact-owner gather and class-preserving restoration."
   ],
   "examples": [
     {

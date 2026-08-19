@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Metadata-only predicate. gpuArray values are MATLAB objects and remain resident while the host logical result is returned."
+    "notes": "Metadata-only predicate. Explicit gpuArray values are MATLAB objects and remain resident; internal automatic residency retains the underlying host value's nonobject semantics."
   },
   "fusion": {
     "elementwise": false,
@@ -30,7 +30,7 @@
   "description": "`isobject(A)` returns true when `A` is represented as a MATLAB class object in RunMat, including value objects, handle objects, listeners, metaclass references, and `MException` values. Plotting handles are still represented by RunMat's numeric graphics-handle compatibility layer, so use `ishandle`/graphics APIs for those until graphics handles move to object values.",
   "behaviors": [
     "Value-class and handle-class instances return `logical(1)`.",
-    "Runtime object values such as event listeners, metaclass references, MException instances, and gpuArray handles return `logical(1)` because they expose MATLAB class/object semantics.",
+    "Runtime object values such as event listeners, metaclass references, MException instances, and explicit gpuArray handles return `logical(1)` because they expose MATLAB class/object semantics.",
     "Numeric, logical, character, string, cell, struct, and function-handle values return `logical(0)`.",
     "Current RunMat plotting handles are numeric compatibility handles rather than `Value::HandleObject` instances, so `isobject` does not treat figure, axes, or plot-child handles as objects yet.",
     "The predicate does not inspect object properties or call user code."
@@ -63,7 +63,7 @@
     },
     {
       "question": "What about gpuArray?",
-      "answer": "A gpuArray is represented by a GPU-resident handle in RunMat and follows MATLAB's object classification, so `isobject(gpuArray(...))` returns true without gathering the buffer."
+      "answer": "An explicit `gpuArray(...)` value follows MATLAB's object classification and returns true without gathering. RunMat's internal automatic residency is transparent and retains the underlying host value's nonobject result."
     },
     {
       "question": "What about graphics handles?",

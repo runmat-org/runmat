@@ -34,7 +34,7 @@
     "Linear polynomials return the single solution `-b/a`. Higher-degree polynomials are solved via the eigenvalues of the companion matrix.",
     "Real coefficients can generate complex conjugate root pairs. Small imaginary round-off terms are rounded to zero to match MATLAB formatting.",
     "Input vectors can be row or column vectors. Higher-dimensional arrays are rejected.",
-    "Inputs may be real or complex. Logical and integer types are converted to double precision automatically."
+    "The MATLAB-compatible coefficient classes are single and double, real or complex. RunMat mode additionally admits all eight integer classes when every coefficient is exactly representable in binary64; otherwise it raises `RunMat:compatibility:RootsIntegerCoefficientsExtension` before solving."
   ],
   "examples": [
     {
@@ -74,7 +74,7 @@
     },
     {
       "question": "Does `roots` preserve the data type of the coefficients?",
-      "answer": "Coefficients are promoted to double precision internally. The output is a double vector when all roots are real and a complex double vector otherwise."
+      "answer": "Single and double coefficients enter the floating companion-matrix solver. Integer coefficients are a checked RunMat extension: exact binary64 values are admitted, values outside that boundary reject, and the output is double or complex double."
     },
     {
       "question": "Are the roots sorted?",

@@ -2,12 +2,18 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_plot::gpu::line::{
     self, LineGpuInputs as MarkerGpuInputs, LineGpuParams as MarkerGpuParams,
 };
 use runmat_plot::gpu::stem::{StemGpuInputs, StemGpuParams};
 use runmat_plot::gpu::ScalarType;
+use runmat_plot::plots::NumericPlotData;
 use runmat_plot::plots::{LineMarkerAppearance, StemPlot};
 use runmat_value::{Tensor, Value};
 use std::cell::RefCell;
@@ -21,7 +27,7 @@ use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, RuntimeError};
 
-use super::common::numeric_pair;
+use super::common::numeric_plot_data_pair;
 use super::gpu_helpers::gpu_xy_bounds;
 use super::op_common::line_inputs::NumericInput;
 use super::plotting_error;
@@ -384,6 +390,26 @@ pub const STEM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &STEM_ERRORS,
 };
 
+const STEM_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X and Y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target explicitly lists all eight integer classes for both coordinate roles. Native class, shape, and exact values remain authoritative as graphics-object source data.",
+    }];
+pub const STEM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "h = stem(integer_Y) or stem(integer_X, integer_Y, ...)",
+        inputs: &STEM_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "XData and YData retain native storage while rendering deliberately materializes floating geometry. Floating gpuArray inputs can use the direct WGPU sink; integer resident inputs gather exactly through their owner.",
+    }];
+
 fn stem_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl AsRef<str>,
@@ -446,6 +472,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::stem::STEM_DESCRIPTOR),
+    integer_capabilities(crate::builtins::plotting::stem::STEM_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::stem"
 )]
 pub fn stem_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
@@ -485,7 +512,8 @@ pub fn stem_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         let y = y_arg
             .into_tensor(BUILTIN_NAME)
             .map_err(map_stem_invalid_argument)?;
-        let (x, y) = numeric_pair(x, y, BUILTIN_NAME).map_err(map_stem_invalid_argument)?;
+        let (x, y) =
+            numeric_plot_data_pair(x, y, BUILTIN_NAME).map_err(map_stem_invalid_argument)?;
         let plot = build_stem_plot(x, y, &parsed, &label).map_err(map_stem_invalid_argument)?;
         let plot_index = figure.add_stem_plot_on_axes(plot, axes);
         *plot_index_slot.borrow_mut() = Some((axes, plot_index));
@@ -507,12 +535,12 @@ pub fn stem_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
 }
 
 fn build_stem_plot(
-    x: Vec<f64>,
-    y: Vec<f64>,
+    x: NumericPlotData,
+    y: NumericPlotData,
     parsed: &ParsedStemStyle,
     label: &str,
 ) -> crate::BuiltinResult<StemPlot> {
-    let mut plot = StemPlot::new(x, y)
+    let mut plot = StemPlot::new_with_source(x, y)
         .map_err(|e| plotting_error(BUILTIN_NAME, format!("stem: {e}")))?
         .with_style(
             parsed.appearance.color,
@@ -825,6 +853,43 @@ mod tests {
         assert!(matches!(fig.plots().next().unwrap(), PlotElement::Stem(_)));
         let ty = get_builtin(vec![Value::Num(handle), Value::String("Type".into())]).unwrap();
         assert_eq!(ty, Value::String("stem".into()));
+    }
+
+    #[test]
+    fn stem_graphics_properties_preserve_wide_integer_source_storage() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        let wide = 9_007_199_254_740_993_u64;
+        let x = Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![wide, wide + 2]),
+            vec![1, 2],
+        )
+        .expect("XData");
+        let y = Tensor::new_integer(runmat_value::IntegerStorage::I16(vec![-3, 4]), vec![2, 1])
+            .expect("YData");
+        let handle = stem_builtin(vec![Value::Tensor(x), Value::Tensor(y)]).expect("stem");
+        let Value::Tensor(x) =
+            get_builtin(vec![Value::Num(handle), Value::from("XData")]).expect("XData")
+        else {
+            panic!("expected XData tensor");
+        };
+        let Value::Tensor(y) =
+            get_builtin(vec![Value::Num(handle), Value::from("YData")]).expect("YData")
+        else {
+            panic!("expected YData tensor");
+        };
+        assert_eq!(
+            x.integer_storage(),
+            Some(&runmat_value::IntegerStorage::U64(vec![wide, wide + 2]))
+        );
+        assert_eq!(
+            y.integer_storage(),
+            Some(&runmat_value::IntegerStorage::I16(vec![-3, 4]))
+        );
+        assert_eq!(x.shape, vec![1, 2]);
+        assert_eq!(y.shape, vec![2, 1]);
     }
 
     #[test]

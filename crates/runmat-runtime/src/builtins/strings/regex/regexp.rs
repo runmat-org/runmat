@@ -4,8 +4,9 @@ use std::collections::HashMap;
 
 use regex::RegexBuilder;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, StringArray, StructValue, Tensor, Value};
@@ -15,6 +16,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::strings::common::contains_numeric_or_resident_text_input;
 use crate::builtins::strings::type_resolvers::unknown_type;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
@@ -193,6 +195,12 @@ pub const REGEXP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &REGEXP_ERRORS,
 };
 
+pub const REGEXP_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "regexp accepts host string, character, and cell text for subjects, expressions, output keys, and options. Numeric match indices are outputs only; numeric, logical, symbolic, and provider-resident inputs reject before gather or provider access.",
+};
+
 fn runtime_error_for(builtin: &'static str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(builtin).build()
 }
@@ -220,6 +228,15 @@ pub async fn evaluate_with(
     pattern: Value,
     rest: &[Value],
 ) -> BuiltinResult<RegexpEvaluation> {
+    if contains_numeric_or_resident_text_input(&subject)
+        || contains_numeric_or_resident_text_input(&pattern)
+        || rest.iter().any(contains_numeric_or_resident_text_input)
+    {
+        return Err(runtime_error_for(
+            builtin,
+            format!("{builtin}: inputs and options must be host text values"),
+        ));
+    }
     let subject = gather_if_needed_async(&subject)
         .await
         .map_err(|err| with_builtin_context(builtin, err))?;
@@ -238,6 +255,7 @@ pub async fn evaluate_with(
     accel = "sink",
     type_resolver(unknown_type),
     descriptor(crate::builtins::strings::regex::regexp::REGEXP_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::regex::regexp::REGEXP_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::regex::regexp"
 )]
 async fn regexp_builtin(

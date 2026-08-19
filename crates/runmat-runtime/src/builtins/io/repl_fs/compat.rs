@@ -167,6 +167,11 @@ simple_descriptor!(
     &OUTPUT_THREE_TEXT,
     BuiltinOutputMode::ByRequestedOutputCount
 );
+pub const ISFILE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "isfile is a host-text filesystem predicate; integer and resident numeric paths reject before provider or filesystem access.",
+};
 
 pub const FILEPARTS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
     BuiltinIntegerAuditDescriptor {
@@ -182,6 +187,83 @@ simple_descriptor!(
     &OUTPUT_VALUE,
     BuiltinOutputMode::Fixed
 );
+
+const MEMMAPFILE_INTEGER_CONTROLS_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "memmapfile-integer-property-controls",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "typed-integer Writable, Offset, Repeat, or Format-shape property values for memmapfile are a RunMat extension; the public MATLAB page specifies logical/double controls and does not establish typed-integer Format dimensions",
+        error_identifier: Some("RunMat:compatibility:MemmapfileIntegerControlsExtension"),
+    };
+
+const MEMMAPFILE_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "memmapfile-explicit-gpu-argument",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "passing an explicit gpuArray argument to host-only memmapfile is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:MemmapfileExplicitGpuExtension"),
+};
+
+pub const MEMMAPFILE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    MEMMAPFILE_INTEGER_CONTROLS_EXTENSION,
+    MEMMAPFILE_EXPLICIT_GPU_EXTENSION,
+];
+
+const MEMMAPFILE_INTEGER_SHAPE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Format.shape",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "RunMat permits a typed-integer shape vector inside a Format cell and parses it from authoritative storage as positive platform dimensions without binary64 conversion; current public evidence does not establish that typed form.",
+    }];
+
+const MEMMAPFILE_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Writable, Offset, or Repeat",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "RunMat accepts exact typed-integer property controls, but compatibility mode retains the public logical/double property types.",
+    }];
+
+pub const MEMMAPFILE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "m.Data = memmapfile(..., 'Format', integer_typename)",
+        inputs: &[],
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "The documented int8/int16/int32/int64/uint8/uint16/uint32/uint64 formats decode file bytes directly into matching integer classes without a numeric cast.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "m = memmapfile(..., 'Format', {type, integer_shape, field})",
+        inputs: &MEMMAPFILE_INTEGER_SHAPE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "This compatibility-gated typed-shape extension checks dimensions exactly before byte-count arithmetic; the mapped Data class is selected independently by the textual type name.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "m = memmapfile(..., integer_property_control)",
+        inputs: &MEMMAPFILE_INTEGER_CONTROL_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "This compatibility-gated extension parses typed controls exactly. Automatic residency gathers through its owner; explicit residency is separately gated before provider access.",
+    },
+];
+pub const ISFOLDER_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "isfolder is a host-text filesystem predicate; integer and resident numeric paths reject before provider or filesystem access.",
+};
 simple_descriptor!(
     ISFOLDER_SIGNATURES,
     ISFOLDER_DESCRIPTOR,
@@ -190,6 +272,11 @@ simple_descriptor!(
     &OUTPUT_VALUE,
     BuiltinOutputMode::Fixed
 );
+pub const ISENV_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "isenv accepts host-text environment names; integer and resident numeric paths reject before provider or environment access.",
+};
 simple_descriptor!(
     ISENV_SIGNATURES,
     ISENV_DESCRIPTOR,
@@ -206,6 +293,11 @@ simple_descriptor!(
     &OUTPUT_VALUE,
     BuiltinOutputMode::Fixed
 );
+pub const UNSETENV_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "unsetenv accepts a host text environment-variable name; integer and resident numeric values reject before provider or environment access.",
+};
 simple_descriptor!(
     MATLABROOT_SIGNATURES,
     MATLABROOT_DESCRIPTOR,
@@ -222,14 +314,52 @@ simple_descriptor!(
     &OUTPUT_VALUE,
     BuiltinOutputMode::Fixed
 );
-simple_descriptor!(
-    SYSTEM_SIGNATURES,
-    SYSTEM_DESCRIPTOR,
-    "[status, output] = system(command)",
-    &INPUTS_ONE,
-    &OUTPUT_STATUS_MESSAGE,
-    BuiltinOutputMode::ByRequestedOutputCount
-);
+const SYSTEM_INPUTS_COMMAND: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "command",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Operating-system command to execute.",
+}];
+const SYSTEM_INPUTS_ECHO: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "command",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Operating-system command to execute.",
+    },
+    BuiltinParamDescriptor {
+        name: "echo",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("'-echo'"),
+        description: "The literal '-echo', which also writes command output to the console.",
+    },
+];
+const SYSTEM_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "[status, output] = system(command)",
+        inputs: &SYSTEM_INPUTS_COMMAND,
+        outputs: &OUTPUT_STATUS_MESSAGE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[status, output] = system(command, '-echo')",
+        inputs: &SYSTEM_INPUTS_ECHO,
+        outputs: &OUTPUT_STATUS_MESSAGE,
+    },
+];
+pub const SYSTEM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SYSTEM_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &[],
+};
+pub const SYSTEM_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "system accepts a host character vector or string command, not numeric input; integer and resident numeric values reject before provider or process access.",
+};
 simple_descriptor!(
     WHAT_SIGNATURES,
     WHAT_DESCRIPTOR,
@@ -238,6 +368,11 @@ simple_descriptor!(
     &OUTPUT_VALUE,
     BuiltinOutputMode::Fixed
 );
+pub const WHAT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "what accepts no input or one host text folder name; integer and resident numeric values reject before provider or filesystem access.",
+};
 simple_descriptor!(
     FILEATTRIB_SIGNATURES,
     FILEATTRIB_DESCRIPTOR,
@@ -354,6 +489,30 @@ pub const GETPREF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] 
         notes: "A host integer scalar or array stored in the current RunMat preference session is returned with its exact class, shape, and value; multiple names wrap values in a shape-preserving cell array. Durable cross-session storage remains a general preference-system gap.",
     },
 ];
+pub const ISPREF_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "ispref accepts text group and preference names; integer host or resident controls are invalid and reject before provider access.",
+};
+const SETPREF_INTEGER_VALUE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "value",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Preference values may use any MATLAB datatype; all eight integer classes retain their exact native class, shape, and payload.",
+    }];
+pub const SETPREF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "setpref(group, preference, integer_value)",
+        inputs: &SETPREF_INTEGER_VALUE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Host values are cloned into the RunMat preference session without conversion; automatic residency gathers exact storage before host persistence. Durable cross-session storage remains a general preference-system gap.",
+    }];
 simple_descriptor!(
     SETPREF_SIGNATURES,
     SETPREF_DESCRIPTOR,
@@ -386,6 +545,11 @@ simple_descriptor!(
     &OUTPUT_VALUE,
     BuiltinOutputMode::Fixed
 );
+pub const USERPATH_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "userpath accepts no input or one host text path/command; integer and resident numeric values reject before provider or search-path access.",
+};
 simple_descriptor!(
     RESTOREDEFAULTPATH_SIGNATURES,
     RESTOREDEFAULTPATH_DESCRIPTOR,
@@ -410,6 +574,17 @@ simple_descriptor!(
     &OUTPUT_VALUE,
     BuiltinOutputMode::Fixed
 );
+pub const WINQUERYREG_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "value = winqueryreg(rootkey, subkey, valname) for REG_DWORD",
+        inputs: &[],
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Text-only registry lookup inputs can return a documented exact int32 scalar for a 32-bit REG_DWORD value. The Windows command output is decoded as a 32-bit bit pattern without a floating conversion.",
+    }];
 
 pub(super) fn compat_error(name: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(name).build()
@@ -531,6 +706,7 @@ async fn fileparts_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::bool_type),
     descriptor(crate::builtins::io::repl_fs::compat::ISFILE_DESCRIPTOR),
+    integer_audit(crate::builtins::io::repl_fs::compat::ISFILE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn isfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -545,6 +721,7 @@ async fn isfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::bool_type),
     descriptor(crate::builtins::io::repl_fs::compat::ISFOLDER_DESCRIPTOR),
+    integer_audit(crate::builtins::io::repl_fs::compat::ISFOLDER_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn isfolder_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -556,6 +733,12 @@ async fn path_predicate_builtin(
     args: Vec<Value>,
     predicate: fn(&vfs::FsMetadata) -> bool,
 ) -> BuiltinResult<Value> {
+    if args.iter().any(value_contains_resident) {
+        return Err(compat_error(
+            name,
+            format!("{name}: path must be text; provider-resident numeric values are invalid"),
+        ));
+    }
     let args = gather_args(name, &args).await?;
     if args.len() != 1 {
         return Err(compat_error(
@@ -607,9 +790,16 @@ async fn path_predicate_builtin(
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::bool_type),
     descriptor(crate::builtins::io::repl_fs::compat::ISENV_DESCRIPTOR),
+    integer_audit(crate::builtins::io::repl_fs::compat::ISENV_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn isenv_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args.iter().any(value_contains_resident) {
+        return Err(compat_error(
+            "isenv",
+            "isenv: name must be text; provider-resident numeric values are invalid",
+        ));
+    }
     let args = gather_args("isenv", &args).await?;
     if args.len() != 1 {
         return Err(compat_error("isenv", "isenv: expected exactly one input"));
@@ -637,6 +827,18 @@ async fn isenv_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     }
 }
 
+fn value_contains_resident(value: &Value) -> bool {
+    match value {
+        Value::GpuTensor(_) => true,
+        Value::Cell(value) => value.data.iter().any(value_contains_resident),
+        Value::Struct(value) => value.fields.values().any(value_contains_resident),
+        Value::Object(value) => value.properties.values().any(value_contains_resident),
+        Value::Closure(value) => value.captures.iter().any(value_contains_resident),
+        Value::OutputList(values) => values.iter().any(value_contains_resident),
+        _ => false,
+    }
+}
+
 #[runtime_builtin(
     name = "unsetenv",
     category = "io/repl_fs",
@@ -645,9 +847,16 @@ async fn isenv_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::num_type),
     descriptor(crate::builtins::io::repl_fs::compat::UNSETENV_DESCRIPTOR),
+    integer_audit(crate::builtins::io::repl_fs::compat::UNSETENV_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn unsetenv_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args.iter().any(value_contains_resident) {
+        return Err(compat_error(
+            "unsetenv",
+            "unsetenv: name must be text; provider-resident numeric values are invalid",
+        ));
+    }
     let args = gather_args("unsetenv", &args).await?;
     if args.len() != 1 {
         return Err(compat_error(
@@ -719,10 +928,10 @@ async fn pathsep_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     suppress_auto_output = true,
     type_resolver(crate::builtins::io::type_resolvers::system_type),
     descriptor(crate::builtins::io::repl_fs::compat::SYSTEM_DESCRIPTOR),
+    integer_audit(crate::builtins::io::repl_fs::compat::SYSTEM_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn system_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let args = gather_args("system", &args).await?;
     if args.is_empty() || args.len() > 2 {
         return Err(compat_error(
             "system",
@@ -730,7 +939,18 @@ async fn system_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
     let command = scalar_text(&args[0], "system", "command")?;
-    let echo = args.get(1).is_some_and(truthy);
+    let echo = if let Some(option) = args.get(1) {
+        let option = scalar_text(option, "system", "option")?;
+        if !option.eq_ignore_ascii_case("-echo") {
+            return Err(compat_error(
+                "system",
+                "system: optional second argument must be '-echo'",
+            ));
+        }
+        true
+    } else {
+        false
+    };
     let result = run_system_command(&command)?;
     let requested = output_count::current_output_count();
     if (echo || requested == Some(0)) && !result.1.is_empty() {
@@ -786,9 +1006,19 @@ fn truthy(value: &Value) -> bool {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::struct_type),
     descriptor(crate::builtins::io::repl_fs::compat::WHAT_DESCRIPTOR),
+    integer_audit(crate::builtins::io::repl_fs::compat::WHAT_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn what_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args.iter().any(|value| {
+        crate::builtins::common::validation::value_contains_native_integer_class(value)
+            || value_contains_resident(value)
+    }) {
+        return Err(compat_error(
+            "what",
+            "what: folder must be a host string scalar or character vector",
+        ));
+    }
     let args = gather_args("what", &args).await?;
     if args.len() > 1 {
         return Err(compat_error("what", "what: too many input arguments"));
@@ -1147,6 +1377,7 @@ fn pref_value_to_text(value: &Value) -> Option<String> {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::num_type),
     descriptor(crate::builtins::io::repl_fs::compat::SETPREF_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::repl_fs::compat::SETPREF_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn setpref_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -1177,10 +1408,10 @@ async fn setpref_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::bool_type),
     descriptor(crate::builtins::io::repl_fs::compat::ISPREF_DESCRIPTOR),
+    integer_audit(crate::builtins::io::repl_fs::compat::ISPREF_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn ispref_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let args = gather_args("ispref", &args).await?;
     if args.is_empty() || args.len() > 2 {
         return Err(compat_error(
             "ispref",
@@ -1224,9 +1455,19 @@ async fn rehash_builtin(_args: Vec<Value>) -> BuiltinResult<Value> {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::string_type),
     descriptor(crate::builtins::io::repl_fs::compat::USERPATH_DESCRIPTOR),
+    integer_audit(crate::builtins::io::repl_fs::compat::USERPATH_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn userpath_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args.iter().any(|value| {
+        crate::builtins::common::validation::value_has_native_integer_class(value)
+            || matches!(value, Value::GpuTensor(_))
+    }) {
+        return Err(compat_error(
+            "userpath",
+            "userpath: path or command must be host text",
+        ));
+    }
     let args = gather_args("userpath", &args).await?;
     match args.len() {
         0 => Ok(char_value(&default_userpath())),
@@ -1285,9 +1526,35 @@ async fn restoredefaultpath_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::struct_type),
     descriptor(crate::builtins::io::repl_fs::compat::MEMMAPFILE_DESCRIPTOR),
+    extensions(crate::builtins::io::repl_fs::compat::MEMMAPFILE_EXTENSIONS),
+    integer_capabilities(crate::builtins::io::repl_fs::compat::MEMMAPFILE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args
+        .iter()
+        .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &MEMMAPFILE_EXPLICIT_GPU_EXTENSION,
+            "memmapfile",
+        )?;
+    }
+    for pair in args.get(1..).unwrap_or_default().chunks_exact(2) {
+        let Some(name) = scalar_text(&pair[0], "memmapfile", "option").ok() else {
+            continue;
+        };
+        if matches!(
+            name.to_ascii_lowercase().as_str(),
+            "writable" | "offset" | "repeat" | "format"
+        ) && crate::builtins::common::validation::value_contains_native_integer_class(&pair[1])
+        {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &MEMMAPFILE_INTEGER_CONTROLS_EXTENSION,
+                "memmapfile",
+            )?;
+        }
+    }
     let args = gather_args("memmapfile", &args).await?;
     if args.is_empty() {
         return Err(compat_error(
@@ -1670,11 +1937,21 @@ fn numeric_usize(value: &Value, name: &str, arg: &str) -> BuiltinResult<usize> {
     summary = "Query values from the Windows registry.",
     keywords = "winqueryreg,windows,registry",
     accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::string_type),
+    type_resolver(crate::builtins::io::type_resolvers::data_unknown_type),
     descriptor(crate::builtins::io::repl_fs::compat::WINQUERYREG_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::repl_fs::compat::WINQUERYREG_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn winqueryreg_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args.iter().any(|value| {
+        crate::builtins::common::validation::value_contains_native_integer_class(value)
+            || value_contains_resident(value)
+    }) {
+        return Err(compat_error(
+            "winqueryreg",
+            "winqueryreg: registry selectors must be host string scalars or character vectors",
+        ));
+    }
     let args = gather_args("winqueryreg", &args).await?;
     if args.len() < 2 || args.len() > 3 {
         return Err(compat_error(
@@ -1683,6 +1960,11 @@ async fn winqueryreg_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
     let root = scalar_text(&args[0], "winqueryreg", "root")?;
+    if root == "name" && args.len() == 3 {
+        let rootkey = scalar_text(&args[1], "winqueryreg", "root")?;
+        let subkey = scalar_text(&args[2], "winqueryreg", "key")?;
+        return query_windows_registry_names(&rootkey, &subkey);
+    }
     let key = scalar_text(&args[1], "winqueryreg", "key")?;
     let value = args
         .get(2)
@@ -1712,7 +1994,78 @@ fn query_windows_registry(root: &str, key: &str, value: Option<&str>) -> Builtin
             String::from_utf8_lossy(&output.stderr).trim().to_string(),
         ));
     }
-    Ok(char_value(String::from_utf8_lossy(&output.stdout).trim()))
+    parse_registry_query_value(&String::from_utf8_lossy(&output.stdout))
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn parse_registry_query_value(output: &str) -> BuiltinResult<Value> {
+    for line in output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if let Some(index) = fields.iter().position(|field| *field == "REG_DWORD") {
+            let raw = fields.get(index + 1).ok_or_else(|| {
+                compat_error("winqueryreg", "winqueryreg: malformed REG_DWORD output")
+            })?;
+            let bits = raw
+                .strip_prefix("0x")
+                .map_or_else(|| raw.parse::<u32>(), |hex| u32::from_str_radix(hex, 16))
+                .map_err(|_| {
+                    compat_error("winqueryreg", "winqueryreg: malformed REG_DWORD value")
+                })?;
+            return Ok(Value::Int(runmat_value::IntValue::I32(bits as i32)));
+        }
+        for kind in ["REG_SZ", "REG_EXPAND_SZ"] {
+            if let Some(index) = fields.iter().position(|field| *field == kind) {
+                return Ok(char_value(&fields[index + 1..].join(" ")));
+            }
+        }
+    }
+    Err(compat_error(
+        "winqueryreg",
+        "winqueryreg: registry query returned no supported value",
+    ))
+}
+
+#[cfg(windows)]
+fn query_windows_registry_names(root: &str, key: &str) -> BuiltinResult<Value> {
+    let mut full = root.to_string();
+    if !key.is_empty() {
+        full.push('\\');
+        full.push_str(key);
+    }
+    let output = Command::new("reg")
+        .args(["query", &full])
+        .output()
+        .map_err(|err| compat_error("winqueryreg", format!("winqueryreg: {err}")))?;
+    if !output.status.success() {
+        return Err(compat_error(
+            "winqueryreg",
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        ));
+    }
+    let names = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            fields
+                .iter()
+                .position(|field| field.starts_with("REG_"))
+                .map(|index| fields[..index].join(" "))
+                .filter(|name| !name.is_empty())
+        })
+        .collect();
+    cellstr(names)
+}
+
+#[cfg(not(windows))]
+fn query_windows_registry_names(_root: &str, _key: &str) -> BuiltinResult<Value> {
+    Err(compat_error(
+        "winqueryreg",
+        "winqueryreg: Windows registry is unavailable on this platform",
+    ))
 }
 
 #[cfg(not(windows))]
@@ -1732,11 +2085,36 @@ mod tests {
         futures::executor::block_on(value)
     }
 
+    #[test]
+    fn what_rejects_integer_folder_before_filesystem_access() {
+        let error = run(what_builtin(vec![Value::Int(runmat_value::IntValue::U64(
+            u64::MAX,
+        ))]))
+        .expect_err("integer folder must reject");
+        assert!(error.message().contains("host string scalar"));
+    }
+
+    #[test]
+    fn winqueryreg_decodes_dword_as_exact_int32() {
+        let positive = parse_registry_query_value(
+            "HKEY_CURRENT_USER\\Software\\RunMat\n    Count    REG_DWORD    0x7fffffff\n",
+        )
+        .expect("positive DWORD");
+        assert_eq!(positive, Value::Int(runmat_value::IntValue::I32(i32::MAX)));
+
+        let bit_pattern = parse_registry_query_value(
+            "HKEY_CURRENT_USER\\Software\\RunMat\n    Count    REG_DWORD    0xffffffff\n",
+        )
+        .expect("full DWORD bit pattern");
+        assert_eq!(bit_pattern, Value::Int(runmat_value::IntValue::I32(-1)));
+    }
+
     fn unowned_resident_value() -> Value {
         Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         })
     }
 
@@ -1750,6 +2128,39 @@ mod tests {
             FILEATTRIB_INTEGER_AUDIT.kind,
             BuiltinIntegerAuditKind::NotApplicable
         );
+        assert_eq!(
+            USERPATH_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+    }
+
+    #[test]
+    fn userpath_rejects_integer_and_resident_values_before_provider_access() {
+        for invalid in [
+            Value::Int(runmat_value::IntValue::I64(i64::MIN)),
+            unowned_resident_value(),
+        ] {
+            let error = run(userpath_builtin(vec![invalid])).expect_err("invalid path text");
+            assert!(error.message().contains("must be host text"));
+            assert!(!error.message().to_ascii_lowercase().contains("provider"));
+        }
+    }
+
+    #[test]
+    fn ispref_rejects_integer_and_resident_controls_without_gather() {
+        for integer in [
+            runmat_value::IntValue::I8(-1),
+            runmat_value::IntValue::I16(-2),
+            runmat_value::IntValue::I32(-3),
+            runmat_value::IntValue::I64(i64::MIN),
+            runmat_value::IntValue::U8(1),
+            runmat_value::IntValue::U16(2),
+            runmat_value::IntValue::U32(3),
+            runmat_value::IntValue::U64(u64::MAX),
+        ] {
+            assert!(run(ispref_builtin(vec![Value::Int(integer)])).is_err());
+        }
+        assert!(run(ispref_builtin(vec![unowned_resident_value()])).is_err());
     }
 
     #[test]
@@ -1814,6 +2225,19 @@ mod tests {
             .unwrap(),
             Value::Bool(false)
         );
+    }
+
+    #[test]
+    fn path_and_environment_predicates_reject_resident_numeric_inputs_before_access() {
+        for result in [
+            run(isfile_builtin(vec![unowned_resident_value()])),
+            run(isfolder_builtin(vec![unowned_resident_value()])),
+            run(isenv_builtin(vec![unowned_resident_value()])),
+        ] {
+            let error = result.expect_err("resident numeric input must be invalid text");
+            assert!(error.message().contains("provider-resident numeric"));
+            assert!(!error.message().contains("no acceleration provider"));
+        }
     }
 
     #[test]
@@ -2127,6 +2551,23 @@ mod tests {
     }
 
     #[test]
+    fn memmapfile_integer_controls_are_gated_before_file_access() {
+        assert_eq!(MEMMAPFILE_INTEGER_CAPABILITIES.len(), 3);
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = run(memmapfile_builtin(vec![
+            Value::String("definitely-missing.bin".into()),
+            Value::String("Offset".into()),
+            Value::Int(runmat_value::IntValue::U64(0)),
+        ]))
+        .expect_err("typed integer control must be gated");
+        assert_eq!(
+            error.identifier(),
+            MEMMAPFILE_INTEGER_CONTROLS_EXTENSION.error_identifier
+        );
+        drop(strict);
+    }
+
+    #[test]
     fn memmapfile_typed_shape_offset_and_repeat_parsers_are_exact() {
         use runmat_value::{IntValue, IntegerStorage};
 
@@ -2269,6 +2710,25 @@ mod tests {
         #[cfg(not(windows))]
         let expected_output = "hello";
         assert_eq!(values[1], char_value(expected_output));
+    }
+
+    #[test]
+    fn system_rejects_integer_commands_before_process_access() {
+        let error = run(system_builtin(vec![Value::Int(
+            runmat_value::IntValue::U64(u64::MAX),
+        )]))
+        .expect_err("integer command must reject");
+        assert!(error.message().contains("command must be"));
+    }
+
+    #[test]
+    fn system_rejects_integer_echo_options_before_process_access() {
+        let error = run(system_builtin(vec![
+            Value::String("printf should-not-run".to_string()),
+            Value::Int(runmat_value::IntValue::U8(1)),
+        ]))
+        .expect_err("integer option must reject");
+        assert!(error.message().contains("option must be"));
     }
 
     #[test]

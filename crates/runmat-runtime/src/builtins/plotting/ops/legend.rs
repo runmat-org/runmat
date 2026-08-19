@@ -1,6 +1,7 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
@@ -11,6 +12,12 @@ use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "legend";
+
+pub const LEGEND_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "Legend labels, commands, and style properties have no integer numeric-data role; graphics-object targets are opaque handles rather than integer values.",
+};
 
 const LEGEND_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "h",
@@ -184,6 +191,7 @@ fn map_legend_figure_error(err: FigureError) -> RuntimeError {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::legend::LEGEND_DESCRIPTOR),
+    integer_audit(crate::builtins::plotting::legend::LEGEND_INTEGER_AUDIT),
     builtin_path = "crate::builtins::plotting::legend"
 )]
 pub fn legend_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {

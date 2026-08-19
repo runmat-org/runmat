@@ -66,6 +66,13 @@ fn logical_from_numeric_and_stringarray() {
     }
     let sa =
         runmat_value::StringArray::new(vec!["".to_string(), "a".to_string()], vec![2, 1]).unwrap();
+    let err = runmat_runtime::call_builtin("logical", &[Value::StringArray(sa.clone())])
+        .expect_err("string-array logical conversion is a RunMat extension");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:compatibility:LogicalStringArrayInputExtension")
+    );
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let l2 = runmat_runtime::call_builtin("logical", &[Value::StringArray(sa)]).unwrap();
     if let Value::LogicalArray(la) = l2 {
         assert_eq!(la.data, vec![0, 1]);

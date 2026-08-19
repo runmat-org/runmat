@@ -1,6 +1,7 @@
 use super::*;
 use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
@@ -15,6 +16,38 @@ const HEIGHT_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCap
 }];
 pub const HEIGHT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor { form: "n = height(integer_A)", inputs: &HEIGHT_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "All integer classes share the array row-count contract; resident inputs are answered from handle shape without gather." }];
+const WIDTH_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "T",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes:
+        "Only array shape metadata is observed; numeric elements are not materialized or converted.",
+}];
+pub const WIDTH_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor { form: "n = width(integer_T)", inputs: &WIDTH_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "All eight integer classes follow the documented array column-count contract; resident inputs are answered from handle shape without gather." }];
+pub const ISCATEGORICAL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "iscategorical is a universal object-type predicate; integer host or resident values return scalar false without gathering or converting numeric payload data.",
+    };
+pub const ISTABLE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "istable is a universal object-type predicate; integer host or resident values return scalar false without gathering payload data.",
+};
+pub const ISTIMETABLE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "istimetable is a universal object-type predicate; integer host or resident values return scalar false without gathering payload data.",
+    };
+pub const ISORDINAL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "isordinal accepts any data type and returns true only for ordinal categorical arrays; integer host or resident values return scalar false without payload access.",
+};
 
 #[runtime_builtin(
     name = "height",
@@ -47,9 +80,13 @@ pub(crate) async fn height_builtin(value: Value) -> BuiltinResult<Value> {
     summary = "Return the number of variables in a table.",
     keywords = "width,table,variables",
     descriptor(crate::builtins::table::WIDTH_DESCRIPTOR),
+    integer_capabilities(crate::builtins::table::builtins::predicates::WIDTH_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn width_builtin(value: Value) -> BuiltinResult<Value> {
+    if let Value::GpuTensor(handle) = &value {
+        return Ok(Value::Num(handle.shape.get(1).copied().unwrap_or(1) as f64));
+    }
     let host = gather_if_needed_async(&value)
         .await
         .map_err(map_control_flow)?;
@@ -73,14 +110,12 @@ pub(crate) async fn width_builtin(value: Value) -> BuiltinResult<Value> {
     summary = "Return true for table arrays.",
     keywords = "istable,table,predicate",
     descriptor(crate::builtins::table::TABLE_PREDICATE_DESCRIPTOR),
+    integer_audit(crate::builtins::table::builtins::predicates::ISTABLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn istable_builtin(value: Value) -> BuiltinResult<Value> {
-    let host = gather_if_needed_async(&value)
-        .await
-        .map_err(map_control_flow)?;
     Ok(Value::Bool(matches!(
-        host,
+        value,
         Value::Object(ref object) if object.is_class(TABLE_CLASS)
     )))
 }
@@ -91,14 +126,12 @@ pub(crate) async fn istable_builtin(value: Value) -> BuiltinResult<Value> {
     summary = "Return true for timetable arrays.",
     keywords = "istimetable,timetable,predicate",
     descriptor(crate::builtins::table::TABLE_PREDICATE_DESCRIPTOR),
+    integer_audit(crate::builtins::table::builtins::predicates::ISTIMETABLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn istimetable_builtin(value: Value) -> BuiltinResult<Value> {
-    let host = gather_if_needed_async(&value)
-        .await
-        .map_err(map_control_flow)?;
     Ok(Value::Bool(matches!(
-        host,
+        value,
         Value::Object(ref object) if object.is_class(TIMETABLE_CLASS)
     )))
 }
@@ -109,14 +142,12 @@ pub(crate) async fn istimetable_builtin(value: Value) -> BuiltinResult<Value> {
     summary = "Return true for categorical arrays.",
     keywords = "iscategorical,categorical,predicate",
     descriptor(crate::builtins::table::TABLE_PREDICATE_DESCRIPTOR),
+    integer_audit(crate::builtins::table::builtins::predicates::ISCATEGORICAL_INTEGER_AUDIT),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn iscategorical_builtin(value: Value) -> BuiltinResult<Value> {
-    let host = gather_if_needed_async(&value)
-        .await
-        .map_err(map_control_flow)?;
     Ok(Value::Bool(matches!(
-        host,
+        value,
         Value::Object(ref object) if object.is_class(CATEGORICAL_CLASS)
     )))
 }
@@ -127,16 +158,108 @@ pub(crate) async fn iscategorical_builtin(value: Value) -> BuiltinResult<Value> 
     summary = "Return true for ordinal categorical arrays.",
     keywords = "isordinal,ordinal,categorical,predicate",
     descriptor(crate::builtins::table::TABLE_PREDICATE_DESCRIPTOR),
+    integer_audit(crate::builtins::table::builtins::predicates::ISORDINAL_INTEGER_AUDIT),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn isordinal_builtin(value: Value) -> BuiltinResult<Value> {
-    let host = gather_if_needed_async(&value)
-        .await
-        .map_err(map_control_flow)?;
     Ok(Value::Bool(matches!(
-        host,
+        value,
         Value::Object(ref object)
             if object.is_class(CATEGORICAL_CLASS)
                 && matches!(object.properties.get("Ordinal"), Some(Value::Bool(true)))
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::builtins::common::test_support;
+    use futures::executor::block_on;
+    use runmat_value::{IntValue, IntegerStorage};
+
+    #[test]
+    fn universal_table_predicates_return_false_for_all_integer_classes() {
+        for integer in [
+            IntValue::I8(-1),
+            IntValue::I16(-2),
+            IntValue::I32(-3),
+            IntValue::I64(i64::MIN),
+            IntValue::U8(1),
+            IntValue::U16(2),
+            IntValue::U32(3),
+            IntValue::U64(u64::MAX),
+        ] {
+            let value = Value::Int(integer);
+            assert_eq!(
+                block_on(istable_builtin(value.clone())).unwrap(),
+                Value::Bool(false)
+            );
+            assert_eq!(
+                block_on(istimetable_builtin(value.clone())).unwrap(),
+                Value::Bool(false)
+            );
+            assert_eq!(
+                block_on(isordinal_builtin(value)).unwrap(),
+                Value::Bool(false)
+            );
+        }
+    }
+
+    #[test]
+    fn universal_table_predicates_do_not_gather_resident_integer() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+                .expect("integer tensor");
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+                .expect("upload integer");
+            let value = Value::GpuTensor(handle);
+            assert_eq!(
+                block_on(istable_builtin(value.clone())).unwrap(),
+                Value::Bool(false)
+            );
+            assert_eq!(
+                block_on(istimetable_builtin(value.clone())).unwrap(),
+                Value::Bool(false)
+            );
+            assert_eq!(
+                block_on(isordinal_builtin(value)).unwrap(),
+                Value::Bool(false)
+            );
+        });
+    }
+
+    #[test]
+    fn width_reads_integer_shape_without_numeric_materialization() {
+        for storage in [
+            IntegerStorage::I8(vec![1, 2, 3, 4, 5, 6]),
+            IntegerStorage::I16(vec![1, 2, 3, 4, 5, 6]),
+            IntegerStorage::I32(vec![1, 2, 3, 4, 5, 6]),
+            IntegerStorage::I64(vec![1, 2, 3, 4, 5, 6]),
+            IntegerStorage::U8(vec![1, 2, 3, 4, 5, 6]),
+            IntegerStorage::U16(vec![1, 2, 3, 4, 5, 6]),
+            IntegerStorage::U32(vec![1, 2, 3, 4, 5, 6]),
+            IntegerStorage::U64(vec![1, 2, 3, 4, 5, u64::MAX]),
+        ] {
+            let tensor = Tensor::new_integer(storage, vec![2, 3]).expect("integer tensor");
+            assert_eq!(
+                block_on(width_builtin(Value::Tensor(tensor))).unwrap(),
+                Value::Num(3.0)
+            );
+        }
+    }
+
+    #[test]
+    fn width_answers_resident_integer_from_handle_shape() {
+        test_support::with_test_provider(|provider| {
+            let tensor =
+                Tensor::new_integer(IntegerStorage::U64(vec![1, 2, 3, u64::MAX]), vec![2, 2])
+                    .expect("integer tensor");
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+                .expect("upload integer");
+            assert_eq!(
+                block_on(width_builtin(Value::GpuTensor(handle))).unwrap(),
+                Value::Num(2.0)
+            );
+        });
+    }
 }

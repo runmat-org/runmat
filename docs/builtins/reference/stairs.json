@@ -18,7 +18,7 @@
       "double"
     ],
     "broadcasting": "none",
-    "notes": "`stairs` can use a direct GPU-backed geometry path when plotting-compatible buffers are available."
+    "notes": "`stairs` can use direct GPU-backed geometry for supported floating buffers. Integer source buffers use an exact owner-aware gather when direct export is unavailable; automatic residency remains transparent and the renderer never interprets integer bytes as floating values."
   },
   "fusion": {
     "elementwise": false,
@@ -30,11 +30,13 @@
   "tested": {
     "unit": "builtins::plotting::stairs::tests"
   },
-  "description": "`stairs` creates staircase-style line plots from `y` or paired `x, y` inputs and returns a graphics handle. It supports MATLAB-compatible call forms and shared plotting property updates.",
+  "description": "`stairs` creates a piecewise-constant line from `Y` alone or paired `X,Y` coordinates and returns a graphics handle. `X` and `Y` may use `single`, `double`, or any of the eight integer classes. RunMat keeps the native source class and exact values for `XData`, `YData`, and saved figure scenes; the plotting renderer receives a derived floating representation, so rendering does not replace or round the authoritative source data.",
   "behaviors": [
     "`stairs(y)` uses implicit x-values `1:n`, while `stairs(x, y)` uses explicit paired coordinates.",
     "The returned value is a plot handle that works with `get` and `set`.",
     "Marker styling and display names can be updated through the same handle/property system used by line plots.",
+    "`XData` and `YData` retain the input numeric class, shape, and exact host values, including `int64` and `uint64` values above `flintmax`.",
+    "Figure-scene serialization preserves typed source data. Loading an older scene without typed source fields reconstructs ordinary double source data for backward compatibility.",
     "Step-plot rendering is subplot-local and respects current axes state just like `plot` and `scatter`.",
     "GPU-backed geometry is preferred when exported buffers and the shared plotting device are available."
   ],

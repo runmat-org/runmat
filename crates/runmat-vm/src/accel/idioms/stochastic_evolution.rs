@@ -30,11 +30,11 @@ pub async fn execute_stochastic_evolution(
                 scale_scalar,
                 steps_u32,
             ) {
-                Ok(output) => {
+                Ok(mut output) => {
                     if runmat_accelerate_api::handle_is_explicit(&state_handle) {
-                        runmat_accelerate_api::mark_handle_explicit(&output);
+                        runmat_accelerate_api::mark_handle_explicit(&mut output);
                     } else {
-                        runmat_accelerate_api::mark_handle_automatic(&output);
+                        runmat_accelerate_api::mark_handle_automatic(&mut output);
                     }
                     if let Some(temp) = state_owned {
                         let _ = provider.free(&temp);

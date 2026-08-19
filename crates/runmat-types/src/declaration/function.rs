@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::IntegerLiteral;
+
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum FunctionArgDim {
     Any,
@@ -29,7 +31,7 @@ pub enum FunctionArgValidator {
     ScalarOrEmpty,
     Real,
     Integer,
-    Vector,
+    Vector { allow_all_empties: bool },
     Positive,
     Negative,
     Nonnegative,
@@ -80,6 +82,7 @@ impl FunctionArgRangeInclusivity {
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum FunctionArgValidationLiteral {
     Number(f64),
+    Integer(IntegerLiteral),
     Text(String),
     Bool(bool),
 }
@@ -87,6 +90,7 @@ pub enum FunctionArgValidationLiteral {
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum FunctionArgDefaultValue {
     Number(f64),
+    Integer(IntegerLiteral),
     Bool(bool),
     String(String),
     EmptyArray,

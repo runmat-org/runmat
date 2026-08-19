@@ -2,7 +2,11 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
@@ -72,6 +76,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "minus";
+
+pub const MINUS_LIKE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "minus-like-prototype",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "minus with a 'like' output prototype is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:MinusLikePrototypeExtension"),
+};
+pub const MINUS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [MINUS_LIKE_EXTENSION];
+const MINUS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability { name: "A", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "An integer operand requires the other operand to use the same integer class or to be scalar double; complex integer subtraction is rejected." },
+    BuiltinIntegerInputCapability { name: "B", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Compatible dimensions expand implicitly and the nondouble integer class is preserved." },
+];
+pub const MINUS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "C = minus(A, B)", inputs: &MINUS_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput, overflow: BuiltinIntegerOverflowRule::Saturate, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::BroadcastCompatible, notes: "Same-class integer differences are exact and saturating. Scalar-double arithmetic uses MATLAB rounding, including the extended-precision 64-bit rule; resident paths use native kernels when supported and otherwise gather authoritative storage." }];
 
 const MINUS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "C",
@@ -249,6 +266,8 @@ fn minus_error_with_detail(
     keywords = "minus,element-wise subtraction,gpu,-",
     accel = "elementwise",
     type_resolver(numeric_binary_type),
+    extensions(MINUS_EXTENSIONS),
+    integer_capabilities(MINUS_INTEGER_CAPABILITIES),
     descriptor(crate::builtins::math::elementwise::minus::MINUS_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::minus"
 )]
@@ -263,6 +282,12 @@ async fn minus_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResul
     }
     reject_integer_logical_operands(&lhs, &rhs, BUILTIN_NAME).map_err(builtin_error)?;
     let template = parse_output_template(&rest)?;
+    if matches!(template, OutputTemplate::Like(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &MINUS_LIKE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let base = match (lhs, rhs) {
         (Value::GpuTensor(la), Value::GpuTensor(lb)) => minus_gpu_pair(la, lb).await,
         (Value::GpuTensor(la), rhs) => minus_gpu_host_left(la, rhs).await,
@@ -1514,6 +1539,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn minus_like_gpu_prototype_keeps_residency() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let lhs = Tensor::new(vec![10.0, 20.0], vec![2, 1]).unwrap();
             let rhs = Tensor::new(vec![3.0, 4.0], vec![2, 1]).unwrap();
@@ -1545,6 +1571,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn minus_like_gpu_prototype_uploads_typed_integer_storage_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let lhs = Tensor::new_integer(IntegerStorage::I16(vec![10, 20]), vec![2, 1]).unwrap();
             let proto_view = HostTensorView {
@@ -1572,6 +1599,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn minus_like_host_gathers_gpu_value() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let lhs = Tensor::new(vec![10.0, 20.0], vec![2, 1]).unwrap();
             let rhs = Tensor::new(vec![5.0, 6.0], vec![2, 1]).unwrap();
@@ -1594,6 +1622,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn minus_like_complex_prototype_yields_complex() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let lhs = Tensor::new(vec![2.0, 3.0], vec![2, 1]).unwrap();
         let rhs = Tensor::new(vec![4.0, 5.0], vec![2, 1]).unwrap();
         let result = minus_builtin(
@@ -1633,6 +1662,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn minus_like_keyword_case_insensitive() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
         let result = minus_builtin(
             Value::Tensor(tensor.clone()),
@@ -1652,6 +1682,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn minus_like_char_array_keyword() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let keyword = CharArray::new_row("like");
         let result = minus_builtin(
             Value::Num(0.0),

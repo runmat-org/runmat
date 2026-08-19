@@ -255,13 +255,106 @@ pub(crate) async fn cast_value(value: Value, target: IntegerTarget) -> Result<Va
             cast_tensor_value(target, tensor)
         }
         Value::GpuTensor(handle) => {
-            let provider = runmat_accelerate_api::provider_for_handle(&handle)
-                .ok_or_else(|| CastError::Internal("no acceleration provider registered".into()))?;
-            provider
+            let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(&handle)
+                .ok_or_else(|| {
+                    CastError::Internal("no acceleration provider owns the input handle".into())
+                })?;
+            let source_integer = runmat_accelerate_api::handle_integer_type(&handle);
+            let source_logical = runmat_accelerate_api::handle_is_logical(&handle);
+            let source_precision = runmat_accelerate_api::handle_precision(&handle);
+            let source_storage = runmat_accelerate_api::handle_storage(&handle);
+            let source_metadata_consistent = if source_integer.is_some() {
+                matches!(
+                    source_storage,
+                    runmat_accelerate_api::GpuTensorStorage::Real
+                        | runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+                ) && source_precision.is_none()
+                    && !source_logical
+            } else {
+                matches!(
+                    source_storage,
+                    runmat_accelerate_api::GpuTensorStorage::Real
+                        | runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+                ) && source_precision == Some(provider.precision())
+                    && (!source_logical
+                        || source_storage == runmat_accelerate_api::GpuTensorStorage::Real)
+            };
+            if !source_metadata_consistent
+                || !crate::builtins::common::gpu_helpers::gpu_class_metadata_matches(
+                    &handle,
+                    source_precision,
+                    source_integer,
+                    source_logical,
+                )
+            {
+                return Err(CastError::Internal(
+                    "input handle has contradictory class metadata".into(),
+                ));
+            }
+            let input_metadata =
+                crate::builtins::common::gpu_helpers::snapshot_handle_metadata(&handle);
+            let provenance = runmat_accelerate_api::handle_provenance(&handle)
+                .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            if runmat_accelerate_api::handle_storage(&handle)
+                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            {
+                let gathered = crate::builtins::common::gpu_helpers::gather_value_async(
+                    &Value::GpuTensor(handle.clone()),
+                )
+                .await
+                .map_err(|error| CastError::Internal(error.message().to_string()))?;
+                let result = cast_complex_value(gathered, target)?;
+                return crate::builtins::common::gpu_helpers::restore_class_preserving_value(
+                    &handle,
+                    result,
+                    target.class_name(),
+                )
+                .map_err(|error| CastError::Internal(error.message().to_string()));
+            }
+            let mut output = match provider
                 .cast_to_integer(&handle, target.accelerator_type())
                 .await
-                .map(Value::GpuTensor)
-                .map_err(|error| CastError::Internal(error.to_string()))
+            {
+                Ok(output) => output,
+                Err(error) => {
+                    crate::builtins::common::gpu_helpers::restore_handle_metadata(
+                        &handle,
+                        &input_metadata,
+                    );
+                    return Err(CastError::Internal(error.to_string()));
+                }
+            };
+            crate::builtins::common::gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
+            let valid = output.shape == handle.shape
+                && output.device_id == handle.device_id
+                && !crate::builtins::common::gpu_helpers::same_gpu_handle(&handle, &output)
+                && crate::builtins::common::gpu_helpers::exact_provider_for_handle(&output)
+                    .is_some_and(|owner| std::ptr::eq(owner, provider))
+                && runmat_accelerate_api::handle_storage(&output)
+                    == runmat_accelerate_api::GpuTensorStorage::Real
+                && runmat_accelerate_api::handle_integer_type(&output)
+                    == Some(target.accelerator_type())
+                && runmat_accelerate_api::handle_precision(&output).is_none()
+                && !runmat_accelerate_api::handle_is_logical(&output)
+                && crate::builtins::common::gpu_helpers::gpu_class_metadata_matches(
+                    &output,
+                    None,
+                    Some(target.accelerator_type()),
+                    false,
+                );
+            if !valid {
+                crate::builtins::common::gpu_helpers::free_unprotected_exact_owner(
+                    &output,
+                    &[&handle],
+                );
+                return Err(CastError::Internal(
+                    "provider returned an invalid integer cast result".into(),
+                ));
+            }
+            runmat_accelerate_api::set_handle_provenance(&mut output, provenance);
+            Ok(crate::builtins::common::gpu_helpers::resident_gpu_value(
+                output,
+            ))
         }
         value @ (Value::Complex(_, _) | Value::ComplexTensor(_)) => {
             cast_complex_value(value, target)
@@ -441,6 +534,7 @@ pub(crate) fn integer_values(storage: IntegerStorage) -> Vec<IntValue> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_value::SymbolicExpr;
 
@@ -705,5 +799,95 @@ mod tests {
                 .expect("matching components")
             )
         );
+    }
+
+    #[test]
+    fn typed_complex_integer_gpu_cast_stays_exact_and_resident() {
+        test_support::with_test_provider(|provider| {
+            let input = ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+                    IntegerStorage::U64(vec![1, u64::MAX]),
+                )
+                .expect("storage"),
+                vec![1, 2],
+            )
+            .expect("input");
+            let handle =
+                crate::builtins::common::gpu_helpers::upload_complex_tensor(provider, &input)
+                    .expect("upload");
+            let Value::GpuTensor(output) =
+                block_on(cast_value(Value::GpuTensor(handle), IntegerTarget::I64)).expect("cast")
+            else {
+                panic!("expected resident complex integer");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&output),
+                Some(runmat_accelerate_api::IntegerElementType::I64)
+            );
+            let Value::ComplexTensor(gathered) = block_on(
+                crate::builtins::common::gpu_helpers::gather_value_async(&Value::GpuTensor(output)),
+            )
+            .expect("gather") else {
+                panic!("expected complex integer");
+            };
+            let storage = gathered.integer_storage().expect("integer storage");
+            assert_eq!(
+                storage.real,
+                IntegerStorage::I64(vec![9_007_199_254_740_993, i64::MAX])
+            );
+            assert_eq!(storage.imag, IntegerStorage::I64(vec![1, i64::MAX]));
+        });
+    }
+
+    #[test]
+    fn complex_integer_cast_matrix_preserves_empty_shape_and_complex_metadata() {
+        for target in [
+            IntegerTarget::I8,
+            IntegerTarget::I16,
+            IntegerTarget::I32,
+            IntegerTarget::I64,
+            IntegerTarget::U8,
+            IntegerTarget::U16,
+            IntegerTarget::U32,
+            IntegerTarget::U64,
+        ] {
+            let empty = ComplexTensor::new(Vec::new(), vec![2, 0, 3]).expect("complex empty");
+            let Value::ComplexTensor(output) =
+                block_on(cast_value(Value::ComplexTensor(empty), target)).expect("empty cast")
+            else {
+                panic!("integer conversion must preserve complex storage");
+            };
+            assert_eq!(output.shape, vec![2, 0, 3]);
+            let storage = output.integer_storage().expect("typed complex storage");
+            assert_eq!(storage.real, target.storage(Vec::new()));
+            assert_eq!(storage.imag, target.storage(Vec::new()));
+
+            let special = ComplexTensor::new(
+                vec![(f64::NAN, 0.0), (f64::INFINITY, f64::NEG_INFINITY)],
+                vec![1, 2],
+            )
+            .expect("complex special values");
+            let Value::ComplexTensor(output) =
+                block_on(cast_value(Value::ComplexTensor(special), target)).expect("special cast")
+            else {
+                panic!("integer conversion must preserve complex storage");
+            };
+            let storage = output.integer_storage().expect("typed complex storage");
+            assert_eq!(
+                storage.real,
+                target.storage(vec![
+                    target.cast_scalar(f64::NAN),
+                    target.cast_scalar(f64::INFINITY)
+                ])
+            );
+            assert_eq!(
+                storage.imag,
+                target.storage(vec![
+                    target.cast_scalar(0.0),
+                    target.cast_scalar(f64::NEG_INFINITY)
+                ])
+            );
+        }
     }
 }

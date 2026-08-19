@@ -80,7 +80,7 @@ const FWRITE_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents all eight integer data classes; exact source values convert directly to the selected binary precision.",
+        notes: "The compatibility target documents all eight integer data classes; exact source values convert directly to the selected binary precision.",
     }];
 const FWRITE_INTEGER_ID_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -88,7 +88,7 @@ const FWRITE_INTEGER_ID_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents double identifiers; typed integer identifiers are independently gated.",
+        notes: "The compatibility target documents double identifiers; typed integer identifiers are independently gated.",
     }];
 const FWRITE_INTEGER_SKIP_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -96,7 +96,7 @@ const FWRITE_INTEGER_SKIP_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents a double skip scalar; typed integer skips are independently gated and range-checked exactly.",
+        notes: "The compatibility target documents a double skip scalar; typed integer skips are independently gated and range-checked exactly.",
     }];
 pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
     BuiltinIntegerCapabilityDescriptor {
@@ -1362,6 +1362,7 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: 903,
             buffer_id: 903,
+            descriptor: Default::default(),
         });
         let args = vec![Value::from("uint8"), resident];
         let (_, skip, _) = classify_arguments(&args).expect("classified controls");

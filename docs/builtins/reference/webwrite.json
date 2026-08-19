@@ -9,13 +9,13 @@
     "form post",
     "binary upload"
   ],
-  "summary": "Write data to web services via HTTP and return decoded responses with MATLAB-compatible behavior.",
+  "summary": "Write data to a web service and decode its response.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "webwrite gathers gpuArray inputs and executes entirely on the CPU networking stack."
+    "notes": "HTTP execution is host-side. Automatically resident values gather transparently; explicit gpuArray input requires RunMat mode."
   },
   "fusion": {
     "elementwise": false,
@@ -34,14 +34,15 @@
       "builtins::io::http::webwrite::tests::webwrite_binary_payload_respected"
     ]
   },
-  "description": "`webwrite` sends request payloads to HTTP/HTTPS endpoints using methods like POST/PUT/PATCH/DELETE and decodes responses using MATLAB-compatible `weboptions` conventions.",
+  "description": "`webwrite` sends data to an HTTP or HTTPS service and decodes the response according to its content type and options.",
   "behaviors": [
     "The first input is an absolute URL supplied as a character vector or string scalar.",
-    "The second input supplies the request body. Structs and two-column cell arrays become `application/x-www-form-urlencoded` payloads. Character vectors / strings are sent as UTF-8 text, and other MATLAB values default to JSON encoding via `jsonencode`.",
-    "Name-value arguments (or an options struct) accept the same fields as MATLAB `weboptions`: `ContentType`, `MediaType`, `Timeout`, `HeaderFields`, `Username`, `Password`, `UserAgent`, `RequestMethod`, and `QueryParameters`.",
+    "Post names are text. Post values may be text, numeric, logical, or datetime values, including supported arrays; native integer values are serialized from exact storage.",
+    "A structure or supported numeric value may be used as JSON data. Nested native integer values remain exact through JSON serialization.",
+    "A final options structure controls `ContentType`, `MediaType`, `Timeout`, `HeaderFields`, `Username`, `Password`, `UserAgent`, and `RequestMethod`. The default timeout is 5 seconds, and an integer timeout is read exactly.",
     "`ContentType` controls how the response is parsed (`\"auto\"` by default). Set it to `\"json\"`, `\"text\"`, or `\"binary\"` to force JSON decoding, text return, or raw byte vectors.",
     "`MediaType` sets the outbound `Content-Type` header. When omitted, RunMat chooses a sensible default (`application/x-www-form-urlencoded`, `application/json`, `text/plain; charset=utf-8`, or `application/octet-stream`) based on the payload.",
-    "Query parameters can be appended through the `QueryParameters` option or by including additional, unrecognised name-value pairs. Parameter values follow MATLAB scalar rules.",
+    "RunMat additionally supports `QueryParameters`, direct option-like name-value pairs, and raw byte-oriented uploads. These conveniences are distinct from the portable post-pair plus final-options form.",
     "HTTP errors, timeouts, TLS verification problems, and JSON encoding issues raise MATLAB-style errors with descriptive text."
   ],
   "examples": [
@@ -102,11 +103,11 @@
     },
     {
       "question": "How do timeouts work?",
-      "answer": "`Timeout` accepts a scalar number of seconds. The default is 60 s. Requests exceeding the limit raise `webwrite: request to <url> timed out`."
+      "answer": "`Timeout` accepts a positive numeric scalar up to 2147.483647 seconds or `Inf`. The default is 5 seconds."
     },
     {
       "question": "What happens with GPU inputs?",
-      "answer": "They are gathered before serialisation. The function is marked as a sink to break fusion graphs and ensure residency is released."
+      "answer": "Automatically resident values gather transparently before serialization. Explicit gpuArray input is a named RunMat extension and is rejected before provider access in MATLAB-compatible mode."
     }
   ],
   "links": [
@@ -135,8 +136,8 @@
     "label": "`crates/runmat-runtime/src/builtins/io/http/webwrite.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/http/webwrite.rs"
   },
-  "gpu_residency": "No. `webwrite` executes on the CPU. Any GPU values are automatically gathered before serialising the payload, and results are created on the host. Manually gathering is unnecessary.",
+  "gpu_residency": "Requests and results are host-side. Automatically resident values gather transparently; explicit gpuArray input requires RunMat mode.",
   "gpu_behavior": [
-    "`webwrite` is a sink in the execution graph. Any GPU-resident inputs (for example tensors inside structs or cell arrays) are gathered to host memory before encoding the request body. Network I/O always runs on the CPU; fusion plans are terminated with `ResidencyPolicy::GatherImmediately`."
+    "The request path terminates fusion and gathers automatically resident values through their owning provider. Explicit gpuArray input crosses the `webwrite-explicit-gpu-input` extension gate before any gather."
   ]
 }

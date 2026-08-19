@@ -3,6 +3,11 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericStorage, Tensor, Value};
 
@@ -76,6 +81,27 @@ const NEXTPOW2_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDe
     outputs: &NEXTPOW2_OUTPUT,
 }];
 
+const NEXTPOW2_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer classes are documented and retain their native class in the exponent result.",
+    }];
+
+pub const NEXTPOW2_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "p = nextpow2(integer_X)",
+        inputs: &NEXTPOW2_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Integer magnitude and exponent selection use exact native storage, including signed minima and uint64 values; documented gpuArray execution preserves class and residency through typed fallback when no provider kernel exists.",
+    }];
+
 const NEXTPOW2_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.NEXTPOW2.INVALID_INPUT",
     identifier: Some("RunMat:nextpow2:InvalidInput"),
@@ -120,6 +146,9 @@ fn nextpow2_error_with_detail(
     accel = "unary",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::elementwise::nextpow2::NEXTPOW2_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::math::elementwise::nextpow2::NEXTPOW2_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::math::elementwise::nextpow2"
 )]
 async fn nextpow2_builtin(value: Value) -> BuiltinResult<Value> {

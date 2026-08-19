@@ -7,7 +7,11 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
@@ -65,6 +69,46 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "log2";
 
+const LOG2_INTEGER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "log2-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "log2 with integer input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Log2IntegerInputExtension"),
+};
+const LOG2_LOGICAL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "log2-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "log2 with logical input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Log2LogicalInputExtension"),
+};
+const LOG2_CHARACTER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "log2-character-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "log2 with character input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Log2CharacterInputExtension"),
+};
+pub const LOG2_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    LOG2_INTEGER_EXTENSION,
+    LOG2_LOGICAL_EXTENSION,
+    LOG2_CHARACTER_EXTENSION,
+];
+const LOG2_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "X",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "RunMat mode promotes all eight integer classes to the binary64 logarithm domain.",
+}];
+pub const LOG2_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor {
+    form: "Y = log2(integer_X)", inputs: &LOG2_INTEGER_INPUTS,
+    computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+    output_class: BuiltinIntegerOutputClassRule::Double,
+    overflow: BuiltinIntegerOverflowRule::NotApplicable,
+    backend: BuiltinIntegerBackendRule::GatherFallback,
+    overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+    notes: "This is a gated RunMat extension; resident integer inputs gather exactly from their owning provider.",
+}];
+
 const LOG2_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
     ty: BuiltinParamType::NumericArray,
@@ -96,7 +140,24 @@ const LOG2_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "Internal tensor construction or provider interaction failed.",
     message: "log2: internal error",
 };
-const LOG2_ERRORS: [BuiltinErrorDescriptor; 2] = [LOG2_ERROR_INVALID_INPUT, LOG2_ERROR_INTERNAL];
+const LOG2_ERROR_PROVIDER_OWNERSHIP: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LOG2.PROVIDER_OWNERSHIP_MISMATCH",
+    identifier: Some("RunMat:gpu:ProviderOwnershipMismatch"),
+    when: "A resident input has no exact owning provider.",
+    message: "log2: resident input has no exact owning provider",
+};
+const LOG2_ERROR_GPU_COMPLEX_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LOG2.GPU_COMPLEX_INPUT_REQUIRED",
+    identifier: Some("RunMat:log2:GpuComplexInputRequired"),
+    when: "Explicitly resident real input would require a complex result.",
+    message: "log2: real gpuArray input must be explicitly complex when the result can be complex",
+};
+const LOG2_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    LOG2_ERROR_INVALID_INPUT,
+    LOG2_ERROR_INTERNAL,
+    LOG2_ERROR_PROVIDER_OWNERSHIP,
+    LOG2_ERROR_GPU_COMPLEX_INPUT,
+];
 pub const LOG2_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &LOG2_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -130,9 +191,12 @@ fn log2_error_with_detail(
     accel = "unary",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::elementwise::log2::LOG2_DESCRIPTOR),
+    extensions(crate::builtins::math::elementwise::log2::LOG2_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::elementwise::log2::LOG2_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::elementwise::log2"
 )]
 async fn log2_builtin(value: Value) -> BuiltinResult<Value> {
+    ensure_log2_extensions(&value).await?;
     match value {
         Value::GpuTensor(handle) => log2_gpu(handle).await,
         Value::Complex(re, im) => {
@@ -152,21 +216,83 @@ async fn log2_builtin(value: Value) -> BuiltinResult<Value> {
     }
 }
 
+async fn ensure_log2_extensions(value: &Value) -> BuiltinResult<()> {
+    let extension = match value {
+        Value::Int(_) => Some(&LOG2_INTEGER_EXTENSION),
+        Value::Tensor(t) if t.integer_storage().is_some() => Some(&LOG2_INTEGER_EXTENSION),
+        Value::GpuTensor(h) if runmat_accelerate_api::handle_integer_type(h).is_some() => {
+            Some(&LOG2_INTEGER_EXTENSION)
+        }
+        Value::Bool(_) | Value::LogicalArray(_) => Some(&LOG2_LOGICAL_EXTENSION),
+        Value::GpuTensor(h) if runmat_accelerate_api::handle_is_logical(h) => {
+            Some(&LOG2_LOGICAL_EXTENSION)
+        }
+        Value::CharArray(_) => Some(&LOG2_CHARACTER_EXTENSION),
+        _ => None,
+    };
+    if let Some(extension) = extension {
+        crate::compatibility::ensure_builtin_extension_enabled(extension, BUILTIN_NAME)?;
+    }
+    if crate::builtins::common::validation::value_has_native_integer_class(value)
+        && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(value)
+            .await?
+    {
+        return Err(log2_error_with_detail(
+            &LOG2_ERROR_INVALID_INPUT,
+            "integer input lies outside the exact binary64 interval",
+        ));
+    }
+    Ok(())
+}
+
 async fn log2_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
+        let owner = gpu_helpers::exact_provider_for_handle(&handle);
         let tensor = gpu_helpers::gather_tensor_async(&handle)
             .await
             .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-        return log2_tensor(tensor);
+        let result = log2_tensor(tensor)?;
+        return restore_explicit_log2_result(result, &handle, owner);
     }
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+    let owner = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+        build_runtime_error("log2: no exact owner for GPU input")
+            .with_builtin(BUILTIN_NAME)
+            .with_identifier(
+                LOG2_ERROR_PROVIDER_OWNERSHIP
+                    .identifier
+                    .expect("log2 provider-ownership descriptor identifier"),
+            )
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build()
+    })?;
+    {
+        let provider = owner;
         match detect_gpu_requires_complex(provider, &handle).await {
             Ok(false) => {
-                if let Ok(out) = provider.unary_log2(&handle).await {
-                    return Ok(Value::GpuTensor(out));
+                if let Ok(mut out) = provider.unary_log2(&handle).await {
+                    if valid_log2_output(&out, &handle, provider) {
+                        runmat_accelerate_api::set_handle_provenance(
+                            &mut out,
+                            runmat_accelerate_api::handle_provenance(&handle)
+                                .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
+                        );
+                        return Ok(gpu_helpers::resident_gpu_value(out));
+                    }
+                    gpu_helpers::free_unprotected_exact_owner(&out, &[&handle]);
                 }
             }
             Ok(true) => {
+                if runmat_accelerate_api::handle_is_explicit(&handle) {
+                    return Err(build_runtime_error(LOG2_ERROR_GPU_COMPLEX_INPUT.message)
+                        .with_builtin(BUILTIN_NAME)
+                        .with_identifier(
+                            LOG2_ERROR_GPU_COMPLEX_INPUT
+                                .identifier
+                                .expect("log2 complex-input descriptor identifier"),
+                        )
+                        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                        .build());
+                }
                 let tensor = gpu_helpers::gather_tensor_async(&handle)
                     .await
                     .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
@@ -183,7 +309,56 @@ async fn log2_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let tensor = gpu_helpers::gather_tensor_async(&handle)
         .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-    log2_tensor(tensor)
+    let result = log2_tensor(tensor)?;
+    restore_explicit_log2_result(result, &handle, Some(owner))
+}
+
+fn restore_explicit_log2_result(
+    result: Value,
+    input: &GpuTensorHandle,
+    owner: Option<&'static dyn runmat_accelerate_api::AccelProvider>,
+) -> BuiltinResult<Value> {
+    if !runmat_accelerate_api::handle_is_explicit(input) {
+        return Ok(result);
+    }
+    let owner = owner.ok_or_else(|| {
+        build_runtime_error("log2: no exact owner for explicit gpuArray input")
+            .with_builtin(BUILTIN_NAME)
+            .with_identifier(
+                LOG2_ERROR_PROVIDER_OWNERSHIP
+                    .identifier
+                    .expect("log2 provider-ownership descriptor identifier"),
+            )
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build()
+    })?;
+    let mut output = match &result {
+        Value::Tensor(tensor) => gpu_helpers::upload_tensor(owner, tensor).map_err(|error| {
+            builtin_error(format!("log2: failed to restore GPU result: {error}"))
+        })?,
+        Value::ComplexTensor(tensor) => gpu_helpers::upload_complex_tensor(owner, tensor)?,
+        _ => return Ok(result),
+    };
+    runmat_accelerate_api::mark_handle_explicit(&mut output);
+    Ok(gpu_helpers::resident_gpu_value(output))
+}
+
+fn valid_log2_output(
+    output: &GpuTensorHandle,
+    input: &GpuTensorHandle,
+    owner: &'static dyn runmat_accelerate_api::AccelProvider,
+) -> bool {
+    output.shape == input.shape
+        && output.device_id == input.device_id
+        && !gpu_helpers::same_gpu_handle(output, input)
+        && runmat_accelerate_api::handle_storage(output)
+            == runmat_accelerate_api::GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_precision(output)
+            == runmat_accelerate_api::handle_precision(input)
+        && runmat_accelerate_api::handle_integer_type(output).is_none()
+        && !runmat_accelerate_api::handle_is_logical(output)
+        && gpu_helpers::exact_provider_for_handle(output)
+            .is_some_and(|candidate| std::ptr::eq(candidate, owner))
 }
 
 fn log2_real(value: Value) -> BuiltinResult<Value> {
@@ -338,6 +513,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::AccelProvider;
     use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntegerStorage, LogicalArray, StringArray, Tensor, Value};
 
@@ -358,6 +535,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log2_reads_typed_integer_tensor_storage_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 4]), vec![3, 1])
             .expect("integer tensor");
 
@@ -372,9 +550,20 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn log2_rejects_integer_values_outside_exact_binary64_interval() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                .unwrap();
+        let error = log2_builtin(Value::Tensor(tensor)).expect_err("wide integer must reject");
+        assert_eq!(error.identifier(), LOG2_ERROR_INVALID_INPUT.identifier);
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log2_negative_typed_integer_tensor_promotes_to_complex_from_storage() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new_integer(IntegerStorage::I32(vec![-4, 4]), vec![1, 2])
             .expect("integer tensor");
 
@@ -394,6 +583,29 @@ pub(crate) mod tests {
     fn log2_string_rejected_with_stable_identifier() {
         let err = log2_builtin(Value::from("bad")).expect_err("expected input error");
         assert_eq!(err.identifier(), LOG2_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn log2_compatibility_mode_gates_integer_logical_and_character_extensions() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let integer = Tensor::new_integer(IntegerStorage::I8(vec![2]), vec![1, 1]).unwrap();
+        assert_eq!(
+            log2_builtin(Value::Tensor(integer))
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:compatibility:Log2IntegerInputExtension")
+        );
+        assert_eq!(
+            log2_builtin(Value::Bool(true)).unwrap_err().identifier(),
+            Some("RunMat:compatibility:Log2LogicalInputExtension")
+        );
+        let chars = CharArray::new(vec!['A'], 1, 1).unwrap();
+        assert_eq!(
+            log2_builtin(Value::CharArray(chars))
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:compatibility:Log2CharacterInputExtension")
+        );
     }
 
     #[test]
@@ -469,6 +681,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log2_bool_true() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let result = log2_builtin(Value::Bool(true)).expect("log2");
         match result {
             Value::Num(v) => assert!((v - 0.0).abs() < 1e-12),
@@ -479,6 +692,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log2_logical_array_inputs() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let logical = LogicalArray::new(vec![1u8, 0, 1, 0], vec![2, 2]).expect("logical");
         let result = log2_builtin(Value::LogicalArray(logical)).expect("log2");
         match result {
@@ -583,8 +797,9 @@ pub(crate) mod tests {
 
     #[test]
     fn log2_integer_gpu_gathers_exact_storage_before_floating_domain() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
-            let wide = 9_007_199_254_740_993_u64;
+            let wide = 9_007_199_254_740_992_u64;
             let tensor =
                 Tensor::new_integer(IntegerStorage::U64(vec![1, wide]), vec![1, 2]).unwrap();
             let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
@@ -616,6 +831,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log2_char_array_inputs() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let chars = CharArray::new("AZ".chars().collect(), 1, 2).unwrap();
         let result = log2_builtin(Value::CharArray(chars)).expect("log2");
         match result {
@@ -678,25 +894,24 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn log2_wgpu_matches_cpu_elementwise() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        ) else {
+            return;
+        };
         let tensor = Tensor::new(vec![1.0, 2.0, 4.0, 8.0], vec![4, 1]).unwrap();
         let cpu = log2_real(Value::Tensor(tensor.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
-        let handle = runmat_accelerate_api::provider()
-            .unwrap()
-            .upload(&view)
-            .expect("upload");
+        let handle = provider.upload(&view).expect("upload");
         let gpu = block_on(log2_gpu(handle)).expect("log2 gpu");
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
                 assert_eq!(gt.shape, ct.shape);
-                let tol = match runmat_accelerate_api::provider().unwrap().precision() {
+                let tol = match provider.precision() {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
                 };

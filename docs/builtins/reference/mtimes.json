@@ -39,7 +39,7 @@
   "behaviors": [
     "The inner dimensions must match: `size(A, 2) == size(B, 1)` for 2-D arrays. N-D tensors flatten the leading two dimensions into a matrix slice so MATLAB-style broadcasting semantics stay intact.",
     "Row vectors (`1×N`) times column vectors (`N×1`) evaluate to a scalar; column-by-row produces the familiar outer product (`N×1` · `1×M` → `N×M`).",
-    "Scalars multiply every element of the other operand without changing shape; logical inputs are first converted to double precision (`true → 1`, `false → 0`).",
+    "Scalars multiply every element of the other operand without changing shape; logical inputs are converted to double precision. If either operand is integer, the other must be scalar and use the same integer class or scalar double; the result preserves the integer class and saturates.",
     "Complex scalars, matrices, and tensors use full complex arithmetic, including real/complex mixes that promote the result to a complex tensor when necessary.",
     "Empty matrices follow MATLAB semantics: multiplying an `m×0` by `0×n` yields an `m×n` zero matrix and any mismatch in inner dimensions raises `Inner matrix dimensions must agree`.",
     "When either input is GPU-resident, RunMat consults the active acceleration provider; if its `matmul` hook supports the operands the computation stays on device, otherwise the runtime gathers inputs and executes the CPU fallback transparently."
@@ -87,7 +87,7 @@
     },
     {
       "question": "Does `mtimes` support scalars and matrices together?",
-      "answer": "Yes. Scalars multiply every element of the matrix, returning a matrix of the same size."
+      "answer": "Yes. Scalars multiply every element of the matrix. When either operand is integer, the other operand must be scalar; the integer class is preserved and overflow saturates."
     },
     {
       "question": "Are complex numbers fully supported?",

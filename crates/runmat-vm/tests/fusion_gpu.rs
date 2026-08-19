@@ -11,15 +11,17 @@ use runmat_accelerate::{
     configure_auto_offload, fusion_residency, AutoOffloadLogLevel, AutoOffloadOptions, FusionKind,
 };
 use runmat_accelerate_api::{
-    AccelDownloadFuture, AccelProvider, AccelProviderFuture, ApiDeviceInfo, CorrcoefOptions,
-    CovNormalization, CovRows, CovarianceOptions, FspecialRequest, GpuTensorHandle,
-    HostTensorOwned, HostTensorView, ImageNormalizeDescriptor, PagefunRequest, PowerStepEpilogue,
-    ProviderCapabilityOperation, ProviderCapabilitySnapshot, ProviderConcurrencyCapabilities,
-    ProviderCondNorm, ProviderConvMode, ProviderCostEstimate, ProviderCostQuery, ProviderEigResult,
-    ProviderElementType, ProviderFeasibility, ProviderFeasibilityQuery, ProviderLinsolveOptions,
-    ProviderLinsolveResult, ProviderNormOrder, ProviderOperationFamily, ProviderOperationIdentity,
-    ProviderPinvOptions, ProviderPrecision, ProviderResourceEstimate, ProviderStorage,
-    UniqueOptions, UniqueResult, PROVIDER_CAPABILITY_SCHEMA_VERSION,
+    AccelDownloadFuture, AccelNumericDownloadFuture, AccelProvider, AccelProviderFuture,
+    ApiDeviceInfo, CorrcoefOptions, CovNormalization, CovRows, CovarianceOptions, FspecialRequest,
+    GpuTensorHandle, HostNumericDataOwned, HostNumericDataView, HostNumericTensorOwned,
+    HostNumericTensorView, HostTensorOwned, HostTensorView, ImageNormalizeDescriptor,
+    PagefunRequest, PowerStepEpilogue, ProviderCapabilityOperation, ProviderCapabilitySnapshot,
+    ProviderConcurrencyCapabilities, ProviderCondNorm, ProviderConvMode, ProviderCostEstimate,
+    ProviderCostQuery, ProviderEigResult, ProviderElementType, ProviderFeasibility,
+    ProviderFeasibilityQuery, ProviderLinsolveOptions, ProviderLinsolveResult, ProviderNormOrder,
+    ProviderOperationFamily, ProviderOperationIdentity, ProviderPinvOptions, ProviderPrecision,
+    ProviderResourceEstimate, ProviderStorage, UniqueOptions, UniqueResult,
+    PROVIDER_CAPABILITY_SCHEMA_VERSION,
 };
 use runmat_execution::{
     EstimateConfidence, EstimateSource, ExecutionCostComponents, ExecutionCostEstimate,
@@ -150,6 +152,10 @@ impl TestProvider {
             shape,
             device_id: 0,
             buffer_id: id,
+            descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            ),
         };
         runmat_accelerate_api::mark_residency(&handle);
         handle
@@ -313,6 +319,29 @@ impl AccelProvider for TestProvider {
         Ok(self.push(host.data.to_vec(), host.shape.to_vec()))
     }
 
+    fn upload_numeric(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+        host.validate()?;
+        match (host.data, host.storage) {
+            (HostNumericDataView::F64(data), runmat_accelerate_api::GpuTensorStorage::Real) => self
+                .upload(&HostTensorView {
+                    data,
+                    shape: host.shape,
+                }),
+            (HostNumericDataView::F32(data), runmat_accelerate_api::GpuTensorStorage::Real) => {
+                let mut handle = self.push(
+                    data.iter().copied().map(f64::from).collect(),
+                    host.shape.to_vec(),
+                );
+                handle.descriptor = runmat_accelerate_api::GpuTensorDescriptor::numeric(
+                    runmat_accelerate_api::NumericElementType::F32,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                );
+                Ok(handle)
+            }
+            _ => bail!("test provider only supports real floating-point uploads"),
+        }
+    }
+
     fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async move {
             let (data, shape) = self.pull(handle)?;
@@ -320,6 +349,32 @@ impl AccelProvider for TestProvider {
                 data,
                 shape,
                 storage: runmat_accelerate_api::GpuTensorStorage::Real,
+            })
+        })
+    }
+
+    fn download_numeric<'a>(
+        &'a self,
+        handle: &'a GpuTensorHandle,
+    ) -> AccelNumericDownloadFuture<'a> {
+        Box::pin(async move {
+            let (data, shape) = self.pull(handle)?;
+            let data = match handle.descriptor.element_type {
+                Some(runmat_accelerate_api::NumericElementType::F32) => {
+                    HostNumericDataOwned::F32(data.into_iter().map(|value| value as f32).collect())
+                }
+                Some(runmat_accelerate_api::NumericElementType::F64) => {
+                    HostNumericDataOwned::F64(data)
+                }
+                other => bail!("test provider cannot download numeric element type {other:?}"),
+            };
+            Ok(HostNumericTensorOwned {
+                data,
+                shape,
+                storage: handle
+                    .descriptor
+                    .storage
+                    .unwrap_or(runmat_accelerate_api::GpuTensorStorage::Real),
             })
         })
     }

@@ -1,8 +1,15 @@
 //! MATLAB-compatible `pad` builtin with GPU-aware semantics for RunMat.
 
+#[cfg(test)]
+use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, IntValue, StringArray, Value};
@@ -336,6 +343,27 @@ pub const PAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &PAD_ERRORS,
 };
 
+const PAD_LENGTH_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "numberOfCharacters",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target explicitly documents single, double, and every built-in integer class for the nonnegative scalar output length.",
+    }];
+
+pub const PAD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "newStr = pad(str, integer_numberOfCharacters, side?, padCharacter?)",
+        inputs: &PAD_LENGTH_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The exact integer controls only target text length; output preserves the input text container. Explicit interactive GPU length input is unsupported, while automatic residency may gather transparently.",
+    }];
+
 fn map_flow(err: RuntimeError) -> RuntimeError {
     map_control_flow_with_builtin(err, BUILTIN_NAME)
 }
@@ -402,10 +430,23 @@ impl PadOptions {
     accel = "sink",
     type_resolver(text_preserve_type),
     descriptor(crate::builtins::strings::transform::pad::PAD_DESCRIPTOR),
+    integer_capabilities(crate::builtins::strings::transform::pad::PAD_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::strings::transform::pad"
 )]
 async fn pad_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let options = parse_arguments(&rest)?;
+    if crate::dispatcher::value_contains_gpu(&value) {
+        return Err(pad_error(&PAD_ERROR_INVALID_INPUT));
+    }
+    if rest.iter().any(
+        |arg| matches!(arg, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle)),
+    ) {
+        return Err(pad_error(&PAD_ERROR_LENGTH));
+    }
+    let mut gathered_rest = Vec::with_capacity(rest.len());
+    for arg in rest {
+        gathered_rest.push(gather_if_needed_async(&arg).await.map_err(map_flow)?);
+    }
+    let options = parse_arguments(&gathered_rest)?;
     let gathered = gather_if_needed_async(&value).await.map_err(map_flow)?;
     match gathered {
         Value::String(text) => pad_string(text, options),
@@ -816,7 +857,6 @@ fn apply_padding_owned(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    #[cfg(feature = "wgpu")]
     use crate::builtins::common::test_support;
     use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntValue, IntegerStorage, Tensor};
@@ -839,6 +879,37 @@ pub(crate) mod tests {
         let result =
             pad_builtin(Value::String("GPU".into()), vec![Value::Tensor(length)]).expect("pad");
         assert_eq!(result, Value::String("GPU  ".into()));
+    }
+
+    #[test]
+    fn pad_gathers_automatic_integer_length_but_rejects_explicit_length() {
+        test_support::with_test_provider(|provider| {
+            let values = [5_u64];
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&values),
+                    shape: &[1, 1],
+                })
+                .expect("automatic integer length");
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let result = pad_builtin(
+                Value::String("GPU".into()),
+                vec![Value::GpuTensor(handle.clone())],
+            )
+            .expect("automatic residency is transparent");
+            assert_eq!(result, Value::String("GPU  ".into()));
+
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let error = pad_builtin(
+                Value::String("GPU".into()),
+                vec![Value::GpuTensor(handle.clone())],
+            )
+            .expect_err("explicit gpuArray length is unsupported");
+            assert_eq!(error.identifier(), PAD_ERROR_LENGTH.identifier);
+            provider.free(&handle).expect("free length");
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -27,6 +27,11 @@ use crate::{
 };
 
 pub(crate) const MEMOIZED_FUNCTION_CLASS: &str = "MemoizedFunction";
+pub const MEMOIZE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "memoize accepts only a function handle and returns a MemoizedFunction object. Integer values used later as arguments to that object belong to callable cache-key semantics, not to the memoize constructor's public integer surface.",
+};
 const FUNCTION_PROPERTY: &str = "Function";
 const ENABLED_PROPERTY: &str = "Enabled";
 const CACHE_SIZE_PROPERTY: &str = "CacheSize";
@@ -103,6 +108,11 @@ pub const CLEAR_CACHE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
         canonical_builtin: None,
         notes: "clearCache accepts only a MemoizedFunction handle and has no public output; integer values may exist inside cached results but are opaque to cache clearing.",
     };
+pub const STATS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "stats accepts only a MemoizedFunction object. Cached integer inputs and outputs are opaque payloads preserved by the cache; the counters produced by stats are metadata, not integer input roles.",
+};
 const STATS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "S = stats(memoizedFcn)",
     inputs: &MEMOIZED_INPUTS,
@@ -243,6 +253,7 @@ pub const CLEAR_ALL_MEMOIZED_CACHES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescr
     summary = "Create a memoized wrapper around a function handle.",
     keywords = "memoize,MemoizedFunction,function handle,cache",
     descriptor(crate::builtins::introspection::memoize::MEMOIZE_DESCRIPTOR),
+    integer_audit(crate::builtins::introspection::memoize::MEMOIZE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::introspection::memoize"
 )]
 pub(crate) async fn memoize_builtin(function: Value) -> BuiltinResult<Value> {
@@ -358,6 +369,7 @@ pub(crate) async fn clear_cache_builtin(receiver: Value) -> BuiltinResult<Value>
     summary = "Return cache statistics for a MemoizedFunction object.",
     keywords = "memoize,MemoizedFunction,stats,cache",
     descriptor(crate::builtins::introspection::memoize::STATS_DESCRIPTOR),
+    integer_audit(crate::builtins::introspection::memoize::STATS_INTEGER_AUDIT),
     builtin_path = "crate::builtins::introspection::memoize"
 )]
 pub(crate) async fn stats_builtin(receiver: Value) -> BuiltinResult<Value> {
@@ -1216,6 +1228,15 @@ mod tests {
     use runmat_value::IntValue;
     use std::sync::{Arc, Mutex};
 
+    #[test]
+    fn memoize_constructor_is_integer_inapplicable() {
+        assert_eq!(
+            MEMOIZE_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        assert!(MEMOIZE_INTEGER_AUDIT.canonical_builtin.is_none());
+    }
+
     fn counting_invoker(counter: Arc<Mutex<usize>>) -> Arc<crate::user_functions::FunctionInvoker> {
         Arc::new(move |_function, args, requested_outputs| {
             let counter = Arc::clone(&counter);
@@ -1470,6 +1491,7 @@ mod tests {
     fn repeated_call_hits_cache_for_same_inputs_and_nargout() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         reset_memoize_registry_for_test();
         let counter = Arc::new(Mutex::new(0usize));
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
@@ -1500,6 +1522,7 @@ mod tests {
     fn nan_inputs_match_existing_cache_entry() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         reset_memoize_registry_for_test();
         let counter = Arc::new(Mutex::new(0usize));
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
@@ -1528,6 +1551,7 @@ mod tests {
     fn requested_output_count_is_part_of_cache_key() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         reset_memoize_registry_for_test();
         let counter = Arc::new(Mutex::new(0usize));
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
@@ -1561,6 +1585,7 @@ mod tests {
     fn disabled_memoized_function_bypasses_cache_and_stats() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         reset_memoize_registry_for_test();
         let counter = Arc::new(Mutex::new(0usize));
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
@@ -1597,6 +1622,7 @@ mod tests {
     fn cache_size_evicts_oldest_entries() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         reset_memoize_registry_for_test();
         let counter = Arc::new(Mutex::new(0usize));
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
@@ -1637,6 +1663,7 @@ mod tests {
     fn clear_cache_and_clear_all_reset_counters() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         reset_memoize_registry_for_test();
         let counter = Arc::new(Mutex::new(0usize));
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
@@ -1695,6 +1722,7 @@ mod tests {
     fn invalid_cache_size_errors_before_dispatch() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         reset_memoize_registry_for_test();
         let f = memoized();
         let Value::HandleObject(handle) = &f else {
@@ -1790,6 +1818,7 @@ mod tests {
     fn handle_valued_outputs_are_reported_from_object_backed_cache() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         reset_memoize_registry_for_test();
         let _guard =
             crate::user_functions::install_semantic_function_invoker(Some(echo_first_invoker()));

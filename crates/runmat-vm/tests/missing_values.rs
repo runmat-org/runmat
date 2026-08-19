@@ -30,6 +30,7 @@ fn has_logical(vars: &[Value], expected: &[u8]) -> bool {
 
 #[test]
 fn missing_constructs_and_detects_string_sentinel() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let vars = execute_source("s = missing(1, 2); tf = ismissing(s); anytf = anymissing(s);")
         .expect("missing string script");
     assert!(vars.iter().any(|value| matches!(

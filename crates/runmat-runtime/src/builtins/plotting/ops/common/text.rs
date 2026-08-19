@@ -1,4 +1,5 @@
 use runmat_plot::plots::{LegendStyle, TextStyle};
+use runmat_value::NumericScalar;
 use runmat_value::Value;
 
 use crate::builtins::plotting::properties::{parse_text_style_pairs, split_legend_style_pairs};
@@ -82,6 +83,71 @@ pub fn parse_text_command(builtin: &'static str, args: &[Value]) -> BuiltinResul
         text,
         style,
     })
+}
+
+pub fn parse_numeric_text_command(
+    builtin: &'static str,
+    args: &[Value],
+) -> BuiltinResult<TextCommand> {
+    let numeric_text_form = args.len() % 2 == 1
+        && args
+            .first()
+            .is_some_and(|value| format_numeric_text(value).is_some());
+    let (target, rest) = if args.len() == 1 || numeric_text_form {
+        (current_axes_target(), args)
+    } else {
+        split_axes_target(builtin, args)?
+    };
+    if rest.is_empty() {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: expected text input"),
+        ));
+    }
+    let text = value_as_text_string(&rest[0])
+        .or_else(|| format_numeric_text(&rest[0]))
+        .ok_or_else(|| {
+            plotting_error(
+                builtin,
+                format!(
+                    "{builtin}: expected text as char array, string, string array, cell array of strings, or numeric scalar"
+                ),
+            )
+        })?;
+    let style = parse_text_style_pairs(builtin, &rest[1..])?;
+    Ok(TextCommand {
+        target,
+        text,
+        style,
+    })
+}
+
+/// Format a numeric annotation scalar without routing native integers through binary64.
+pub fn format_numeric_text(value: &Value) -> Option<String> {
+    match value {
+        Value::Int(value) => Some(value.decimal_string()),
+        Value::Num(value) if value.is_finite() => Some(format!("{value}")),
+        Value::Tensor(tensor) if tensor.len() == 1 => {
+            format_numeric_scalar(tensor.numeric_value_at(0)?)
+        }
+        _ => None,
+    }
+}
+
+fn format_numeric_scalar(value: NumericScalar) -> Option<String> {
+    match value {
+        NumericScalar::F64(value) if value.is_finite() => Some(format!("{value}")),
+        NumericScalar::F32(value) if value.is_finite() => Some(format!("{value}")),
+        NumericScalar::I8(value) => Some(value.to_string()),
+        NumericScalar::I16(value) => Some(value.to_string()),
+        NumericScalar::I32(value) => Some(value.to_string()),
+        NumericScalar::I64(value) => Some(value.to_string()),
+        NumericScalar::U8(value) => Some(value.to_string()),
+        NumericScalar::U16(value) => Some(value.to_string()),
+        NumericScalar::U32(value) => Some(value.to_string()),
+        NumericScalar::U64(value) => Some(value.to_string()),
+        _ => None,
+    }
 }
 
 pub fn parse_legend_command(builtin: &'static str, args: &[Value]) -> BuiltinResult<LegendCommand> {

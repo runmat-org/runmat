@@ -2,7 +2,11 @@
 
 use nalgebra::{DMatrix, DVector};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ResolveContext, Type,
 };
@@ -102,6 +106,94 @@ pub const RIDGE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const RIDGE_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ridge-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ridge accepts typed-integer response and predictor data as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RidgeIntegerDataExtension"),
+};
+const RIDGE_INTEGER_K_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ridge-integer-k",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ridge accepts typed-integer regularization parameters as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RidgeIntegerKExtension"),
+};
+const RIDGE_INTEGER_SCALED_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ridge-integer-scaled",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ridge accepts a typed-integer scaled flag as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RidgeIntegerScaledExtension"),
+};
+pub const RIDGE_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    RIDGE_INTEGER_DATA_EXTENSION,
+    RIDGE_INTEGER_K_EXTENSION,
+    RIDGE_INTEGER_SCALED_EXTENSION,
+];
+const RIDGE_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double response data; typed integers require exact binary64 conversion.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double predictors; typed integers require the same checked conversion.",
+    },
+];
+const RIDGE_INTEGER_K_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "k",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed regularization parameters are a RunMat extension and enter the floating solver only after exactness and range checks.",
+    }];
+const RIDGE_INTEGER_SCALED_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "scaled",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents scaled as numeric 0 or 1 but not a typed integer class; RunMat gates that convenience form independently.",
+    }];
+pub const RIDGE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "ridge(integer_y, integer_X, k [, scaled])",
+        inputs: &RIDGE_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The authoritative integer samples are checked before transparent gather and intentional binary64 standardization/SVD.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "ridge(y, X, integer_k [, scaled])",
+        inputs: &RIDGE_INTEGER_K_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Regularization parameters are checked exactly before entering the binary64 solver.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "ridge(y, X, k, integer_scaled)",
+        inputs: &RIDGE_INTEGER_SCALED_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "Only exact typed values zero and one are accepted after the compatibility gate.",
+    },
+];
+
 fn ridge_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Tensor {
         shape: Some(vec![None, None]),
@@ -146,6 +238,8 @@ struct PreparedRidge {
     keywords = "ridge,regression,regularization,statistics,machine learning",
     type_resolver(ridge_type),
     descriptor(crate::builtins::stats::ml::ridge::RIDGE_DESCRIPTOR),
+    extensions(crate::builtins::stats::ml::ridge::RIDGE_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::ml::ridge::RIDGE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::ml::ridge"
 )]
 async fn ridge_builtin(y: Value, x: Value, k: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -153,6 +247,35 @@ async fn ridge_builtin(y: Value, x: Value, k: Value, rest: Vec<Value>) -> Builti
         return Err(invalid_argument(
             "ridge: accepts at most one scaled argument",
         ));
+    }
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &y,
+        &RIDGE_INTEGER_DATA_EXTENSION,
+        NAME,
+        "response",
+    )
+    .await?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &x,
+        &RIDGE_INTEGER_DATA_EXTENSION,
+        NAME,
+        "predictor",
+    )
+    .await?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &k,
+        &RIDGE_INTEGER_K_EXTENSION,
+        NAME,
+        "regularization parameter",
+    )
+    .await?;
+    if let Some(value) = rest.first() {
+        if crate::builtins::common::validation::value_has_native_integer_class(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &RIDGE_INTEGER_SCALED_EXTENSION,
+                NAME,
+            )?;
+        }
     }
     let y = value_to_tensor(y).await?;
     let x = value_to_tensor(x).await?;
@@ -436,6 +559,7 @@ mod tests {
 
     #[test]
     fn ridge_accepts_typed_integer_response_design_and_k() {
+        let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
         let y = poisoned_int_tensor(IntegerStorage::I16(vec![1, 3, 5, 7]), 4, 1, f64::NAN);
         let x = poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3]), 4, 1, f64::NAN);
         let k = poisoned_int_tensor(IntegerStorage::U8(vec![0, 1]), 1, 2, f64::NAN);

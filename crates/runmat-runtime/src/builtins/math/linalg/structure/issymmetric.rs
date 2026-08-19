@@ -5,6 +5,10 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
+    BuiltinIntegerAuditKind,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, IntegerStorage, LogicalArray, NumericScalar, Tensor, Value};
 
@@ -133,6 +137,37 @@ pub const ISSYMMETRIC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ISSYMMETRIC_ERRORS,
 };
 
+const ISSYMMETRIC_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "issymmetric-integer-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "issymmetric with typed-integer input is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:IssymmetricIntegerInputExtension"),
+    };
+const ISSYMMETRIC_TOLERANCE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "issymmetric-tolerance-form",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "issymmetric tolerance arguments are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:IssymmetricToleranceExtension"),
+};
+const ISSYMMETRIC_FLAG_ALIAS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "issymmetric-flag-aliases",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "issymmetric flag aliases beyond 'nonskew' and 'skew' are RunMat extensions",
+    error_identifier: Some("RunMat:compatibility:IssymmetricFlagAliasExtension"),
+};
+const ISSYMMETRIC_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    ISSYMMETRIC_INTEGER_INPUT_EXTENSION,
+    ISSYMMETRIC_TOLERANCE_EXTENSION,
+    ISSYMMETRIC_FLAG_ALIAS_EXTENSION,
+];
+pub const ISSYMMETRIC_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "MATLAB documents single, double, and logical matrix inputs; RunMat integer matrices and tolerance arguments are separately declared and gated extensions.",
+    };
+
 #[runmat_macros::register_gpu_spec(
     builtin_path = "crate::builtins::math::linalg::structure::issymmetric"
 )]
@@ -190,9 +225,31 @@ fn issymmetric_error_with_detail(
     accel = "metadata",
     type_resolver(logical_scalar_type),
     descriptor(crate::builtins::math::linalg::structure::issymmetric::ISSYMMETRIC_DESCRIPTOR),
+    extensions(ISSYMMETRIC_EXTENSIONS),
+    integer_audit(
+        crate::builtins::math::linalg::structure::issymmetric::ISSYMMETRIC_INTEGER_AUDIT
+    ),
     builtin_path = "crate::builtins::math::linalg::structure::issymmetric"
 )]
 async fn issymmetric_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if value_has_integer_storage(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ISSYMMETRIC_INTEGER_INPUT_EXTENSION,
+            NAME,
+        )?;
+    }
+    if rest.iter().any(is_tolerance_argument) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ISSYMMETRIC_TOLERANCE_EXTENSION,
+            NAME,
+        )?;
+    }
+    if rest.iter().any(is_flag_alias_argument) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ISSYMMETRIC_FLAG_ALIAS_EXTENSION,
+            NAME,
+        )?;
+    }
     let (mode, tol) = parse_optional_args(&rest)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "issymmetric")?;
     match value {
@@ -205,27 +262,69 @@ async fn issymmetric_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinRe
     }
 }
 
+fn is_tolerance_argument(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Num(_)
+            | Value::Int(_)
+            | Value::Bool(_)
+            | Value::Tensor(_)
+            | Value::LogicalArray(_)
+            | Value::GpuTensor(_)
+    )
+}
+
+fn is_flag_alias_argument(value: &Value) -> bool {
+    let text = match value {
+        Value::String(value) => Some(value.as_str()),
+        Value::StringArray(value) if value.data.len() == 1 => Some(value.data[0].as_str()),
+        _ => None,
+    };
+    text.is_some_and(|value| value.trim().eq_ignore_ascii_case("symmetric"))
+        || matches!(value, Value::CharArray(value) if value.rows == 1 && {
+            let text = value.data.iter().collect::<String>().trim().to_ascii_lowercase();
+            text == "symmetric"
+        })
+}
+
+fn value_has_integer_storage(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(value) if value.integer_storage().is_some())
+        || matches!(value, Value::ComplexTensor(value) if value.integer_storage().is_some())
+        || matches!(value, Value::SparseTensor(value) if value.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
 async fn issymmetric_gpu(
     handle: GpuTensorHandle,
     mode: SymmetryMode,
     tol: f64,
 ) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
+        let metadata = gpu_helpers::snapshot_handle_metadata(&handle);
         let kind = match mode {
             SymmetryMode::Symmetric => ProviderSymmetryKind::Symmetric,
             SymmetryMode::Skew => ProviderSymmetryKind::Skew,
         };
-        let tried = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            provider.issymmetric(&handle, kind, tol)
-        }));
-        if let Ok(Ok(flag)) = tried {
-            return Ok(Value::Bool(flag));
+        match provider.issymmetric(&handle, kind, tol) {
+            Ok(flag) => {
+                gpu_helpers::restore_handle_metadata(&handle, &metadata);
+                return Ok(Value::Bool(flag));
+            }
+            Err(err) => {
+                log::debug!("issymmetric: provider hook unavailable, falling back to host: {err}");
+            }
         }
-        log::debug!("issymmetric: provider path failed or panicked; falling back to host");
+        gpu_helpers::restore_handle_metadata(&handle, &metadata);
     }
-
-    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-    let matrix = MatrixInput::from_value(Value::Tensor(tensor)).await?;
+    let owner = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+        issymmetric_error_with_detail(
+            &ISSYMMETRIC_ERROR_INTERNAL,
+            "no acceleration provider owns the input",
+        )
+    })?;
+    let host = gpu_helpers::download_value_preserving_residency_async(owner, &handle).await?;
+    let matrix = MatrixInput::from_value(host).await?;
     let result = evaluate_matrix(matrix, mode, tol);
     Ok(Value::Bool(result))
 }
@@ -691,6 +790,38 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn compatibility_mode_rejects_integer_tolerance_and_flag_alias_extensions() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let integer_error = block_on(super::issymmetric_builtin(
+            Value::Int(IntValue::I32(1)),
+            Vec::new(),
+        ))
+        .expect_err("integer input is an extension");
+        assert_eq!(
+            integer_error.identifier(),
+            ISSYMMETRIC_INTEGER_INPUT_EXTENSION.error_identifier
+        );
+        let tolerance_error = block_on(super::issymmetric_builtin(
+            Value::Num(1.0),
+            vec![Value::Num(0.0)],
+        ))
+        .expect_err("tolerance form is an extension");
+        assert_eq!(
+            tolerance_error.identifier(),
+            ISSYMMETRIC_TOLERANCE_EXTENSION.error_identifier
+        );
+        let alias_error = block_on(super::issymmetric_builtin(
+            Value::Num(1.0),
+            vec![Value::from("symmetric")],
+        ))
+        .expect_err("noncanonical flag alias is an extension");
+        assert_eq!(
+            alias_error.identifier(),
+            ISSYMMETRIC_FLAG_ALIAS_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
     fn issymmetric_descriptor_signatures_cover_core_forms() {
         let labels: Vec<&str> = ISSYMMETRIC_DESCRIPTOR
             .signatures
@@ -1040,6 +1171,7 @@ pub(crate) mod tests {
     }
 
     fn issymmetric_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         block_on(super::issymmetric_builtin(value, rest))
     }
 }

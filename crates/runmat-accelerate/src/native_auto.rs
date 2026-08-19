@@ -22,8 +22,8 @@ use futures::lock::Mutex as AsyncMutex;
 use log::{debug, info, trace, warn};
 use once_cell::sync::{Lazy, OnceCell};
 use runmat_accelerate_api::{
-    AccelProvider, ApiDeviceInfo, HostIntegerDataView, HostIntegerTensorView, HostTensorView,
-    ProviderOperationFamily, ProviderPrecision, ProviderRejectionCode, ProviderWorkload,
+    AccelProvider, ApiDeviceInfo, HostTensorView, ProviderOperationFamily, ProviderPrecision,
+    ProviderRejectionCode, ProviderWorkload,
 };
 use runmat_builtins::{builtin_functions, AccelTag};
 use runmat_execution::{
@@ -842,8 +842,14 @@ fn record_provider_rejection(
 }
 
 pub async fn global() -> Option<&'static NativeAutoOffload> {
+    if !auto_enabled() {
+        return None;
+    }
+    let active_provider = runmat_accelerate_api::provider()?;
     if let Some(existing) = GLOBAL.get() {
-        return existing.as_ref();
+        return existing
+            .as_ref()
+            .filter(|offload| std::ptr::eq(offload.provider, active_provider));
     }
     // If auto-offload is disabled or there is no GPU provider registered,
     // initialize_async() would return None immediately (no I/O, no blocking).
@@ -856,12 +862,11 @@ pub async fn global() -> Option<&'static NativeAutoOffload> {
     // silently fail (OnceCell is set-once), permanently disabling the
     // accelerator for the lifetime of the process.  These two checks are
     // cheap (no I/O), so re-evaluating them on each call is acceptable.
-    if !auto_enabled() || runmat_accelerate_api::provider().is_none() {
-        return None;
-    }
     let _guard = GLOBAL_INIT_LOCK.lock().await;
     if let Some(existing) = GLOBAL.get() {
-        return existing.as_ref();
+        return existing
+            .as_ref()
+            .filter(|offload| std::ptr::eq(offload.provider, active_provider));
     }
     let initialized = initialize_async().await;
     let _ = GLOBAL.set(initialized);
@@ -974,9 +979,9 @@ impl NativeAutoOffload {
             Value::GpuTensor(_) => Ok(value.clone()),
             Value::Tensor(t) => {
                 // Exact integer buffers are a residency/transfer capability, not a
-                // float-kernel precision.  Try the provider's typed upload below;
-                // a provider that does not implement it simply leaves the value on
-                // the host rather than coercing it through f64.
+                // floating-kernel precision. Try the provider's native numeric
+                // transfer below; an older provider that cannot represent the class
+                // leaves the value on the host rather than coercing it.
                 if t.integer_storage().is_none()
                     && ensure_provider_supports_dtype(self.provider, t.numeric_dtype()).is_err()
                 {
@@ -1046,37 +1051,10 @@ impl NativeAutoOffload {
     }
 
     fn tensor_to_gpu(&self, tensor: &Tensor) -> Result<Value> {
-        if let Some(storage) = tensor.integer_storage() {
-            let data = match storage {
-                runmat_value::IntegerStorage::I8(values) => HostIntegerDataView::I8(values),
-                runmat_value::IntegerStorage::I16(values) => HostIntegerDataView::I16(values),
-                runmat_value::IntegerStorage::I32(values) => HostIntegerDataView::I32(values),
-                runmat_value::IntegerStorage::I64(values) => HostIntegerDataView::I64(values),
-                runmat_value::IntegerStorage::U8(values) => HostIntegerDataView::U8(values),
-                runmat_value::IntegerStorage::U16(values) => HostIntegerDataView::U16(values),
-                runmat_value::IntegerStorage::U32(values) => HostIntegerDataView::U32(values),
-                runmat_value::IntegerStorage::U64(values) => HostIntegerDataView::U64(values),
-            };
-            let handle = self
-                .provider
-                .upload_integer(&HostIntegerTensorView {
-                    data,
-                    shape: &tensor.shape,
-                })
-                .map_err(|e| anyhow!(e.to_string()))?;
-            runmat_accelerate_api::mark_handle_automatic(&handle);
-            return Ok(Value::GpuTensor(handle));
-        }
-        let data = tensor.materialize_f64();
-        let view = HostTensorView {
-            data: &data,
-            shape: &tensor.shape,
-        };
-        let handle = self
-            .provider
-            .upload(&view)
-            .map_err(|e| anyhow!(e.to_string()))?;
-        runmat_accelerate_api::mark_handle_automatic(&handle);
+        let mut handle =
+            runmat_runtime::builtins::common::gpu_helpers::upload_tensor(self.provider, tensor)
+                .map_err(|error| anyhow!(error))?;
+        runmat_accelerate_api::mark_handle_automatic(&mut handle);
         Ok(Value::GpuTensor(handle))
     }
 
@@ -1760,8 +1738,8 @@ fn value_kind(value: &Value) -> &'static str {
 mod tests {
     use super::*;
     use runmat_accelerate_api::{
-        GpuTensorHandle, HostIntegerDataOwned, ProviderCostEstimate, ProviderCostQuery,
-        ProviderFeasibility, ProviderFeasibilityQuery, ProviderResourceEstimate,
+        GpuTensorHandle, HostNumericDataOwned, NumericElementType, ProviderCostEstimate,
+        ProviderCostQuery, ProviderFeasibility, ProviderFeasibilityQuery, ProviderResourceEstimate,
     };
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
@@ -1808,13 +1786,15 @@ mod tests {
     impl AccelProvider for CostedProvider {
         fn upload(&self, host: &HostTensorView<'_>) -> Result<GpuTensorHandle> {
             self.uploads.fetch_add(1, Ordering::Relaxed);
-            let handle = GpuTensorHandle {
-                shape: host.shape.to_vec(),
-                device_id: self.device_id(),
-                buffer_id: self.next_buffer.fetch_add(1, Ordering::Relaxed),
-            };
-            runmat_accelerate_api::set_handle_precision(&handle, ProviderPrecision::F64);
-            Ok(handle)
+            Ok(GpuTensorHandle::new(
+                host.shape.to_vec(),
+                self.device_id(),
+                self.next_buffer.fetch_add(1, Ordering::Relaxed),
+            )
+            .with_numeric_descriptor(
+                NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            ))
         }
 
         fn download<'a>(
@@ -1878,7 +1858,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_promotion_uploads_native_integer_storage_without_f64_conversion() {
+    fn auto_promotion_uploads_native_numeric_storage_without_conversion() {
         crate::simple_provider::register_inprocess_provider();
         let provider = runmat_accelerate_api::provider().expect("in-process provider");
         let auto = NativeAutoOffload::new(provider, ThresholdConfig::default());
@@ -1896,12 +1876,25 @@ mod tests {
             Some(runmat_accelerate_api::IntegerElementType::U64)
         );
         assert_eq!(
-            futures::executor::block_on(provider.download_integer(&handle))
+            futures::executor::block_on(provider.download_numeric(&handle))
                 .expect("exact integer download")
                 .data,
-            HostIntegerDataOwned::U64(vec![1_u64 << 63, u64::MAX])
+            HostNumericDataOwned::U64(vec![1_u64 << 63, u64::MAX])
         );
         provider.free(&handle).expect("free integer handle");
+
+        let single = Tensor::from_f32(vec![1.25, -2.5], vec![1, 2]).expect("single tensor");
+        let promoted = auto
+            .promote_tensor_if_large_observed(&Value::Tensor(single), 1, None)
+            .expect("native single promotion");
+        let Value::GpuTensor(handle) = promoted else {
+            panic!("expected resident single gpuArray");
+        };
+        let downloaded = futures::executor::block_on(provider.download_numeric(&handle))
+            .expect("native single download");
+        assert_eq!(downloaded.data.element_type(), NumericElementType::F32);
+        assert_eq!(downloaded.data, HostNumericDataOwned::F32(vec![1.25, -2.5]));
+        provider.free(&handle).expect("free single handle");
     }
 
     #[test]
@@ -1923,18 +1916,16 @@ mod tests {
     #[test]
     fn complete_cost_keeps_a_profitable_resident_chain_on_provider() {
         clear_decisions();
-        let left = GpuTensorHandle {
-            shape: vec![1, 128],
-            device_id: COSTED_PROVIDER.device_id(),
-            buffer_id: 10_001,
-        };
-        let right = GpuTensorHandle {
-            shape: vec![1, 128],
-            device_id: COSTED_PROVIDER.device_id(),
-            buffer_id: 10_002,
-        };
-        runmat_accelerate_api::set_handle_precision(&left, ProviderPrecision::F64);
-        runmat_accelerate_api::set_handle_precision(&right, ProviderPrecision::F64);
+        let left = GpuTensorHandle::new(vec![1, 128], COSTED_PROVIDER.device_id(), 10_001)
+            .with_numeric_descriptor(
+                NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            );
+        let right = GpuTensorHandle::new(vec![1, 128], COSTED_PROVIDER.device_id(), 10_002)
+            .with_numeric_descriptor(
+                NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            );
         let auto = NativeAutoOffload::new(&COSTED_PROVIDER, ThresholdConfig::default());
         let _ = auto
             .promote_binary(

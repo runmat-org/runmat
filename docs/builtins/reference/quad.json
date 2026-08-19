@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "The adaptive Simpson loop runs on the host. Callback functions may still call GPU-aware builtins."
+    "notes": "The adaptive Simpson loop runs on the host. Automatic residency gathers transparently; explicit gpuArray host fallback is a gated RunMat extension. Callback functions may still call GPU-aware builtins."
   },
   "fusion": {
     "elementwise": false,
@@ -34,6 +34,9 @@
     "`tol` is an absolute positive scalar tolerance and defaults to `1e-6`; an empty `tol` uses the default.",
     "`trace` prints legacy adaptive subdivision rows as `[fcnEvals, a, b-a, Q]` when nonzero; an empty `trace` disables tracing.",
     "Arguments after `trace` are forwarded to the integrand as `fun(x, p1, p2, ...)`.",
+    "Integer bounds and tolerance are gated RunMat extensions and must be exactly representable in the double quadrature domain.",
+    "Integer trace values are documented structural controls tested for exact zero/nonzero state without floating conversion. Integer forwarded parameters are documented callback payloads and retain exact native storage.",
+    "Integer integrand results are a gated RunMat extension and must be exactly representable before adaptive Simpson arithmetic.",
     "The integrand must return a finite real scalar. Array-valued and complex-valued integrands are not supported by `quad`.",
     "Finite reversed bounds are accepted and negate the result. Equal bounds return zero with a function count of zero.",
     "Requests for more than two outputs are rejected."

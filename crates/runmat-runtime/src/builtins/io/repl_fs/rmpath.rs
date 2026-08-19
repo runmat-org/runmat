@@ -4,6 +4,7 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, StringArray, Tensor, Value};
 
@@ -145,6 +146,11 @@ pub const RMPATH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &RMPATH_ERRORS,
 };
+pub const RMPATH_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "rmpath accepts text path containers only; native integer and resident numeric inputs are rejected before provider lookup.",
+};
 
 fn rmpath_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     rmpath_error_with_message(error.message, error)
@@ -188,6 +194,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     suppress_auto_output = true,
     type_resolver(crate::builtins::io::type_resolvers::rmpath_type),
     descriptor(crate::builtins::io::repl_fs::rmpath::RMPATH_DESCRIPTOR),
+    integer_audit(crate::builtins::io::repl_fs::rmpath::RMPATH_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::repl_fs::rmpath"
 )]
 async fn rmpath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -195,6 +202,12 @@ async fn rmpath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         return Err(rmpath_error(&RMPATH_ERROR_TOO_FEW_ARGS));
     }
 
+    if args.iter().any(|value| {
+        crate::builtins::common::validation::value_has_native_integer_class(value)
+            || matches!(value, Value::GpuTensor(_))
+    }) {
+        return Err(rmpath_error(&RMPATH_ERROR_ARG_TYPE));
+    }
     let gathered = gather_arguments(&args).await?;
     let directories = parse_directories(&gathered).await?;
 
@@ -450,6 +463,21 @@ pub(crate) mod tests {
             .collect();
         assert!(labels.contains(&"oldpath = rmpath(folder1)"));
         assert!(labels.contains(&"oldpath = rmpath(folder1, folder2, ...)"));
+    }
+
+    #[test]
+    fn rmpath_rejects_integer_and_resident_inputs_before_provider_access() {
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 9_446_001,
+            descriptor: Default::default(),
+        });
+        for invalid in [Value::Int(runmat_value::IntValue::U8(1)), resident] {
+            let error = rmpath_builtin(vec![invalid]).expect_err("numeric path must reject");
+            assert_eq!(error.identifier(), RMPATH_ERROR_ARG_TYPE.identifier);
+            assert!(!error.message().to_ascii_lowercase().contains("provider"));
+        }
     }
 
     struct PathGuard {

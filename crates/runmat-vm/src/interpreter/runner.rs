@@ -13,7 +13,7 @@ use crate::runtime::workspace::{
     workspace_snapshot,
 };
 use runmat_runtime::call::function_abi::{
-    collect_function_outputs, prepare_function_inputs, FunctionInputSpec,
+    collect_function_outputs, prepare_function_inputs_async, FunctionInputSpec,
 };
 use runmat_runtime::{
     user_functions,
@@ -94,9 +94,17 @@ fn clear_residency(value: &Value) {
 
 fn active_or_standalone_runtime_context() -> runmat_runtime::context::RuntimeContext {
     runmat_runtime::context::legacy::active().unwrap_or_else(|| {
-        runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
-            runmat_runtime::execution::RuntimeExecutionService::new(),
-        ))
+        let execution = std::rc::Rc::new(runmat_runtime::execution::RuntimeExecutionService::new());
+        let runtime = match runmat_runtime::interrupt::current_interrupt() {
+            Some(cancellation) => {
+                runmat_runtime::context::RuntimeContext::with_cancellation(execution, cancellation)
+            }
+            None => runmat_runtime::context::RuntimeContext::new(execution),
+        };
+        runmat_runtime::compatibility::inherit_legacy_extension_policy(&runtime);
+        runmat_runtime::user_functions::inherit_legacy_call_environment(&runtime);
+        runmat_runtime::source_context::inherit_legacy_source_context(&runtime);
+        runtime
     })
 }
 
@@ -230,13 +238,14 @@ async fn invoke_semantic_function_value_with_input_residency_inner(
             })
         })
         .collect::<Result<Vec<_>, RuntimeError>>()?;
-    let prepared = prepare_function_inputs(
+    let prepared = prepare_function_inputs_async(
         &func.display_name,
         runtime_args,
         func.input_slots.len(),
         func.varargin_slot.is_some(),
         &input_specs,
-    )?;
+    )
+    .await?;
     let mut missing_input_slots = HashSet::new();
     for (slot, value) in func.input_slots.iter().zip(&prepared.fixed) {
         if let Some(value) = value {
@@ -958,6 +967,7 @@ async fn run_interpreter_inner(
             | Instr::JumpIfFalse(_)
             | Instr::Jump(_)
             | Instr::LoadConst(_)
+            | Instr::LoadInt(_)
             | Instr::LoadComplex(_, _)
             | Instr::LoadBool(_)
             | Instr::LoadString(_)
@@ -1510,6 +1520,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: 777_001,
+            descriptor: Default::default(),
         };
         fusion_residency::mark(&handle);
         assert!(fusion_residency::is_resident(&handle));
@@ -1538,6 +1549,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: 777_002,
+            descriptor: Default::default(),
         };
         fusion_residency::mark(&handle);
         assert!(fusion_residency::is_resident(&handle));

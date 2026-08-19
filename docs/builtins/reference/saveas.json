@@ -32,7 +32,8 @@
     "`saveas(fig, filename)` infers the output format from `.fig` or `.png`; names without an extension save as `.fig`.",
     "`saveas(fig, filename, formattype)` uses the explicit format. If `filename` has no extension, RunMat appends the standard extension for that format.",
     "Figure, axes, text, legend, ruler, and plot-child handles save their parent figure.",
-    "PDF, EPS, SVG, JPEG, TIFF, and MATLAB code-generation formats are recognized as unsupported until those exporters exist."
+    "PDF, EPS, SVG, JPEG, TIFF, and MATLAB code-generation formats are recognized as unsupported until those exporters exist.",
+    "Figure handles are double graphics identities and format/file arguments are text. Direct typed-integer or gpuArray arguments are invalid and reject before file I/O; integer plot data nested inside a figure remains authoritative scene data."
   ],
   "examples": [
     {

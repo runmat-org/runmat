@@ -198,16 +198,14 @@ fn test_row_column_access() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn test_builtin_functions() {
-    // Test that our new built-in functions are registered
-    let names: Vec<&str> = builtin_functions().into_iter().map(|b| b.name).collect();
-
-    assert!(names.contains(&"zeros"));
-    assert!(names.contains(&"ones"));
-    assert!(names.contains(&"eye"));
-    assert!(names.contains(&"transpose"));
-    assert!(names.contains(&"gt"));
-    assert!(names.contains(&"lt"));
-    assert!(names.contains(&"eq"));
+    runmat_runtime::builtins::wasm_registry::register_all();
+    for name in ["zeros", "ones", "eye", "transpose", "gt", "lt", "eq"] {
+        let legacy = builtin_functions()
+            .into_iter()
+            .any(|builtin| builtin.name == name);
+        let canonical = !runmat_runtime::builtin::runtime_builtin_bindings_by_name(name).is_empty();
+        assert!(legacy || canonical, "{name} is not registered");
+    }
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

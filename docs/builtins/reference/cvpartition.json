@@ -17,7 +17,7 @@
     "reduction": false,
     "precisions": ["logical", "f32", "f64"],
     "broadcasting": "none",
-    "notes": "Current RunMat construction gathers resident inputs and runs on CPU. This is not claimed as complete compatibility with the newer GPU stratification and custom-partition surface introduced in R2026a."
+    "notes": "Current RunMat construction gathers resident inputs and runs on CPU. This is not claimed as complete compatibility with the newer GPU stratification and custom-partition surface introduced in the compatibility target."
   },
   "fusion": {
     "elementwise": false,
@@ -43,7 +43,7 @@
     "Typed-integer `n`, KFold or Holdout controls, stratification labels, and custom test sets are four independently gated RunMat extensions. Documented single, double, and logical forms remain accepted as appropriate to each argument.",
     "The `Stratify` value uses documented logical scalars in compatibility mode; numeric, integer, text, and other broad boolean aliases require the `cvpartition-nonlogical-stratify-option` extension.",
     "Random partitions respect RunMat's runtime RNG: the same seed reproduces the same masks, while different seeds can change assignment without changing fold-size invariants.",
-    "General compatibility gaps remain for R2025a `GroupingVariables`, tall-array holdout, R2026a GPU stratification and custom partitions, and portions of object summary and repartition behavior."
+    "General compatibility gaps remain for R2025a `GroupingVariables`, tall-array holdout, the compatibility target's GPU stratification and custom partitions, and portions of object summary and repartition behavior."
   ],
   "examples": [
     {

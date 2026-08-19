@@ -1,5 +1,6 @@
 //! MATLAB-compatible `readlines` and `writelines` helpers.
 
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use std::path::PathBuf;
 
 use runmat_builtins::{
@@ -69,6 +70,12 @@ pub const WRITELINES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &[],
 };
+pub const WRITELINES_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "writelines accepts textual lines, a host text filename, and text-valued options. Integer and resident numeric values are invalid and reject before provider or filesystem access.",
+    };
 
 fn map_control_flow(name: &str, err: RuntimeError) -> RuntimeError {
     build_runtime_error(format!("{name}: {}", err.message()))
@@ -179,9 +186,19 @@ fn parse_empty_line_rule(args: &[Value]) -> BuiltinResult<bool> {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::num_type),
     descriptor(crate::builtins::io::filetext::lines::WRITELINES_DESCRIPTOR),
+    integer_audit(crate::builtins::io::filetext::lines::WRITELINES_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::filetext::lines"
 )]
 async fn writelines_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args.iter().any(|value| {
+        crate::builtins::common::validation::value_contains_native_integer_class(value)
+            || crate::value_contains_gpu(value)
+    }) {
+        return Err(line_error(
+            "writelines",
+            "writelines: lines, filename, and options must be host text values",
+        ));
+    }
     let args = gather_args("writelines", &args).await?;
     if args.len() < 2 {
         return Err(line_error(
@@ -293,5 +310,15 @@ mod tests {
         .unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "a\nb\n");
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn writelines_rejects_integer_input_before_filesystem_access() {
+        let error = run(writelines_builtin(vec![
+            Value::Int(runmat_value::IntValue::U8(1)),
+            Value::String("unused.txt".into()),
+        ]))
+        .expect_err("integer lines are outside the text-only surface");
+        assert!(error.message().contains("must be host text values"));
     }
 }

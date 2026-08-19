@@ -274,7 +274,7 @@ pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::FunctionSpecific,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "[integer-audit-open] This legacy control form updates the shared RunMat random stream and synchronizes the active provider when supported, but exact MATLAB stream/state equivalence is not yet established.",
+        notes: "The legacy control reads all eight native integer scalar classes exactly, rejects negatives and values outside its restorable token domain, updates the shared stream, and synchronizes the active provider when supported. Generator sequence/state parity is a general RNG-engine conformance gap rather than an implicit integer conversion boundary.",
     },
 ];
 
@@ -846,7 +846,6 @@ fn dtype_from_precision(precision: ProviderPrecision) -> NumericDType {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{random, test_support};
-    use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
     use runmat_value::{IntegerComplexStorage, IntegerStorage};
 
@@ -979,8 +978,9 @@ pub(crate) mod tests {
             let handle = provider.random_uniform(&[4, 1]).expect("gpu uniform");
             let host_after_gpu =
                 random::generate_uniform(4, "rand provider sync").expect("uniform");
-            let gpu = block_on(download_handle_async(provider, &handle)).expect("download");
-            assert_eq!(gpu.data, host_after_gpu);
+            let gpu = test_support::gather(Value::GpuTensor(handle.clone())).expect("gather");
+            assert_eq!(gpu.materialize_f64(), host_after_gpu);
+            provider.free(&handle).expect("free uniform handle");
         });
     }
 

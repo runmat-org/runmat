@@ -65,6 +65,18 @@ pub const COLORCUBE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1
         notes: "m is read exactly from authoritative host integer storage, validated against RunMat's allocation guard, and used only as the row count. The generated m-by-3 RGB colormap is double; resident scalar controls are rejected without provider dispatch.",
     }];
 
+pub const PARULA_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "c = parula(integer_m)",
+        inputs: &COLORCUBE_INTEGER_LENGTH_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The compatibility target explicitly lists every built-in integer class for m. The exact nonnegative length is read from authoritative host storage and used only as a guarded row count; the generated m-by-3 RGB colormap is double, and resident controls reject without provider dispatch.",
+    }];
+
 fn colormap_type(_args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> Type {
     Type::Tensor { shape: None }
 }
@@ -129,7 +141,8 @@ define_colormap_builtin!(
     "Return the parula colormap as an RGB array.",
     "parula,colormap,plotting,rgb",
     "c = parula()",
-    "c = parula(m)"
+    "c = parula(m)",
+    crate::builtins::plotting::colormap_arrays::PARULA_INTEGER_CAPABILITIES
 );
 define_colormap_builtin!(
     COLORCUBE_DESCRIPTOR,
@@ -650,11 +663,36 @@ mod tests {
     }
 
     #[test]
+    fn parula_accepts_all_integer_length_classes_and_returns_double() {
+        let storages = [
+            runmat_value::IntegerStorage::I8(vec![6]),
+            runmat_value::IntegerStorage::I16(vec![6]),
+            runmat_value::IntegerStorage::I32(vec![6]),
+            runmat_value::IntegerStorage::I64(vec![6]),
+            runmat_value::IntegerStorage::U8(vec![6]),
+            runmat_value::IntegerStorage::U16(vec![6]),
+            runmat_value::IntegerStorage::U32(vec![6]),
+            runmat_value::IntegerStorage::U64(vec![6]),
+        ];
+
+        for storage in storages {
+            let length = Tensor::new_integer(storage, vec![1, 1]).expect("length");
+            let Value::Tensor(cmap) = parula_builtin(vec![Value::Tensor(length)]).expect("parula")
+            else {
+                panic!("expected colormap tensor");
+            };
+            assert_eq!((cmap.rows, cmap.cols), (6, 3));
+            assert_eq!(cmap.numeric_dtype(), runmat_value::NumericDType::F64);
+        }
+    }
+
+    #[test]
     fn colorcube_rejects_resident_length_without_provider_dispatch() {
         let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let err = colorcube_builtin(vec![resident]).expect_err("resident length");
         assert!(err.message().contains("numeric scalar"));

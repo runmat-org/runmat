@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Uses provider reduce_nnz / reduce_nnz_dim kernels when available and gathers results to the host for MATLAB-compatible doubles."
+    "notes": "Uses a validated owning-provider `reduce_nnz` hook for floating input when available and otherwise performs a non-destructive host fallback. Integer resident input gathers exact native storage because floating reduction kernels cannot interpret packed integer buffers."
   },
   "fusion": {
     "elementwise": false,
@@ -28,8 +28,8 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::math::reduction::nnz::tests::nnz_tensor_counts_entries",
-    "integration": "builtins::math::reduction::nnz::tests::nnz_gpu_provider_roundtrip",
-    "gpu": "builtins::math::reduction::nnz::tests::nnz_wgpu_dim_matches_cpu"
+    "integration": "crates/runmat-vm/tests/integer_datetime_metadata_and_nonzero_semantics.rs",
+    "gpu": "builtins::math::reduction::nnz::tests::nnz_wgpu_integer_fallback_is_exact_and_preserves_source"
   },
   "description": "`nnz(X)` returns the count of nonzero elements in `X`. Result type and supported input classes follow MATLAB semantics.",
   "behaviors": [
@@ -38,8 +38,9 @@
     "Logical arrays (`logical`) are summed as if `true` were `1` and `false` were `0`.",
     "Character arrays use their code points; only the null character (`char(0)`) is considered zero.",
     "Empty arrays return `0` because no elements are nonzero.",
-    "`nnz(X, dim)` counts nonzeros along the specified dimension, returning a tensor whose size in that dimension becomes `1` (mirroring `sum(X ~= 0, dim)`).",
-    "Dimensions larger than `ndims(X)` leave the result unchanged, again following MATLAB's reduction rules for singleton trailing dimensions."
+    "All eight integer classes are counted directly from authoritative native storage and return a host double scalar.",
+    "`nnz(X, dim)` is a gated RunMat reduction convenience, not a documented MATLAB `nnz` syntax. MATLAB-compatible mode rejects it before dimension gathering or provider access.",
+    "In RunMat mode, dimensions larger than `ndims(X)` leave the convenience result unchanged, following ordinary singleton-dimension reduction geometry."
   ],
   "examples": [
     {
@@ -83,7 +84,7 @@
     },
     {
       "question": "How can I count nonzeros along a dimension?",
-      "answer": "Use `nnz(X, dim)`—it behaves like `sum(X ~= 0, dim)` and returns a tensor whose size in the specified dimension becomes `1`."
+      "answer": "The documented MATLAB form is `nnz(X)` only. RunMat offers `nnz(X,dim)` as an explicitly gated convenience when RunMat extensions are enabled."
     },
     {
       "question": "What does `nnz` return for logical arrays?",
@@ -91,7 +92,7 @@
     },
     {
       "question": "Does `nnz` work with GPU arrays?",
-      "answer": "Yes. The builtin dispatches to provider kernels when possible and downloads the MATLAB-compatible double result. When a provider lacks specialised kernels, RunMat gathers the tensor and counts on the CPU."
+      "answer": "Yes. Floating input uses a validated owning-provider reduction when available. Integer input uses an exact non-destructive gather fallback so native and packed integer storage is never interpreted as floating data. The result is a host double scalar."
     },
     {
       "question": "How does `nnz` handle character arrays?",
@@ -180,8 +181,8 @@
     "label": "`crates/runmat-runtime/src/builtins/math/reduction/nnz.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/nnz.rs"
   },
-  "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. RunMat's auto-offload planner tracks residency automatically. For `nnz`, the runtime inspects the active provider and, when available, invokes device-side reduction kernels to count nonzeros on the GPU before downloading the final result. When a provider cannot supply those kernels, RunMat gathers the tensor and computes on the CPU, preserving MATLAB semantics.",
+  "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. RunMat selects the exact provider that owns the source handle, validates fresh floating reduction results, and uses non-destructive authoritative fallback when the provider hook is unavailable or the payload is integer. The source handle and metadata remain intact and the count is returned as a host double scalar.",
   "gpu_behavior": [
-    "When RunMat Accelerate is active, `nnz` keeps work on the GPU whenever the provider implements `reduce_nnz` / `reduce_nnz_dim`. The WGPU provider ships with dedicated kernels that count nonzero elements without gathering intermediate data. The resulting scalar or tensor is then downloaded to the host so the return value matches MATLAB's CPU-resident doubles. If a provider lacks these hooks RunMat falls back to gathering the input and computing on the CPU."
+    "For documented `nnz(X)`, floating resident input may use `reduce_nnz`; the returned handle must be fresh, owned by the same provider, real floating, correctly shaped, and physically consistent with its metadata before download. Integer input follows an exact owner-aware gather fallback. The RunMat-only dimension form can use `reduce_nnz_dim` for floating input after its compatibility gate."
   ]
 }

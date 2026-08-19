@@ -63,12 +63,12 @@
       "input": "G = randn(2048, 2048, \"gpuArray\");\npositive = abs(G)"
     },
     {
-      "description": "Using RunMat's logical extension",
+      "description": "Computing magnitudes of logical values",
       "input": "mask = logical([0 1 0; 1 0 1]);\nnumeric = abs(mask)",
       "output": "numeric = [0 1 0; 1 0 1]"
     },
     {
-      "description": "Using RunMat's character extension",
+      "description": "Computing magnitudes of character codes",
       "input": "c = 'ABC';\ncodes = abs(c)",
       "output": "codes = [65 66 67]"
     },

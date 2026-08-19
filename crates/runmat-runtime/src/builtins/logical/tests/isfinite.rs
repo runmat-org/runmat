@@ -4,6 +4,11 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, LogicalArray, NumericScalar, Tensor, Value};
 
@@ -104,6 +109,15 @@ pub const ISFINITE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ISFINITE_ERRORS,
 };
+const ISFINITE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Every fixed-width integer value is finite.",
+    }];
+pub const ISFINITE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "tf = isfinite(integer_A)", inputs: &ISFINITE_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Predicate, output_class: BuiltinIntegerOutputClassRule::Logical, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving, notes: "Returns a same-shaped all-true logical mask directly from integer class and shape; resident execution or exact fallback preserves typed storage." }];
 
 fn isfinite_error(name: &str, error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     isfinite_error_with_message(name, error.message, error)
@@ -129,17 +143,39 @@ fn isfinite_error_with_message(
     accel = "elementwise",
     type_resolver(logical_unary_type),
     descriptor(crate::builtins::logical::tests::isfinite::ISFINITE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::logical::tests::isfinite::ISFINITE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::logical::tests::isfinite"
 )]
 async fn isfinite_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => {
-            if let Some(provider) = runmat_accelerate_api::provider() {
+            if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
+                return resident_integer_mask(&handle, true);
+            }
+            let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+                isfinite_error_with_message(
+                    BUILTIN_NAME,
+                    "isfinite: no acceleration provider owns the input handle",
+                    &ISFINITE_ERROR_INTERNAL,
+                )
+            })?;
+            let metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+            {
                 if let Ok(mask) = provider.logical_isfinite(&handle) {
-                    return Ok(gpu_helpers::logical_gpu_value(mask));
+                    gpu_helpers::restore_handle_metadata(&handle, &metadata);
+                    if valid_logical_mask(&handle, &mask, provider) {
+                        return Ok(gpu_helpers::logical_gpu_value(mask));
+                    }
+                    gpu_helpers::free_unprotected_exact_owner(&mask, &[&handle]);
+                    return Err(isfinite_error_with_message(
+                        BUILTIN_NAME,
+                        "isfinite: provider returned an invalid logical mask",
+                        &ISFINITE_ERROR_INTERNAL,
+                    ));
                 }
             }
-            let tensor = gpu_helpers::gather_tensor_async(&handle)
+            gpu_helpers::restore_handle_metadata(&handle, &metadata);
+            let host = gpu_helpers::download_value_preserving_residency_async(provider, &handle)
                 .await
                 .map_err(|err| {
                     isfinite_error_with_message(
@@ -148,10 +184,57 @@ async fn isfinite_builtin(value: Value) -> BuiltinResult<Value> {
                         &ISFINITE_ERROR_INTERNAL,
                     )
                 })?;
-            isfinite_tensor(BUILTIN_NAME, tensor)
+            let mask = isfinite_host(host)?;
+            gpu_helpers::restore_class_preserving_value(&handle, mask, BUILTIN_NAME)
         }
         other => isfinite_host(other),
     }
+}
+
+fn valid_logical_mask(
+    input: &runmat_accelerate_api::GpuTensorHandle,
+    output: &runmat_accelerate_api::GpuTensorHandle,
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+) -> bool {
+    output.shape == input.shape
+        && output.device_id == provider.device_id()
+        && gpu_helpers::exact_provider_for_handle(output)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+        && !gpu_helpers::same_gpu_handle(input, output)
+        && runmat_accelerate_api::handle_storage(output)
+            == runmat_accelerate_api::GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_precision(output) == Some(provider.precision())
+        && runmat_accelerate_api::handle_integer_type(output).is_none()
+        && runmat_accelerate_api::handle_class_name(output)
+            .as_deref()
+            .is_none_or(|class| matches!(class, "logical" | "single" | "double"))
+}
+
+fn resident_integer_mask(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+    value: bool,
+) -> BuiltinResult<Value> {
+    let integer = runmat_accelerate_api::handle_integer_type(handle)
+        .expect("resident integer mask requires integer metadata");
+    if gpu_helpers::exact_provider_for_handle(handle).is_none()
+        || runmat_accelerate_api::handle_storage(handle)
+            != runmat_accelerate_api::GpuTensorStorage::Real
+        || runmat_accelerate_api::handle_precision(handle).is_some()
+        || runmat_accelerate_api::handle_is_logical(handle)
+        || !gpu_helpers::gpu_class_metadata_matches(handle, None, Some(integer), false)
+    {
+        return Err(isfinite_error_with_message(
+            BUILTIN_NAME,
+            format!("{BUILTIN_NAME}: resident integer metadata is contradictory"),
+            &ISFINITE_ERROR_INTERNAL,
+        ));
+    }
+    let mask = LogicalArray::new(
+        vec![u8::from(value); tensor::element_count(&handle.shape)],
+        handle.shape.clone(),
+    )
+    .map_err(|error| internal_error(BUILTIN_NAME, format!("{BUILTIN_NAME}: {error}")))?;
+    gpu_helpers::restore_class_preserving_value(handle, Value::LogicalArray(mask), BUILTIN_NAME)
 }
 
 fn isfinite_host(value: Value) -> BuiltinResult<Value> {

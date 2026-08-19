@@ -1,3 +1,4 @@
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_types::MemberAccess;
 use std::collections::{HashMap, HashSet};
 
@@ -63,6 +64,34 @@ const DATETIME_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensio
         "Gathering resident numeric input into a host datetime object is a RunMat-only extension",
     error_identifier: Some("RunMat:compatibility:DatetimeGpuInputExtension"),
 };
+const HOUR_TYPED_LEGACY_NUMERIC_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "hour-typed-legacy-serial-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "hour with single-precision or typed-integer legacy serial-date input is a RunMat extension because the public legacy documentation does not enumerate those storage classes",
+        error_identifier: Some("RunMat:compatibility:HourTypedLegacySerialExtension"),
+    };
+const YEAR_TYPED_LEGACY_NUMERIC_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "year-typed-legacy-serial-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "year with single-precision or typed-integer legacy serial-date input is a RunMat extension because the public legacy documentation does not enumerate those storage classes",
+        error_identifier: Some("RunMat:compatibility:YearTypedLegacySerialExtension"),
+    };
+const MINUTE_TYPED_LEGACY_NUMERIC_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "minute-typed-legacy-serial-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "minute with single-precision or typed-integer legacy serial-date input is a RunMat extension because the public legacy documentation does not enumerate those storage classes",
+        error_identifier: Some("RunMat:compatibility:MinuteTypedLegacySerialExtension"),
+    };
+const MONTH_TYPED_LEGACY_NUMERIC_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "month-typed-legacy-serial-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "month with single-precision or typed-integer legacy serial-date input is a RunMat extension because the public legacy documentation does not enumerate those storage classes",
+        error_identifier: Some("RunMat:compatibility:MonthTypedLegacySerialExtension"),
+    };
 pub const DATETIME_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
     DATETIME_RAW_DATENUM_EXTENSION,
     DATETIME_LEGACY_COMPONENT_ARITY_EXTENSION,
@@ -70,6 +99,26 @@ pub const DATETIME_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
     DATETIME_GPU_INPUT_EXTENSION,
 ];
 pub const DAY_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    DATETIME_LOGICAL_INPUT_EXTENSION,
+    DATETIME_GPU_INPUT_EXTENSION,
+];
+pub const HOUR_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    HOUR_TYPED_LEGACY_NUMERIC_EXTENSION,
+    DATETIME_LOGICAL_INPUT_EXTENSION,
+    DATETIME_GPU_INPUT_EXTENSION,
+];
+pub const YEAR_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    YEAR_TYPED_LEGACY_NUMERIC_EXTENSION,
+    DATETIME_LOGICAL_INPUT_EXTENSION,
+    DATETIME_GPU_INPUT_EXTENSION,
+];
+pub const MINUTE_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    MINUTE_TYPED_LEGACY_NUMERIC_EXTENSION,
+    DATETIME_LOGICAL_INPUT_EXTENSION,
+    DATETIME_GPU_INPUT_EXTENSION,
+];
+pub const MONTH_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    MONTH_TYPED_LEGACY_NUMERIC_EXTENSION,
     DATETIME_LOGICAL_INPUT_EXTENSION,
     DATETIME_GPU_INPUT_EXTENSION,
 ];
@@ -407,16 +456,30 @@ const DATETIME_SIGNATURES: [BuiltinSignatureDescriptor; 10] = [
     },
 ];
 
-const DATETIME_YEAR_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "X = year(t)",
-    inputs: &DATETIME_SINGLE_INPUT,
-    outputs: &OUT_NUMERIC,
-}];
-const DATETIME_MONTH_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "X = month(t)",
-    inputs: &DATETIME_SINGLE_INPUT,
-    outputs: &OUT_NUMERIC,
-}];
+const DATETIME_YEAR_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "X = year(t)",
+        inputs: &DATETIME_SINGLE_INPUT,
+        outputs: &OUT_NUMERIC,
+    },
+    BuiltinSignatureDescriptor {
+        label: "X = year(t, yearTypeOrFormat)",
+        inputs: DATETIME_HOUR_SIGNATURES[1].inputs,
+        outputs: &OUT_NUMERIC,
+    },
+];
+const DATETIME_MONTH_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "X = month(t)",
+        inputs: &DATETIME_SINGLE_INPUT,
+        outputs: &OUT_NUMERIC,
+    },
+    BuiltinSignatureDescriptor {
+        label: "X = month(t, monthTypeOrFormat)",
+        inputs: DATETIME_HOUR_SIGNATURES[1].inputs,
+        outputs: &OUT_ANY,
+    },
+];
 const DATETIME_DAY_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
         label: "X = day(t)",
@@ -444,16 +507,45 @@ const DATETIME_DAY_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
         outputs: &OUT_ANY,
     },
 ];
-const DATETIME_HOUR_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "X = hour(t)",
-    inputs: &DATETIME_SINGLE_INPUT,
-    outputs: &OUT_NUMERIC,
-}];
-const DATETIME_MINUTE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "X = minute(t)",
-    inputs: &DATETIME_SINGLE_INPUT,
-    outputs: &OUT_NUMERIC,
-}];
+const DATETIME_HOUR_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "X = hour(t)",
+        inputs: &DATETIME_SINGLE_INPUT,
+        outputs: &OUT_NUMERIC,
+    },
+    BuiltinSignatureDescriptor {
+        label: "X = hour(t, F)",
+        inputs: &[
+            BuiltinParamDescriptor {
+                name: "t",
+                ty: BuiltinParamType::Any,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "Legacy serial date number or date text.",
+            },
+            BuiltinParamDescriptor {
+                name: "F",
+                ty: BuiltinParamType::StringScalar,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "Legacy datestr input format.",
+            },
+        ],
+        outputs: &OUT_NUMERIC,
+    },
+];
+const DATETIME_MINUTE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "X = minute(t)",
+        inputs: &DATETIME_SINGLE_INPUT,
+        outputs: &OUT_NUMERIC,
+    },
+    BuiltinSignatureDescriptor {
+        label: "X = minute(t, F)",
+        inputs: DATETIME_HOUR_SIGNATURES[1].inputs,
+        outputs: &OUT_NUMERIC,
+    },
+];
 const DATETIME_SECOND_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "X = second(t)",
     inputs: &DATETIME_SINGLE_INPUT,
@@ -502,6 +594,54 @@ const DAY_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerIn
 }];
 pub const DAY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor { form: "day(integer_serial, dayType)", inputs: &DAY_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::Multiple, notes: "All integer classes enter through authoritative storage; numeric outputs are MATLAB-compatible double arrays. Name modes return cell arrays of character vectors." }];
+
+const HOUR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "legacy serial date number",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "The merged legacy API documents serial date numbers but does not enumerate typed integer storage. RunMat accepts all eight classes only behind the typed-legacy extension and validates exact storage before conversion.",
+}];
+pub const HOUR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor { form: "hour(integer_serial, F?)", inputs: &HOUR_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Typed integer serials are a clearly gated RunMat extension because the documented primary input is datetime and legacy examples use binary64 serial dates. Exact native storage is range-checked before one serial-date conversion; results are host double values with the input shape." }];
+
+const YEAR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "legacy serial date number",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+    notes: "The retained public legacy API documents serial date numbers but does not enumerate typed integer storage.",
+}];
+pub const YEAR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor { form: "year(integer_serial, F?)", inputs: &YEAR_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Typed integer serials are gated before one checked serial-date conversion and return host double values with the input shape." }];
+
+const MINUTE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "legacy serial date number",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented primary input is datetime and legacy examples use binary64 serial dates. RunMat gates all eight typed integer classes and validates authoritative storage before conversion.",
+    }];
+pub const MINUTE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor { form: "minute(integer_serial, F?)", inputs: &MINUTE_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Typed integer legacy serials are RunMat-only, cross one checked serial-date boundary, and return host double values with the input shape." }];
+
+pub const SECOND_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "second accepts a datetime value and returns its numeric second component. Native integer host or resident values are not datetime objects and reject without conversion or provider access; legacy serial-date parsing belongs to the separately documented date conversion APIs.",
+};
+
+const MONTH_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "legacy serial date number",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented primary input is datetime and legacy examples use binary64 serial dates. RunMat gates all eight typed integer classes and validates authoritative storage before conversion.",
+    }];
+pub const MONTH_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor { form: "month(integer_serial, F?)", inputs: &MONTH_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Typed integer legacy serials are RunMat-only, cross one checked serial-date boundary, and return host double month numbers with the input shape." }];
 
 const DATESHIFT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -584,7 +724,11 @@ pub const DATESHIFT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 fn datetime_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
-        .with_identifier("RunMat:datetime:InvalidInput")
+        .with_identifier(
+            DATETIME_ERROR_INVALID_INPUT
+                .identifier
+                .expect("datetime invalid-input descriptor identifier"),
+        )
         .build()
 }
 
@@ -943,6 +1087,8 @@ fn parse_datetime_text(text: &str) -> Option<(NaiveDateTime, bool)> {
 
     for (pattern, has_time) in [
         ("%Y-%m-%d %H:%M:%S", true),
+        ("%Y/%m/%d %H:%M:%S%.f", true),
+        ("%Y/%m/%d %H:%M:%S", true),
         ("%Y-%m-%d", false),
         ("%d-%b-%Y %H:%M:%S", true),
         ("%d-%b-%Y", false),
@@ -1079,15 +1225,73 @@ fn relative_datetime(text: &str) -> Option<NaiveDateTime> {
 fn legacy_date_format_to_strftime(format: &str) -> String {
     let mut out = format.to_string();
     for (source, target) in [
+        (".fff", "%.3f"),
         ("yyyy", "%Y"),
         ("mmmm", "%B"),
         ("mmm", "%b"),
+        ("HH", "%H"),
+        ("hh", "%H"),
+        ("MM", "%M"),
+        ("ss", "%S"),
         ("mm", "%m"),
         ("dd", "%d"),
     ] {
         out = out.replace(source, target);
     }
     out
+}
+
+fn parse_legacy_component_text(
+    value: Value,
+    input_format: Option<&str>,
+    label: &str,
+) -> BuiltinResult<(Vec<f64>, Vec<usize>)> {
+    let (texts, shape) = match value {
+        Value::String(text) => (vec![text], vec![1, 1]),
+        Value::StringArray(array) => {
+            let shape = tensor::default_shape_for(&array.shape, array.data.len());
+            (array.data, shape)
+        }
+        Value::CharArray(array) => {
+            let texts = (0..array.rows)
+                .map(|row| {
+                    array.data[row * array.cols..(row + 1) * array.cols]
+                        .iter()
+                        .collect::<String>()
+                        .trim_end()
+                        .to_string()
+                })
+                .collect();
+            (texts, vec![array.rows, 1])
+        }
+        _ => {
+            return Err(datetime_error(format!(
+                "{label}: expected legacy date text"
+            )))
+        }
+    };
+    let legacy_format = input_format.map(legacy_date_format_to_strftime);
+    let mut serials = Vec::with_capacity(texts.len());
+    for text in texts {
+        let parsed = if let Some(format) = legacy_format.as_deref() {
+            NaiveDateTime::parse_from_str(text.trim(), format)
+                .ok()
+                .or_else(|| {
+                    NaiveDate::parse_from_str(text.trim(), format)
+                        .ok()
+                        .map(|date| date.and_hms_opt(0, 0, 0).unwrap())
+                })
+        } else {
+            parse_datetime_text(text.trim()).map(|(value, _)| value)
+        }
+        .ok_or_else(|| {
+            datetime_error(format!(
+                "{label}: unable to parse legacy date text '{text}'"
+            ))
+        })?;
+        serials.push(datenum_from_naive(parsed));
+    }
+    Ok((serials, shape))
 }
 
 fn parse_legacy_day_text(
@@ -1795,6 +1999,144 @@ fn component_tensor_from_datetime(
     }
 }
 
+fn component_tensor_from_serials(
+    serials: &Tensor,
+    label: &str,
+    extractor: impl Fn(&NaiveDateTime) -> f64,
+) -> BuiltinResult<Value> {
+    let values = tensor::tensor_values_f64_cow(serials);
+    let mut out = Vec::with_capacity(values.len());
+    for serial in values.iter().copied() {
+        out.push(if serial.is_finite() {
+            extractor(&naive_from_datenum(serial)?)
+        } else {
+            f64::NAN
+        });
+    }
+    let shape = tensor::default_shape_for(&serials.shape, values.len());
+    tensor_or_scalar(out, shape)
+        .map_err(|err| datetime_error(format!("{label}: {}", err.message())))
+}
+
+fn is_typed_legacy_numeric(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some() || tensor.as_f32_slice().is_some())
+}
+
+async fn prepare_legacy_component_input(
+    builtin: &'static str,
+    value: Value,
+    rest: &[Value],
+    typed_extension: &'static BuiltinExtensionDescriptor,
+) -> BuiltinResult<(Value, Option<String>)> {
+    if rest.len() > 1 {
+        return Err(datetime_error(format!(
+            "{builtin}: expected at most one component type or legacy date format"
+        )));
+    }
+    if matches!(value, Value::GpuTensor(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DATETIME_GPU_INPUT_EXTENSION,
+            builtin,
+        )?;
+    }
+    if matches!(value, Value::Bool(_) | Value::LogicalArray(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DATETIME_LOGICAL_INPUT_EXTENSION,
+            builtin,
+        )?;
+    }
+    if is_typed_legacy_numeric(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(typed_extension, builtin)?;
+    }
+    if rest
+        .iter()
+        .any(|value| matches!(value, Value::GpuTensor(_)))
+    {
+        return Err(datetime_error(format!(
+            "{builtin}: component type or legacy date format must be host text"
+        )));
+    }
+
+    let value = gather_if_needed_async(&value)
+        .await
+        .map_err(|err| datetime_error(format!("{builtin}: {}", err.message())))?;
+    let option = rest
+        .first()
+        .map(|value| scalar_text(value, &format!("{builtin} component type or date format")))
+        .transpose()?;
+    Ok((value, option))
+}
+
+fn numeric_component_from_modern_or_legacy(
+    builtin: &'static str,
+    value: Value,
+    legacy_format: Option<&str>,
+    extractor: impl Fn(&NaiveDateTime) -> f64,
+) -> BuiltinResult<Value> {
+    if is_datetime_object(&value) {
+        if legacy_format.is_some() {
+            return Err(datetime_error(format!(
+                "{builtin}: legacy date format is not supported for datetime input"
+            )));
+        }
+        return component_tensor_from_datetime(&value, builtin, extractor);
+    }
+    let serials = match value {
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
+            let (serials, shape) = parse_legacy_component_text(value, legacy_format, builtin)?;
+            Tensor::new(serials, shape)
+                .map_err(|err| datetime_error(format!("{builtin}: {err}")))?
+        }
+        value => serial_tensor_from_value(value, &format!("{builtin} legacy serial input"))?,
+    };
+    component_tensor_from_serials(&serials, builtin, extractor)
+}
+
+fn month_name(month: u32, short: bool) -> &'static str {
+    const FULL: [&str; 12] = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ];
+    const SHORT: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let index = month.saturating_sub(1) as usize;
+    if short {
+        SHORT.get(index).copied().unwrap_or("")
+    } else {
+        FULL.get(index).copied().unwrap_or("")
+    }
+}
+
+fn month_names_from_datetime(value: &Value, short: bool) -> BuiltinResult<Value> {
+    let serials = serials_from_datetime_value(value)?;
+    let values = tensor::tensor_values_f64_cow(&serials);
+    let shape = tensor::default_shape_for(&serials.shape, values.len());
+    let mut out = Vec::with_capacity(values.len());
+    for serial in values.iter().copied() {
+        let text = if serial.is_finite() {
+            month_name(naive_from_datenum(serial)?.month(), short)
+        } else {
+            ""
+        };
+        out.push(Value::CharArray(CharArray::new_row(text)));
+    }
+    runmat_value::CellArray::new_with_shape(out, shape)
+        .map(Value::Cell)
+        .map_err(|err| datetime_error(format!("month: {err}")))
+}
+
 fn tensor_or_scalar(data: Vec<f64>, shape: Vec<usize>) -> BuiltinResult<Value> {
     if data.len() == 1 {
         Ok(Value::Num(data[0]))
@@ -2373,25 +2715,81 @@ async fn datetime_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 #[runmat_macros::runtime_builtin(
     name = "year",
     descriptor(crate::builtins::datetime::DATETIME_YEAR_DESCRIPTOR),
+    extensions(crate::builtins::datetime::YEAR_EXTENSIONS),
+    integer_capabilities(crate::builtins::datetime::YEAR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::datetime",
     category = "datetime",
     summary = "Extract calendar year components from datetime values.",
     keywords = "year,datetime,date component"
 )]
-async fn year_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    component_tensor_from_datetime(&value, "year", |naive| naive.year() as f64)
+async fn year_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let (value, option) =
+        prepare_legacy_component_input("year", value, &rest, &YEAR_TYPED_LEGACY_NUMERIC_EXTENSION)
+            .await?;
+    if is_datetime_object(&value) {
+        let mode = option
+            .as_deref()
+            .unwrap_or("iso")
+            .trim()
+            .to_ascii_lowercase();
+        return match mode.as_str() {
+            "iso" => component_tensor_from_datetime(&value, "year", |naive| naive.year() as f64),
+            "gregorian" => component_tensor_from_datetime(&value, "year", |naive| {
+                let year = naive.year();
+                if year > 0 {
+                    year as f64
+                } else {
+                    f64::from(1 - year)
+                }
+            }),
+            _ => Err(datetime_error(format!(
+                "year: unsupported year type '{mode}'"
+            ))),
+        };
+    }
+    numeric_component_from_modern_or_legacy("year", value, option.as_deref(), |naive| {
+        naive.year() as f64
+    })
 }
 
 #[runmat_macros::runtime_builtin(
     name = "month",
     descriptor(crate::builtins::datetime::DATETIME_MONTH_DESCRIPTOR),
+    extensions(crate::builtins::datetime::MONTH_EXTENSIONS),
+    integer_capabilities(crate::builtins::datetime::MONTH_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::datetime",
     category = "datetime",
     summary = "Extract month numbers from datetime arrays.",
     keywords = "month,datetime,date component"
 )]
-async fn month_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    component_tensor_from_datetime(&value, "month", |naive| naive.month() as f64)
+async fn month_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let (value, option) = prepare_legacy_component_input(
+        "month",
+        value,
+        &rest,
+        &MONTH_TYPED_LEGACY_NUMERIC_EXTENSION,
+    )
+    .await?;
+    if is_datetime_object(&value) {
+        let mode = option
+            .as_deref()
+            .unwrap_or("monthofyear")
+            .trim()
+            .to_ascii_lowercase();
+        return match mode.as_str() {
+            "monthofyear" => {
+                component_tensor_from_datetime(&value, "month", |naive| naive.month() as f64)
+            }
+            "name" => month_names_from_datetime(&value, false),
+            "shortname" => month_names_from_datetime(&value, true),
+            _ => Err(datetime_error(format!(
+                "month: unsupported month type '{mode}'"
+            ))),
+        };
+    }
+    numeric_component_from_modern_or_legacy("month", value, option.as_deref(), |naive| {
+        naive.month() as f64
+    })
 }
 
 #[runmat_macros::runtime_builtin(
@@ -2522,30 +2920,49 @@ fn weekday_name(weekday: Weekday, short: bool) -> &'static str {
 #[runmat_macros::runtime_builtin(
     name = "hour",
     descriptor(crate::builtins::datetime::DATETIME_HOUR_DESCRIPTOR),
+    extensions(crate::builtins::datetime::HOUR_EXTENSIONS),
+    integer_capabilities(crate::builtins::datetime::HOUR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::datetime",
     category = "datetime",
     summary = "Extract hour components from datetime values.",
     keywords = "hour,datetime,time component"
 )]
-async fn hour_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    component_tensor_from_datetime(&value, "hour", |naive| naive.hour() as f64)
+async fn hour_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let (value, format) =
+        prepare_legacy_component_input("hour", value, &rest, &HOUR_TYPED_LEGACY_NUMERIC_EXTENSION)
+            .await?;
+    numeric_component_from_modern_or_legacy("hour", value, format.as_deref(), |naive| {
+        naive.hour() as f64
+    })
 }
 
 #[runmat_macros::runtime_builtin(
     name = "minute",
     descriptor(crate::builtins::datetime::DATETIME_MINUTE_DESCRIPTOR),
+    extensions(crate::builtins::datetime::MINUTE_EXTENSIONS),
+    integer_capabilities(crate::builtins::datetime::MINUTE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::datetime",
     category = "datetime",
     summary = "Extract minute numbers from datetime arrays.",
     keywords = "minute,datetime,time component"
 )]
-async fn minute_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    component_tensor_from_datetime(&value, "minute", |naive| naive.minute() as f64)
+async fn minute_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let (value, format) = prepare_legacy_component_input(
+        "minute",
+        value,
+        &rest,
+        &MINUTE_TYPED_LEGACY_NUMERIC_EXTENSION,
+    )
+    .await?;
+    numeric_component_from_modern_or_legacy("minute", value, format.as_deref(), |naive| {
+        naive.minute() as f64
+    })
 }
 
 #[runmat_macros::runtime_builtin(
     name = "second",
     descriptor(crate::builtins::datetime::DATETIME_SECOND_DESCRIPTOR),
+    integer_audit(crate::builtins::datetime::SECOND_INTEGER_AUDIT),
     builtin_path = "crate::builtins::datetime",
     category = "datetime",
     summary = "Extract second components from datetime values.",
@@ -4489,6 +4906,10 @@ mod tests {
         assert!(labels.contains(&"t = datetime(serialDateNumbers, \"ConvertFrom\", \"datenum\")"));
 
         assert_eq!(DATETIME_YEAR_DESCRIPTOR.signatures[0].label, "X = year(t)");
+        assert!(DATETIME_HOUR_DESCRIPTOR
+            .signatures
+            .iter()
+            .any(|signature| signature.label == "X = hour(t, F)"));
         assert_eq!(
             DATETIME_SUBSREF_DESCRIPTOR.signatures[0].label,
             "out = datetime.subsref(obj, kind, payload)"
@@ -4500,6 +4921,199 @@ mod tests {
     }
 
     #[test]
+    fn hour_supports_datetime_legacy_serial_and_formatted_text_shapes() {
+        let datetime = run_datetime(vec![Value::from("2024-03-14 09:26:53")]);
+        assert_eq!(
+            futures::executor::block_on(hour_builtin(datetime, Vec::new())).unwrap(),
+            Value::Num(9.0)
+        );
+
+        let serials = Tensor::new(
+            vec![
+                serial_for_date(2024, 3, 14) + 3.0 / 24.0,
+                serial_for_date(2024, 3, 14) + 17.0 / 24.0,
+            ],
+            vec![1, 2],
+        )
+        .unwrap();
+        let result =
+            futures::executor::block_on(hour_builtin(Value::Tensor(serials), Vec::new())).unwrap();
+        let Value::Tensor(result) = result else {
+            panic!("expected shaped hour result");
+        };
+        assert_eq!(result.shape, vec![1, 2]);
+        assert_eq!(result.materialize_f64(), vec![3.0, 17.0]);
+
+        let formatted = futures::executor::block_on(hour_builtin(
+            Value::from("14/03/2024 21:05:00"),
+            vec![Value::from("dd/MM/yyyy HH:mm:ss")],
+        ))
+        .unwrap();
+        assert_eq!(formatted, Value::Num(21.0));
+
+        let documented = futures::executor::block_on(hour_builtin(
+            Value::from("2024/14/03 09:26:53.125"),
+            vec![Value::from("yyyy/dd/mm hh:MM:ss.fff")],
+        ))
+        .expect("documented datestr format language");
+        assert_eq!(documented, Value::Num(9.0));
+
+        let default_fractional = futures::executor::block_on(hour_builtin(
+            Value::from("2024/03/14 17:26:53.125"),
+            Vec::new(),
+        ))
+        .expect("year-first fractional legacy text");
+        assert_eq!(default_fractional, Value::Num(17.0));
+    }
+
+    #[test]
+    fn hour_gates_uncertain_typed_and_resident_legacy_extensions_before_access() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let typed = futures::executor::block_on(hour_builtin(
+            integer_tensor(runmat_value::IntegerStorage::U32(vec![739_000]), vec![1, 1]),
+            Vec::new(),
+        ))
+        .expect_err("typed legacy serial must be gated");
+        assert_eq!(
+            typed.identifier(),
+            Some("RunMat:compatibility:HourTypedLegacySerialExtension")
+        );
+
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 9_419_002,
+            descriptor: Default::default(),
+        });
+        let resident = futures::executor::block_on(hour_builtin(resident, Vec::new()))
+            .expect_err("resident legacy input must gate before provider access");
+        assert_eq!(
+            resident.identifier(),
+            Some("RunMat:compatibility:DatetimeGpuInputExtension")
+        );
+    }
+
+    #[test]
+    fn hour_minute_and_month_typed_legacy_serials_cover_every_integer_class() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let serial = 42;
+        let cases = [
+            runmat_value::IntegerStorage::I8(vec![serial as i8]),
+            runmat_value::IntegerStorage::I16(vec![serial as i16]),
+            runmat_value::IntegerStorage::I32(vec![serial]),
+            runmat_value::IntegerStorage::I64(vec![i64::from(serial)]),
+            runmat_value::IntegerStorage::U8(vec![serial as u8]),
+            runmat_value::IntegerStorage::U16(vec![serial as u16]),
+            runmat_value::IntegerStorage::U32(vec![serial as u32]),
+            runmat_value::IntegerStorage::U64(vec![serial as u64]),
+        ];
+        let expected_hour =
+            futures::executor::block_on(hour_builtin(Value::Num(f64::from(serial)), Vec::new()))
+                .expect("double legacy hour");
+        let expected_minute =
+            futures::executor::block_on(minute_builtin(Value::Num(f64::from(serial)), Vec::new()))
+                .expect("double legacy minute");
+        let expected_month =
+            futures::executor::block_on(month_builtin(Value::Num(f64::from(serial)), Vec::new()))
+                .expect("double legacy month");
+
+        for storage in cases {
+            let value = integer_tensor(storage.clone(), vec![1, 1]);
+            assert_eq!(
+                futures::executor::block_on(hour_builtin(value.clone(), Vec::new()))
+                    .expect("typed legacy hour"),
+                expected_hour
+            );
+            assert_eq!(
+                futures::executor::block_on(minute_builtin(value.clone(), Vec::new()))
+                    .expect("typed legacy minute"),
+                expected_minute
+            );
+            assert_eq!(
+                futures::executor::block_on(month_builtin(value, Vec::new()))
+                    .expect("typed legacy month"),
+                expected_month
+            );
+        }
+    }
+
+    #[test]
+    fn minute_and_month_gate_typed_and_resident_extensions_before_access() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        for (result, identifier) in [
+            (
+                futures::executor::block_on(minute_builtin(
+                    integer_tensor(runmat_value::IntegerStorage::U16(vec![42]), vec![1, 1]),
+                    Vec::new(),
+                )),
+                "RunMat:compatibility:MinuteTypedLegacySerialExtension",
+            ),
+            (
+                futures::executor::block_on(month_builtin(
+                    integer_tensor(runmat_value::IntegerStorage::U16(vec![42]), vec![1, 1]),
+                    Vec::new(),
+                )),
+                "RunMat:compatibility:MonthTypedLegacySerialExtension",
+            ),
+        ] {
+            assert_eq!(
+                result
+                    .expect_err("typed legacy input must gate")
+                    .identifier(),
+                Some(identifier)
+            );
+        }
+
+        for result in [
+            futures::executor::block_on(minute_builtin(
+                Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+                    shape: vec![1, 1],
+                    device_id: 0,
+                    buffer_id: 9_419_003,
+                    descriptor: Default::default(),
+                }),
+                Vec::new(),
+            )),
+            futures::executor::block_on(month_builtin(
+                Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+                    shape: vec![1, 1],
+                    device_id: 0,
+                    buffer_id: 9_419_004,
+                    descriptor: Default::default(),
+                }),
+                Vec::new(),
+            )),
+        ] {
+            assert_eq!(
+                result
+                    .expect_err("resident legacy input must gate before provider access")
+                    .identifier(),
+                Some("RunMat:compatibility:DatetimeGpuInputExtension")
+            );
+        }
+    }
+
+    #[test]
+    fn month_datetime_name_modes_return_shaped_character_cells() {
+        let datetime = run_datetime(vec![Value::from("2024-03-14 09:26:53")]);
+        for (mode, expected) in [("name", "March"), ("shortname", "Mar")] {
+            let result = futures::executor::block_on(month_builtin(
+                datetime.clone(),
+                vec![Value::from(mode)],
+            ))
+            .expect("month name mode");
+            let Value::Cell(cell) = result else {
+                panic!("expected month name cell");
+            };
+            assert_eq!(cell.shape, vec![1, 1]);
+            assert_eq!(
+                cell.data,
+                vec![Value::CharArray(CharArray::new_row(expected))]
+            );
+        }
+    }
+
+    #[test]
     fn datetime_builds_from_components() {
         let value = run_datetime(vec![Value::Num(2024.0), Value::Num(3.0), Value::Num(14.0)]);
         let object = as_datetime(value);
@@ -4508,8 +5122,28 @@ mod tests {
         let serials = serial_tensor_for_object(&object).expect("serials");
         assert_eq!(serials.materialize_f64().len(), 1);
         let year =
-            futures::executor::block_on(year_builtin(Value::Object(object.clone()))).expect("year");
+            futures::executor::block_on(year_builtin(Value::Object(object.clone()), Vec::new()))
+                .expect("year");
         assert_eq!(year, Value::Num(2024.0));
+    }
+
+    #[test]
+    fn year_typed_legacy_serial_is_separately_gated() {
+        let serial = serial_for_date(2024, 1, 1) as i64;
+        let input = Value::Int(runmat_value::IntValue::I64(serial));
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = futures::executor::block_on(year_builtin(input.clone(), Vec::new()))
+            .expect_err("strict gate");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:YearTypedLegacySerialExtension")
+        );
+        drop(_strict);
+
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let result = futures::executor::block_on(year_builtin(input, Vec::new()))
+            .expect("typed legacy serial");
+        assert_eq!(result, Value::Num(2024.0));
     }
 
     #[test]
@@ -4618,6 +5252,7 @@ mod tests {
             shape: vec![1, 3],
             device_id: 0,
             buffer_id: 9_397_001,
+            descriptor: Default::default(),
         });
         let resident = futures::executor::block_on(datetime_builtin(vec![resident]))
             .expect_err("resident input is gated before provider access");
@@ -5006,7 +5641,7 @@ mod tests {
         let indexed =
             futures::executor::block_on(datetime_subsref(value.clone(), "()".to_string(), payload))
                 .expect("subsref");
-        let year = futures::executor::block_on(year_builtin(indexed)).expect("year");
+        let year = futures::executor::block_on(year_builtin(indexed, Vec::new())).expect("year");
         assert_eq!(year, Value::Num(2025.0));
 
         let lhs = run_datetime(vec![Value::Num(2024.0), Value::Num(1.0), Value::Num(1.0)]);
@@ -5038,7 +5673,7 @@ mod tests {
         let indexed =
             futures::executor::block_on(datetime_subsref(value, "()".to_string(), payload))
                 .expect("subsref");
-        let year = futures::executor::block_on(year_builtin(indexed)).expect("year");
+        let year = futures::executor::block_on(year_builtin(indexed, Vec::new())).expect("year");
         assert_eq!(year, Value::Num(2025.0));
     }
 

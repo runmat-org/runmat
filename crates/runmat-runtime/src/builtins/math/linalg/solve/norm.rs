@@ -2,13 +2,18 @@
 
 use nalgebra::{DMatrix, SVD};
 use num_complex::Complex64;
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderNormOrder};
+use runmat_accelerate_api::{GpuTensorHandle, ProviderNormOrder};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, IntValue, Tensor, Value};
+use runmat_value::{NumericDType, NumericScalar};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -19,6 +24,90 @@ use crate::builtins::math::linalg::type_resolvers::numeric_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "norm";
+
+const INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "norm-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "norm with native-class integer input data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:NormIntegerDataExtension"),
+};
+
+const LOGICAL_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "norm-logical-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "norm with logical input data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:NormLogicalDataExtension"),
+};
+
+const LOGICAL_ORDER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "norm-logical-order",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "norm with a logical norm-order selector is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:NormLogicalOrderExtension"),
+};
+
+const ZERO_ORDER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "norm-zero-order",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "norm with the undocumented zero-norm selector is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:NormZeroOrderExtension"),
+};
+
+const NUCLEAR_ORDER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "norm-nuclear-order",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "norm with the undocumented nuclear-norm selector is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:NormNuclearOrderExtension"),
+};
+
+pub const EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
+    INTEGER_DATA_EXTENSION,
+    LOGICAL_DATA_EXTENSION,
+    LOGICAL_ORDER_EXTENSION,
+    ZERO_ORDER_EXTENSION,
+    NUCLEAR_ORDER_EXTENSION,
+];
+
+const INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Native integer vectors and matrices are gated by norm-integer-data and enter the explicitly floating norm domain from authoritative storage.",
+    }];
+
+const INTEGER_ORDER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "p",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented positive real scalar norm order accepts exact native integer scalars; wide values must be representable at the floating exponent boundary.",
+    }];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "n = norm(integer_A, p)",
+        inputs: &INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer A is a RunMat-only extension. Host and automatic-resident inputs materialize once into the floating norm domain; restoration uses the exact owner only when it can preserve double, while incompatible automatic residency may remain host and explicit residency errors.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "n = norm(A, integer_p)",
+        inputs: &INTEGER_ORDER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Integer p is parsed exactly before conversion to the documented real scalar selector; GPU-resident order selectors remain unsupported.",
+    },
+];
 
 const NORM_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "n",
@@ -181,20 +270,38 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     type_resolver(numeric_scalar_type),
     descriptor(crate::builtins::math::linalg::solve::norm::NORM_DESCRIPTOR),
+    extensions(crate::builtins::math::linalg::solve::norm::EXTENSIONS),
+    integer_capabilities(crate::builtins::math::linalg::solve::norm::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::linalg::solve::norm"
 )]
 async fn norm_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_compatibility(&value, &rest)?;
     let order = parse_order(&rest)?;
+    match order {
+        NormOrder::Zero => {
+            crate::compatibility::ensure_builtin_extension_enabled(&ZERO_ORDER_EXTENSION, NAME)?
+        }
+        NormOrder::Nuc => {
+            crate::compatibility::ensure_builtin_extension_enabled(&NUCLEAR_ORDER_EXTENSION, NAME)?
+        }
+        _ => {}
+    }
     crate::builtins::common::validation::reject_typed_complex_integer(&value, NAME)?;
     match value {
         Value::GpuTensor(handle) => norm_gpu(handle, order).await,
         Value::ComplexTensor(tensor) => {
             let norm = norm_complex_tensor(&tensor, order)?;
-            Ok(Value::Num(norm))
+            Ok(norm_host_output(
+                norm,
+                tensor.numeric_dtype() == NumericDType::F32,
+            )?)
         }
         Value::Tensor(tensor) => {
             let norm = norm_real_tensor(&tensor, order)?;
-            Ok(Value::Num(norm))
+            Ok(norm_host_output(
+                norm,
+                tensor.numeric_dtype() == NumericDType::F32,
+            )?)
         }
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(builtin_error)?;
@@ -207,6 +314,30 @@ async fn norm_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
             Ok(Value::Num(norm))
         }
     }
+}
+
+fn ensure_compatibility(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    if is_typed_integer(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_DATA_EXTENSION, NAME)?;
+    }
+    if is_logical(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(&LOGICAL_DATA_EXTENSION, NAME)?;
+    }
+    if rest.first().is_some_and(is_logical) {
+        crate::compatibility::ensure_builtin_extension_enabled(&LOGICAL_ORDER_EXTENSION, NAME)?;
+    }
+    Ok(())
+}
+
+fn is_typed_integer(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn is_logical(value: &Value) -> bool {
+    matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -229,12 +360,47 @@ enum TensorKind {
 }
 
 async fn norm_gpu(handle: GpuTensorHandle, order: NormOrder) -> BuiltinResult<Value> {
-    let maybe_provider = runmat_accelerate_api::provider();
+    let maybe_provider = gpu_helpers::exact_provider_for_handle(&handle);
+    let is_nonfloating = runmat_accelerate_api::handle_integer_type(&handle).is_some()
+        || runmat_accelerate_api::handle_is_logical(&handle);
 
-    if let Some(provider) = maybe_provider {
+    if let Some(provider) = maybe_provider.filter(|_| !is_nonfloating) {
         let provider_order = ProviderNormOrder::from(order);
-        if let Ok(result) = provider.norm(&handle, provider_order).await {
-            return Ok(Value::GpuTensor(result));
+        let source_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+        let provider_result = provider.norm(&handle, provider_order).await;
+        gpu_helpers::restore_handle_metadata(&handle, &source_metadata);
+        match provider_result {
+            Ok(mut result) if valid_provider_norm_result(provider, &handle, &result) => {
+                runmat_accelerate_api::set_handle_provenance(
+                    &mut result,
+                    runmat_accelerate_api::handle_provenance(&handle)
+                        .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
+                );
+                return Ok(gpu_helpers::resident_gpu_value(result));
+            }
+            Ok(result) => {
+                gpu_helpers::free_unprotected_exact_owner(&result, &[&handle]);
+                return Err(internal_error(format!(
+                    "{NAME}: provider returned a malformed, aliased, or foreign norm result"
+                )));
+            }
+            Err(error)
+                if error
+                    .chain()
+                    .any(|cause| cause.to_string() == "norm not supported by provider") => {}
+            Err(error) => {
+                return Err(build_runtime_error(format!(
+                    "{NAME}: provider norm execution failed: {error}"
+                ))
+                .with_builtin(NAME)
+                .with_identifier(
+                    NORM_ERROR_INTERNAL
+                        .identifier
+                        .expect("norm internal descriptor identifier"),
+                )
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .build())
+            }
         }
     }
 
@@ -243,20 +409,63 @@ async fn norm_gpu(handle: GpuTensorHandle, order: NormOrder) -> BuiltinResult<Va
         .map_err(map_control_flow)?;
     let norm = norm_real_tensor(&tensor, order)?;
 
-    if let Some(provider) = maybe_provider {
-        match upload_scalar(provider, norm) {
-            Ok(uploaded) => return Ok(Value::GpuTensor(uploaded)),
-            Err(err) => {
-                if err.message() == "interaction pending..." {
-                    return Err(build_runtime_error("interaction pending...")
-                        .with_builtin(NAME)
-                        .build());
-                }
-            }
+    let source_is_single = !is_nonfloating
+        && runmat_accelerate_api::handle_precision(&handle)
+            == Some(runmat_accelerate_api::ProviderPrecision::F32);
+    let host = norm_host_output(norm, source_is_single)?;
+    if maybe_provider.is_some() {
+        let restored = gpu_helpers::restore_class_preserving_value(&handle, host, NAME)?;
+        if runmat_accelerate_api::handle_is_explicit(&handle)
+            && !matches!(restored, Value::GpuTensor(_))
+        {
+            return Err(build_runtime_error(
+                "norm: provider cannot preserve explicit gpuArray output residency",
+            )
+            .with_builtin(NAME)
+            .with_identifier(
+                NORM_ERROR_INTERNAL
+                    .identifier
+                    .expect("norm internal descriptor identifier"),
+            )
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build());
         }
+        return Ok(restored);
     }
+    Ok(host)
+}
 
-    Ok(Value::Num(norm))
+fn norm_host_output(norm: f64, single: bool) -> BuiltinResult<Value> {
+    if !single {
+        return Ok(Value::Num(norm));
+    }
+    Tensor::from_f32(vec![norm as f32], vec![1, 1])
+        .map(Value::Tensor)
+        .map_err(builtin_error)
+}
+
+fn valid_provider_norm_result(
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    source: &GpuTensorHandle,
+    result: &GpuTensorHandle,
+) -> bool {
+    !gpu_helpers::same_gpu_handle(source, result)
+        && result.shape == [1, 1]
+        && result.device_id == provider.device_id()
+        && gpu_helpers::exact_provider_for_handle(result)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+        && runmat_accelerate_api::handle_storage(result)
+            == runmat_accelerate_api::GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_precision(result)
+            == runmat_accelerate_api::handle_precision(source)
+        && runmat_accelerate_api::handle_integer_type(result).is_none()
+        && !runmat_accelerate_api::handle_is_logical(result)
+        && gpu_helpers::gpu_class_metadata_matches(
+            result,
+            runmat_accelerate_api::handle_precision(source),
+            None,
+            false,
+        )
 }
 
 fn norm_real_tensor(tensor: &Tensor, order: NormOrder) -> BuiltinResult<f64> {
@@ -268,6 +477,7 @@ fn norm_complex_tensor(tensor: &ComplexTensor, order: NormOrder) -> BuiltinResul
 }
 
 fn norm_real_tensor_impl(tensor: &Tensor, order: NormOrder) -> BuiltinResult<f64> {
+    ensure_integer_tensor_exactly_representable(tensor)?;
     let kind = classify_tensor(&tensor.shape)?;
     let values = tensor::tensor_values_f64_cow(tensor);
     let resolved = match order {
@@ -281,6 +491,32 @@ fn norm_real_tensor_impl(tensor: &Tensor, order: NormOrder) -> BuiltinResult<f64
         }
         TensorKind::Matrix { rows, cols } => matrix_norm_real(&values, rows, cols, resolved),
     }
+}
+
+fn ensure_integer_tensor_exactly_representable(tensor: &Tensor) -> BuiltinResult<()> {
+    if tensor.integer_storage().is_none() {
+        return Ok(());
+    }
+    const MAX_EXACT_INTEGER: i128 = 1_i128 << 53;
+    for index in 0..tensor.len() {
+        let exact = match tensor.numeric_value_at(index) {
+            Some(NumericScalar::I8(value)) => i128::from(value),
+            Some(NumericScalar::I16(value)) => i128::from(value),
+            Some(NumericScalar::I32(value)) => i128::from(value),
+            Some(NumericScalar::I64(value)) => i128::from(value),
+            Some(NumericScalar::U8(value)) => i128::from(value),
+            Some(NumericScalar::U16(value)) => i128::from(value),
+            Some(NumericScalar::U32(value)) => i128::from(value),
+            Some(NumericScalar::U64(value)) => i128::from(value),
+            _ => continue,
+        };
+        if !(-MAX_EXACT_INTEGER..=MAX_EXACT_INTEGER).contains(&exact) {
+            return Err(argument_error(format!(
+                "{NAME}: integer input values must be exactly representable as double"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn norm_complex_tensor_impl(tensor: &ComplexTensor, order: NormOrder) -> BuiltinResult<f64> {
@@ -730,20 +966,6 @@ fn approx_eq(a: f64, b: f64) -> bool {
     (a - b).abs() <= f64::EPSILON * (a.abs() + b.abs() + 1.0)
 }
 
-fn upload_scalar(
-    provider: &'static dyn runmat_accelerate_api::AccelProvider,
-    value: f64,
-) -> BuiltinResult<GpuTensorHandle> {
-    let data = [value];
-    let shape = [1usize, 1usize];
-    provider
-        .upload(&HostTensorView {
-            data: &data,
-            shape: &shape,
-        })
-        .map_err(|e| internal_error(format!("{NAME}: {e}")))
-}
-
 impl From<ProviderNormOrder> for NormOrder {
     fn from(value: ProviderNormOrder) -> Self {
         match value {
@@ -848,6 +1070,7 @@ pub(crate) mod tests {
 
     #[test]
     fn norm_reads_typed_integer_tensor_storage_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![3, 4]), vec![2, 1]).expect("integer");
         let value = norm_builtin(Value::Tensor(tensor), Vec::new()).expect("norm");
@@ -855,6 +1078,36 @@ pub(crate) mod tests {
             Value::Num(v) => assert_close(v, 5.0),
             other => panic!("expected scalar value, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn norm_integer_data_gates_and_wide_values_reject() {
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![3, 4]), vec![2, 1]).unwrap();
+        {
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = norm_builtin(Value::Tensor(tensor.clone()), Vec::new()).unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:NormIntegerDataExtension")
+            );
+        }
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let wide =
+            Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1]).unwrap();
+        let error = norm_builtin(Value::Tensor(wide), Vec::new()).unwrap_err();
+        assert!(error.message.contains("exactly representable"));
+    }
+
+    #[test]
+    fn norm_single_input_returns_single_scalar_tensor() {
+        let tensor = Tensor::from_f32(vec![3.0, 4.0], vec![2, 1]).unwrap();
+        let out = norm_builtin(Value::Tensor(tensor), Vec::new()).unwrap();
+        let Value::Tensor(out) = out else {
+            panic!("expected single scalar tensor");
+        };
+        assert_eq!(out.numeric_dtype(), NumericDType::F32);
+        assert_eq!(out.shape, vec![1, 1]);
+        assert_close(out.materialize_f64()[0], 5.0);
     }
 
     #[test]
@@ -933,6 +1186,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn norm_vector_zero_norm_counts_nonzeros() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![0.0, 0.0, 5.0, 0.0], vec![4, 1]).unwrap();
         let value = norm_builtin(Value::Tensor(tensor), vec![Value::Num(0.0)]).expect("norm");
         match value {
@@ -957,6 +1211,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn norm_vector_nuclear_norm_errors() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let err = unwrap_error(
             norm_builtin(Value::Tensor(tensor), vec![Value::from("nuc")]).unwrap_err(),
@@ -970,6 +1225,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn norm_matrix_fro_and_nuclear() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![2.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
         let fro =
             norm_builtin(Value::Tensor(tensor.clone()), vec![Value::from("fro")]).expect("fro");
@@ -1017,6 +1273,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn norm_order_accepts_boolean_scalar() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![2.0, -3.0], vec![2, 1]).unwrap();
         let value = norm_builtin(Value::Tensor(tensor), vec![Value::Bool(true)]).expect("norm");
         match value {
@@ -1028,6 +1285,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn norm_order_logical_scalar_tensor() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let logical = runmat_value::LogicalArray::new(vec![1], vec![1]).expect("logical scalar");
         let value =
@@ -1129,6 +1387,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn norm_complex_matrix_nuclear() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = ComplexTensor::new(
             vec![(2.0, 0.0), (0.0, 0.0), (0.0, 0.0), (1.0, 0.0)],
             vec![2, 2],
@@ -1189,6 +1448,24 @@ pub(crate) mod tests {
         let result = norm_builtin(Value::GpuTensor(handle), Vec::new()).expect("norm");
         let gathered = test_support::gather(result).expect("gather");
         assert_close(gathered.materialize_f64()[0], cpu);
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn norm_wgpu_integer_fallback_preserves_class_and_explicit_intent() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .expect("wgpu provider");
+        let input = Tensor::new_integer(IntegerStorage::I16(vec![3, 4]), vec![2, 1]).unwrap();
+        let handle = gpu_helpers::upload_tensor(provider, &input).expect("integer upload");
+        let out = norm_builtin(Value::GpuTensor(handle.clone()), Vec::new()).expect("norm");
+        assert!(matches!(out, Value::Num(value) if (value - 5.0).abs() < 1.0e-12));
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let error = norm_builtin(Value::GpuTensor(handle), Vec::new())
+            .expect_err("explicit output class mismatch must reject");
+        assert!(error.message.contains("cannot preserve explicit gpuArray"));
     }
 
     fn norm_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

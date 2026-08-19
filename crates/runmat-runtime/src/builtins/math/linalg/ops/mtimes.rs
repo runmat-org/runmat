@@ -5,6 +5,11 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntegerStorage, Tensor, Value};
 
@@ -17,9 +22,16 @@ use crate::builtins::common::{gpu_helpers, linalg, tensor};
 use crate::builtins::math::elementwise::integer_arithmetic::{try_integer_binary, IntegerBinaryOp};
 use crate::builtins::math::linalg::type_resolvers::matmul_type;
 use crate::builtins::math::symbolic::{symbolic_binary, SymbolicBinaryOp};
-use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "mtimes";
+
+const MTIMES_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability { name: "A", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "If A is an integer class, B must be scalar and use the same integer class or scalar double; complex integer storage is unsupported." },
+    BuiltinIntegerInputCapability { name: "B", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "If B is an integer class, A must be scalar and use the same integer class or scalar double; the integer class is preserved." },
+];
+pub const MTIMES_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor { form: "C = mtimes(A, B)", inputs: &MTIMES_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput, overflow: BuiltinIntegerOverflowRule::Saturate, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "When either operand is integer the other must be scalar, making the operation equivalent to class-preserving element-wise multiplication. Native integer arithmetic saturates, scalar-double arithmetic follows the 64-bit extended-precision rule, and resident fallback gathers authoritative storage." }];
 
 const MTIMES_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "C",
@@ -153,6 +165,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "mtimes,matrix multiplication,linear algebra,gpu",
     accel = "matmul",
     type_resolver(matmul_type),
+    integer_capabilities(crate::builtins::math::linalg::ops::mtimes::MTIMES_INTEGER_CAPABILITIES),
     descriptor(crate::builtins::math::linalg::ops::mtimes::MTIMES_DESCRIPTOR),
     builtin_path = "crate::builtins::math::linalg::ops::mtimes"
 )]
@@ -297,7 +310,7 @@ async fn real_scalar_value(
             Ok(Some(if logical.data[0] != 0 { 1.0 } else { 0.0 }))
         }
         Value::GpuTensor(handle) if is_scalar_handle(handle) => {
-            let host = download_handle_async(provider, handle)
+            let host = gpu_helpers::download_floating_projection_async(provider, handle)
                 .await
                 .map_err(|e| mtimes_internal_error(format!("{NAME}: {e}")))?;
             Ok(host.data.first().copied())
@@ -336,6 +349,14 @@ async fn mtimes_cpu(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
         {
             return Ok(result);
         }
+    }
+
+    // MATLAB defines matrix multiplication by a scalar as scalar
+    // multiplication. Typed floating scalars are represented as 1-by-1
+    // tensors, so route every scalar case through the same class-preserving
+    // host implementation used by `times` before attempting matrix products.
+    if mtimes_scalar(&lhs) || mtimes_scalar(&rhs) {
+        return crate::builtins::math::elementwise::times::times_host(lhs, rhs);
     }
 
     match (lhs, rhs) {
@@ -480,8 +501,9 @@ fn contains_integer(value: &Value) -> bool {
 
 fn mtimes_scalar(value: &Value) -> bool {
     match value {
-        Value::Int(_) | Value::Num(_) | Value::Bool(_) => true,
+        Value::Int(_) | Value::Num(_) | Value::Bool(_) | Value::Complex(_, _) => true,
         Value::Tensor(tensor) => tensor::is_scalar_tensor(tensor),
+        Value::ComplexTensor(tensor) => tensor::is_scalar_complex_tensor(tensor),
         Value::LogicalArray(logical) => logical.data.len() == 1,
         Value::GpuTensor(handle) => is_scalar_handle(handle),
         _ => false,

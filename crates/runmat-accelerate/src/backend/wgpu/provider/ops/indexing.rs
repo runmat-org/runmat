@@ -39,7 +39,7 @@ impl WgpuProvider {
         values: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
         let raw_matrix = self.get_entry_raw(matrix)?;
-        if raw_matrix.integer_type.is_some() {
+        if raw_matrix.integer_type().is_some() {
             ensure!(
                 raw_matrix.shape.len() == 2,
                 "scatter_column: only 2D tensors supported"
@@ -52,7 +52,7 @@ impl WgpuProvider {
             );
             let raw_values = self.get_entry_raw(values)?;
             ensure!(
-                raw_values.integer_type == raw_matrix.integer_type,
+                raw_values.integer_type() == raw_matrix.integer_type(),
                 "scatter_column: integer storage mismatch"
             );
             ensure!(
@@ -412,6 +412,16 @@ impl WgpuProvider {
         {
             return Err(anyhow!("ind2sub: dimensions exceed GPU kernel limits"));
         }
+        let storage_bindings =
+            super::backend_shared::checked_binding_count("ind2sub", dims.len(), 2)?;
+        let total_bindings =
+            super::backend_shared::checked_binding_count("ind2sub", dims.len(), 3)?;
+        super::backend_shared::validate_compute_binding_counts(
+            "ind2sub",
+            storage_bindings,
+            total_bindings,
+            &self.device_ref().limits(),
+        )?;
 
         let entry = self.get_entry(indices)?;
         if entry.len != len {
@@ -550,10 +560,7 @@ impl WgpuProvider {
         if code != 0 {
             let err = match code {
                 1..=3 => anyhow!("Linear indices must be positive integers."),
-                4 => anyhow!(
-                    "Index exceeds number of array elements. Index must not exceed {}.",
-                    total
-                ),
+                4 => anyhow!("Linear index exceeds GPU kernel limits."),
                 _ => anyhow!("ind2sub: kernel reported error code {}", code),
             };
             return Err(err);
@@ -573,7 +580,7 @@ impl WgpuProvider {
         values: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
         let raw_matrix = self.get_entry_raw(matrix)?;
-        if raw_matrix.integer_type.is_some() {
+        if raw_matrix.integer_type().is_some() {
             ensure!(
                 raw_matrix.shape.len() == 2,
                 "scatter_row: only 2D tensors supported"
@@ -583,7 +590,7 @@ impl WgpuProvider {
             ensure!(row_index < rows, "scatter_row: row index out of bounds");
             let raw_values = self.get_entry_raw(values)?;
             ensure!(
-                raw_values.integer_type == raw_matrix.integer_type,
+                raw_values.integer_type() == raw_matrix.integer_type(),
                 "scatter_row: integer storage mismatch"
             );
             ensure!(
@@ -726,7 +733,7 @@ impl WgpuProvider {
         output_shape: &[usize],
     ) -> Result<GpuTensorHandle> {
         let entry = self.get_entry_raw(source)?;
-        let integer_type = entry.integer_type;
+        let integer_type = entry.integer_type();
         let expected = product_checked(output_shape)
             .ok_or_else(|| anyhow!("gather_linear: output shape product overflow"))?;
         let lane_factor = linear_storage_lane_factor(integer_type, entry.storage);
@@ -897,12 +904,12 @@ impl WgpuProvider {
         );
         let target_entry = self.get_entry_raw(target)?;
         let values_entry = self.get_entry_raw(values)?;
-        let integer_type = target_entry.integer_type;
+        let integer_type = target_entry.integer_type();
         ensure!(
-            integer_type == values_entry.integer_type,
+            integer_type == values_entry.integer_type(),
             "scatter_linear: integer storage mismatch target={:?} values={:?}",
             integer_type,
-            values_entry.integer_type
+            values_entry.integer_type()
         );
         ensure!(
             target_entry.storage == values_entry.storage,
@@ -1196,7 +1203,10 @@ mod tests {
     use super::*;
     use crate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use futures::executor::block_on;
-    use runmat_accelerate_api::{HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView};
+    use runmat_accelerate_api::{
+        HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView, HostNumericDataView,
+        HostNumericTensorView,
+    };
 
     #[test]
     fn linear_scatter_length_uses_logical_counts_for_all_integer_types() {
@@ -1235,12 +1245,12 @@ mod tests {
         };
         let data = [1.0, 10.0, 2.0, 20.0, 3.0, 30.0, 4.0, 40.0];
         let source = provider
-            .upload_exec(&HostTensorView {
-                data: &data,
+            .upload_numeric_exec(&HostNumericTensorView {
+                data: HostNumericDataView::F64(&data),
                 shape: &[1, 4],
+                storage: GpuTensorStorage::ComplexInterleaved,
             })
             .expect("upload");
-        runmat_accelerate_api::set_handle_storage(&source, GpuTensorStorage::ComplexInterleaved);
 
         let gathered = provider
             .gather_linear_exec(&source, &[1, 3], &[1, 2])

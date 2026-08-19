@@ -85,7 +85,7 @@ const FPRINTF_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents all eight integer classes; integer conversions format authoritative values exactly and arrays traverse in column-major order.",
+        notes: "The compatibility target documents all eight integer classes; integer conversions format authoritative values exactly and arrays traverse in column-major order.",
     }];
 const FPRINTF_INTEGER_ID_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -93,7 +93,7 @@ const FPRINTF_INTEGER_ID_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents double identifiers; typed integer identifiers are an independently gated extension.",
+        notes: "The compatibility target documents double identifiers; typed integer identifiers are an independently gated extension.",
     }];
 const FPRINTF_INTEGER_FORMAT_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -101,7 +101,7 @@ const FPRINTF_INTEGER_FORMAT_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
-        notes: "R2026a documents character or string format specifications; numeric code vectors are a gated RunMat extension.",
+        notes: "The compatibility target documents character or string format specifications; numeric code vectors are a gated RunMat extension.",
     }];
 pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
     BuiltinIntegerCapabilityDescriptor {
@@ -1089,10 +1089,11 @@ pub(crate) mod tests {
             shape: vec![1, 2],
             device_id: 904,
             buffer_id: 904,
-        };
-        runmat_accelerate_api::set_handle_integer_type(
-            &handle,
-            runmat_accelerate_api::IntegerElementType::U16,
+            descriptor: Default::default(),
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::U16,
+            runmat_accelerate_api::GpuTensorStorage::Real,
         );
         let args = [Value::Num(1.0), Value::GpuTensor(handle.clone())];
         let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -1101,7 +1102,6 @@ pub(crate) mod tests {
             error.identifier(),
             Some("RunMat:compatibility:FprintfResidentFormatExtension")
         );
-        runmat_accelerate_api::clear_handle_integer_type(&handle);
     }
 
     #[test]

@@ -26,6 +26,13 @@ pub const FINDPROP_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
         notes: "findprop accepts a scalar object or handle object and a textual property name. All eight integer classes, logical and complex values, and resident numeric handles are invalid targets and are never converted into object metadata.",
     };
 
+pub const DYNAMIC_PROPERTY_DELETE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "matlab.metadata.DynamicProperty.delete accepts only a dynamic-property metadata handle. Integer scalars, arrays, nested payloads, and resident numeric handles have no data, control, output-class, or backend role and reject without conversion or provider access.",
+    };
+
 const TARGET_FIELD: &str = "__runmat_dynamic_property_target__";
 const VALID_FIELD: &str = "__runmat_dynamic_property_valid__";
 
@@ -763,6 +770,9 @@ fn findprop_builtin(target: Value, property_name: String) -> BuiltinResult<Value
     sink = true,
     suppress_auto_output = true,
     descriptor(crate::builtins::introspection::dynamicprops::DYNAMIC_PROPERTY_DELETE_DESCRIPTOR),
+    integer_audit(
+        crate::builtins::introspection::dynamicprops::DYNAMIC_PROPERTY_DELETE_INTEGER_AUDIT
+    ),
     builtin_path = "crate::builtins::introspection::dynamicprops"
 )]
 async fn dynamic_property_delete_builtin(prop: Value) -> BuiltinResult<Value> {
@@ -851,6 +861,17 @@ mod tests {
             BuiltinIntegerAuditKind::NotApplicable
         );
         assert!(ADDPROP_INTEGER_AUDIT.canonical_builtin.is_none());
+    }
+
+    #[test]
+    fn dynamic_property_delete_is_integer_inapplicable() {
+        assert_eq!(
+            DYNAMIC_PROPERTY_DELETE_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        assert!(DYNAMIC_PROPERTY_DELETE_INTEGER_AUDIT
+            .canonical_builtin
+            .is_none());
     }
 
     #[test]
@@ -1051,6 +1072,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let error = findprop_builtin(resident, "Name".into())
             .expect_err("resident numeric value is not an object target");
