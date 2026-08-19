@@ -2,7 +2,7 @@ use runmat_meshing_core::MeshingPartitionKind;
 
 use crate::{
     ExactCurveJoinKernel, ExactCurveRefinementKernel, ExactCurveStageKernel,
-    ExactSurfaceJoinKernel, ExactSurfacePartitionKernel, MeshingStageInvocation,
+    ExactSurfaceJoinKernel, ExactSurfacePartitionKernel, ExactVolumeKernel, MeshingStageInvocation,
     MeshingStageKernel, ValidatedMeshingStageOutput,
 };
 
@@ -41,6 +41,10 @@ impl MeshingStageKernel for MeshingKernelDispatcher {
                 runmat_meshing_core::MeshingStageKind::SurfaceMesh,
                 MeshingPartitionKind::CanonicalEntityBatch,
             ) => ExactSurfacePartitionKernel::default().execute(invocation),
+            (
+                runmat_meshing_core::MeshingStageKind::Tetrahedralization,
+                MeshingPartitionKind::WholeStage,
+            ) => ExactVolumeKernel.execute(invocation),
             _ => Err(Box::new(runmat_meshing_core::MeshingFailure {
                 schema_version: runmat_meshing_core::MESHING_FAILURE_SCHEMA_VERSION,
                 category: runmat_meshing_core::MeshingFailureCategory::InternalInvariantViolation,

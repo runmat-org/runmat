@@ -16,6 +16,7 @@ runmat-geometry-core = { workspace = true }
 runmat-meshing-core = { workspace = true }
 runmat-meshing-curve = { workspace = true }
 runmat-meshing-surface = { workspace = true }
+runmat-meshing-tetrahedron = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 

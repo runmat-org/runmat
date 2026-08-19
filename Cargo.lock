@@ -6840,6 +6840,7 @@ dependencies = [
  "runmat-meshing-core",
  "runmat-meshing-curve",
  "runmat-meshing-surface",
+ "runmat-meshing-tetrahedron",
  "serde",
  "thiserror 1.0.69",
 ]

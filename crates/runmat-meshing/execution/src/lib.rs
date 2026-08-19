@@ -24,6 +24,7 @@ mod surface_dag;
 mod surface_join_kernel;
 mod surface_kernel;
 mod task;
+mod volume_kernel;
 
 #[cfg(test)]
 mod faceted_geometry_object_tests;
@@ -87,3 +88,4 @@ pub use task::{
     build_task_submission, MeshingExecutionContext, MeshingTaskEffectPolicy,
     MESHING_EXECUTION_CALLABLE_OWNER,
 };
+pub use volume_kernel::ExactVolumeKernel;

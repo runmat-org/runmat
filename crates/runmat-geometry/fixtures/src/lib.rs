@@ -3,8 +3,10 @@
 use runmat_geometry_core::*;
 
 mod spherical;
+mod tetrahedral;
 
 pub use spherical::exact_spherical_octant;
+pub use tetrahedral::exact_tetrahedron;
 
 /// A closed circular edge on a planar face with a complete exact evaluator inventory.
 pub fn exact_circle() -> (GeometryDocument, ExactBRepTopology, ExactEvaluatorRegistry) {

@@ -316,8 +316,25 @@ fn execute_surface_join_pipeline(
     CompletedMeshingStage,
     CompletedMeshingStage,
 ) {
+    execute_surface_join_pipeline_from_fixture(
+        partition_kernel,
+        Fixture::with_exact_curve_partition(),
+    )
+}
+
+pub(super) fn execute_surface_join_pipeline_from_fixture(
+    partition_kernel: &dyn MeshingStageKernel,
+    fixture: Fixture,
+) -> (
+    Fixture,
+    MeshingHostWorkload,
+    ValueRef,
+    CompletedMeshingStage,
+    CompletedMeshingStage,
+    CompletedMeshingStage,
+) {
     let (mut fixture, partition_host, exact_root, joined, partition, _) =
-        execute_surface_pipeline_with(partition_kernel);
+        execute_surface_pipeline_with_fixture(partition_kernel, fixture);
     let curve_root = root(joined.publication().root_output());
     let partition_root = root(partition.publication().root_output());
     let exact_input = partition_host.workload.inputs[0].clone();

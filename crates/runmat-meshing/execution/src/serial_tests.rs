@@ -41,6 +41,7 @@ use super::{
 };
 
 mod surface_restart;
+mod volume;
 
 #[derive(Default)]
 struct MemoryStore {
@@ -372,7 +373,21 @@ fn execute_surface_pipeline_with(
     CompletedMeshingStage,
     MeshingPartitionDescriptor,
 ) {
-    let (mut fixture, curve_host, exact_root, joined) = execute_curve_pipeline();
+    execute_surface_pipeline_with_fixture(kernel, Fixture::with_exact_curve_partition())
+}
+
+fn execute_surface_pipeline_with_fixture(
+    kernel: &dyn MeshingStageKernel,
+    fixture: Fixture,
+) -> (
+    Fixture,
+    MeshingHostWorkload,
+    ValueRef,
+    CompletedMeshingStage,
+    CompletedMeshingStage,
+    MeshingPartitionDescriptor,
+) {
+    let (mut fixture, curve_host, exact_root, joined) = execute_curve_pipeline_from(fixture);
     let curve_root = root(joined.publication().root_output());
     let exact = import_exact_geometry_input(
         &fixture.store,
@@ -442,7 +457,17 @@ fn execute_curve_pipeline() -> (
     ValueRef,
     CompletedMeshingStage,
 ) {
-    let mut fixture = Fixture::with_exact_curve_partition();
+    execute_curve_pipeline_from(Fixture::with_exact_curve_partition())
+}
+
+fn execute_curve_pipeline_from(
+    mut fixture: Fixture,
+) -> (
+    Fixture,
+    MeshingHostWorkload,
+    ValueRef,
+    CompletedMeshingStage,
+) {
     let exact_root = root(&fixture.program.arguments[0]);
     let partition = execute_serial_stage(
         &fixture.program,
@@ -1004,13 +1029,39 @@ impl Fixture {
         Self::with_exact_geometry_stage(MeshingStageKind::CurveMesh)
     }
 
+    fn with_exact_tetrahedron_curve_partition() -> Self {
+        Self::with_exact_geometry_fixture(
+            MeshingStageKind::CurveMesh,
+            runmat_geometry_fixtures::exact_tetrahedron(),
+            false,
+            true,
+        )
+    }
+
     fn with_exact_geometry_stage(stage: MeshingStageKind) -> Self {
+        Self::with_exact_geometry_fixture(
+            stage,
+            runmat_geometry_fixtures::exact_circle(),
+            stage == MeshingStageKind::CurveMesh,
+            false,
+        )
+    }
+
+    fn with_exact_geometry_fixture(
+        stage: MeshingStageKind,
+        (mut document, mut topology, mut evaluators): (
+            runmat_geometry_core::GeometryDocument,
+            runmat_geometry_core::ExactBRepTopology,
+            runmat_geometry_core::ExactEvaluatorRegistry,
+        ),
+        curve_as_sheet: bool,
+        relaxed_volume: bool,
+    ) -> Self {
         let access = MeshingArtifactAccess {
             authorization_scope: "serial-exact-geometry-run".into(),
             encryption_context: Digest::sha256(b"serial-exact-geometry-context"),
         };
-        let (mut document, mut topology, mut evaluators) = runmat_geometry_fixtures::exact_circle();
-        if stage == MeshingStageKind::CurveMesh {
+        if curve_as_sheet {
             topology.bodies[0].is_sheet_body = true;
             topology.bodies[0].sheet_shell_ids = vec![topology.shells[0].id.clone()];
             topology.bodies[0].lump_ids.clear();
@@ -1064,6 +1115,20 @@ impl Fixture {
         }
         let mut request = request();
         request.tolerance = document.tolerance;
+        if relaxed_volume {
+            request.metric.global_metric = MetricTensor3::isotropic_length_m(10.0).unwrap();
+            request.quality.curve.maximum_chordal_deviation_m = 0.1;
+            request.quality.curve.maximum_tangent_change_degrees = 180.0;
+            request.quality.curve.minimum_metric_edge_length = 0.01;
+            request.quality.curve.maximum_metric_edge_length = 10.0;
+            request.quality.surface.minimum_metric_angle_degrees = 0.1;
+            request.quality.surface.maximum_physical_aspect_ratio = 1_000.0;
+            request.quality.surface.maximum_chordal_deviation_m = 0.1;
+            request.quality.surface.maximum_normal_deviation_degrees = 180.0;
+            request.quality.volume.maximum_metric_edge_length = 2.0;
+            request.quality.volume.maximum_radius_edge_ratio = 10.0;
+            request.quality.volume.minimum_scaled_jacobian = 0.01;
+        }
         if stage == MeshingStageKind::CurveMesh {
             request.quality.curve.maximum_chordal_deviation_m = 0.05;
             request.quality.curve.maximum_tangent_change_degrees = 20.0;
@@ -1296,7 +1361,7 @@ fn chunk_policy(maximum_chunk_bytes: u64) -> MeshingChunkPolicy {
     }
 }
 
-fn request() -> MeshingRequest {
+pub(crate) fn request() -> MeshingRequest {
     MeshingRequest {
         schema_version: MESHING_REQUEST_SCHEMA_VERSION,
         element_order: ElementOrder::Tet4,
