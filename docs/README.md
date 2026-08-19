@@ -140,5 +140,4 @@ If you want to understand how the runtime works internally, start with the [Comp
 - [Supported Architectures](./development/supported-architectures.md)
 - [Testing Strategy](./development/testing.md)
 - [Benchmarking](./development/benchmarking.md)
-- [Package Ecosystem Validation](./development/package-ecosystem-validation.md)
 - [Telemetry](./development/telemetry.md)

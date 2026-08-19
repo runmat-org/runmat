@@ -2,4 +2,4 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec node "${script_dir}/rm1064-inventory.mjs" --check
+exec node "${script_dir}/check-architecture-boundaries.mjs"
