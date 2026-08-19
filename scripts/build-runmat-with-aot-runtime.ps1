@@ -1,21 +1,38 @@
 $ErrorActionPreference = "Stop"
 
 $profile = if ($env:RUNMAT_BUILD_PROFILE) { $env:RUNMAT_BUILD_PROFILE } else { "release" }
-$profileDirectory = if ($profile -eq "dev") { "debug" } else { $profile }
 $buildRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("runmat-aot-build-" + [System.Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $buildRoot | Out-Null
 $target = $env:RUNMAT_BUILD_TARGET
 $lockedArgs = @()
+$buildArgs = @()
 for ($index = 0; $index -lt $args.Count; $index++) {
   $argument = [string]$args[$index]
-  if ($argument -eq '--target' -and ($index + 1) -lt $args.Count) {
-    $target = [string]$args[$index + 1]
+  if ($argument -eq '--release') {
+    $profile = 'release'
+  } elseif ($argument -eq '--profile') {
+    if (($index + 1) -ge $args.Count) { throw '--profile requires a value' }
+    $index++
+    $profile = [string]$args[$index]
+  } elseif ($argument.StartsWith('--profile=')) {
+    $profile = $argument.Substring('--profile='.Length)
+  } elseif ($argument -eq '--target') {
+    if (($index + 1) -ge $args.Count) { throw '--target requires a value' }
+    $buildArgs += $argument
+    $index++
+    $buildArgs += [string]$args[$index]
+    $target = [string]$args[$index]
   } elseif ($argument.StartsWith('--target=')) {
     $target = $argument.Substring('--target='.Length)
+    $buildArgs += $argument
   } elseif ($argument -in @('--locked', '--offline', '--frozen')) {
     $lockedArgs += $argument
+    $buildArgs += $argument
+  } else {
+    $buildArgs += $argument
   }
 }
+$profileDirectory = if ($profile -eq "dev") { "debug" } else { $profile }
 $targetArgs = @()
 $targetDirectory = Join-Path 'target' $profileDirectory
 if ($target) {
@@ -49,7 +66,7 @@ try {
   $manifest = Join-Path $buildRoot "runtime-archive.json"
   $packArgs = @(
     "run"
-  ) + $lockedArgs + @(
+  ) + $lockedArgs + $targetArgs + @(
     "-p", "runmat-aot", "--bin", "runmat-aot-pack", "--",
     "--archive", $archive,
     "--payload-out", $payload,
@@ -68,7 +85,7 @@ try {
   try {
     $env:RUNMAT_AOT_RUNTIME_ARCHIVE = $payload
     $env:RUNMAT_AOT_RUNTIME_MANIFEST = $manifest
-    & cargo build -p runmat --profile $profile @args
+    & cargo build -p runmat --profile $profile @buildArgs
     if ($LASTEXITCODE -ne 0) {
       throw "failed to build RunMat with the embedded AOT runtime"
     }
