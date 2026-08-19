@@ -6,10 +6,14 @@ use runmat_meshing_core::{
 
 use super::*;
 use crate::cdt::{
-    build_delaunay_volume_topology, recover_delaunay_facets, recover_delaunay_segments,
-    DelaunayConstraintFacet, DelaunayConstraintFacetSide, DelaunayConstraintNode,
-    DelaunayConstraintSegment, DelaunaySegmentRecoveryOptions, DelaunayTopologyOptions,
+    build_delaunay_volume_point_set, build_delaunay_volume_topology, recover_delaunay_facets,
+    recover_delaunay_segments, DelaunayConstraintFacet, DelaunayConstraintFacetSide,
+    DelaunayConstraintNode, DelaunayConstraintSegment, DelaunayPointSetOptions,
+    DelaunaySegmentRecoveryOptions, DelaunayTopologyOptions,
 };
+
+#[path = "tests/close_parallel.rs"]
+mod close_parallel;
 
 fn entity(kind: PersistentEntityKind, value: &str) -> PersistentEntityId {
     PersistentEntityId {
@@ -315,16 +319,23 @@ fn boundary_sides(
     opposite: u32,
     region_id: &str,
 ) -> (DelaunayConstraintFacetSide, DelaunayConstraintFacetSide) {
+    sides_containing_point(
+        coordinates,
+        facet,
+        coordinates[opposite as usize],
+        region_id,
+    )
+}
+
+fn sides_containing_point<const N: usize>(
+    coordinates: [[f64; 3]; N],
+    facet: [u32; 3],
+    contained_point: [f64; 3],
+    region_id: &str,
+) -> (DelaunayConstraintFacetSide, DelaunayConstraintFacetSide) {
     let points = facet.map(|vertex| coordinates[vertex as usize]);
     let region = DelaunayConstraintFacetSide::Region(region(region_id));
-    match orient3d([
-        points[0],
-        points[1],
-        points[2],
-        coordinates[opposite as usize],
-    ])
-    .unwrap()
-    {
+    match orient3d([points[0], points[1], points[2], contained_point]).unwrap() {
         PredicateSign::Negative => (region, DelaunayConstraintFacetSide::Exterior),
         PredicateSign::Positive => (DelaunayConstraintFacetSide::Exterior, region),
         PredicateSign::Zero => panic!("fixture facet must be nondegenerate"),
