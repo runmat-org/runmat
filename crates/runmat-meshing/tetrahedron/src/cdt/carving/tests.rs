@@ -14,6 +14,8 @@ use crate::cdt::{
 
 #[path = "tests/close_parallel.rs"]
 mod close_parallel;
+#[path = "tests/small_void.rs"]
+mod small_void;
 
 fn entity(kind: PersistentEntityKind, value: &str) -> PersistentEntityId {
     PersistentEntityId {
@@ -333,11 +335,27 @@ fn sides_containing_point<const N: usize>(
     contained_point: [f64; 3],
     region_id: &str,
 ) -> (DelaunayConstraintFacetSide, DelaunayConstraintFacetSide) {
-    let points = facet.map(|vertex| coordinates[vertex as usize]);
     let region = DelaunayConstraintFacetSide::Region(region(region_id));
+    sides_for_point(
+        coordinates,
+        facet,
+        contained_point,
+        region,
+        DelaunayConstraintFacetSide::Exterior,
+    )
+}
+
+fn sides_for_point<const N: usize>(
+    coordinates: [[f64; 3]; N],
+    facet: [u32; 3],
+    contained_point: [f64; 3],
+    contained_side: DelaunayConstraintFacetSide,
+    other_side: DelaunayConstraintFacetSide,
+) -> (DelaunayConstraintFacetSide, DelaunayConstraintFacetSide) {
+    let points = facet.map(|vertex| coordinates[vertex as usize]);
     match orient3d([points[0], points[1], points[2], contained_point]).unwrap() {
-        PredicateSign::Negative => (region, DelaunayConstraintFacetSide::Exterior),
-        PredicateSign::Positive => (DelaunayConstraintFacetSide::Exterior, region),
+        PredicateSign::Negative => (contained_side, other_side),
+        PredicateSign::Positive => (other_side, contained_side),
         PredicateSign::Zero => panic!("fixture facet must be nondegenerate"),
     }
 }
