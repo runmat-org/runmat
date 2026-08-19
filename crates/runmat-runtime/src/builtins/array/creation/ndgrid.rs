@@ -39,7 +39,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Resident real/logical gpuArray vector inputs use the provider ndgrid hook when available; unsupported providers or complex axes fall back to host materialisation.",
+    notes: "Resident real/logical gpuArray vector inputs use the provider ndgrid hook when available; complex axes use exact owner-resolved gather, host expansion, and validated restoration.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::ndgrid")]
@@ -267,9 +267,7 @@ fn try_provider_outputs(
         return Ok(Some(Vec::new()));
     }
 
-    let Some(provider) = runmat_accelerate_api::provider_for_device(device_id)
-        .or_else(runmat_accelerate_api::provider)
-    else {
+    let Some(provider) = runmat_accelerate_api::provider_for_device(device_id) else {
         return Ok(None);
     };
 
@@ -354,7 +352,9 @@ impl ParsedNdgrid {
         let mut prefer_gpu = false;
         let mut gpu_device_id = None;
         let force_host_for_integer_residency = args.iter().any(|value| {
-            matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+            matches!(value, Value::GpuTensor(handle)
+                if runmat_accelerate_api::handle_integer_type(handle).is_some()
+                    && runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::Real)
         });
         let mut axes = Vec::with_capacity(args.len());
         for (index, value) in args.iter().cloned().enumerate() {
@@ -462,6 +462,29 @@ async fn axis_from_value(
         Value::ComplexTensor(tensor) => axis_from_complex_tensor(tensor, index),
         Value::GpuTensor(handle) => {
             if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
+                if runmat_accelerate_api::handle_storage(&handle)
+                    == GpuTensorStorage::ComplexInterleaved
+                {
+                    if !is_vector_shape(&handle.shape) {
+                        return Err(ndgrid_error_with_detail(
+                            &NDGRID_ERROR_INVALID_AXIS,
+                            format!(
+                                "argument {} must be a vector, got shape {:?}",
+                                index + 1,
+                                handle.shape
+                            ),
+                        ));
+                    }
+                    *prefer_gpu = true;
+                    gpu_device_id.get_or_insert(handle.device_id);
+                    return Ok(AxisData {
+                        len: vector_len_from_shape(&handle.shape),
+                        storage: AxisStorage::GpuReal {
+                            handle,
+                            class: OutputClass::Complex,
+                        },
+                    });
+                }
                 if runmat_accelerate_api::handle_is_explicit(&handle) {
                     return Err(ndgrid_error_with_detail(
                         &NDGRID_ERROR_INVALID_AXIS,
@@ -856,24 +879,17 @@ impl GridOutput {
         let storage = storage
             .gather(&self.indices)
             .map_err(|err| ndgrid_error_with_detail(&NDGRID_ERROR_INTERNAL, err))?;
-        let is_integer = matches!(storage, ComplexStorage::Integer(_));
         let tensor = ComplexTensor::from_complex_storage(storage, self.shape.clone())
             .map_err(|err| ndgrid_error_with_detail(&NDGRID_ERROR_INTERNAL, err))?;
         match residency {
             OutputResidency::Host => Ok(complex_tensor_into_value(tensor)),
-            OutputResidency::Gpu { .. } if is_integer => Err(ndgrid_error_with_detail(
-                &NDGRID_ERROR_INTERNAL,
-                "GPU-resident typed complex integer outputs are not supported",
-            )),
             OutputResidency::Gpu { device_id } => to_complex_gpu_tensor_value(tensor, device_id),
         }
     }
 }
 
 fn to_gpu_tensor_value(tensor: Tensor, device_id: u32) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider_for_device(device_id)
-        .or_else(runmat_accelerate_api::provider)
-    {
+    if let Some(provider) = runmat_accelerate_api::provider_for_device(device_id) {
         match gpu_helpers::upload_tensor(provider, &tensor) {
             Ok(handle) => {
                 return Ok(Value::GpuTensor(handle));
@@ -895,9 +911,7 @@ fn to_gpu_tensor_value(tensor: Tensor, device_id: u32) -> BuiltinResult<Value> {
 fn to_logical_gpu_value(logical: LogicalArray, device_id: u32) -> BuiltinResult<Value> {
     let tensor = tensor::logical_to_tensor(&logical)
         .map_err(|err| ndgrid_error_with_detail(&NDGRID_ERROR_INTERNAL, err))?;
-    if let Some(provider) = runmat_accelerate_api::provider_for_device(device_id)
-        .or_else(runmat_accelerate_api::provider)
-    {
+    if let Some(provider) = runmat_accelerate_api::provider_for_device(device_id) {
         let data = tensor.as_f64_slice().ok_or_else(|| {
             ndgrid_error_with_detail(
                 &NDGRID_ERROR_INTERNAL,
@@ -925,9 +939,7 @@ fn to_logical_gpu_value(logical: LogicalArray, device_id: u32) -> BuiltinResult<
 }
 
 fn to_complex_gpu_tensor_value(tensor: ComplexTensor, device_id: u32) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider_for_device(device_id)
-        .or_else(runmat_accelerate_api::provider)
-    {
+    if let Some(provider) = runmat_accelerate_api::provider_for_device(device_id) {
         match gpu_helpers::upload_complex_tensor(provider, &tensor) {
             Ok(handle) => return Ok(gpu_helpers::complex_gpu_value(handle)),
             Err(err) => {
@@ -1524,6 +1536,53 @@ mod tests {
             assert_eq!(x_after.materialize_f64(), vec![1.0, 2.0]);
             assert_eq!(y_after.shape, vec![3, 1]);
             assert_eq!(y_after.materialize_f64(), vec![10.0, 20.0, 30.0]);
+        });
+    }
+
+    #[test]
+    fn ndgrid_gpu_paired_complex_integer_axis_restores_exact_resident_output() {
+        test_support::with_test_provider(|provider| {
+            let wide = (1_u64 << 53) + 1;
+            let axis = ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![wide, u64::MAX]),
+                    IntegerStorage::U64(vec![u64::MAX, wide]),
+                )
+                .expect("paired axis storage"),
+                vec![1, 2],
+            )
+            .expect("paired axis");
+            let input = gpu_helpers::upload_complex_tensor(provider, &axis).expect("upload axis");
+            let eval = eval(&[Value::GpuTensor(input.clone())], Some(2)).expect("ndgrid");
+            let Value::GpuTensor(output) = output(&eval, 0).expect("first grid") else {
+                panic!("expected resident paired grid");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&output),
+                GpuTensorStorage::ComplexInterleaved
+            );
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&output),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            let gathered = block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(
+                output.clone(),
+            )))
+            .expect("gather paired grid");
+            let Value::ComplexTensor(gathered) = gathered else {
+                panic!("expected paired tensor");
+            };
+            let storage = gathered.integer_storage().expect("paired storage");
+            assert_eq!(
+                storage.real,
+                IntegerStorage::U64(vec![wide, u64::MAX, wide, u64::MAX])
+            );
+            assert_eq!(
+                storage.imag,
+                IntegerStorage::U64(vec![u64::MAX, wide, u64::MAX, wide])
+            );
+            provider.free(&input).expect("free input");
+            provider.free(&output).expect("free output");
         });
     }
 }

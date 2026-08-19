@@ -92,7 +92,7 @@ macro_rules! define_integer_cast_builtin {
                 two_pass_threshold: None,
                 workgroup_size: None,
                 accepts_nan_mode: false,
-                notes: "Real gpuArray inputs use the provider resident integer-cast hook and return native integer gpuArray storage. Complex gpuArray integer casts remain unsupported until typed complex integer provider storage exists.",
+                notes: "Real gpuArray inputs use the provider resident integer-cast hook. Paired-complex inputs use exact owner-resolved fallback, and both return native integer gpuArray storage.",
             };
 
             #[runmat_macros::register_fusion_spec(builtin_path = $path)]

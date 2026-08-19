@@ -2,8 +2,7 @@
 
 use std::cmp::max;
 
-use log::warn;
-use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, HostTensorView};
+use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
@@ -486,7 +485,7 @@ pub async fn evaluate(args: &[Value]) -> crate::BuiltinResult<MeshgridEval> {
     let target_residency = match &parsed.template {
         OutputTemplate::Default => {
             if parsed.prefer_gpu {
-                DevicePreference::Gpu
+                DevicePreference::Gpu(parsed.preferred_device_id.unwrap_or(0))
             } else {
                 DevicePreference::Host
             }
@@ -496,7 +495,7 @@ pub async fn evaluate(args: &[Value]) -> crate::BuiltinResult<MeshgridEval> {
 
     let mut outputs: Vec<MeshgridOutput> = Vec::new();
 
-    if matches!(target_residency, DevicePreference::Gpu) {
+    if matches!(target_residency, DevicePreference::Gpu(_)) {
         if let Some(gpu) = try_meshgrid_gpu_from_vector_axes(&x_axis, &y_axis, z_axis.as_ref())? {
             outputs = gpu;
         }
@@ -528,6 +527,7 @@ struct ParsedMeshgrid {
     axes: Vec<AxisData>,
     template: OutputTemplate,
     prefer_gpu: bool,
+    preferred_device_id: Option<u32>,
 }
 
 impl ParsedMeshgrid {
@@ -540,6 +540,7 @@ impl ParsedMeshgrid {
         let mut axis_values: Vec<Value> = Vec::new();
         let mut like_proto: Option<Value> = None;
         let mut prefer_gpu = false;
+        let mut preferred_device_id = None;
         let mut idx = 0;
         while idx < args.len() {
             let value = args[idx].clone();
@@ -596,11 +597,16 @@ impl ParsedMeshgrid {
         }
 
         let force_host_for_integer_residency = axis_values.iter().any(|value| {
-            matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+            matches!(value, Value::GpuTensor(handle)
+                if runmat_accelerate_api::handle_integer_type(handle).is_some()
+                    && runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::Real)
         });
 
         let mut axes = Vec::with_capacity(max(axis_values.len(), 2));
         for (i, value) in axis_values.into_iter().enumerate() {
+            if let Value::GpuTensor(handle) = &value {
+                preferred_device_id.get_or_insert(handle.device_id);
+            }
             let mut consumed_gpu = false;
             let data = axis_from_value(value, i, &mut consumed_gpu).await?;
             if data.is_complex {
@@ -642,6 +648,7 @@ impl ParsedMeshgrid {
             axes,
             template,
             prefer_gpu,
+            preferred_device_id,
         })
     }
 }
@@ -667,7 +674,7 @@ enum PrototypeClass {
 #[derive(Clone, Copy)]
 enum DevicePreference {
     Host,
-    Gpu,
+    Gpu(u32),
 }
 
 fn analyse_like_prototype(proto: &Value) -> crate::BuiltinResult<PrototypeSpec> {
@@ -681,7 +688,7 @@ fn analyse_like_prototype(proto: &Value) -> crate::BuiltinResult<PrototypeSpec> 
                 PrototypeClass::Real
             };
             Ok(PrototypeSpec {
-                residency: DevicePreference::Gpu,
+                residency: DevicePreference::Gpu(handle.device_id),
                 class,
             })
         }
@@ -800,6 +807,19 @@ async fn axis_from_value(
         Value::ComplexTensor(tensor) => axis_from_complex_tensor(tensor, index),
         Value::GpuTensor(handle) => {
             if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
+                if runmat_accelerate_api::handle_storage(&handle)
+                    == GpuTensorStorage::ComplexInterleaved
+                {
+                    *prefer_gpu = true;
+                    let gathered =
+                        gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await?;
+                    return match gathered {
+                        Value::ComplexTensor(tensor) => axis_from_complex_tensor(tensor, index),
+                        other => Err(builtin_error(format!(
+                            "meshgrid: expected paired complex integer GPU axis, got {other:?}"
+                        ))),
+                    };
+                }
                 if runmat_accelerate_api::handle_is_explicit(&handle) {
                     return Err(builtin_error(
                         "meshgrid: integer gpuArray axes are not supported",
@@ -1325,18 +1345,11 @@ impl GridOutput {
                 complex_storage_into_real(storage)?
             }
         };
-        let is_integer = !matches!(
-            storage.numeric_dtype(),
-            NumericDType::F64 | NumericDType::F32
-        );
         let tensor = Tensor::from_numeric_storage(storage, self.shape.clone())
             .map_err(|e| builtin_error(format!("meshgrid: {e}")))?;
         match residency {
             DevicePreference::Host => Ok(Value::Tensor(tensor)),
-            DevicePreference::Gpu if is_integer => Err(builtin_error(
-                "meshgrid: GPU-resident typed integer outputs are not supported",
-            )),
-            DevicePreference::Gpu => to_gpu_tensor_value(tensor),
+            DevicePreference::Gpu(device_id) => to_gpu_tensor_value(tensor, device_id),
         }
     }
 
@@ -1368,15 +1381,11 @@ impl GridOutput {
                 .gather(&self.indices)
                 .map_err(|e| builtin_error(format!("meshgrid: {e}")))?,
         };
-        let is_integer = matches!(storage, ComplexStorage::Integer(_));
         let tensor = ComplexTensor::from_complex_storage(storage, self.shape.clone())
             .map_err(|e| builtin_error(format!("meshgrid: {e}")))?;
         match residency {
             DevicePreference::Host => Ok(complex_tensor_into_value(tensor)),
-            DevicePreference::Gpu if is_integer => Err(builtin_error(
-                "meshgrid: GPU-resident typed complex integer outputs are not supported",
-            )),
-            DevicePreference::Gpu => to_complex_gpu_tensor_value(tensor),
+            DevicePreference::Gpu(device_id) => to_complex_gpu_tensor_value(tensor, device_id),
         }
     }
 }
@@ -1425,41 +1434,23 @@ fn complex_storage_into_real(storage: ComplexStorage) -> crate::BuiltinResult<Nu
     }
 }
 
-fn to_gpu_tensor_value(tensor: Tensor) -> crate::BuiltinResult<Value> {
-    let shape = tensor.shape.clone();
-    let storage = tensor
-        .into_numeric_storage()
-        .map_err(|error| builtin_error(format!("meshgrid: {error}")))?;
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        let data = storage.materialize_f64();
-        let view = HostTensorView {
-            data: &data,
-            shape: &shape,
-        };
-        match provider.upload(&view) {
-            Ok(handle) => return Ok(Value::GpuTensor(handle)),
-            Err(err) => {
-                warn!("meshgrid: failed to upload tensor to GPU, returning host array: {err}")
-            }
-        }
-    }
-    let tensor = Tensor::from_numeric_storage(storage, shape)
-        .map_err(|error| builtin_error(format!("meshgrid: {error}")))?;
-    Ok(tensor::tensor_into_value(tensor))
+fn to_gpu_tensor_value(tensor: Tensor, device_id: u32) -> crate::BuiltinResult<Value> {
+    let provider = runmat_accelerate_api::provider_for_device(device_id)
+        .ok_or_else(|| builtin_error("meshgrid: no acceleration provider owns the GPU output"))?;
+    gpu_helpers::upload_tensor(provider, &tensor)
+        .map(Value::GpuTensor)
+        .map_err(|error| builtin_error(format!("meshgrid: GPU output upload failed: {error}")))
 }
 
-fn to_complex_gpu_tensor_value(tensor: ComplexTensor) -> crate::BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        match gpu_helpers::upload_complex_tensor(provider, &tensor) {
-            Ok(handle) => return Ok(gpu_helpers::complex_gpu_value(handle)),
-            Err(err) => {
-                warn!(
-                    "meshgrid: failed to upload complex tensor to GPU, returning host array: {err}"
-                )
-            }
-        }
-    }
-    Ok(complex_tensor_into_value(tensor))
+fn to_complex_gpu_tensor_value(
+    tensor: ComplexTensor,
+    device_id: u32,
+) -> crate::BuiltinResult<Value> {
+    let provider = runmat_accelerate_api::provider_for_device(device_id)
+        .ok_or_else(|| builtin_error("meshgrid: no acceleration provider owns the GPU output"))?;
+    gpu_helpers::upload_complex_tensor(provider, &tensor)
+        .map(gpu_helpers::complex_gpu_value)
+        .map_err(|error| builtin_error(format!("meshgrid: GPU output upload failed: {error}")))
 }
 
 fn tensor_to_complex_tensor(tensor: Tensor) -> crate::BuiltinResult<ComplexTensor> {
@@ -1508,7 +1499,7 @@ impl MeshgridOutput {
         match self {
             MeshgridOutput::Host(host) => host.to_value(class, residency),
             MeshgridOutput::Gpu(handle) => match (class, residency) {
-                (PrototypeClass::Real, DevicePreference::Gpu) => {
+                (PrototypeClass::Real, DevicePreference::Gpu(_)) => {
                     Ok(Value::GpuTensor(handle.clone()))
                 }
                 (PrototypeClass::Real, DevicePreference::Host) => {
@@ -1527,14 +1518,14 @@ impl MeshgridOutput {
                         ))),
                     }
                 }
-                (PrototypeClass::Complex, DevicePreference::Gpu) => {
+                (PrototypeClass::Complex, DevicePreference::Gpu(device_id)) => {
                     if runmat_accelerate_api::handle_storage(handle)
                         == GpuTensorStorage::ComplexInterleaved
                     {
                         Ok(gpu_helpers::complex_gpu_value(handle.clone()))
                     } else {
                         let tensor = gpu_helpers::gather_tensor_async(handle).await?;
-                        to_complex_gpu_tensor_value(tensor_to_complex_tensor(tensor)?)
+                        to_complex_gpu_tensor_value(tensor_to_complex_tensor(tensor)?, device_id)
                     }
                 }
             },
@@ -2261,6 +2252,58 @@ pub(crate) mod tests {
                 tensor.materialize_f64(),
                 vec![(1.0, 1.0), (1.0, 1.0), (2.0, -1.0), (2.0, -1.0)]
             );
+        });
+    }
+
+    #[test]
+    fn meshgrid_paired_complex_integer_gpu_axis_stays_resident_and_exact() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        test_support::with_test_provider(|provider| {
+            let wide = (1_u64 << 53) + 1;
+            let axis = ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![wide, u64::MAX]),
+                    IntegerStorage::U64(vec![u64::MAX, wide]),
+                )
+                .expect("paired axis storage"),
+                vec![1, 2],
+            )
+            .expect("paired axis");
+            let axis_handle =
+                gpu_helpers::upload_complex_tensor(provider, &axis).expect("upload paired axis");
+
+            let eval = evaluate(&[Value::GpuTensor(axis_handle.clone())]).expect("meshgrid");
+            let Value::GpuTensor(output) = eval_first(&eval).expect("X") else {
+                panic!("expected resident paired grid");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&output),
+                GpuTensorStorage::ComplexInterleaved
+            );
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&output),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            assert!(runmat_accelerate_api::provider_for_handle(&output)
+                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            let gathered = block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(
+                output.clone(),
+            )))
+            .expect("gather paired grid");
+            let Value::ComplexTensor(gathered) = gathered else {
+                panic!("expected paired tensor");
+            };
+            let storage = gathered.integer_storage().expect("paired storage");
+            assert_eq!(
+                storage.real,
+                IntegerStorage::U64(vec![wide, wide, u64::MAX, u64::MAX])
+            );
+            assert_eq!(
+                storage.imag,
+                IntegerStorage::U64(vec![u64::MAX, u64::MAX, wide, wide])
+            );
+            provider.free(&axis_handle).expect("free axis");
+            provider.free(&output).expect("free output");
         });
     }
 

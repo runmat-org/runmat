@@ -116,7 +116,7 @@ fn complex_matmul_and_transpose() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
-fn complex_string_and_logical() {
+fn complex_string_formats_and_logical_conversion_rejects_complex_values() {
     let a = Value::Complex(0.0, -2.5);
     let s = runmat_runtime::call_builtin("string", std::slice::from_ref(&a)).unwrap();
     if let Value::StringArray(sa) = s {
@@ -124,26 +124,20 @@ fn complex_string_and_logical() {
     } else {
         panic!();
     }
-    let l = runmat_runtime::call_builtin("logical", &[Value::Complex(0.0, 0.0)]).unwrap();
-    if let Value::Bool(b) = l {
-        assert!(!b);
-    } else {
-        panic!();
-    }
-    let l2 = runmat_runtime::call_builtin("logical", &[Value::Complex(1.0, 0.0)]).unwrap();
-    if let Value::Bool(b) = l2 {
-        assert!(b);
-    } else {
-        panic!();
-    }
+    let scalar_error =
+        runmat_runtime::call_builtin("logical", &[Value::Complex(0.0, 0.0)]).unwrap_err();
+    assert_eq!(
+        scalar_error.identifier(),
+        Some("RunMat:logical:ConversionNotPossible")
+    );
     use runmat_builtins::ComplexTensor;
     let ct = ComplexTensor::new_2d(vec![(0.0, 0.0), (1.0, 0.0)], 1, 2).unwrap();
-    let mask = runmat_runtime::call_builtin("logical", &[Value::ComplexTensor(ct)]).unwrap();
-    if let Value::LogicalArray(la) = mask {
-        assert_eq!(la.data, vec![0, 1]);
-    } else {
-        panic!();
-    }
+    let array_error =
+        runmat_runtime::call_builtin("logical", &[Value::ComplexTensor(ct)]).unwrap_err();
+    assert_eq!(
+        array_error.identifier(),
+        Some("RunMat:logical:ConversionNotPossible")
+    );
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

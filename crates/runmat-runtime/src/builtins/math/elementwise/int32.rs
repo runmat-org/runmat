@@ -94,7 +94,7 @@ pub const INT32_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
         overflow: BuiltinIntegerOverflowRule::Saturate,
         backend: BuiltinIntegerBackendRule::HostAndGpu,
         overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Host conversion is exact and saturating. Real gpuArray conversion uses native int32 device storage; the compatibility target's complex-input preservation is implemented on host, while paired complex-integer device storage remains an explicit architecture gap.",
+        notes: "Host and resident conversion is exact and saturating. Real and paired-complex gpuArray inputs preserve native int32 device storage, owner, and residency.",
     }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::int32")]
@@ -110,7 +110,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Real gpuArray inputs use the provider resident integer-cast hook and return native int32 gpuArray storage. Complex gpuArray integer casts remain unsupported until typed complex integer provider storage exists.",
+    notes: "Real gpuArray inputs use the provider resident integer-cast hook. Paired-complex inputs use exact owner-resolved fallback, and both return native int32 gpuArray storage.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::int32")]

@@ -490,7 +490,7 @@ async fn permute_value(value: Value, order: &[usize]) -> crate::BuiltinResult<Va
                 .map(Value::Cell)
                 .map_err(|error| shiftdim_error(&ERROR_UNSUPPORTED_INPUT, error))
         }
-        Value::GpuTensor(handle) => permute_gpu(handle, order),
+        Value::GpuTensor(handle) => permute_gpu(handle, order).await,
         Value::Num(_)
         | Value::Int(_)
         | Value::Bool(_)
@@ -569,14 +569,19 @@ fn wrap_gpu(handle: GpuTensorHandle, complex: bool, logical: bool) -> Value {
     }
 }
 
-fn permute_gpu(handle: GpuTensorHandle, order: &[usize]) -> crate::BuiltinResult<Value> {
+async fn permute_gpu(handle: GpuTensorHandle, order: &[usize]) -> crate::BuiltinResult<Value> {
     let complex =
         runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved;
     if complex && runmat_accelerate_api::handle_integer_type(&handle).is_some() {
-        return Err(shiftdim_error(
-            &ERROR_UNSUPPORTED_INPUT,
-            "shiftdim: positive shifts of complex integer GPU arrays require typed complex device storage support",
-        ));
+        let host = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await?;
+        let Value::ComplexTensor(tensor) = host else {
+            return Err(shiftdim_error(
+                &ERROR_UNSUPPORTED_INPUT,
+                "shiftdim: paired complex integer GPU input did not gather to exact complex storage",
+            ));
+        };
+        let permuted = permute_complex_tensor(NAME, tensor, order).map(Value::ComplexTensor)?;
+        return gpu_helpers::restore_class_preserving_value(&handle, permuted, NAME);
     }
     let logical = runmat_accelerate_api::handle_is_logical(&handle);
     let provider = runmat_accelerate_api::provider_for_handle(&handle)
@@ -627,6 +632,8 @@ fn reshape_gpu(handle: GpuTensorHandle, shape: &[usize]) -> crate::BuiltinResult
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::AccelProvider;
     use runmat_builtins::{
         ComplexStorage, IntValue, IntegerComplexStorage, IntegerStorage, NumericDType, Tensor,
     };
@@ -1002,6 +1009,48 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn simple_provider_keeps_paired_complex_integer_gpu_values_resident_and_exact() {
+        runmat_accelerate::initialize_acceleration_provider();
+        runmat_accelerate::simple_provider::register_inprocess_provider();
+        let provider = runmat_accelerate_api::provider().expect("provider");
+        let wide = (1_u64 << 53) + 1;
+        let tensor = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![wide, u64::MAX, 3, 4]),
+                IntegerStorage::U64(vec![u64::MAX, wide, 5, 6]),
+            )
+            .expect("paired storage"),
+            vec![1, 2, 2],
+        )
+        .expect("paired tensor");
+        let handle = gpu_helpers::upload_complex_tensor(provider, &tensor).expect("upload paired");
+        let Value::GpuTensor(output) =
+            call(Value::GpuTensor(handle.clone()), Some(Value::Num(1.0))).expect("shift paired")
+        else {
+            panic!("expected resident paired output")
+        };
+        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&output),
+            GpuTensorStorage::ComplexInterleaved
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&output),
+            Some(runmat_accelerate_api::IntegerElementType::U64)
+        );
+        let gathered = block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(
+            output.clone(),
+        )))
+        .expect("gather paired");
+        let Value::ComplexTensor(gathered) = gathered else {
+            panic!("expected paired complex tensor")
+        };
+        assert_eq!(gathered.integer_storage(), tensor.integer_storage());
+        provider.free(&handle).expect("free input");
+        provider.free(&output).expect("free output");
+    }
+
     #[cfg(feature = "wgpu")]
     #[test]
     fn wgpu_positive_integer_shift_preserves_class_when_adapter_is_available() {
@@ -1033,5 +1082,50 @@ mod tests {
             runmat_accelerate_api::handle_integer_type(&output),
             Some(runmat_accelerate_api::IntegerElementType::I32)
         );
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn wgpu_paired_complex_integer_shift_stays_resident_and_exact_when_available() {
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) else {
+            return;
+        };
+        let wide = (1_u64 << 53) + 1;
+        let tensor = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![wide, u64::MAX, 3, 4]),
+                IntegerStorage::U64(vec![u64::MAX, wide, 5, 6]),
+            )
+            .expect("paired storage"),
+            vec![1, 2, 2],
+        )
+        .expect("paired tensor");
+        let handle = gpu_helpers::upload_complex_tensor(provider, &tensor).expect("upload paired");
+        let Value::GpuTensor(output) =
+            call(Value::GpuTensor(handle.clone()), Some(Value::Num(1.0))).expect("shift paired")
+        else {
+            panic!("expected resident paired output")
+        };
+        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&output),
+            GpuTensorStorage::ComplexInterleaved
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&output),
+            Some(runmat_accelerate_api::IntegerElementType::U64)
+        );
+        let gathered = block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(
+            output.clone(),
+        )))
+        .expect("gather paired");
+        let Value::ComplexTensor(gathered) = gathered else {
+            panic!("expected paired tensor")
+        };
+        assert_eq!(gathered.integer_storage(), tensor.integer_storage());
+        provider.free(&handle).expect("free input");
+        provider.free(&output).expect("free output");
     }
 }

@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Documented resident single and double gpuArray vector inputs use the provider ndgrid hook when available. Explicit integer gpuArray axes reject; automatically resident integer axes gather transparently and produce exact host grids."
+    "notes": "Documented resident single and double gpuArray vector inputs use the provider ndgrid hook when available. Explicit real-integer gpuArray axes reject; automatically resident real-integer axes gather transparently and produce exact host grids. Paired-complex integer axes use exact owner-resolved fallback and remain resident."
   },
   "fusion": {
     "elementwise": false,
@@ -75,7 +75,7 @@
     },
     {
       "question": "Can `ndgrid` return gpuArray outputs?",
-      "answer": "Documented single and double gpuArray vectors use the provider hook when available. Explicit integer gpuArray axes are unsupported; automatic integer residency gathers transparently to exact host output."
+      "answer": "Documented single and double gpuArray vectors use the provider hook when available. Explicit real-integer gpuArray axes are unsupported, while automatic real-integer residency gathers transparently to exact host output. RunMat's paired-complex integer extension uses exact owner-resolved fallback and restores resident output."
     }
   ],
   "links": [

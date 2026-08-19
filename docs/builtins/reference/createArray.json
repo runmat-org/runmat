@@ -3,7 +3,7 @@
   "category": "array/creation",
   "keywords": ["createArray", "FillValue", "Like", "constant", "array"],
   "summary": "Create an array of a specified class and value.",
-  "description": "`createArray` accepts dimensions first, followed by an optional class name and `Like` or `FillValue` name-value arguments. Integer dimensions are structural and exact. Real integer FillValue and Like forms preserve authoritative class and resident storage; typed complex integer GPU storage is not currently supported. The result is complex when either Like or FillValue is complex.",
+  "description": "`createArray` accepts dimensions first, followed by an optional class name and `Like` or `FillValue` name-value arguments. Integer dimensions are structural and exact. Integer FillValue and Like forms preserve authoritative class, complexity, and resident storage. The result is complex when either Like or FillValue is complex.",
   "behaviors": [
     "`createArray` returns scalar double zero.",
     "`createArray(n)` creates an n-by-n array and `createArray(m,n,...)` creates the requested shape.",
@@ -18,7 +18,7 @@
     "reduction": false,
     "precisions": ["f32", "f64"],
     "broadcasting": "none",
-    "notes": "Real-valued Like and GPU FillValue forms use the source handle's owning provider for fill and fallback upload paths; native real integer storage remains exact and the output remains on that owner/device. Typed complex integer GPU output is not supported because providers do not expose exact complex integer device storage."
+    "notes": "Like and GPU FillValue forms use the source handle's owning provider for fill and fallback upload paths; native real and paired-complex integer storage remains exact and the output remains on that owner/device."
   },
   "fusion": {
     "elementwise": true,

@@ -7,7 +7,7 @@ last_updated: "August 18, 2026"
 
 # MATLAB Language Compatibility
 
-RunMat is a high-performance runtime designed for MATLAB-syntax code. It targets the core language grammar and semantics, enabling engineers to execute `.m` scripts, functions, and complex object-oriented systems. Compatibility focuses on the core language (variables, operators, control flow, N-D indexing, and `classdef` OOP) and a standard library of 400+ built-in functions.
+RunMat is a high-performance runtime designed for MATLAB-syntax code. It targets the core language grammar and semantics, enabling engineers to execute `.m` scripts, functions, and complex object-oriented systems. Compatibility focuses on the core language (variables, operators, control flow, N-D indexing, and `classdef` OOP) and an extensive standard library of built-in functions.
 
 RunMat is an independent runtime for MATLAB-language source code. Compatibility work is based on publicly available documentation and independent engineering.
 

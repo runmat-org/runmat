@@ -424,7 +424,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "A DataArray whose declared dtype is any built-in integer class is decoded directly into authoritative same-class tensor storage."
+              "notes": "A DataArray whose declared dtype is any built-in integer class is decoded directly into authoritative same-class real or paired-complex tensor storage."
             },
             {
               "name": "sliceSpec",
@@ -448,7 +448,7 @@
           "overflow": "NotApplicable",
           "backend": "HostOnly",
           "overload": "Multiple",
-          "notes": "Full and sliced reads preserve the declared integer dtype, exact values, selected shape, and column-major order; dataset persistence is host/filesystem I/O."
+          "notes": "Full and sliced reads preserve the declared integer dtype, real or paired-complex storage, exact values, selected shape, and column-major order; dataset persistence is host/filesystem I/O."
         }
       ]
     },
@@ -702,7 +702,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "Scalar or tensor values accept every integer class and are stored exactly when their class matches the declared array dtype."
+              "notes": "Scalar or tensor values accept every integer class in real or paired-complex storage and are stored exactly when their class matches the declared array dtype."
             },
             {
               "name": "sliceSpec",
@@ -726,7 +726,7 @@
           "overflow": "FunctionSpecific",
           "backend": "HostOnly",
           "overload": "Multiple",
-          "notes": "Writes preserve exact same-class integer storage; unlike source and declared dtypes use the declared numeric cast contract before chunk serialization, and shape mismatches reject."
+          "notes": "Writes preserve exact same-class real or paired-complex integer storage; unlike source and declared dtypes use the declared numeric cast contract before chunk serialization, and shape or complexity mismatches reject."
         }
       ]
     },
@@ -26873,7 +26873,7 @@
           "overflow": "Saturate",
           "backend": "GpuRestricted",
           "overload": "FunctionSpecific",
-          "notes": "Without an override, output preserves FillValue class; documented assignment conversion applies for classname or Like. Real integer GPU FillValue forms preserve native storage, but typed complex integer GPU storage is not supported."
+          "notes": "Without an override, output preserves FillValue class; documented assignment conversion applies for classname or Like. Integer GPU FillValue forms preserve native real or paired-complex storage."
         },
         {
           "form": "X = createArray(..., Like=integer_prototype)",
@@ -26900,7 +26900,7 @@
           "overflow": "Saturate",
           "backend": "GpuRestricted",
           "overload": "FunctionSpecific",
-          "notes": "Real integer GPU prototypes preserve exact class and residency. Typed complex integer GPU prototypes require device storage that is not currently supported."
+          "notes": "Integer GPU prototypes preserve exact class, complexity, and residency."
         }
       ]
     },
@@ -77841,7 +77841,7 @@
           "overflow": "Saturate",
           "backend": "HostAndGpu",
           "overload": "ElementwiseShapePreserving",
-          "notes": "Host conversion is exact and saturating. Real gpuArray conversion uses native int32 device storage; the compatibility target's complex-input preservation is implemented on host, while paired complex-integer device storage remains an explicit architecture gap."
+          "notes": "Host and resident conversion is exact and saturating. Real and paired-complex gpuArray inputs preserve native int32 device storage, owner, and residency."
         }
       ]
     },
@@ -163846,7 +163846,7 @@
           "overflow": "Saturate",
           "backend": "HostAndGpu",
           "overload": "ElementwiseShapePreserving",
-          "notes": "Host conversion is exact and saturating. Real gpuArray conversion uses native uint16 device storage; complex-input preservation is implemented on host, while paired complex-integer device storage remains an architecture gap."
+          "notes": "Host and resident conversion is exact and saturating. Real and paired-complex gpuArray inputs preserve native uint16 device storage, owner, and residency."
         }
       ]
     },
@@ -164064,7 +164064,7 @@
           "overflow": "Saturate",
           "backend": "HostAndGpu",
           "overload": "ElementwiseShapePreserving",
-          "notes": "Host conversion is exact and saturating. Real gpuArray conversion uses native uint32 device storage; complex-input preservation is implemented on host, while paired complex-integer device storage remains an architecture gap."
+          "notes": "Host and resident conversion is exact and saturating. Real and paired-complex gpuArray inputs preserve native uint32 device storage, owner, and residency."
         }
       ]
     },
@@ -164423,7 +164423,7 @@
           "overflow": "Saturate",
           "backend": "HostAndGpu",
           "overload": "ElementwiseShapePreserving",
-          "notes": "Host conversion is exact and saturating. Real gpuArray conversion uses native uint8 device storage; complex-input preservation is implemented on host, while paired complex-integer device storage remains an architecture gap."
+          "notes": "Host and resident conversion is exact and saturating. Real and paired-complex gpuArray inputs preserve native uint8 device storage, owner, and residency."
         }
       ]
     },

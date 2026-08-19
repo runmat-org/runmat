@@ -1771,16 +1771,18 @@ async fn apply_gpu_like_template(
                 .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))?;
             (handle, shape, GpuTensorStorage::Real, expected_integer)
         }
-        Value::ComplexTensor(tensor) if tensor.integer_storage().is_none() => {
+        Value::ComplexTensor(tensor) => {
             let shape = tensor.shape.clone();
+            let expected_integer = tensor
+                .integer_storage()
+                .map(|storage| integer_storage_element_type(&storage.real));
             let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)?;
-            (handle, shape, GpuTensorStorage::ComplexInterleaved, None)
-        }
-        Value::ComplexTensor(_) => {
-            return Err(diag_error(
-                MESSAGE_ID_INVALID_INPUT,
-                "diag: typed complex integer gpuArray 'like' results are not supported",
-            ));
+            (
+                handle,
+                shape,
+                GpuTensorStorage::ComplexInterleaved,
+                expected_integer,
+            )
         }
         other => {
             return Err(diag_error(
@@ -2685,6 +2687,68 @@ mod tests {
             let gathered = test_support::gather(Value::GpuTensor(output.clone())).unwrap();
             assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 0.0, 2.0]);
             provider.free(&proto).expect("free prototype");
+            provider.free(&output).expect("free output");
+        });
+    }
+
+    #[test]
+    fn diag_resident_like_preserves_exact_paired_complex_integer_storage() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        test_support::with_test_provider(|provider| {
+            let wide = (1_u64 << 53) + 1;
+            let prototype = ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![0]),
+                    IntegerStorage::U64(vec![0]),
+                )
+                .expect("paired prototype storage"),
+                vec![1, 1],
+            )
+            .expect("paired prototype");
+            let prototype = gpu_helpers::upload_complex_tensor(provider, &prototype)
+                .expect("upload paired prototype");
+            let input = ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![wide, u64::MAX]),
+                    IntegerStorage::U64(vec![u64::MAX, wide]),
+                )
+                .expect("paired input storage"),
+                vec![1, 2],
+            )
+            .expect("paired input");
+            let output = run_diag(
+                Value::ComplexTensor(input),
+                vec![Value::from("like"), Value::GpuTensor(prototype.clone())],
+            )
+            .expect("resident paired diag");
+            let Value::GpuTensor(output) = output else {
+                panic!("expected resident paired result");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&output),
+                GpuTensorStorage::ComplexInterleaved
+            );
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&output),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            let gathered = futures::executor::block_on(gpu_helpers::gather_value_async(
+                &Value::GpuTensor(output.clone()),
+            ))
+            .expect("gather paired diag");
+            let Value::ComplexTensor(gathered) = gathered else {
+                panic!("expected paired diag tensor");
+            };
+            let storage = gathered.integer_storage().expect("paired storage");
+            assert_eq!(
+                storage.real,
+                IntegerStorage::U64(vec![wide, 0, 0, u64::MAX])
+            );
+            assert_eq!(
+                storage.imag,
+                IntegerStorage::U64(vec![u64::MAX, 0, 0, wide])
+            );
+            provider.free(&prototype).expect("free prototype");
             provider.free(&output).expect("free output");
         });
     }

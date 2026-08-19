@@ -1068,7 +1068,7 @@ const DATAARRAY_READ_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "A DataArray whose declared dtype is any built-in integer class is decoded directly into authoritative same-class tensor storage.",
+        notes: "A DataArray whose declared dtype is any built-in integer class is decoded directly into authoritative same-class real or paired-complex tensor storage.",
     },
     BuiltinIntegerInputCapability {
         name: "sliceSpec",
@@ -1087,7 +1087,7 @@ pub const DATAARRAY_READ_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescript
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Full and sliced reads preserve the declared integer dtype, exact values, selected shape, and column-major order; dataset persistence is host/filesystem I/O.",
+        notes: "Full and sliced reads preserve the declared integer dtype, real or paired-complex storage, exact values, selected shape, and column-major order; dataset persistence is host/filesystem I/O.",
     }];
 
 const DATAARRAY_WRITE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
@@ -1096,7 +1096,7 @@ const DATAARRAY_WRITE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Scalar or tensor values accept every integer class and are stored exactly when their class matches the declared array dtype.",
+        notes: "Scalar or tensor values accept every integer class in real or paired-complex storage and are stored exactly when their class matches the declared array dtype.",
     },
     BuiltinIntegerInputCapability {
         name: "sliceSpec",
@@ -1115,7 +1115,7 @@ pub const DATAARRAY_WRITE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescrip
         overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Writes preserve exact same-class integer storage; unlike source and declared dtypes use the declared numeric cast contract before chunk serialization, and shape mismatches reject.",
+        notes: "Writes preserve exact same-class real or paired-complex integer storage; unlike source and declared dtypes use the declared numeric cast contract before chunk serialization, and shape or complexity mismatches reject.",
     }];
 
 const DATAARRAY_RESIZE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
@@ -3016,6 +3016,16 @@ async fn apply_slice_write_chunked_async(
             &chunk_index,
         )
         .await?;
+        if chunk_payload.imaginary_values.is_none() && rhs.imaginary_values.is_some() {
+            chunk_payload.imaginary_values = Some(crate::data::DataArrayValues::zeros(
+                &meta.dtype,
+                chunk_payload.values.len(),
+            )?);
+        } else if chunk_payload.imaginary_values.is_some() && rhs.imaginary_values.is_none() {
+            return Err(data_error(
+                "CLASS_MISMATCH: real and complex data-array slices cannot be assigned to one another",
+            ));
+        }
 
         let mut local = vec![0usize; intersection.len()];
         let intersection_shape: Vec<usize> = intersection
@@ -3042,6 +3052,11 @@ async fn apply_slice_write_chunked_async(
             chunk_payload
                 .values
                 .set(chunk_linear, rhs.values.get(rhs_linear)?)?;
+            if let (Some(target), Some(source)) =
+                (&mut chunk_payload.imaginary_values, &rhs.imaginary_values)
+            {
+                target.set(chunk_linear, source.get(rhs_linear)?)?;
+            }
             if !advance_index(&mut local, &intersection_shape) {
                 break;
             }
@@ -3124,6 +3139,11 @@ fn read_slice_payload(
         .map(|r| r.end.saturating_sub(r.start))
         .collect();
     let mut out_values = crate::data::DataArrayValues::zeros(&payload.dtype, 0)?;
+    let mut out_imaginary_values = payload
+        .imaginary_values
+        .as_ref()
+        .map(|_| crate::data::DataArrayValues::zeros(&payload.dtype, 0))
+        .transpose()?;
     let mut out_index = vec![0usize; out_shape.len()];
     loop {
         let source_index: Vec<usize> = out_index
@@ -3133,6 +3153,10 @@ fn read_slice_payload(
             .collect();
         let linear = linear_index_column_major(&source_index, &payload.shape)?;
         out_values.push(payload.values.get(linear)?)?;
+        if let (Some(source), Some(target)) = (&payload.imaginary_values, &mut out_imaginary_values)
+        {
+            target.push(source.get(linear)?)?;
+        }
 
         if !advance_index(&mut out_index, &out_shape) {
             break;
@@ -3142,6 +3166,7 @@ fn read_slice_payload(
         dtype: payload.dtype.clone(),
         shape: out_shape,
         values: out_values,
+        imaginary_values: out_imaginary_values,
     })
 }
 
@@ -3164,6 +3189,12 @@ fn write_slice_payload(
     }
 
     let mut next = payload.values.clone();
+    if payload.imaginary_values.is_some() != rhs.imaginary_values.is_some() {
+        return Err(data_error(
+            "CLASS_MISMATCH: real and complex data-array slices cannot be assigned to one another",
+        ));
+    }
+    let mut next_imaginary = payload.imaginary_values.clone();
     let mut rhs_index = vec![0usize; target_shape.len()];
     let mut rhs_linear = 0usize;
     loop {
@@ -3174,6 +3205,9 @@ fn write_slice_payload(
             .collect();
         let target_linear = linear_index_column_major(&target_index, &payload.shape)?;
         next.set(target_linear, rhs.values.get(rhs_linear)?)?;
+        if let (Some(target), Some(source)) = (&mut next_imaginary, &rhs.imaginary_values) {
+            target.set(target_linear, source.get(rhs_linear)?)?;
+        }
         rhs_linear += 1;
 
         if !advance_index(&mut rhs_index, &target_shape) {
@@ -3185,6 +3219,7 @@ fn write_slice_payload(
         dtype: payload.dtype.clone(),
         shape: payload.shape.clone(),
         values: next,
+        imaginary_values: next_imaginary,
     })
 }
 
@@ -3546,7 +3581,7 @@ fn json_to_value(value: &serde_json::Value) -> Value {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
-    use runmat_builtins::IntValue;
+    use runmat_builtins::{ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage};
 
     fn tensor_values(tensor: &Tensor) -> Vec<f64> {
         tensor.materialize_f64()
@@ -3662,7 +3697,7 @@ mod tests {
     use axum::http::{HeaderMap, StatusCode};
     use axum::routing::{post, put};
     use axum::{Json, Router};
-    use runmat_builtins::{CellArray, IntegerStorage};
+    use runmat_builtins::CellArray;
     use runmat_filesystem::data_contract::{
         DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
     };
@@ -5461,6 +5496,98 @@ mod tests {
         assert_eq!(
             read_back.integer_storage(),
             Some(&IntegerStorage::U64(vec![1_u64 << 63; 4]))
+        );
+    }
+
+    #[test]
+    fn paired_complex_uint64_data_array_chunk_and_slice_paths_remain_exact() {
+        let _serial = serial_test_guard();
+        let _provider = native_provider_guard();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir
+            .path()
+            .join("complex-uint64.data")
+            .to_string_lossy()
+            .to_string();
+        let mut array_meta = StructValue::new();
+        array_meta
+            .fields
+            .insert("dtype".to_string(), Value::String("uint64".to_string()));
+        array_meta.fields.insert(
+            "shape".to_string(),
+            Value::Tensor(Tensor::new(vec![2.0, 2.0], vec![1, 2]).expect("shape")),
+        );
+        array_meta.fields.insert(
+            "chunk".to_string(),
+            Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).expect("chunk")),
+        );
+        let mut arrays = StructValue::new();
+        arrays
+            .fields
+            .insert("samples".to_string(), Value::Struct(array_meta));
+        let mut schema = StructValue::new();
+        schema
+            .fields
+            .insert("arrays".to_string(), Value::Struct(arrays));
+        let ds = call_builtin("data.create", &[Value::String(path), Value::Struct(schema)])
+            .expect("create dataset");
+        let arr = call_builtin("Dataset.array", &[ds, Value::String("samples".to_string())])
+            .expect("array");
+        let wide = (1_u64 << 53) + 1;
+        let initial_storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![wide, u64::MAX, 3, 4]),
+            IntegerStorage::U64(vec![u64::MAX, wide, 5, 6]),
+        )
+        .expect("initial paired storage");
+        let initial = ComplexTensor::new_integer(initial_storage.clone(), vec![2, 2])
+            .expect("initial paired tensor");
+        call_builtin(
+            "DataArray.write",
+            &[arr.clone(), Value::ComplexTensor(initial)],
+        )
+        .expect("write paired array");
+
+        let Value::ComplexTensor(read_back) =
+            call_builtin("DataArray.read", &[arr.clone()]).expect("read paired array")
+        else {
+            panic!("expected paired tensor");
+        };
+        assert_eq!(read_back.integer_storage(), Some(&initial_storage));
+
+        let slice = Value::Cell(
+            CellArray::new(
+                vec![Value::Int(IntValue::I32(1)), Value::String(":".to_string())],
+                1,
+                2,
+            )
+            .expect("slice"),
+        );
+        let replacement_storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![1_u64 << 63, u64::MAX - 1]),
+            IntegerStorage::U64(vec![u64::MAX - 2, 1_u64 << 63]),
+        )
+        .expect("replacement storage");
+        let replacement = ComplexTensor::new_integer(replacement_storage, vec![1, 2])
+            .expect("replacement tensor");
+        call_builtin(
+            "DataArray.write",
+            &[arr.clone(), slice, Value::ComplexTensor(replacement)],
+        )
+        .expect("write paired slice");
+
+        let Value::ComplexTensor(read_back) =
+            call_builtin("DataArray.read", &[arr]).expect("read paired slice result")
+        else {
+            panic!("expected paired tensor");
+        };
+        let storage = read_back.integer_storage().expect("paired storage");
+        assert_eq!(
+            storage.real,
+            IntegerStorage::U64(vec![1_u64 << 63, u64::MAX, u64::MAX - 1, 4])
+        );
+        assert_eq!(
+            storage.imag,
+            IntegerStorage::U64(vec![u64::MAX - 2, wide, 1_u64 << 63, 6])
         );
     }
 }

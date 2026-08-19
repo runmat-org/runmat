@@ -60,6 +60,6 @@
   "gpu_residency": "Real gpuArray inputs remain resident and return native uint32 storage owned by the same provider.",
   "gpu_behavior": [
     "The active provider performs real integer conversion through its native cast hook.",
-    "Complex gpuArray conversion is unavailable until the provider interface supports paired complex-integer storage."
+    "Paired-complex gpuArray conversion preserves exact components, class, owner, and residency through an owner-resolved fallback when a direct provider cast is unavailable."
   ]
 }

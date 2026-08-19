@@ -19,7 +19,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "Same-owner, same-device real floating inputs may use the provider conv2d hook when its result preserves the required f32/f64 class and belongs to the invoked provider/device. Other resident inputs gather through their owning providers; eligible real or complex floating results are restored only when the owner preserves the selected class. The provider ABI cannot represent typed complex-integer resident buffers."
+    "notes": "Same-owner, same-device real floating inputs may use the provider conv2d hook when its result preserves the required f32/f64 class and belongs to the invoked provider/device. Other resident inputs gather through their owning providers; eligible real or complex floating results are restored only when the owner preserves the selected class. Convolution does not accept typed complex-integer inputs."
   },
   "fusion": {
     "elementwise": false,

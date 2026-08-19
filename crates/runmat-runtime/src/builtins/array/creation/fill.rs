@@ -212,7 +212,7 @@ pub const CREATE_ARRAY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor
         overflow: BuiltinIntegerOverflowRule::Saturate,
         backend: BuiltinIntegerBackendRule::GpuRestricted,
         overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Without an override, output preserves FillValue class; documented assignment conversion applies for classname or Like. Real integer GPU FillValue forms preserve native storage, but typed complex integer GPU storage is not supported.",
+        notes: "Without an override, output preserves FillValue class; documented assignment conversion applies for classname or Like. Integer GPU FillValue forms preserve native real or paired-complex storage.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "X = createArray(..., Like=integer_prototype)",
@@ -222,7 +222,7 @@ pub const CREATE_ARRAY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor
         overflow: BuiltinIntegerOverflowRule::Saturate,
         backend: BuiltinIntegerBackendRule::GpuRestricted,
         overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Real integer GPU prototypes preserve exact class and residency. Typed complex integer GPU prototypes require device storage that is not currently supported.",
+        notes: "Integer GPU prototypes preserve exact class, complexity, and residency.",
     },
 ];
 
@@ -796,9 +796,6 @@ fn upload_created_output(
             runmat_accelerate_api::set_handle_logical(&handle, true);
             handle
         }
-        Value::ComplexTensor(tensor) if tensor.integer_storage().is_some() => {
-            return Err("createArray: typed complex integer GPU FillValue is not supported without exact complex integer device storage".to_string());
-        }
         Value::ComplexTensor(tensor) => gpu_helpers::upload_complex_tensor(provider, &tensor)
             .map_err(|error| format!("createArray: GPU FillValue upload failed: {error}"))?,
         Value::Complex(real, imag) => {
@@ -978,14 +975,30 @@ fn fill_like_gpu(
             );
         }
     }
-    if fill.is_complex() && runmat_accelerate_api::handle_integer_type(prototype).is_some() {
-        return Err(
-            "createArray: complex output for an integer GPU Like prototype requires exact complex integer device storage"
-                .to_string(),
-        );
-    }
     if let Some(integer_type) = runmat_accelerate_api::handle_integer_type(prototype) {
         let prototype_storage = integer_storage_prototype(integer_type);
+        if fill.is_complex()
+            || runmat_accelerate_api::handle_storage(prototype)
+                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            let component = prototype_storage;
+            let complex_prototype =
+                IntegerComplexStorage::new(component.zeros_like(0), component.zeros_like(0))?;
+            let Value::ComplexTensor(tensor) =
+                fill_complex_integer_like(fill, shape, &complex_prototype)?
+            else {
+                unreachable!("complex integer fill produces a complex tensor")
+            };
+            let provider =
+                runmat_accelerate_api::provider_for_handle(prototype).ok_or_else(|| {
+                    "createArray: GPU Like prototype has no registered owning provider".to_string()
+                })?;
+            let uploaded = gpu_helpers::upload_complex_tensor(provider, &tensor)
+                .map_err(|error| format!("createArray: GPU Like upload failed: {error}"))?;
+            validate_like_gpu_owner(prototype, &uploaded, shape, provider)
+                .map_err(|error| error.to_string())?;
+            return Ok(Value::GpuTensor(uploaded));
+        }
         let storage = exact_integer_fill_storage(fill, shape, &prototype_storage)?;
         let provider = runmat_accelerate_api::provider_for_handle(prototype).ok_or_else(|| {
             "createArray: GPU Like prototype has no registered owning provider".to_string()
@@ -1004,12 +1017,6 @@ fn fill_like_gpu(
     let provider = runmat_accelerate_api::provider_for_handle(prototype).ok_or_else(|| {
         "createArray: GPU Like prototype has no registered owning provider".to_string()
     })?;
-    if matches!(fill, FillScalar::ComplexInteger(_, _)) {
-        return Err(
-            "createArray: typed complex integer GPU FillValue is not supported without exact complex integer device storage"
-                .to_string(),
-        );
-    }
     let prototype_is_complex = runmat_accelerate_api::handle_storage(prototype)
         == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
     if fill.is_complex() || prototype_is_complex {
@@ -1454,6 +1461,67 @@ pub(crate) mod tests {
                 panic!("expected uint64 storage");
             };
             assert_eq!(values, vec![wide; 4]);
+        });
+    }
+
+    #[test]
+    fn create_array_gpu_like_preserves_exact_paired_complex_integer_storage() {
+        test_support::with_test_provider(|provider| {
+            let wide = (1_u64 << 53) + 1;
+            let prototype = ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![0]),
+                    IntegerStorage::U64(vec![0]),
+                )
+                .expect("paired prototype storage"),
+                vec![1, 1],
+            )
+            .expect("paired prototype");
+            let prototype = gpu_helpers::upload_complex_tensor(provider, &prototype)
+                .expect("upload paired prototype");
+            let fill_value = ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![wide]),
+                    IntegerStorage::U64(vec![u64::MAX]),
+                )
+                .expect("paired fill storage"),
+                vec![1, 1],
+            )
+            .expect("paired fill value");
+
+            let result = block_on(create_array_builtin(vec![
+                Value::Num(2.0),
+                Value::from("Like"),
+                Value::GpuTensor(prototype.clone()),
+                Value::from("FillValue"),
+                Value::ComplexTensor(fill_value),
+            ]))
+            .expect("resident paired complex integer createArray");
+            let Value::GpuTensor(output) = result else {
+                panic!("expected resident paired output");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&output),
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            );
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&output),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            assert!(runmat_accelerate_api::provider_for_handle(&output)
+                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            let gathered = block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(
+                output.clone(),
+            )))
+            .expect("gather paired output");
+            let Value::ComplexTensor(gathered) = gathered else {
+                panic!("expected exact paired tensor");
+            };
+            let storage = gathered.integer_storage().expect("paired integer storage");
+            assert_eq!(storage.real, IntegerStorage::U64(vec![wide; 4]));
+            assert_eq!(storage.imag, IntegerStorage::U64(vec![u64::MAX; 4]));
+            provider.free(&prototype).expect("free prototype");
+            provider.free(&output).expect("free output");
         });
     }
 
