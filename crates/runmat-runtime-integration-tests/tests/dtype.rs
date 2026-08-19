@@ -87,6 +87,7 @@ fn zeros_like_sparse_proto_preserves_sparse_storage() {
 
 #[test]
 fn zeros_like_typed_sparse_proto_preserves_integer_class() {
+    let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let cases = vec![
         IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
         IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
@@ -192,6 +193,7 @@ fn typed_sparse_scalar_indexing_preserves_all_integer_classes() {
 
 #[test]
 fn sparse_full_and_nonzeros_preserve_exact_integer_storage() {
+    let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let cases = vec![
         IntegerStorage::I8(vec![0, i8::MIN, i8::MAX, 0]),
         IntegerStorage::I16(vec![0, i16::MIN, i16::MAX, 0]),
@@ -245,6 +247,7 @@ fn sparse_full_and_nonzeros_preserve_exact_integer_storage() {
 
 #[test]
 fn sparse_triplets_preserve_integer_values_and_saturate_duplicates() {
+    let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let rows = Tensor::new(vec![1.0, 1.0, 2.0], vec![3, 1]).expect("row subscripts");
     let cols = Tensor::new(vec![1.0, 1.0, 2.0], vec![3, 1]).expect("column subscripts");
     let values = Tensor::new_integer(IntegerStorage::I8(vec![100, 100, 0]), vec![3, 1])
@@ -283,6 +286,7 @@ fn sparse_triplets_preserve_integer_values_and_saturate_duplicates() {
 
 #[test]
 fn sparse_triplets_preserve_uint64_and_expand_integer_scalars() {
+    let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let rows = Tensor::new(vec![1.0, 1.0], vec![2, 1]).expect("row subscripts");
     let cols = Tensor::new(vec![1.0, 1.0], vec![2, 1]).expect("column subscripts");
     let values = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 1]), vec![2, 1])
@@ -329,6 +333,7 @@ fn sparse_triplets_preserve_uint64_and_expand_integer_scalars() {
 
 #[test]
 fn sparse_triplets_accept_matrix_subscripts_and_integer_values() {
+    let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let rows = Tensor::new(vec![1.0, 2.0, 1.0, 2.0], vec![2, 2]).expect("row subscripts");
     let cols = Tensor::new(vec![1.0, 1.0, 2.0, 2.0], vec![2, 2]).expect("column subscripts");
     let values = Tensor::new_integer(IntegerStorage::U32(vec![1, 2, 3, u32::MAX]), vec![2, 2])
@@ -363,6 +368,7 @@ fn sparse_triplets_accept_matrix_subscripts_and_integer_values() {
 
 #[test]
 fn transpose_preserves_exact_sparse_integer_storage() {
+    let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let sparse = SparseTensor::new_integer(
         3,
         2,
@@ -411,7 +417,12 @@ fn randn_like_proto_preserves_dtype() {
         .expect("proto tensor");
     let result = runmat_runtime::call_builtin(
         "randn",
-        &[Value::String("like".into()), Value::Tensor(proto.clone())],
+        &[
+            Value::Num(3.0),
+            Value::Num(1.0),
+            Value::String("like".into()),
+            Value::Tensor(proto.clone()),
+        ],
     )
     .expect("randn like");
     match result {
@@ -425,6 +436,7 @@ fn randn_like_proto_preserves_dtype() {
 
 #[test]
 fn gpu_array_single_roundtrip_preserves_dtype() {
+    let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     runmat_accelerate::simple_provider::register_inprocess_provider();
     let host = Tensor::new_with_dtype(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], NumericDType::F32)
         .expect("host tensor");

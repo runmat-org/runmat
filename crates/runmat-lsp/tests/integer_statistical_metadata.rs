@@ -198,8 +198,11 @@ fn grouping_control_extensions_and_groupsummary_forms_are_explicit() {
         .expect("ordinary table groupsummary signature");
     assert_eq!(ordinary_table.inputs[0].name, "T");
     assert_eq!(ordinary_table.inputs[0].description, "Input table.");
-    assert!(builtin
-        .integer_capabilities
-        .iter()
-        .any(|capability| capability.notes.contains("[integer-audit-open]")));
+    assert_eq!(builtin.integer_capabilities.len(), 3);
+    assert!(builtin.integer_capabilities.iter().any(|capability| {
+        capability.form.contains("integer_numbins")
+            && capability.inputs.iter().all(|input| {
+                input.availability == runmat_builtins::BuiltinIntegerInputAvailability::RunMatOnly
+            })
+    }));
 }

@@ -168,8 +168,15 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
     fn spawn(&self, future: &FutureHandle) -> Result<TaskHandle, ExecutionServiceError> {
         self.validate_scope(future.scope_id)?;
         let mut state = self.state.lock().expect("execution service state poisoned");
-        if !state.futures.contains_key(&future.id) {
-            return Err(ExecutionServiceError::UnknownHandle);
+        match state.futures.get(&future.id) {
+            Some(FutureState::Deferred(_))
+                if !state.tasks.values().any(|task| task.future_id == future.id) => {}
+            Some(_) => {
+                return Err(ExecutionServiceError::Failed(
+                    "future has already been scheduled".into(),
+                ));
+            }
+            None => return Err(ExecutionServiceError::UnknownHandle),
         }
         let sequence = state.next_task;
         state.next_task = state.next_task.wrapping_add(1);
@@ -195,8 +202,8 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
         if let Value::Job(handle) = &value {
             return self.await_job(handle).map(AwaitAction::Completed);
         }
-        let future = match value {
-            Value::Future(handle) => handle,
+        let (future, task_id) = match value {
+            Value::Future(handle) => (handle, None),
             Value::Task(task) => {
                 self.validate_scope(task.scope_id)?;
                 let state = self.state.lock().expect("execution service state poisoned");
@@ -210,11 +217,14 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
                 if record.cancelled {
                     return Err(ExecutionServiceError::Cancelled);
                 }
-                FutureHandle {
-                    id: record.future_id,
-                    scope_id: self.scope_id,
-                    outputs: task.outputs,
-                }
+                (
+                    FutureHandle {
+                        id: record.future_id,
+                        scope_id: self.scope_id,
+                        outputs: task.outputs,
+                    },
+                    Some(task.id),
+                )
             }
             value => return Ok(AwaitAction::Passthrough(value)),
         };
@@ -236,7 +246,13 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
             FutureState::Running => Err(ExecutionServiceError::Failed(
                 "execution is already being awaited".to_string(),
             )),
-            FutureState::Completed(result) => result.clone().map(AwaitAction::Completed),
+            FutureState::Completed(result) => {
+                let result = result.clone();
+                if let Some(task_id) = task_id {
+                    state.tasks.remove(&task_id);
+                }
+                result.map(AwaitAction::Completed)
+            }
             FutureState::Cancelled => Err(ExecutionServiceError::Cancelled),
         }
     }
@@ -256,6 +272,7 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
             return Err(ExecutionServiceError::UnknownHandle);
         }
         *record = FutureState::Completed(result);
+        state.tasks.retain(|_, task| task.future_id != future.id);
         Ok(())
     }
 
@@ -355,8 +372,8 @@ mod tests {
             .complete_future(&future, Ok(Value::Num(9.0)))
             .unwrap();
         assert_eq!(
-            service.begin_await(Value::Task(task)).unwrap(),
-            AwaitAction::Completed(Value::Num(9.0))
+            service.begin_await(Value::Task(task)),
+            Err(ExecutionServiceError::UnknownHandle)
         );
     }
 

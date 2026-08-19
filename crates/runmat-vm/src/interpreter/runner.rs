@@ -721,7 +721,7 @@ async fn run_interpreter_inner(
     let mut interpreter_timing = InterpreterTiming::new();
     while pc < bytecode.instructions.len() {
         if let Some(sites) = bytecode.coverage_sites.get(pc) {
-            crate::coverage::hit_sites(sites);
+            runmat_runtime::coverage::hit_sites(sites);
         }
         set_vm_pc(pc);
         #[cfg(feature = "native-accel")]

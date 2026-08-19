@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, HashMap};
 
-use runmat_runtime::testing::{install_test_context, ActiveTestContext, RuntimeTeardownInvocation};
+use runmat_runtime::testing::{
+    install_test_context_in, ActiveTestContext, RuntimeTeardownInvocation,
+};
 use runmat_test::context::TestCommand;
 use runmat_test::descriptor::{
     FixtureScope, ParameterDescriptor, ProcedureDescriptor, ProcedureKind,
@@ -143,7 +145,9 @@ impl<'a> CoreTestExecutor<'a> {
         unit: ExecutableUnit,
         invocation: ProcedureInvocation,
     ) -> Result<ExecutionResponse, ExecutionFailure> {
-        let guard = install_test_context(
+        let runtime = self.session.runtime_context().clone();
+        let guard = install_test_context_in(
+            &runtime,
             ActiveTestContext {
                 execution: request.context.clone(),
                 phase: request.phase,
@@ -152,7 +156,7 @@ impl<'a> CoreTestExecutor<'a> {
             self.limits,
         );
         let handle = guard.handle();
-        runmat_runtime::console::reset_thread_buffer();
+        reset_console_output(&runtime);
         let result = self
             .session
             .invoke_executable(&unit, invocation, &self.control)
@@ -168,7 +172,7 @@ impl<'a> CoreTestExecutor<'a> {
             );
         }
         drop(guard);
-        let output = take_console_output();
+        let output = take_console_output(&runtime);
         let response = ExecutionResponse { commands, output };
         match result {
             Ok(_) => Ok(response),
@@ -200,17 +204,24 @@ impl<'a> CoreTestExecutor<'a> {
                 )
                 .await;
         }
-        runmat_runtime::console::reset_thread_buffer();
-        match runmat_runtime::call_builtin_async(&name, &teardown.invocation.arguments).await {
+        let runtime = self.session.runtime_context().clone();
+        reset_console_output(&runtime);
+        match runtime
+            .scope(runmat_runtime::call_builtin_async(
+                &name,
+                &teardown.invocation.arguments,
+            ))
+            .await
+        {
             Ok(_) => Ok(ExecutionResponse {
                 commands: Vec::new(),
-                output: take_console_output(),
+                output: take_console_output(&runtime),
             }),
             Err(error) => Err(ExecutionFailure {
                 fault: ExecutionFault::Uncaught(error.to_string()),
                 partial: ExecutionResponse {
                     commands: Vec::new(),
-                    output: take_console_output(),
+                    output: take_console_output(&runtime),
                 },
             }),
         }
@@ -254,7 +265,13 @@ fn callback_name(value: &Value) -> Option<String> {
     }
 }
 
-fn take_console_output() -> String {
+fn reset_console_output(runtime: &runmat_runtime::context::RuntimeContext) {
+    let _context = runtime.enter();
+    runmat_runtime::console::reset_thread_buffer();
+}
+
+fn take_console_output(runtime: &runmat_runtime::context::RuntimeContext) -> String {
+    let _context = runtime.enter();
     runmat_runtime::console::take_thread_buffer()
         .into_iter()
         .filter(|entry| entry.stream != runmat_runtime::console::ConsoleStream::ClearScreen)

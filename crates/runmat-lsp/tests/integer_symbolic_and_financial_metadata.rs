@@ -28,9 +28,13 @@ fn symbolic_and_financial_integer_metadata_is_explicit() {
         limit.integer_capabilities[1].inputs[0].availability,
         BuiltinIntegerInputAvailability::Documented
     );
+    assert_eq!(
+        limit.integer_capabilities[1].overflow,
+        BuiltinIntegerOverflowRule::Error
+    );
     assert!(limit.integer_capabilities[1]
         .notes
-        .contains("[integer-audit-open]"));
+        .contains("convert exactly"));
     let macd = runmat_builtins::builtin_function_by_name("macd").expect("macd");
     assert!(macd
         .integer_capabilities

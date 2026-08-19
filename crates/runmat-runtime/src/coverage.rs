@@ -9,8 +9,9 @@ runmat_thread_local::runmat_thread_local! {
         RefCell::new(HashMap::new());
 }
 
-/// Thread-confined coverage counters shared by nested interpreter and JIT calls
-/// for one exact executable invocation.
+/// Scope-owned backend-neutral coverage counters for one exact executable
+/// invocation. VM, native, and browser-capable executors report the same stable
+/// counter keys through this runtime boundary.
 #[derive(Debug)]
 pub struct CoverageSession {
     scope_id: runmat_execution::ExecutionScopeId,
@@ -18,7 +19,7 @@ pub struct CoverageSession {
 }
 
 impl CoverageSession {
-    pub fn start(runtime: &runmat_runtime::context::RuntimeContext) -> Self {
+    pub fn start(runtime: &crate::context::RuntimeContext) -> Self {
         let scope_id = runtime.execution().scope_id();
         let counters = Rc::new(RefCell::new(BTreeMap::new()));
         ACTIVE.with(|active| {
@@ -59,14 +60,18 @@ impl Drop for CoverageSession {
 
 #[inline]
 pub fn hit_sites(sites: &[u64]) {
+    let Some(runtime) = crate::context::legacy::active() else {
+        return;
+    };
+    hit_sites_in(&runtime, sites);
+}
+
+#[inline]
+pub fn hit_sites_in(runtime: &crate::context::RuntimeContext, sites: &[u64]) {
     if sites.is_empty() {
         return;
     }
-    let Some(scope_id) =
-        runmat_runtime::context::legacy::active().map(|runtime| runtime.execution().scope_id())
-    else {
-        return;
-    };
+    let scope_id = runtime.execution().scope_id();
     ACTIVE.with(|active| {
         let counters = active
             .borrow()
@@ -85,11 +90,15 @@ pub fn hit_sites(sites: &[u64]) {
 mod tests {
     use super::*;
 
+    fn runtime() -> crate::context::RuntimeContext {
+        crate::context::RuntimeContext::new(Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ))
+    }
+
     #[test]
     fn nested_sessions_restore_the_outer_collector() {
-        let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
-            runmat_runtime::execution::RuntimeExecutionService::new(),
-        ));
+        let runtime = runtime();
         futures::executor::block_on(runtime.scope(async {
             let outer = CoverageSession::start(&runtime);
             hit_sites(&[0]);
@@ -105,16 +114,12 @@ mod tests {
 
     #[test]
     fn independently_scoped_collectors_do_not_share_hits() {
-        let first = runmat_runtime::context::RuntimeContext::new(Rc::new(
-            runmat_runtime::execution::RuntimeExecutionService::new(),
-        ));
-        let second = runmat_runtime::context::RuntimeContext::new(Rc::new(
-            runmat_runtime::execution::RuntimeExecutionService::new(),
-        ));
+        let first = runtime();
+        let second = runtime();
         let first_coverage = CoverageSession::start(&first);
         let second_coverage = CoverageSession::start(&second);
-        futures::executor::block_on(first.scope(async { hit_sites(&[1]) }));
-        futures::executor::block_on(second.scope(async { hit_sites(&[2]) }));
+        hit_sites_in(&first, &[1]);
+        hit_sites_in(&second, &[2]);
         assert_eq!(first_coverage.counts(), BTreeMap::from([(1, 1)]));
         assert_eq!(second_coverage.counts(), BTreeMap::from([(2, 1)]));
     }

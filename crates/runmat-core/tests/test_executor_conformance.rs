@@ -16,6 +16,22 @@ fn digest(value: &str) -> String {
     runmat_execution::Digest::sha256(value).to_string()
 }
 
+fn result_for<'a>(
+    run: &'a runmat_core::testing::CoreTestRun,
+    display_name: &str,
+) -> &'a runmat_test::result::TestResult {
+    let test_id = &run
+        .plan
+        .tests()
+        .find(|test| test.display_name == display_name)
+        .unwrap_or_else(|| panic!("missing planned test {display_name}"))
+        .id;
+    run.results
+        .iter()
+        .find(|result| result.test_id == *test_id)
+        .unwrap_or_else(|| panic!("missing result for {display_name}"))
+}
+
 async fn execute_portable_envelope(
     envelope: &runmat_execution::ExecutableUnitEnvelope,
 ) -> runmat_execution_artifact::ProgramExecutionResponse {
@@ -99,11 +115,15 @@ async fn core_executor_has_the_same_portable_lifecycle_contract() {
 
     assert_eq!(run.results.len(), 2, "{run:#?}");
     assert_eq!(
-        run.results
-            .iter()
-            .map(|result| result.state.disposition)
-            .collect::<Vec<_>>(),
-        vec![TerminalDisposition::Passed, TerminalDisposition::Failed],
+        result_for(&run, "portableTest/testPasses")
+            .state
+            .disposition,
+        TerminalDisposition::Passed,
+        "{run:#?}"
+    );
+    assert_eq!(
+        result_for(&run, "portableTest/testFails").state.disposition,
+        TerminalDisposition::Failed,
         "{run:#?}"
     );
     assert_eq!(
@@ -144,16 +164,24 @@ async fn jit_tiering_preserves_the_portable_lifecycle_contract() {
             .unwrap();
         assert_eq!(run.results.len(), 2, "iteration {iteration}: {run:#?}");
         assert_eq!(
-            run.results[0].state.disposition,
+            result_for(&run, "portableTest/testPasses")
+                .state
+                .disposition,
             TerminalDisposition::Passed,
             "iteration {iteration}: {run:#?}"
         );
         assert_eq!(
-            run.results[1].state.disposition,
+            result_for(&run, "portableTest/testFails").state.disposition,
             TerminalDisposition::Failed,
             "iteration {iteration}: {run:#?}"
         );
-        assert_eq!(run.results[1].attempts[0].diagnostics.len(), 1, "{run:#?}");
+        assert_eq!(
+            result_for(&run, "portableTest/testFails").attempts[0]
+                .diagnostics
+                .len(),
+            1,
+            "{run:#?}"
+        );
     }
 
     assert!(
@@ -506,7 +534,7 @@ async fn jit_and_interpreter_hit_the_same_coverage_sites() {
     let source = ExecutableSource::new(
         "path:conformance",
         "coveredJit.m",
-        "function y = coveredJit(x)\n y = x + 1;\n if y > 0\n  y = y * 2;\n end\nend\n",
+        "function y = coveredJit(x)\n y = x + 1;\n for i = 1:3\n  y = y + i;\n end\n if y > 0\n  y = y * 2;\n end\nend\n",
     );
     let mut interpreter = RunMatSession::with_options(false, false).unwrap();
     let interpreter_unit = interpreter
@@ -524,21 +552,34 @@ async fn jit_and_interpreter_hit_the_same_coverage_sites() {
 
     let mut jit = RunMatSession::with_options(true, false).unwrap();
     let jit_unit = jit.compile_executable_unit(source, None).await.unwrap();
-    let mut actual = None;
-    for _ in 0..12 {
-        actual = Some(
-            jit.invoke_executable_with_coverage(
-                &jit_unit,
-                ProcedureInvocation::function("coveredJit", vec![runmat_value::Value::Num(1.0)]),
-                &InvocationControl::default(),
-            )
-            .await
-            .unwrap()
-            .1,
-        );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
+        jit.invoke_executable(
+            &jit_unit,
+            ProcedureInvocation::function("coveredJit", vec![runmat_value::Value::Num(1.0)]),
+            &InvocationControl::default(),
+        )
+        .await
+        .unwrap();
+        if jit.stats().jit_compiled > 0 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
     }
     assert!(jit.stats().jit_compiled > 0, "{:?}", jit.stats());
-    assert_eq!(actual.unwrap(), expected);
+    let (_, actual) = jit
+        .invoke_executable_with_coverage(
+            &jit_unit,
+            ProcedureInvocation::function("coveredJit", vec![runmat_value::Value::Num(1.0)]),
+            &InvocationControl::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(actual, expected);
+    assert!(
+        actual.counts.values().any(|count| *count == 3),
+        "loop body should record all three executions: {actual:#?}"
+    );
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

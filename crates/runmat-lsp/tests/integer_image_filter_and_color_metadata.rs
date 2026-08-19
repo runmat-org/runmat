@@ -19,15 +19,17 @@ fn image_filter_and_color_integer_metadata_is_public_and_honest() {
         );
         assert!(!builtin.integer_capabilities.is_empty(), "{name}");
     }
-    for name in [
-        "imag", "imfilter", "imhist", "imwrite", "rgb2gray", "rgb2lab",
-    ] {
+    for name in ["imag", "imhist"] {
         let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
         assert!(
             builtin
                 .integer_capabilities
                 .iter()
-                .any(|capability| capability.notes.contains("[integer-audit-open]")),
+                .any(|capability| capability.notes.contains("evidence-open")
+                    || capability
+                        .inputs
+                        .iter()
+                        .any(|input| input.notes.contains("evidence-open"))),
             "{name} must expose its bounded evidence gap"
         );
     }

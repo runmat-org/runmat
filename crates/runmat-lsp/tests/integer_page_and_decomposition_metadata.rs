@@ -53,9 +53,14 @@ fn floating_decomposition_extensions_declare_checked_runmat_boundaries() {
 #[test]
 fn exact_page_projection_and_realsqrt_rejection_are_distinguished() {
     let pagefun = runmat_builtins::builtin_function_by_name("pagefun").expect("pagefun");
-    assert!(pagefun.integer_capabilities[0]
-        .notes
-        .contains("[integer-audit-open]"));
+    assert_eq!(
+        pagefun.integer_capabilities[0].output_class,
+        BuiltinIntegerOutputClassRule::FunctionSpecific
+    );
+    assert_eq!(
+        pagefun.integer_capabilities[0].overflow,
+        BuiltinIntegerOverflowRule::FunctionSpecific
+    );
 
     let transpose =
         runmat_builtins::builtin_function_by_name("pagetranspose").expect("pagetranspose");
@@ -70,9 +75,14 @@ fn exact_page_projection_and_realsqrt_rejection_are_distinguished() {
     assert_eq!(transpose.integer_capabilities[0].inputs[0].classes.len(), 8);
 
     let real = runmat_builtins::builtin_function_by_name("real").expect("real");
-    assert!(real.integer_capabilities[0]
-        .notes
-        .contains("[integer-audit-open]"));
+    assert_eq!(
+        real.integer_capabilities[0].output_class,
+        BuiltinIntegerOutputClassRule::PreserveInput
+    );
+    assert_eq!(
+        real.integer_capabilities[0].overflow,
+        BuiltinIntegerOverflowRule::NotApplicable
+    );
 
     let realsqrt = runmat_builtins::builtin_function_by_name("realsqrt").expect("realsqrt");
     assert_eq!(

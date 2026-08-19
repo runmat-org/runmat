@@ -38,6 +38,7 @@ pub mod compatibility;
 pub mod condition;
 pub mod console;
 pub mod context;
+pub mod coverage;
 pub mod data;
 pub mod execution;
 pub mod indexing;

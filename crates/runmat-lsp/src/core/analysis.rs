@@ -1880,7 +1880,7 @@ mod tests {
     fn signature_help_uses_plotting_control_descriptors() {
         let cases = [
             ("drawnow();", "ok = drawnow()"),
-            ("hold('on');", "enabled = hold(mode)"),
+            ("hold('on');", "hold(mode)"),
         ];
 
         for (text, expected_label) in cases {
@@ -2715,11 +2715,11 @@ mod tests {
             ),
             (
                 "writematrix([1 2; 3 4], \"out.csv\");",
-                "bytesWritten = writematrix(data, filename)",
+                "writematrix(data, filename)",
             ),
             (
                 "writematrix([1 2; 3 4], \"out.csv\", \"Delimiter\", \";\");",
-                "bytesWritten = writematrix(data, filename, name, optionValue)",
+                "writematrix(data, filename, name, optionValue)",
             ),
             ("readmatrix(\"data.csv\");", "M = readmatrix(filename)"),
             (
@@ -3463,8 +3463,11 @@ mod tests {
             ("rgb2hsv(ones(2,2,3));", "HSV = rgb2hsv(RGB)"),
             ("hsv2rgb(ones(2,2,3));", "RGB = hsv2rgb(HSV)"),
             ("ind2rgb([1,2;2,1],[1,0,0;0,1,0]);", "RGB = ind2rgb(X, map)"),
-            ("rgb2lab(ones(2,2,3));", "LAB = rgb2lab(RGB)"),
-            ("lab2rgb(ones(2,2,3));", "RGB = lab2rgb(LAB)"),
+            ("rgb2lab(ones(2,2,3));", "LAB = rgb2lab(RGB, Name=Value)"),
+            (
+                "lab2rgb(ones(2,2,3));",
+                "RGB = lab2rgb(LAB, OutputType=type)",
+            ),
             ("im2double(ones(2,2));", "J = im2double(I)"),
             ("im2uint8(ones(2,2));", "J = im2uint8(I)"),
             ("im2uint16(ones(2,2));", "J = im2uint16(I)"),

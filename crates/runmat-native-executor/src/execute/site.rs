@@ -55,6 +55,7 @@ pub(super) fn execute(
         enter_site(
             state,
             call,
+            &block.terminator.site,
             &block.terminator.source,
             block.terminator.frame_state.side_effect_epoch.0,
             request,
@@ -96,6 +97,7 @@ pub(super) fn execute(
         enter_site(
             state,
             call,
+            &instruction.site,
             &instruction.source,
             instruction
                 .frame_state
@@ -141,10 +143,12 @@ pub(super) fn execute(
 fn enter_site(
     state: &mut HostState,
     call: &mut NativeCall,
+    site: &runmat_native_codegen::NativeMirSite,
     source: &runmat_native_codegen::NativeSourceLocation,
     side_effect_epoch: u32,
     request: NativeSiteRequest,
 ) -> NativeExecutorResult<()> {
+    state.hit_coverage(site);
     state.current_source = runtime_source(source);
     state.enter_site_block(runmat_native_codegen::NativeBlockId(request.block));
     // SAFETY: NativeCall was validated before entry and its frame/resume

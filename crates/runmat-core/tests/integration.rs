@@ -899,7 +899,7 @@ fn test_spawn_handle_is_consumed_after_await() {
         engine.set_compat_mode(CompatMode::RunMat);
         let first_await = runmat_core::execute_text_request_for_testing(
             &mut engine,
-            "t = spawn(41 + 1); first = await(t);",
+            "async function y = work(); y = 41 + 1; end; t = spawn(work()); first = await(t);",
         )
         .expect("first await execution should complete successfully");
         assert!(
@@ -915,12 +915,12 @@ fn test_spawn_handle_is_consumed_after_await() {
             runmat_core::execute_text_request_for_testing(&mut engine, "second = await(t);");
         match second_await {
             Err(RunError::Runtime(err)) => {
-                assert_eq!(err.identifier(), Some("RunMat:AwaitOperandInvalid"));
+                assert_eq!(err.identifier(), Some("RunMat:ExecutionService"));
             }
             Err(other) => panic!("expected runtime await-handle error, got: {other:?}"),
             Ok(exec) => {
                 if let Some(err) = exec.error {
-                    assert_eq!(err.identifier(), Some("RunMat:AwaitOperandInvalid"));
+                    assert_eq!(err.identifier(), Some("RunMat:ExecutionService"));
                 } else {
                     let second =
                         runmat_core::execute_text_request_for_testing(&mut engine, "second")

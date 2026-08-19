@@ -35,6 +35,7 @@ pub(super) struct HostStateInput {
     pub captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
     pub deoptimization: DeoptimizationPolicy,
     pub interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
+    pub coverage_sites: BTreeMap<runmat_native_codegen::NativeMirSite, Vec<u64>>,
     pub osr_point: Option<runmat_types::ProgramPointId>,
     pub optimized_regions: Arc<Vec<crate::region::OptimizedRegionPlan>>,
     pub workspace: Option<super::workspace::NativeWorkspaceInput>,
@@ -68,6 +69,7 @@ pub(super) struct HostState {
     retired_guards: BTreeSet<runmat_types::RegionGuardId>,
     pending_deoptimization: Option<MaterializedFrame>,
     interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
+    coverage_sites: BTreeMap<runmat_native_codegen::NativeMirSite, Vec<u64>>,
     supplied_inputs: usize,
     requested_outputs: usize,
     missing_input_locals: Vec<runmat_native_codegen::NativeLocalId>,
@@ -91,6 +93,7 @@ impl HostState {
             captures,
             deoptimization,
             interpreter_resume_points,
+            coverage_sites,
             osr_point,
             optimized_regions,
             workspace,
@@ -254,6 +257,7 @@ impl HostState {
             retired_guards: BTreeSet::new(),
             pending_deoptimization: None,
             interpreter_resume_points,
+            coverage_sites,
             supplied_inputs,
             requested_outputs,
             missing_input_locals,
@@ -270,6 +274,12 @@ impl HostState {
         };
         state.enter_block(state.function.entry)?;
         Ok((state, argument_refs))
+    }
+
+    pub fn hit_coverage(&self, site: &runmat_native_codegen::NativeMirSite) {
+        if let Some(sites) = self.coverage_sites.get(site) {
+            runmat_runtime::coverage::hit_sites_in(&self.runtime, sites);
+        }
     }
 }
 

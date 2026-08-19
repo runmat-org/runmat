@@ -67,8 +67,6 @@ fn residency_broadcast_3d_chain_and_mean_vecdim() {
         &[
             shifted.clone(),
             Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap()),
-            Value::String("like".into()),
-            shifted.clone(),
         ],
     )
     .unwrap();

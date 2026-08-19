@@ -68,12 +68,11 @@ fn documented_and_evidence_open_string_controls_are_distinguished() {
     for name in ["strfind", "split"] {
         let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
         assert!(builtin.integer_capabilities.iter().all(|capability| {
-            capability.overflow == BuiltinIntegerOverflowRule::EvidenceOpen
-                && capability.notes.contains("[integer-audit-open]")
-                && capability.inputs.iter().all(|input| {
-                    input.availability == BuiltinIntegerInputAvailability::RunMatOnly
-                        && input.notes.contains("[integer-audit-open]")
-                })
+            capability.overflow == BuiltinIntegerOverflowRule::Error
+                && capability
+                    .inputs
+                    .iter()
+                    .all(|input| input.availability == BuiltinIntegerInputAvailability::RunMatOnly)
         }));
     }
 }

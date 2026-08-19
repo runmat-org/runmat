@@ -93,13 +93,34 @@ thread_local! {
 }
 
 pub fn install_test_context(active: ActiveTestContext, limits: ProtocolLimits) -> TestContextGuard {
+    let context = crate::context::legacy::active().map(|context| Rc::clone(context.state()));
+    install_test_context_for_state(context, active, limits)
+}
+
+/// Install lifecycle state into a specific session-owned runtime context.
+///
+/// Hosts that are about to enter a known context must use this form so the
+/// lifecycle state follows the invocation instead of relying on the legacy
+/// ambient stack.
+pub fn install_test_context_in(
+    context: &crate::context::RuntimeContext,
+    active: ActiveTestContext,
+    limits: ProtocolLimits,
+) -> TestContextGuard {
+    install_test_context_for_state(Some(Rc::clone(context.state())), active, limits)
+}
+
+fn install_test_context_for_state(
+    context: Option<Rc<crate::context::RuntimeContextState>>,
+    active: ActiveTestContext,
+    limits: ProtocolLimits,
+) -> TestContextGuard {
     let state = Rc::new(RefCell::new(ContextState {
         active,
         limits,
         commands: Vec::new(),
         runtime_teardowns: Vec::new(),
     }));
-    let context = crate::context::legacy::active().map(|context| Rc::clone(context.state()));
     if let Some(context) = &context {
         context.test_contexts.borrow_mut().push(Rc::clone(&state));
     } else {

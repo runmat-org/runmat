@@ -78,9 +78,9 @@ impl NativeExecutionService {
     fn future_for_value(
         &self,
         value: Value,
-    ) -> Result<Result<FutureHandle, Value>, ExecutionServiceError> {
+    ) -> Result<Result<(FutureHandle, Option<TaskId>), Value>, ExecutionServiceError> {
         match value {
-            Value::Future(handle) => Ok(Ok(handle)),
+            Value::Future(handle) => Ok(Ok((handle, None))),
             Value::Task(handle) => {
                 self.validate_scope(handle.scope_id)?;
                 let state = self.state.lock().expect("native service poisoned");
@@ -91,11 +91,14 @@ impl NativeExecutionService {
                 if task.generation != handle.generation {
                     return Err(ExecutionServiceError::UnknownHandle);
                 }
-                Ok(Ok(FutureHandle {
-                    id: task.future_id,
-                    scope_id: self.scope_id,
-                    outputs: handle.outputs,
-                }))
+                Ok(Ok((
+                    FutureHandle {
+                        id: task.future_id,
+                        scope_id: self.scope_id,
+                        outputs: handle.outputs,
+                    },
+                    Some(handle.id),
+                )))
             }
             value => Ok(Err(value)),
         }
@@ -201,7 +204,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
             return self.await_job(handle).map(AwaitAction::Completed);
         }
         let original = value.clone();
-        let future = match self.future_for_value(value)? {
+        let (future, task_id) = match self.future_for_value(value)? {
             Ok(future) => future,
             Err(value) => return Ok(AwaitAction::Passthrough(value)),
         };
@@ -228,7 +231,11 @@ impl RuntimeExecutionServices for NativeExecutionService {
                 }
                 FutureState::Running(completion) => Arc::clone(completion),
                 FutureState::Completed(result) => {
-                    return result.clone().map(AwaitAction::Completed)
+                    let result = result.clone();
+                    if let Some(task_id) = task_id {
+                        state.tasks.remove(&task_id);
+                    }
+                    return result.map(AwaitAction::Completed);
                 }
                 FutureState::Cancelled => return Err(ExecutionServiceError::Cancelled),
             }
@@ -253,11 +260,13 @@ impl RuntimeExecutionServices for NativeExecutionService {
                     .map_err(|error| error.to_string())
             })
             .map_err(ExecutionServiceError::Failed);
-        self.state
-            .lock()
-            .expect("native service poisoned")
+        let mut state = self.state.lock().expect("native service poisoned");
+        state
             .futures
             .insert(future.id, FutureState::Completed(result.clone()));
+        if let Some(task_id) = task_id {
+            state.tasks.remove(&task_id);
+        }
         result.map(AwaitAction::Completed)
     }
 

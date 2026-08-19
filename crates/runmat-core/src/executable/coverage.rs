@@ -203,6 +203,7 @@ fn instrument_program(
     spans: &[runmat_hir::Span],
     mapping: &mut Vec<Vec<u64>>,
 ) {
+    let mut instrumented_statements = std::collections::BTreeSet::new();
     mapping.clear();
     mapping.resize(spans.len(), Vec::new());
     let first = spans.iter().position(nonempty_span);
@@ -229,7 +230,7 @@ fn instrument_program(
         mapping[first].push(function);
     }
     for (pc, span) in spans.iter().copied().enumerate() {
-        if nonempty_span(&span) {
+        if nonempty_span(&span) && instrumented_statements.insert((span.start, span.end)) {
             let statement = builder.site(
                 CoverageMetric::Statement,
                 semantic_path,

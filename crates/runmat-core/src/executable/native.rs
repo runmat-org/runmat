@@ -15,6 +15,7 @@ pub struct NativeCompilationInput {
     entrypoint: runmat_types::ProgramFunctionId,
     program_capture: Vec<u8>,
     interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
+    coverage_sites: BTreeMap<runmat_types::ProgramPointId, Vec<u64>>,
 }
 
 impl NativeCompilationInput {
@@ -42,6 +43,10 @@ impl NativeCompilationInput {
 
     pub fn interpreter_resume_points(&self) -> &BTreeMap<runmat_types::ProgramPointId, u64> {
         &self.interpreter_resume_points
+    }
+
+    pub fn coverage_sites(&self) -> &BTreeMap<runmat_types::ProgramPointId, Vec<u64>> {
+        &self.coverage_sites
     }
 
     pub fn retain_functions(
@@ -83,6 +88,8 @@ impl NativeCompilationInput {
             class.methods.retain(|function| retained.contains(function));
         }
         self.interpreter_resume_points
+            .retain(|point, _| retained.contains(&point.function));
+        self.coverage_sites
             .retain(|point, _| retained.contains(&point.function));
         self.manifest
             .regions
@@ -222,6 +229,48 @@ impl ExecutableUnit {
                 interpreter_resume_points.insert(*point, pc);
             }
         }
+        let mut coverage_sites = BTreeMap::new();
+        let mut assigned_coverage = std::collections::BTreeSet::new();
+        for function in self.functions().functions.values() {
+            for (point, pc) in &function.resume_points {
+                if let Some(sites) = function
+                    .coverage_sites
+                    .get(*pc)
+                    .filter(|sites| !sites.is_empty())
+                {
+                    let sites = sites
+                        .iter()
+                        .copied()
+                        .filter(|site| assigned_coverage.insert(*site))
+                        .collect::<Vec<_>>();
+                    if !sites.is_empty() {
+                        coverage_sites.insert(*point, sites);
+                    }
+                }
+            }
+        }
+        if let Some(layout) = self.vm_layout().functions.values().find(|layout| {
+            u32::try_from(layout.function.0).ok()
+                == Some(envelope.manifest.identity.entrypoint_function.0)
+        }) {
+            for (point, pc) in &layout.resume_points {
+                if let Some(sites) = self
+                    .bytecode()
+                    .coverage_sites
+                    .get(*pc)
+                    .filter(|sites| !sites.is_empty())
+                {
+                    let sites = sites
+                        .iter()
+                        .copied()
+                        .filter(|site| assigned_coverage.insert(*site))
+                        .collect::<Vec<_>>();
+                    if !sites.is_empty() {
+                        coverage_sites.insert(*point, sites);
+                    }
+                }
+            }
+        }
         Ok(NativeCompilationInput {
             mir: self.mir().clone(),
             analysis: self.analysis().clone(),
@@ -230,6 +279,7 @@ impl ExecutableUnit {
             binding_names: self.binding_names(),
             program_capture,
             interpreter_resume_points,
+            coverage_sites,
         })
     }
 }

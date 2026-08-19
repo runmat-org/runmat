@@ -15,6 +15,7 @@ pub struct NativeExecutor {
     compiled: NativeExecutable,
     program_capture: Option<Vec<u8>>,
     interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
+    coverage_sites: BTreeMap<runmat_native_codegen::NativeMirSite, Vec<u64>>,
     pub(super) regions: Vec<runmat_types::RegionContract>,
     pub(super) compile_duration_ns: u64,
     entry_profile: Option<crate::RepresentationProfile>,
@@ -25,6 +26,7 @@ pub struct NativeExecutor {
 pub struct NativeExecutorOptions {
     pub program_capture: Option<Vec<u8>>,
     pub interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
+    pub coverage_sites: BTreeMap<runmat_native_codegen::NativeMirSite, Vec<u64>>,
     pub entry_profile: Option<crate::RepresentationProfile>,
     pub compile_duration_ns: u64,
 }
@@ -84,6 +86,7 @@ impl NativeExecutor {
             compiled: executable,
             program_capture: options.program_capture,
             interpreter_resume_points: options.interpreter_resume_points,
+            coverage_sites: options.coverage_sites,
             regions,
             compile_duration_ns: options.compile_duration_ns,
             entry_profile: options.entry_profile,
@@ -346,6 +349,7 @@ impl NativeExecutor {
             captures,
             deoptimization,
             interpreter_resume_points: self.interpreter_resume_points.clone(),
+            coverage_sites: self.coverage_sites.clone(),
             osr_point: osr_target.as_ref().map(OsrTarget::point),
             optimized_regions: Arc::clone(&self.optimized_regions),
             workspace,

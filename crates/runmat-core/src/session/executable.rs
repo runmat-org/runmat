@@ -102,6 +102,11 @@ impl RunMatSession {
         if !self.native_tiering_enabled {
             return None;
         }
+        // Empty inputs and function-definition-only inputs intentionally have no
+        // executable script entrypoint. They still update session state through
+        // the interpreter path, but there is no native tier site to profile or
+        // publish for them.
+        unit.script_entrypoint()?;
         let values = self
             .workspace_values
             .iter()
@@ -396,7 +401,7 @@ impl RunMatSession {
         invocation: crate::ProcedureInvocation,
         control: &crate::InvocationControl,
     ) -> std::result::Result<(Value, crate::CoverageFragment), RunError> {
-        let coverage = runmat_vm::coverage::CoverageSession::start(&self.runtime_context);
+        let coverage = runmat_runtime::coverage::CoverageSession::start(&self.runtime_context);
         let value = self.invoke_executable(unit, invocation, control).await?;
         let program_revision = unit.revision().program_revision.canonical_identity();
         let fragment = unit

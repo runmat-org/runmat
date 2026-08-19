@@ -8,6 +8,44 @@ use runmat_macros::runtime_builtin;
 use runmat_runtime::call_builtin;
 use runmat_value::{Tensor, Value};
 
+#[derive(Debug)]
+struct TestBuiltinError {
+    message: String,
+    retry: runmat_runtime::GpuGatherRetry,
+}
+
+impl TestBuiltinError {
+    fn terminal(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            retry: runmat_runtime::GpuGatherRetry::Never,
+        }
+    }
+
+    fn request_gpu_gather(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            retry: runmat_runtime::GpuGatherRetry::Requested,
+        }
+    }
+}
+
+impl std::fmt::Display for TestBuiltinError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for TestBuiltinError {}
+
+impl From<TestBuiltinError> for runmat_runtime::RuntimeError {
+    fn from(error: TestBuiltinError) -> Self {
+        runmat_runtime::build_runtime_error(error.message)
+            .with_gpu_gather_retry(error.retry)
+            .build()
+    }
+}
+
 const TEST_ERRORS: [BuiltinErrorDescriptor; 0] = [];
 const OUT_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "out",
@@ -94,13 +132,15 @@ fn double_fn(x: i32) -> Result<i32, String> {
     descriptor(crate::HOST_TRACE_DESCRIPTOR),
     builtin_path = "tests::host_only_trace"
 )]
-fn host_only_trace(value: Value) -> Result<Value, String> {
+fn host_only_trace(value: Value) -> Result<Value, TestBuiltinError> {
     match value {
         Value::Tensor(t) => {
             let sum: f64 = t.materialize_f64().iter().copied().sum();
             Ok(Value::Num(sum))
         }
-        other => Err(format!("host_only_trace: unsupported input {other:?}")),
+        other => Err(TestBuiltinError::request_gpu_gather(format!(
+            "host_only_trace: unsupported input {other:?}"
+        ))),
     }
 }
 
@@ -109,11 +149,13 @@ fn host_only_trace(value: Value) -> Result<Value, String> {
     descriptor(crate::HOST_ADD_DESCRIPTOR),
     builtin_path = "tests::host_only_add_tensors"
 )]
-fn host_only_add_tensors(a: Value, b: Value) -> Result<Value, String> {
+fn host_only_add_tensors(a: Value, b: Value) -> Result<Value, TestBuiltinError> {
     match (a, b) {
         (Value::Tensor(ta), Value::Tensor(tb)) => {
             if ta.shape != tb.shape {
-                return Err("host_only_add_tensors: shape mismatch".to_string());
+                return Err(TestBuiltinError::terminal(
+                    "host_only_add_tensors: shape mismatch",
+                ));
             }
             let data: Vec<f64> = ta
                 .materialize_f64()
@@ -121,12 +163,13 @@ fn host_only_add_tensors(a: Value, b: Value) -> Result<Value, String> {
                 .zip(tb.materialize_f64().iter())
                 .map(|(x, y)| x + y)
                 .collect();
-            let tensor = Tensor::new(data, ta.shape.clone()).map_err(|e| e.to_string())?;
+            let tensor = Tensor::new(data, ta.shape.clone())
+                .map_err(|error| TestBuiltinError::terminal(error.to_string()))?;
             Ok(Value::Tensor(tensor))
         }
-        (lhs, rhs) => Err(format!(
+        (lhs, rhs) => Err(TestBuiltinError::request_gpu_gather(format!(
             "host_only_add_tensors: unsupported inputs {lhs:?} and {rhs:?}"
-        )),
+        ))),
     }
 }
 
@@ -142,12 +185,23 @@ fn call_registered_builtin() {
     assert!(names.contains(&"double"));
 }
 
+fn mark_automatic(value: Value) -> Value {
+    match value {
+        Value::GpuTensor(mut handle) => {
+            runmat_accelerate_api::mark_handle_automatic(&mut handle);
+            Value::GpuTensor(handle)
+        }
+        other => other,
+    }
+}
+
 #[test]
 fn dispatcher_gathers_gpu_argument_for_host_builtin() {
     register_inprocess_provider();
 
     let cpu_tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-    let gpu_value = call_builtin("gpuArray", &[Value::Tensor(cpu_tensor.clone())]).unwrap();
+    let gpu_value =
+        mark_automatic(call_builtin("gpuArray", &[Value::Tensor(cpu_tensor.clone())]).unwrap());
     let result = call_builtin("host_only_trace", &[gpu_value]).unwrap();
 
     match result {
@@ -162,8 +216,8 @@ fn dispatcher_gathers_multiple_gpu_arguments() {
 
     let a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
     let b = Tensor::new(vec![5.0, 6.0, 7.0, 8.0], vec![2, 2]).unwrap();
-    let ga = call_builtin("gpuArray", &[Value::Tensor(a.clone())]).unwrap();
-    let gb = call_builtin("gpuArray", &[Value::Tensor(b.clone())]).unwrap();
+    let ga = mark_automatic(call_builtin("gpuArray", &[Value::Tensor(a.clone())]).unwrap());
+    let gb = mark_automatic(call_builtin("gpuArray", &[Value::Tensor(b.clone())]).unwrap());
 
     let result = call_builtin("host_only_add_tensors", &[ga, gb]).unwrap();
 

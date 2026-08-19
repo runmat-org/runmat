@@ -61,6 +61,7 @@ fn elementwise_mul_on_gpu_handles() {
 
 #[test]
 fn gpu_device_returns_struct() {
+    let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     runmat_accelerate::simple_provider::register_inprocess_provider();
     let info = runmat_runtime::call_builtin("gpuDevice", &[]).unwrap();
     match info {
