@@ -26,10 +26,23 @@ jobs:
       # Enable backtraces on CI to aid debugging of panics/segfaults
       RUST_BACKTRACE: 1
       MATRIX_NAME: windows-x86_64
+      # The Windows runner cannot reliably link the full workspace at Cargo's
+      # default parallelism. Bound compiler/linker pressure and avoid large PDBs.
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@v3
         with:
           ref: ${{ github.event.inputs.ref || github.ref_name }}
+
+      - name: Isolate Cargo build artifacts
+        shell: pwsh
+        run: |
+          # Self-hosted runners retain the checkout between jobs. Isolate build
+          # artifacts so stale rmeta/rlib fingerprints cannot cross release runs.
+          Add-Content -Path $env:GITHUB_ENV -Value "CARGO_TARGET_DIR=${{ runner.temp }}\runmat-release-${{ github.run_id }}"
 
       - name: Validate Rust toolchain (Windows self-hosted)
         shell: pwsh
