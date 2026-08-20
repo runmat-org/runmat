@@ -92,7 +92,7 @@ async fn main() -> ExitCode {
                     .downcast_ref::<runmat::AlreadyReportedCliError>()
                     .is_none()
                 {
-                    eprintln!("{}: {err}", runmat::presentation::stderr().error("Error"));
+                    eprintln!("{}: {err:#}", runmat::presentation::stderr().error("Error"));
                 }
                 1
             }

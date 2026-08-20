@@ -19,7 +19,7 @@ use runmat_execution_runner::{
 
 mod process;
 
-use crate::local_store::{ArtifactStore, CheckpointStore};
+use crate::local_store::{prepare_session_root, ArtifactStore, CheckpointStore};
 use crate::protocol::StoredProgram;
 use crate::{
     NativeExecutionConfig, NativeExecutionError, NativeExecutionResult, NativeObjectStore,
@@ -138,6 +138,7 @@ impl LocalDriver {
                 },
             }))?;
         }
+        prepare_session_root(&config.store_root)?;
         let artifacts = ArtifactStore::new(config.store_root.join("artifacts"))?;
         let objects =
             NativeObjectStore::open(config.store_root.join("objects"), config.max_object_bytes)

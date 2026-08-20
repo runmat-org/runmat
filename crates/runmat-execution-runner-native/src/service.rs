@@ -11,6 +11,7 @@ use runmat_runtime::execution::{
 };
 use runmat_value::Value;
 
+use crate::config::fresh_scope_id;
 use crate::driver::{LocalDriver, TaskCompletion};
 use crate::durable::DurableJobBridge;
 use crate::supervisor::ProgramBatchSubmission;
@@ -47,11 +48,7 @@ pub struct NativeExecutionService {
 impl NativeExecutionService {
     pub fn new(mut config: NativeExecutionConfig) -> NativeExecutionResult<Self> {
         let nonce = NEXT_NATIVE_SCOPE.fetch_add(1, Ordering::Relaxed);
-        let scope_id = ExecutionScopeId::derive(&[
-            b"native-session",
-            &std::process::id().to_be_bytes(),
-            &nonce.to_be_bytes(),
-        ]);
+        let scope_id = fresh_scope_id(b"native-session", nonce);
         config.store_root.push(scope_id.to_string());
         Ok(Self {
             scope_id,

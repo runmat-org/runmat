@@ -22,6 +22,10 @@ fn run_runmat(args: &[&str]) -> std::process::Output {
     Command::new(get_binary_path())
         .args(args)
         .env("RUNMAT_CONFIG", &config_path)
+        .env(
+            "RUNMAT_EXECUTION_STATE_DIR",
+            temp_dir.path().join("execution-state"),
+        )
         .env("NO_GUI", "1")
         .output()
         .expect("Failed to execute runmat binary")
@@ -37,6 +41,10 @@ fn run_repl_with_piped_input(
     command
         .args(["repl"])
         .env("RUNMAT_CONFIG", &config_path)
+        .env(
+            "RUNMAT_EXECUTION_STATE_DIR",
+            temp_dir.path().join("execution-state"),
+        )
         .env("NO_GUI", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -114,6 +122,35 @@ fn forced_color_does_not_style_program_output() {
     assert!(output.status.success(), "{output:?}");
     assert!(String::from_utf8_lossy(&output.stdout).contains("PROGRAM_OUTPUT_SENTINEL"));
     assert!(!output.stdout.windows(2).any(|bytes| bytes == b"\x1b["));
+}
+
+#[cfg(unix)]
+#[test]
+fn session_startup_does_not_depend_on_a_host_global_temp_parent() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let temporary = TempDir::new().unwrap();
+    let foreign_parent = temporary.path().join("runmat-execution");
+    fs::create_dir(&foreign_parent).unwrap();
+    fs::set_permissions(&foreign_parent, fs::Permissions::from_mode(0o555)).unwrap();
+
+    let script_path = temporary.path().join("session_store.m");
+    fs::write(&script_path, "disp('PER_USER_SESSION_STORE');").unwrap();
+    let config_path = write_test_config(temporary.path());
+    let output = Command::new(get_binary_path())
+        .args(["run", script_path.to_str().unwrap()])
+        .env("RUNMAT_CONFIG", config_path)
+        .env(
+            "RUNMAT_EXECUTION_STATE_DIR",
+            temporary.path().join("execution-state"),
+        )
+        .env("NO_GUI", "1")
+        .env("TMPDIR", temporary.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stdout).contains("PER_USER_SESSION_STORE"));
 }
 
 #[test]

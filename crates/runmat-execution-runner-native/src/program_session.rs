@@ -7,6 +7,7 @@ use runmat_execution::{CancellationReason, ExecutionScopeId, PoolId};
 use runmat_execution_artifact::ProgramExecutionRequest;
 use runmat_execution_runner::{AttemptSuccess, TaskSubmission};
 
+use crate::config::fresh_scope_id;
 use crate::driver::{LocalDriver, TaskCompletion};
 use crate::{
     NativeExecutionConfig, NativeExecutionError, NativeExecutionResult, NativeObjectStore,
@@ -22,11 +23,7 @@ pub struct NativeProgramSession {
 impl NativeProgramSession {
     pub fn new(mut config: NativeExecutionConfig) -> NativeExecutionResult<Self> {
         let nonce = NEXT_PROGRAM_SCOPE.fetch_add(1, Ordering::Relaxed);
-        let scope_id = ExecutionScopeId::derive(&[
-            b"native-program-session",
-            &std::process::id().to_be_bytes(),
-            &nonce.to_be_bytes(),
-        ]);
+        let scope_id = fresh_scope_id(b"native-program-session", nonce);
         config.store_root.push(scope_id.to_string());
         Ok(Self {
             driver: LocalDriver::new(config, scope_id)?,
