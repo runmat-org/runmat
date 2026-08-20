@@ -93,6 +93,7 @@ pub fn lifecycle_case(
 pub struct FakeExecutor {
     pub responses: BTreeMap<String, Result<ExecutionResponse, ExecutionFailure>>,
     pub calls: Vec<String>,
+    pub scopes: Vec<FixtureScopeKey>,
 }
 
 impl FakeExecutor {
@@ -113,6 +114,7 @@ impl FakeExecutor {
 impl TestExecutor for FakeExecutor {
     fn execute<'a>(&'a mut self, request: &'a ExecutionRequest) -> ExecutionFuture<'a> {
         self.calls.push(request.procedure.semantic_path.clone());
+        self.scopes.push(request.scope.clone());
         let response = self
             .responses
             .get(&request.procedure.semantic_path)

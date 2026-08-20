@@ -4,15 +4,12 @@ use runmat_runtime::testing::{
     install_test_context_in, ActiveTestContext, RuntimeTeardownInvocation,
 };
 use runmat_test::context::TestCommand;
-use runmat_test::descriptor::{
-    FixtureScope, ParameterDescriptor, ProcedureDescriptor, ProcedureKind,
-};
+use runmat_test::descriptor::{ParameterDescriptor, ProcedureDescriptor, ProcedureKind};
 use runmat_test::executor::{
     ExecutionFailure, ExecutionFault, ExecutionFuture, ExecutionRequest, ExecutionResponse,
     TestExecutor,
 };
 use runmat_test::identity::TestId;
-use runmat_test::lifecycle::{ExecutionPhase, FixtureScopeKey};
 use runmat_test::protocol::ProtocolLimits;
 use runmat_value::Value;
 
@@ -151,7 +148,7 @@ impl<'a> CoreTestExecutor<'a> {
             ActiveTestContext {
                 execution: request.context.clone(),
                 phase: request.phase,
-                scope: scope_for(request),
+                scope: request.scope.clone(),
             },
             self.limits,
         );
@@ -231,26 +228,6 @@ impl<'a> CoreTestExecutor<'a> {
 impl TestExecutor for CoreTestExecutor<'_> {
     fn execute<'a>(&'a mut self, request: &'a ExecutionRequest) -> ExecutionFuture<'a> {
         Box::pin(async move { self.execute_request(request).await })
-    }
-}
-
-fn scope_for(request: &ExecutionRequest) -> FixtureScopeKey {
-    let scope = match request.phase {
-        ExecutionPhase::RunSetup | ExecutionPhase::RunTeardown => FixtureScope::Run,
-        ExecutionPhase::SuiteSetup | ExecutionPhase::SuiteTeardown => FixtureScope::Suite,
-        ExecutionPhase::ClassSetup | ExecutionPhase::ClassTeardown => FixtureScope::Class,
-        ExecutionPhase::TestSetup
-        | ExecutionPhase::TestBody
-        | ExecutionPhase::DynamicTeardown
-        | ExecutionPhase::TestTeardown => FixtureScope::Test,
-    };
-    FixtureScopeKey {
-        scope,
-        identity: if scope == FixtureScope::Test {
-            request.context.test_id.as_str().to_owned()
-        } else {
-            request.procedure.semantic_path.clone()
-        },
     }
 }
 

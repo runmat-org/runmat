@@ -4,7 +4,9 @@ use common::{execute, lifecycle_case, procedure, scope, step, FakeExecutor};
 use runmat_test::context::TestCommand;
 use runmat_test::descriptor::FixtureScope;
 use runmat_test::executor::{ExecutionFailure, ExecutionFault, ExecutionResponse};
-use runmat_test::lifecycle::{CancellationProbe, LifecycleEngine, QualificationKind};
+use runmat_test::lifecycle::{
+    CancellationProbe, FixtureScopeKey, LifecycleEngine, QualificationKind,
+};
 use runmat_test::result::{Diagnostic, DiagnosticSeverity, ResultState, TerminalDisposition};
 
 #[test]
@@ -55,6 +57,67 @@ fn successful_case_runs_dynamic_lifo_before_declared_teardowns() {
     assert!(events
         .windows(2)
         .all(|pair| pair[1].sequence == pair[0].sequence + 1));
+}
+
+#[test]
+fn equal_level_fixture_scopes_unwind_by_activation_order_with_exact_scope_context() {
+    let outer = FixtureScopeKey {
+        scope: FixtureScope::Test,
+        identity: "z-outer".into(),
+    };
+    let inner = FixtureScopeKey {
+        scope: FixtureScope::Test,
+        identity: "a-inner".into(),
+    };
+    let case = lifecycle_case(
+        vec![
+            step(outer.clone(), "outer-setup"),
+            step(inner.clone(), "inner-setup"),
+        ],
+        "body",
+        vec![
+            step(inner.clone(), "inner-teardown"),
+            step(outer.clone(), "outer-teardown"),
+        ],
+    );
+    let mut executor = FakeExecutor::default().responding(
+        "inner-setup",
+        Ok(ExecutionResponse {
+            commands: vec![TestCommand::AddTeardown {
+                scope: inner.clone(),
+                procedure: procedure("inner-dynamic"),
+            }],
+            output: String::new(),
+        }),
+    );
+    let (outcome, _) = execute(&case, &mut executor);
+
+    assert_eq!(
+        executor.calls,
+        [
+            "outer-setup",
+            "inner-setup",
+            "body",
+            "inner-dynamic",
+            "inner-teardown",
+            "outer-teardown"
+        ]
+    );
+    assert_eq!(
+        executor.scopes,
+        [
+            outer.clone(),
+            inner.clone(),
+            FixtureScopeKey {
+                scope: FixtureScope::Test,
+                identity: case.context.test_id.as_str().to_owned(),
+            },
+            inner.clone(),
+            inner,
+            outer,
+        ]
+    );
+    assert_eq!(outcome.attempt.state, ResultState::PASSED);
 }
 
 #[test]

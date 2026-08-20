@@ -80,6 +80,7 @@ impl LifecycleEngine {
             self.invoke(
                 case,
                 setup_phase(step.scope.scope),
+                &step.scope,
                 &step.procedure,
                 executor,
                 events,
@@ -111,6 +112,7 @@ impl LifecycleEngine {
                 self.invoke(
                     case,
                     ExecutionPhase::TestBody,
+                    &active_scopes[0],
                     &case.body,
                     executor,
                     events,
@@ -126,7 +128,7 @@ impl LifecycleEngine {
             }
         }
 
-        active_scopes.sort();
+        active_scopes.sort_by_key(|scope| scope.scope);
         for scope in active_scopes.iter().rev() {
             while let Some(index) = dynamic_teardowns
                 .iter()
@@ -139,6 +141,7 @@ impl LifecycleEngine {
                 self.invoke(
                     case,
                     ExecutionPhase::DynamicTeardown,
+                    &teardown.scope,
                     &teardown.procedure,
                     executor,
                     events,
@@ -160,6 +163,7 @@ impl LifecycleEngine {
                 self.invoke(
                     case,
                     teardown_phase(scope.scope),
+                    &teardown.scope,
                     &teardown.procedure,
                     executor,
                     events,
@@ -198,6 +202,7 @@ impl LifecycleEngine {
         &self,
         case: &LifecycleCase,
         phase: ExecutionPhase,
+        scope: &FixtureScopeKey,
         procedure: &ProcedureDescriptor,
         executor: &mut E,
         events: &mut SequencedEventSink<'_, S>,
@@ -220,6 +225,7 @@ impl LifecycleEngine {
         let request = ExecutionRequest {
             context: case.context.clone(),
             phase,
+            scope: scope.clone(),
             procedure: procedure.clone(),
         };
         let response = executor.execute(&request).await;
