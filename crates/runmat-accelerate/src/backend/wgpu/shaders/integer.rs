@@ -463,9 +463,20 @@ fn remainder_unsigned32(a: u32, b: u32, is_modulus: bool) -> u32 {
 }
 fn remainder_signed32(a: i32, b: i32, is_modulus: bool) -> u32 {
     if (b == 0) { return select(0u, bitcast<u32>(a), is_modulus); }
-    var remainder = a % b;
-    if (is_modulus && remainder != 0 && (remainder < 0) != (b < 0)) { remainder = remainder + b; }
-    return bitcast<u32>(remainder);
+    let a_negative = a < 0;
+    let b_negative = b < 0;
+    let a_bits = bitcast<u32>(a);
+    let b_bits = bitcast<u32>(b);
+    let a_magnitude = select(a_bits, 0u - a_bits, a_negative);
+    let b_magnitude = select(b_bits, 0u - b_bits, b_negative);
+    var magnitude = a_magnitude % b_magnitude;
+    if (magnitude == 0u) { return 0u; }
+    var negative = a_negative;
+    if (is_modulus && a_negative != b_negative) {
+        magnitude = b_magnitude - magnitude;
+        negative = b_negative;
+    }
+    return select(magnitude, 0u - magnitude, negative);
 }
 fn add_with_carry(a: u32, b: u32, carry: u32) -> vec2<u32> {
     let first = a + b;
@@ -1970,6 +1981,8 @@ mod tests {
     fn arithmetic_shader_substitutes_workgroup_size() {
         let shader = arithmetic_shader(128);
         assert!(shader.contains("@workgroup_size(128)"));
+        assert!(shader.contains("let a_magnitude = select"));
+        assert!(!shader.contains("var remainder = a % b;"));
         assert!(!shader.contains("@WG@"));
     }
 
