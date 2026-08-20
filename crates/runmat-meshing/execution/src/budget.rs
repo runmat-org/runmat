@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use runmat_meshing_core::{
@@ -42,7 +43,7 @@ pub struct MeshingStageControl<'a> {
     cancellation: &'a dyn MeshingCancellationSignal,
     progress: &'a mut dyn MeshingProgressSink,
     started: Instant,
-    last_checkpoint_at: Instant,
+    last_checkpoint_at: Arc<Mutex<Instant>>,
     last: MeshingStageCheckpoint,
     last_progress: Option<MeshingProgress>,
     sequence: u64,
@@ -72,7 +73,7 @@ impl<'a> MeshingStageControl<'a> {
             cancellation,
             progress,
             started: now,
-            last_checkpoint_at: now,
+            last_checkpoint_at: Arc::new(Mutex::new(now)),
             last: MeshingStageCheckpoint::default(),
             last_progress: None,
             sequence: 0,
@@ -87,6 +88,7 @@ impl<'a> MeshingStageControl<'a> {
         MeshingGeometryEvaluationControl::new(
             self.cancellation,
             self.started,
+            Arc::clone(&self.last_checkpoint_at),
             &self.request.resources,
             &self.request.cancellation,
         )
@@ -114,7 +116,15 @@ impl<'a> MeshingStageControl<'a> {
                 )),
             ));
         }
-        if elapsed_millis(self.last_checkpoint_at, now)
+        let last_checkpoint_at = *self.last_checkpoint_at.lock().map_err(|_| {
+            failure(
+                self.stage,
+                MeshingFailureCategory::InternalInvariantViolation,
+                "restart the stage because its checkpoint state is unavailable",
+                None,
+            )
+        })?;
+        if elapsed_millis(last_checkpoint_at, now)
             > self.request.cancellation.maximum_checkpoint_latency_ms
         {
             return Err(failure(
@@ -133,7 +143,15 @@ impl<'a> MeshingStageControl<'a> {
     ) -> Result<(), Box<MeshingFailure>> {
         let now = Instant::now();
         let elapsed_ms = elapsed_millis(self.started, now);
-        let checkpoint_latency_ms = elapsed_millis(self.last_checkpoint_at, now);
+        let mut last_checkpoint_at = self.last_checkpoint_at.lock().map_err(|_| {
+            failure(
+                self.stage,
+                MeshingFailureCategory::InternalInvariantViolation,
+                "restart the stage because its checkpoint state is unavailable",
+                None,
+            )
+        })?;
+        let checkpoint_latency_ms = elapsed_millis(*last_checkpoint_at, now);
         if self.cancellation.is_cancelled() {
             return Err(failure(
                 self.stage,
@@ -198,7 +216,7 @@ impl<'a> MeshingStageControl<'a> {
         self.progress.record(&progress);
         self.last = checkpoint;
         self.last_progress = Some(progress);
-        self.last_checkpoint_at = now;
+        *last_checkpoint_at = now;
         Ok(())
     }
 

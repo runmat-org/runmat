@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use runmat_geometry_core::{
@@ -18,7 +18,7 @@ pub struct GeometryEvaluationUsage {
 pub struct MeshingGeometryEvaluationControl<'a> {
     cancellation: &'a dyn MeshingCancellationSignal,
     started: Instant,
-    last_checkpoint_at: Mutex<Instant>,
+    last_checkpoint_at: Arc<Mutex<Instant>>,
     maximum_wall_time_ms: u64,
     maximum_checkpoint_latency_ms: u64,
     maximum_allocation_bytes: u64,
@@ -33,13 +33,14 @@ impl<'a> MeshingGeometryEvaluationControl<'a> {
     pub(crate) fn new(
         cancellation: &'a dyn MeshingCancellationSignal,
         started: Instant,
+        last_checkpoint_at: Arc<Mutex<Instant>>,
         resources: &MeshingResourceBudget,
         policy: &CancellationPolicy,
     ) -> Self {
         Self {
             cancellation,
             started,
-            last_checkpoint_at: Mutex::new(Instant::now()),
+            last_checkpoint_at,
             maximum_wall_time_ms: resources.maximum_wall_time_ms,
             maximum_checkpoint_latency_ms: policy.maximum_checkpoint_latency_ms,
             maximum_allocation_bytes: resources.maximum_memory_bytes,

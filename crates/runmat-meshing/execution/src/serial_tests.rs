@@ -808,6 +808,26 @@ fn exact_geometry_control_projects_cancellation_and_hard_counters() {
 }
 
 #[test]
+fn exact_geometry_checkpoints_renew_the_enclosing_stage_deadline() {
+    let mut bounded = request();
+    bounded.cancellation.maximum_checkpoint_latency_ms = 1_000;
+    let mut progress = Progress::default();
+    let mut stage = MeshingStageControl::new(
+        MeshingStageKind::SurfaceMesh,
+        0,
+        &bounded,
+        &NeverCancelled,
+        &mut progress,
+    )
+    .unwrap();
+    stage.checkpoint(MeshingStageCheckpoint::default()).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    stage.geometry_evaluation_control().checkpoint().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    stage.guard().unwrap();
+}
+
+#[test]
 fn stage_control_enforces_wall_time_and_serialization_enforces_artifact_bytes() {
     let mut timed = request();
     timed.resources.maximum_wall_time_ms = 1;
