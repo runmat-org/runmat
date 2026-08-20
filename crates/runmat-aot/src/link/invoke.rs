@@ -78,7 +78,7 @@ pub fn link_standalone(
         .output()
         .map_err(|error| AotError::io("invoke native linker", &plan.driver.path, error))?;
     if !result.status.success() {
-        let diagnostic = String::from_utf8_lossy(&result.stderr);
+        let diagnostic = linker_diagnostic(&result.stdout, &result.stderr);
         return Err(AotError::Linker {
             driver: plan.driver.path,
             status: result.status.to_string(),
@@ -127,6 +127,16 @@ pub fn link_standalone(
     })
 }
 
+fn linker_diagnostic(stdout: &[u8], stderr: &[u8]) -> String {
+    let stdout = String::from_utf8_lossy(stdout);
+    let stderr = String::from_utf8_lossy(stderr);
+    match (stdout.trim(), stderr.trim()) {
+        ("", stderr) => stderr.to_string(),
+        (stdout, "") => stdout.to_string(),
+        (stdout, stderr) => format!("{stdout}\n{stderr}"),
+    }
+}
+
 fn bounded_diagnostic(diagnostic: &str) -> String {
     const MAX_BYTES: usize = 64 * 1024;
     if diagnostic.len() <= MAX_BYTES {
@@ -140,5 +150,19 @@ fn bounded_diagnostic(diagnostic: &str) -> String {
             "{}\n[linker diagnostic truncated]",
             diagnostic[..end].trim()
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::linker_diagnostic;
+
+    #[test]
+    fn linker_diagnostic_preserves_stdout_and_stderr() {
+        assert_eq!(linker_diagnostic(b"MSVC stdout\n", b""), "MSVC stdout");
+        assert_eq!(
+            linker_diagnostic(b"stdout\n", b"stderr\n"),
+            "stdout\nstderr"
+        );
     }
 }

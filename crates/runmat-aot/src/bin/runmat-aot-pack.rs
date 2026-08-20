@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+#[cfg(target_os = "windows")]
+use runmat_aot::archive::prepare_msvc_runtime_archive;
 use runmat_aot::archive::{
     build_runtime_archive, RuntimeArchiveCapabilities, RuntimeArchiveEncoding,
     RuntimeArchiveManifest,
@@ -25,11 +27,22 @@ fn run() -> Result<(), String> {
     reject_existing(&arguments.manifest_out)?;
     let bytes = std::fs::read(&arguments.archive)
         .map_err(|error| format!("read `{}`: {error}", arguments.archive.display()))?;
+    let native_link_tokens = arguments.native_link_tokens;
+    #[cfg(target_os = "windows")]
+    let (bytes, native_link_tokens) = {
+        let prepared = prepare_msvc_runtime_archive(&bytes, native_link_tokens)
+            .map_err(|error| error.to_string())?;
+        eprintln!(
+            "runmat-aot-pack: normalized MSVC archive ({} duplicate members and {} bundled link tokens removed)",
+            prepared.duplicate_members_removed, prepared.bundled_link_tokens_removed
+        );
+        (prepared.archive, prepared.native_link_tokens)
+    };
     let environment = runmat_core::program_environment(runmat_core::CompatMode::Matlab);
     let product = build_runtime_archive(
         &bytes,
         &environment,
-        arguments.native_link_tokens,
+        native_link_tokens,
         RuntimeArchiveEncoding::Zstd,
         RuntimeArchiveCapabilities::standalone_host(),
     )

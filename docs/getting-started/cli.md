@@ -119,6 +119,8 @@ Compilation uses the same project/package composition, HIR, MIR, static analysis
 
 The default `--policy=native-specialized` emits target-native code and links the matching RunMat runtime archive embedded in the `runmat` binary. The result does not require a separate RunMat installation or SDK directory at runtime. `--optimization=none|size|speed` controls native object optimization; speed is the default.
 
+The final host link uses a supported system linker and the native development libraries behind enabled runtime features, such as HDF5. Install those platform dependencies and expose their standard library search paths to the linker; RunMat supplies its own matching execution runtime and does not require a separate RunMat SDK.
+
 Use `--policy=closed-world` when every runtime target can be proven. RunMat links only the exact reachable catalog-backed builtin bindings, uses ordinary archive extraction and platform dead stripping, and omits parser, compiler, VM, JIT, and object-emission code from the resulting executable. The small HIR/MIR operation schema required to decode and verify Native IR remains part of the runtime. If a call can reach an unknown target, a dynamically extensible builtin, or a builtin without an exact native binding, compilation fails with a specific diagnostic; use `native-specialized` when that broader runtime discovery is intentional.
 
 The `dynamic-runtime` and `portable` policy names reserve distinct product contracts and fail clearly until their complete implementations are available: `dynamic-runtime` requires an embedded frontend and dynamic source loader, while `portable` produces a target-independent artifact instead of a host executable. RunMat does not silently approximate one policy with another.
