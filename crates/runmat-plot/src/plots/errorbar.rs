@@ -109,13 +109,7 @@ impl ErrorBar {
         if x_pos.is_empty() {
             x_pos.resize(n, 0.0);
         }
-        if n == 0
-            || y.len() != n
-            || x_neg.len() != n
-            || x_pos.len() != n
-            || y_neg.len() != n
-            || y_pos.len() != n
-        {
+        if n == 0 || y.len() != n || x_neg.len() != n || x_pos.len() != n {
             return Err("errorbar: input vectors must have equal non-zero length".to_string());
         }
         let mut plot = Self::new_vertical(x, y, y_neg, y_pos)?;

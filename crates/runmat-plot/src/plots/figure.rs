@@ -2876,15 +2876,21 @@ mod tests {
     #[test]
     fn errorbar_render_data_includes_marker_pass() {
         let mut figure = Figure::new();
-        figure.add_errorbar(
-            ErrorBar::new_vertical(
-                vec![0.0, 1.0],
-                vec![1.0, 2.0],
-                vec![0.1, 0.2],
-                vec![0.1, 0.2],
-            )
-            .unwrap(),
-        );
+        let mut errorbar = ErrorBar::new_vertical(
+            vec![0.0, 1.0],
+            vec![1.0, 2.0],
+            vec![0.1, 0.2],
+            vec![0.1, 0.2],
+        )
+        .unwrap();
+        errorbar.set_marker(Some(crate::plots::line::LineMarkerAppearance {
+            kind: crate::plots::scatter::MarkerStyle::Circle,
+            size: 6.0,
+            edge_color: Vec4::ZERO,
+            face_color: Vec4::ONE,
+            filled: false,
+        }));
+        figure.add_errorbar(errorbar);
 
         let render_data = figure.render_data();
         assert_eq!(render_data.len(), 2);
