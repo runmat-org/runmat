@@ -91,7 +91,7 @@ async fn worker_launch_uses_only_scoped_bootstrap_material() {
         queue: "default".into(),
         resources: ResourceRequest {
             cpu_millicores: 1,
-            memory_bytes: 1024 * 1024,
+            memory_bytes: 64 * 1024 * 1024,
             scratch_bytes: 1024,
             accelerator_count: 0,
             accelerator_class: None,
