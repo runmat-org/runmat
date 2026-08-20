@@ -1055,7 +1055,17 @@ impl RunMatSession {
             })?;
             analysis = runmat_mir::analysis::analyze_assembly(&mir);
             if let Some(layout) = &mut bytecode.layout {
-                runmat_vm::remap_layout_function_ids(layout, &function_id_remap);
+                runmat_vm::remap_layout_function_ids(layout, &function_id_remap).map_err(
+                    |error| {
+                        RunError::Runtime(
+                            build_runtime_error(format!(
+                                "failed to publish executable VM layout identities: {error:?}"
+                            ))
+                            .with_identifier("RunMat:ExecutableFunctionIdentity")
+                            .build(),
+                        )
+                    },
+                )?;
             }
         }
         Ok(PreparedExecution {
@@ -1104,7 +1114,21 @@ impl RunMatSession {
     ) {
         let mut session_registry = self.function_registry.clone();
         let mut execution_registry = session_registry.clone();
-        let mut next_semantic_function_id = self.next_semantic_function_id;
+        // Published semantic functions share the retained executable layout's
+        // function-id namespace. Reserve every unit-local layout id before
+        // assigning session-stable ids so a closure/local function can never
+        // overwrite the entrypoint (or another unremapped unit function).
+        let first_id_after_unit = bytecode
+            .layout
+            .as_ref()
+            .and_then(|layout| layout.functions.keys().map(|function| function.0).max())
+            .map(|function| {
+                function
+                    .checked_add(1)
+                    .expect("unit-local function identity space exhausted")
+            })
+            .unwrap_or(0);
+        let mut next_semantic_function_id = self.next_semantic_function_id.max(first_id_after_unit);
         let current_registry = bytecode.function_registry();
         if current_registry.functions.is_empty() {
             bytecode.function_registry = session_registry.clone();

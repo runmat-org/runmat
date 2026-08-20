@@ -4,7 +4,7 @@ use runmat_hir::{
 };
 use runmat_mir::{MirAssembly, MirLocalId};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Portable schema for serialized [`VmAssemblyLayout`] payloads.
 pub const VM_LAYOUT_SCHEMA_VERSION: u16 = 3;
@@ -116,9 +116,16 @@ pub struct VmStorageBinding {
 pub fn remap_layout_function_ids(
     layout: &mut VmAssemblyLayout,
     remap: &HashMap<FunctionId, FunctionId>,
-) {
+) -> Result<(), LayoutError> {
     if remap.is_empty() {
-        return;
+        return Ok(());
+    }
+    let mut published_ids = HashSet::with_capacity(layout.functions.len());
+    for function in layout.functions.keys().copied() {
+        let published = remap.get(&function).copied().unwrap_or(function);
+        if !published_ids.insert(published) {
+            return Err(LayoutError::FunctionRemapCollision(published));
+        }
     }
     let mut functions = HashMap::with_capacity(layout.functions.len());
     for (function, mut metadata) in std::mem::take(&mut layout.functions) {
@@ -143,7 +150,8 @@ pub fn remap_layout_function_ids(
                 .copied()
                 .unwrap_or(capture.from_function);
         }
-        functions.insert(remap.get(&function).copied().unwrap_or(function), metadata);
+        let published = remap.get(&function).copied().unwrap_or(function);
+        functions.insert(published, metadata);
     }
     layout.functions = functions;
     for entrypoint in layout.entrypoints.values_mut() {
@@ -152,6 +160,7 @@ pub fn remap_layout_function_ids(
             .copied()
             .unwrap_or(entrypoint.target);
     }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -163,6 +172,7 @@ pub enum LayoutError {
         function: FunctionId,
         binding: BindingId,
     },
+    FunctionRemapCollision(FunctionId),
 }
 
 pub fn derive_layout(
@@ -585,5 +595,44 @@ mod tests {
         assert_eq!(exports.len(), 1);
         assert_eq!(exports[0].binding, visible);
         assert_eq!(exports[0].name, "x");
+    }
+
+    #[test]
+    fn function_id_remap_rejects_layout_collisions_without_mutating_layout() {
+        let function_layout = |function| VmFunctionLayout {
+            function,
+            display_name: format!("function_{}", function.0),
+            private_owner_scope: String::new(),
+            frame_abi: VmFrameAbi {
+                fixed_inputs: Vec::new(),
+                varargin: None,
+                fixed_outputs: Vec::new(),
+                varargout: None,
+                implicit_nargin: None,
+                implicit_nargout: None,
+            },
+            binding_slots: HashMap::new(),
+            mir_local_slots: HashMap::new(),
+            captures: Vec::new(),
+            local_count: 0,
+            resume_points: BTreeMap::new(),
+        };
+        let first = FunctionId(0);
+        let second = FunctionId(1);
+        let mut layout = VmAssemblyLayout {
+            functions: HashMap::from([
+                (first, function_layout(first)),
+                (second, function_layout(second)),
+            ]),
+            entrypoints: HashMap::new(),
+            storage_bindings: HashMap::new(),
+        };
+        let original = layout.clone();
+
+        let error = remap_layout_function_ids(&mut layout, &HashMap::from([(second, first)]))
+            .expect_err("two functions cannot publish to one layout identity");
+
+        assert_eq!(error, LayoutError::FunctionRemapCollision(first));
+        assert_eq!(layout, original);
     }
 }
