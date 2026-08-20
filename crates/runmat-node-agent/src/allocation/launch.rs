@@ -5,6 +5,7 @@ use runmat_execution_transport_native::control::DriverBootstrapCredential;
 use runmat_execution_transport_native::control::NodeAllocation;
 use runmat_execution_transport_native::control::WorkerBootstrapCredential;
 use runmat_process_host::{
+    environment::{EnvironmentAllowlist, EnvironmentPolicy},
     ChildLifetime, ChildProcess, HiddenMode, HostCommand, ResourceLimits, StdioPolicy,
 };
 
@@ -43,6 +44,8 @@ impl AllocationProcesses {
             ));
         }
         let mut command = HostCommand::new(runmat_executable);
+        command.environment_policy =
+            EnvironmentPolicy::Allow(EnvironmentAllowlist::platform_runtime());
         command.arguments = vec![HiddenMode::ExecutionWorker.marker().to_string()];
         command.environment.insert(
             "RUNMAT_EXECUTION_WORKER_REMOTE".to_string(),
@@ -139,6 +142,8 @@ impl AllocationProcesses {
             ));
         }
         let mut command = HostCommand::new(runmat_executable);
+        command.environment_policy =
+            EnvironmentPolicy::Allow(EnvironmentAllowlist::platform_runtime());
         // This exact private mode remains the sole process argument. Lease
         // authority crosses in a sanitized environment; the Server cannot
         // choose an executable or arbitrary argument vector.

@@ -2,7 +2,6 @@ use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use runmat_process_host::environment::EnvironmentPolicy;
 use runmat_process_host::{ChildProcess, HostCommand, ProcessHostError};
 use runmat_test::event::TestEvent;
 use runmat_test::protocol::{
@@ -121,11 +120,7 @@ impl WorkerBackend for ProcessBackend {
             let mut command = HostCommand::new(&self.config.executable);
             command.arguments = self.config.worker_arguments.clone();
             command.environment = self.config.environment.clone();
-            command.environment_policy = if self.config.inherit_environment {
-                EnvironmentPolicy::Inherit
-            } else {
-                EnvironmentPolicy::Clear
-            };
+            command.environment_policy = self.config.environment_policy.clone();
             command.max_stderr_bytes = self.config.max_stderr_bytes;
             let mut child = command.spawn().await.map_err(spawn_error)?;
             let process_id = child.id();
@@ -143,26 +138,38 @@ impl WorkerBackend for ProcessBackend {
             )
             .await
             {
-                terminate_failed_spawn(&mut child).await;
-                return Err(native_backend_error(error));
+                return Err(failed_spawn(&mut child, &stderr, native_backend_error(error)).await);
             }
             let remote = match read_response(&mut reader, initial_limits).await {
                 Ok(WorkerResponse::Handshake(remote)) => remote,
                 Ok(response) => {
-                    terminate_failed_spawn(&mut child).await;
-                    return Err(BackendError::new(
-                        BackendErrorKind::MalformedProtocol,
-                        format!("worker returned {response:?} before handshake"),
-                    ));
+                    return Err(failed_spawn(
+                        &mut child,
+                        &stderr,
+                        BackendError::new(
+                            BackendErrorKind::MalformedProtocol,
+                            format!("worker returned {response:?} before handshake"),
+                        ),
+                    )
+                    .await);
                 }
                 Err(error) => {
-                    terminate_failed_spawn(&mut child).await;
-                    return Err(native_backend_error(error));
+                    return Err(
+                        failed_spawn(&mut child, &stderr, native_backend_error(error)).await,
+                    );
                 }
             };
-            let limits = validate_handshake(local, &remote).map_err(|error| {
-                BackendError::new(BackendErrorKind::MalformedProtocol, error.to_string())
-            })?;
+            let limits = match validate_handshake(local, &remote) {
+                Ok(limits) => limits,
+                Err(error) => {
+                    return Err(failed_spawn(
+                        &mut child,
+                        &stderr,
+                        BackendError::new(BackendErrorKind::MalformedProtocol, error.to_string()),
+                    )
+                    .await);
+                }
+            };
             if let Err(error) = write_bootstrap(
                 &mut writer,
                 &NativeWorkerBootstrap::new(self.config.project_handoff.clone()),
@@ -170,8 +177,7 @@ impl WorkerBackend for ProcessBackend {
             )
             .await
             {
-                terminate_failed_spawn(&mut child).await;
-                return Err(native_backend_error(error));
+                return Err(failed_spawn(&mut child, &stderr, native_backend_error(error)).await);
             }
             let run_id = request.submission.plan.run_id.clone();
             let install = WorkerRequest::InstallPlan {
@@ -179,28 +185,33 @@ impl WorkerBackend for ProcessBackend {
                 snapshot: Box::new(request.submission.snapshot),
             };
             if let Err(error) = write_request(&mut writer, &install, limits).await {
-                terminate_failed_spawn(&mut child).await;
-                return Err(native_backend_error(error));
+                return Err(failed_spawn(&mut child, &stderr, native_backend_error(error)).await);
             }
             match read_response(&mut reader, limits).await {
                 Ok(WorkerResponse::Ready { run_id: ready }) if ready == run_id => {}
                 Ok(WorkerResponse::Rejected { code, message }) => {
-                    terminate_failed_spawn(&mut child).await;
-                    return Err(BackendError::new(
-                        BackendErrorKind::Rejected,
-                        format!("{code}: {message}"),
-                    ));
+                    return Err(failed_spawn(
+                        &mut child,
+                        &stderr,
+                        BackendError::new(BackendErrorKind::Rejected, format!("{code}: {message}")),
+                    )
+                    .await);
                 }
                 Ok(response) => {
-                    terminate_failed_spawn(&mut child).await;
-                    return Err(BackendError::new(
-                        BackendErrorKind::MalformedProtocol,
-                        format!("worker returned invalid plan response {response:?}"),
-                    ));
+                    return Err(failed_spawn(
+                        &mut child,
+                        &stderr,
+                        BackendError::new(
+                            BackendErrorKind::MalformedProtocol,
+                            format!("worker returned invalid plan response {response:?}"),
+                        ),
+                    )
+                    .await);
                 }
                 Err(error) => {
-                    terminate_failed_spawn(&mut child).await;
-                    return Err(native_backend_error(error));
+                    return Err(
+                        failed_spawn(&mut child, &stderr, native_backend_error(error)).await,
+                    );
                 }
             }
             let sequence = self.sequence.fetch_add(1, Ordering::Relaxed);
@@ -370,8 +381,13 @@ async fn read_execution(
     }
 }
 
-async fn terminate_failed_spawn(child: &mut ChildProcess) {
+async fn failed_spawn(
+    child: &mut ChildProcess,
+    stderr: &runmat_process_host::child::CapturedStderr,
+    error: BackendError,
+) -> BackendError {
     let _ = child.terminate_tree().await;
+    with_captured_stderr(error, stderr)
 }
 
 fn spawn_error(error: ProcessHostError) -> BackendError {
@@ -395,10 +411,21 @@ fn native_backend_error(error: NativeRunnerError) -> BackendError {
 }
 
 fn with_stderr(mut error: BackendError, session: &ProcessSession) -> BackendError {
-    let stderr = session.captured_stderr();
+    append_stderr(&mut error, &session.captured_stderr());
+    error
+}
+
+fn with_captured_stderr(
+    mut error: BackendError,
+    stderr: &runmat_process_host::child::CapturedStderr,
+) -> BackendError {
+    append_stderr(&mut error, &stderr.text());
+    error
+}
+
+fn append_stderr(error: &mut BackendError, stderr: &str) {
     if !stderr.is_empty() {
         error.message.push_str("\nworker stderr:\n");
-        error.message.push_str(&stderr);
+        error.message.push_str(stderr);
     }
-    error
 }
