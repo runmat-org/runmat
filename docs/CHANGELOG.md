@@ -25,6 +25,19 @@ _What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/r
 * Fixed `try`/`catch` protection across nested control flow and native execution, preserving exact catch bindings, nested-handler and `rethrow` behavior, normal exits, and canonical exception identifiers without replaying completed work.
 * Fixed native `spawn`/`await` execution so spawned work no longer blocks the awaiting runtime thread, and native suspension resumes at the exact post-`await` site without replaying completed effects.
 
+### Desktop
+
+#### Added
+* Students and instructors can now request complimentary RunMat Academic licenses directly from the product. Approved instructors can set up courses, add instructional staff, and invite students using their granted licenses.
+* Connect RunMat projects to OpenAI ChatGPT and Codex, Anthropic Claude Code and Cowork, or any other MCP-compatible assistant. Connected assistants can synchronize project files, execute RunMat code, and return generated artifacts.
+
+#### Changed
+* Changed organizations to use dedicated project pages with simpler switching and administration, configurable profiles and visibility, and readable organization and project URLs.
+* Expanded file and folder workflows with renaming, duplication, version history, path copying, downloads, and deletion. Cloud and Temporary Sandbox projects can also be exported as ZIP archives, including generated artifacts.
+
+#### Fixed
+* Improved language-server startup, semantic-highlighting recovery, runtime loading, failure handling, and observability so projects recover more reliably when browser workers or background services restart.
+
 ## [v0.6.1](https://github.com/runmat-org/runmat/compare/v0.6.0...v0.6.1) - July 2026
 
 ### Runtime
