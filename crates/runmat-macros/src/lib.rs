@@ -505,7 +505,10 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
             quote! {
                 #[cfg(not(target_arch = "wasm32"))]
                 runmat_builtins::inventory::submit! { #binding_expr }
-                #[cfg(not(target_arch = "wasm32"))]
+                // A package's unit-test harness can link both its cfg(test)
+                // copy and a normal dependency copy of the runtime. Only the
+                // latter should publish the process-wide AOT ABI symbols.
+                #[cfg(all(not(target_arch = "wasm32"), not(test)))]
                 #[export_name = #native_symbol]
                 static #native_binding_ident: crate::builtin::RuntimeBuiltinBinding = #binding_expr;
             },

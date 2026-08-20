@@ -24,6 +24,10 @@ tempfile = "3.12"
 thiserror = { workspace = true }
 zstd = "0.13"
 
+[target.'cfg(windows)'.dependencies]
+ar_archive_writer = "0.5.2"
+object = { version = "0.37.3", default-features = false, features = ["read"] }
+
 [dev-dependencies]
 runmat-runtime = { workspace = true, features = ["plot-core"] }
 
