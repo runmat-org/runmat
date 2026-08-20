@@ -1,11 +1,11 @@
 error[E0277]: the `?` operator can only be applied to values that implement `Try`
-  --> tests/ui/fail_bad_sig.rs:34:1
+  --> tests/ui/fail_bad_sig.rs:31:1
    |
-34 | / #[runtime_builtin(
-35 | |     name = "oops",
-36 | |     descriptor(crate::OOPS_DESCRIPTOR),
-37 | |     builtin_path = "tests::oops"
-38 | | )]
+31 | / #[runtime_builtin(
+32 | |     name = "oops",
+33 | |     descriptor(crate::OOPS_DESCRIPTOR),
+34 | |     builtin_path = "tests::oops"
+35 | | )]
    | |__^ the `?` operator cannot be applied to type `i32`
    |
    = help: the trait `Try` is not implemented for `i32`
