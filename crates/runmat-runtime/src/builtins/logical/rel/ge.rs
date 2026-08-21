@@ -20,6 +20,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::logical::rel::integer_comparison::{
+    restore_explicit_comparison_result, select_comparison_output_source,
     try_complex_ordering_comparison, try_gpu_ordering_comparison, try_integer_comparison,
     IntegerComparisonError, IntegerComparisonOp,
 };
@@ -172,17 +173,7 @@ fn ge_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     builtin_path = "crate::builtins::logical::rel::ge"
 )]
 async fn ge_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let has_resident_input =
-        matches!(&lhs, Value::GpuTensor(_)) || matches!(&rhs, Value::GpuTensor(_));
-    let resident_owner = match (&lhs, &rhs) {
-        (Value::GpuTensor(handle), _) | (_, Value::GpuTensor(handle)) => {
-            runmat_accelerate_api::provider_for_handle(handle)
-        }
-        _ => None,
-    };
-    if has_resident_input && resident_owner.is_none() {
-        return Err(ge_error(&GE_ERROR_INVALID_INPUT));
-    }
+    let source = select_comparison_output_source(&lhs, &rhs, BUILTIN_NAME)?;
     // Prefer device paths when any operand is a GPU tensor
     match (&lhs, &rhs) {
         (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) => {
@@ -219,10 +210,7 @@ async fn ge_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
         _ => {}
     }
     let result = ge_host(lhs, rhs).await?;
-    if let Some(provider) = resident_owner {
-        return upload_logical_result(provider, result);
-    }
-    Ok(result)
+    restore_explicit_comparison_result(result, source.as_ref(), BUILTIN_NAME)
 }
 
 async fn try_ge_gpu(
@@ -255,23 +243,6 @@ fn try_fill_like(proto: &GpuTensorHandle, other: &Value) -> Option<GpuTensorHand
         return None;
     }
     provider.fill_like(proto, scalar).ok()
-}
-
-fn upload_logical_result(
-    provider: &'static dyn runmat_accelerate_api::AccelProvider,
-    result: Value,
-) -> crate::BuiltinResult<Value> {
-    let tensor = match result {
-        Value::Bool(flag) => Tensor::new(vec![if flag { 1.0 } else { 0.0 }], vec![1, 1])
-            .map_err(|_| ge_error(&GE_ERROR_INVALID_INPUT))?,
-        Value::LogicalArray(array) => {
-            tensor::logical_to_tensor(&array).map_err(|_| ge_error(&GE_ERROR_INVALID_INPUT))?
-        }
-        _ => return Err(ge_error(&GE_ERROR_INVALID_INPUT)),
-    };
-    let handle = gpu_helpers::upload_tensor(provider, &tensor)
-        .map_err(|_| ge_error(&GE_ERROR_INVALID_INPUT))?;
-    Ok(gpu_helpers::logical_gpu_value(handle))
 }
 
 async fn ge_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {

@@ -1076,24 +1076,21 @@ mod tests {
                 Value::from("rectpuls"),
                 vec![Value::Num(0.25)],
             );
-            if provider.precision() == runmat_accelerate_api::ProviderPrecision::F64 {
-                let output = result.expect("resident integer pulstran");
-                let Value::GpuTensor(output_handle) = &output else {
-                    panic!("expected resident output");
-                };
-                assert!(runmat_accelerate_api::handle_is_explicit(output_handle));
-                assert_eq!(
-                    test_support::gather(output)
-                        .expect("gather")
-                        .materialize_f64(),
-                    vec![1.0, 0.0]
-                );
-            } else {
-                let error = result.expect_err("f32 owner cannot preserve double output");
-                assert!(error
-                    .message()
-                    .contains("cannot preserve explicit gpuArray"));
-            }
+            let output = result.expect("resident integer pulstran");
+            let Value::GpuTensor(output_handle) = &output else {
+                panic!("expected resident output");
+            };
+            assert!(runmat_accelerate_api::handle_is_explicit(output_handle));
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(output_handle),
+                Some(runmat_accelerate_api::ProviderPrecision::F64)
+            );
+            assert_eq!(
+                test_support::gather(output)
+                    .expect("gather")
+                    .materialize_f64(),
+                vec![1.0, 0.0]
+            );
         }
     }
 

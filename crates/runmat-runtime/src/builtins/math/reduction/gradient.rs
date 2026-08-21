@@ -661,27 +661,6 @@ fn restore_gradient_outputs_if_supported(
     let Some(provider) = provider else {
         return Ok(outputs);
     };
-    let precision_matches = outputs.iter().all(|value| match value {
-        Value::Num(_) | Value::Complex(_, _) => {
-            provider.precision() == runmat_accelerate_api::ProviderPrecision::F64
-        }
-        Value::Tensor(tensor) => match tensor.numeric_dtype() {
-            NumericDType::F32 => {
-                provider.precision() == runmat_accelerate_api::ProviderPrecision::F32
-            }
-            _ => provider.precision() == runmat_accelerate_api::ProviderPrecision::F64,
-        },
-        Value::ComplexTensor(tensor) => match tensor.numeric_dtype() {
-            NumericDType::F32 => {
-                provider.precision() == runmat_accelerate_api::ProviderPrecision::F32
-            }
-            _ => provider.precision() == runmat_accelerate_api::ProviderPrecision::F64,
-        },
-        _ => false,
-    });
-    if !precision_matches {
-        return Ok(outputs);
-    }
     let mut restored = Vec::with_capacity(outputs.len());
     for output in outputs.iter().cloned() {
         let protected = std::iter::once(prototype.clone())

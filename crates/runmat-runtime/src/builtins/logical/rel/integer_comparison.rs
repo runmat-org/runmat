@@ -86,8 +86,7 @@ pub(crate) fn restore_explicit_comparison_result(
     source: Option<&GpuTensorHandle>,
     builtin: &str,
 ) -> crate::BuiltinResult<Value> {
-    let Some(source) = source.filter(|handle| runmat_accelerate_api::handle_is_explicit(handle))
-    else {
+    let Some(source) = source else {
         return Ok(value);
     };
     let value = match value {
@@ -103,7 +102,8 @@ pub(crate) fn restore_explicit_comparison_result(
         value => value,
     };
     let restored = gpu_helpers::restore_class_preserving_value(source, value, builtin)?;
-    if !matches!(restored, Value::GpuTensor(_)) {
+    if runmat_accelerate_api::handle_is_explicit(source) && !matches!(restored, Value::GpuTensor(_))
+    {
         return Err(crate::build_runtime_error(format!(
             "{builtin}: provider cannot preserve explicit gpuArray output residency"
         ))
@@ -1374,7 +1374,9 @@ mod tests {
                 )
                 .expect("resident complex ordering");
                 assert!(
-                    matches!(&result, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+                    matches!(&result, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle)),
+                    "{builtin} did not preserve logical residency for rhs storage {:?}: {result:?}",
+                    runmat_accelerate_api::handle_storage(rhs)
                 );
                 let gathered = test_support::gather(result).expect("gather logical result");
                 assert_eq!(gathered.shape, vec![1, 2]);

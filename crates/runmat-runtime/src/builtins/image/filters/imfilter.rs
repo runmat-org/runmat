@@ -475,12 +475,6 @@ async fn download_kernel_tensor(handle: &GpuTensorHandle) -> BuiltinResult<Tenso
             "no acceleration provider owns H",
         )
     })?;
-    if provider.precision() != ProviderPrecision::F64 {
-        return Err(imfilter_error_with_detail(
-            &IMFILTER_ERROR_INVALID_INPUT,
-            "H is labelled double but its owner cannot physically represent double storage",
-        ));
-    }
     let metadata = gpu_helpers::snapshot_handle_metadata(handle);
     let result = gpu_helpers::download_value_preserving_residency_async(provider, handle).await;
     gpu_helpers::restore_handle_metadata(handle, &metadata);
@@ -526,16 +520,6 @@ async fn imfilter_gpu(
     let provider = gpu_helpers::exact_provider_for_handle(&image_handle).ok_or_else(|| {
         imfilter_error_with_detail(&IMFILTER_ERROR_INTERNAL, "no acceleration provider owns A")
     })?;
-    if output_class
-        .provider_precision()
-        .is_some_and(|precision| precision != provider.precision())
-    {
-        return Err(imfilter_error_with_detail(
-            &IMFILTER_ERROR_INVALID_INPUT,
-            "A GPU precision metadata contradicts its owning provider",
-        ));
-    }
-
     let (kernel_tensor, resident_kernel) = match kernel_value {
         Value::GpuTensor(handle) => (download_kernel_tensor(&handle).await?, Some(handle)),
         other => (host_kernel_tensor(other)?, None),
@@ -554,6 +538,9 @@ async fn imfilter_gpu(
     let Some(expected_precision) = output_class.provider_precision() else {
         return imfilter_gpu_host_fallback(provider, &image_handle, &kernel_tensor, &options).await;
     };
+    if expected_precision != provider.precision() {
+        return imfilter_gpu_host_fallback(provider, &image_handle, &kernel_tensor, &options).await;
+    }
     let mut uploaded_kernel = None;
     let kernel_handle = if let Some(handle) = resident_kernel {
         let same_owner = gpu_helpers::exact_provider_for_handle(&handle)
@@ -2060,21 +2047,12 @@ pub(crate) mod tests {
         );
         let provider = runmat_accelerate_api::provider().expect("wgpu provider registered");
 
-        let shape = vec![1; runmat_accelerate::backend::wgpu::params::IMFILTER_MAX_RANK + 1];
-        let image = Tensor::new(vec![2.0], shape.clone()).expect("higher-rank image");
-        let kernel = Tensor::new(vec![3.0], shape.clone()).expect("higher-rank kernel");
-        let image_handle = provider
-            .upload(&HostTensorView {
-                data: image.as_f64_slice().expect("double image storage"),
-                shape: &image.shape,
-            })
-            .expect("upload image");
-        let kernel_handle = provider
-            .upload(&HostTensorView {
-                data: kernel.as_f64_slice().expect("double kernel storage"),
-                shape: &kernel.shape,
-            })
-            .expect("upload kernel");
+        let mut shape = vec![1; runmat_accelerate::backend::wgpu::params::IMFILTER_MAX_RANK + 1];
+        *shape.last_mut().expect("non-empty shape") = 2;
+        let image = Tensor::new(vec![2.0, 4.0], shape.clone()).expect("higher-rank image");
+        let kernel = Tensor::new(vec![3.0], vec![1, 1]).expect("scalar kernel");
+        let image_handle = gpu_helpers::upload_tensor(provider, &image).expect("upload image");
+        let kernel_handle = gpu_helpers::upload_tensor(provider, &kernel).expect("upload kernel");
 
         let filtered = block_on(imfilter_builtin(
             Value::GpuTensor(image_handle),
@@ -2085,7 +2063,7 @@ pub(crate) mod tests {
         let gathered = test_support::gather(filtered).expect("gather higher-rank output");
 
         assert_eq!(gathered.shape, shape);
-        assert_eq!(gathered.materialize_f64(), vec![6.0]);
+        assert_eq!(gathered.materialize_f64(), vec![6.0, 12.0]);
     }
 
     #[test]

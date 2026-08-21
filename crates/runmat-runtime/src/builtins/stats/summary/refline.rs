@@ -851,22 +851,14 @@ mod tests {
         let context = crate::builtins::plotting::context::ensure_context_from_provider()
             .expect("shared plotting context");
 
-        let x = block_on(crate::call_builtin_async(
-            "gpuArray",
-            &[tensor(vec![1.0, 2.0, 3.0], 1, 3)],
-        ))
-        .expect("gpu x");
-        let y = block_on(crate::call_builtin_async(
-            "gpuArray",
-            &[tensor(vec![2.0, 4.0, 6.0], 1, 3)],
-        ))
-        .expect("gpu y");
-        let Value::GpuTensor(x_handle) = x.clone() else {
-            panic!("expected gpu x");
-        };
-        let Value::GpuTensor(y_handle) = y.clone() else {
-            panic!("expected gpu y");
-        };
+        let x_tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).expect("x tensor");
+        let y_tensor = Tensor::new(vec![2.0, 4.0, 6.0], vec![1, 3]).expect("y tensor");
+        let x_handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &x_tensor)
+            .expect("gpu x");
+        let y_handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &y_tensor)
+            .expect("gpu y");
+        let x = Value::GpuTensor(x_handle.clone());
+        let y = Value::GpuTensor(y_handle.clone());
         let x_ref = runmat_accelerate_api::export_wgpu_buffer(&x_handle).expect("export x");
         let y_ref = runmat_accelerate_api::export_wgpu_buffer(&y_handle).expect("export y");
         let dummy_vertices = context.device.create_buffer(&wgpu::BufferDescriptor {

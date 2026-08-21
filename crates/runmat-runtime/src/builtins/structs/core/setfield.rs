@@ -2056,7 +2056,7 @@ pub(crate) mod tests {
                 match values {
                     Value::Tensor(tensor) => {
                         assert_eq!(tensor.shape, vec![2, 2]);
-                        assert_eq!(tensor.numeric_value_at(3), Some(NumericScalar::F64(99.0)));
+                        assert_eq!(tensor.numeric_value_at(3), Some(NumericScalar::F32(99.0)));
                     }
                     other => panic!("expected tensor after gather, got {other:?}"),
                 }

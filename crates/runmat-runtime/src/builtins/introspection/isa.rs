@@ -686,11 +686,8 @@ pub(crate) mod tests {
         };
 
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let view = HostTensorView {
-            data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
-        };
-        let handle = provider.upload(&view).expect("wgpu upload");
+        let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+            .expect("wgpu upload");
         let value = Value::GpuTensor(handle);
 
         let numeric = isa_builtin(value.clone(), Value::from("numeric")).expect("isa numeric");

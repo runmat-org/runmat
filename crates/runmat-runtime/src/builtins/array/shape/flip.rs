@@ -1350,6 +1350,7 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn flip_wgpu_matches_cpu() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );

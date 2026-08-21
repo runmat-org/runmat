@@ -1452,7 +1452,7 @@ pub(crate) mod tests {
 
     #[test]
     #[cfg(feature = "wgpu")]
-    fn norm_wgpu_integer_fallback_preserves_class_and_explicit_intent() {
+    fn norm_wgpu_integer_fallback_preserves_residency_and_explicit_intent() {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
@@ -1461,11 +1461,14 @@ pub(crate) mod tests {
         let input = Tensor::new_integer(IntegerStorage::I16(vec![3, 4]), vec![2, 1]).unwrap();
         let handle = gpu_helpers::upload_tensor(provider, &input).expect("integer upload");
         let out = norm_builtin(Value::GpuTensor(handle.clone()), Vec::new()).expect("norm");
-        assert!(matches!(out, Value::Num(value) if (value - 5.0).abs() < 1.0e-12));
+        assert!(matches!(out, Value::GpuTensor(_)));
+        let gathered = test_support::gather(out).expect("gather automatic result");
+        assert_close(gathered.materialize_f64()[0], 5.0);
         let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
-        let error = norm_builtin(Value::GpuTensor(handle), Vec::new())
-            .expect_err("explicit output class mismatch must reject");
-        assert!(error.message.contains("cannot preserve explicit gpuArray"));
+        let out = norm_builtin(Value::GpuTensor(handle), Vec::new()).expect("explicit norm");
+        assert!(matches!(out, Value::GpuTensor(_)));
+        let gathered = test_support::gather(out).expect("gather explicit result");
+        assert_close(gathered.materialize_f64()[0], 5.0);
     }
 
     fn norm_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

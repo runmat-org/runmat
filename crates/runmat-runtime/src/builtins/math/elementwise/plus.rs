@@ -675,10 +675,11 @@ fn broadcast_reps(a: &[usize], b: &[usize]) -> Option<(Vec<usize>, Vec<usize>, V
 
 async fn plus_gpu_host_left(lhs: GpuTensorHandle, rhs: Value) -> BuiltinResult<Value> {
     if is_real_integer_operand(&rhs) {
-        let host_lhs = gpu_helpers::gather_value_async(&Value::GpuTensor(lhs))
+        let host_lhs = gpu_helpers::gather_value_async(&Value::GpuTensor(lhs.clone()))
             .await
             .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-        return plus_host(host_lhs, rhs);
+        let host = plus_host(host_lhs, rhs)?;
+        return gpu_helpers::restore_class_preserving_value(&lhs, host, BUILTIN_NAME);
     }
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(scalar) = extract_scalar_f64(&rhs)? {
@@ -704,10 +705,11 @@ async fn plus_gpu_host_left(lhs: GpuTensorHandle, rhs: Value) -> BuiltinResult<V
 
 async fn plus_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> BuiltinResult<Value> {
     if is_real_integer_operand(&lhs) {
-        let host_rhs = gpu_helpers::gather_value_async(&Value::GpuTensor(rhs))
+        let host_rhs = gpu_helpers::gather_value_async(&Value::GpuTensor(rhs.clone()))
             .await
             .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-        return plus_host(lhs, host_rhs);
+        let host = plus_host(lhs, host_rhs)?;
+        return gpu_helpers::restore_class_preserving_value(&rhs, host, BUILTIN_NAME);
     }
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(scalar) = extract_scalar_f64(&lhs)? {
@@ -1530,9 +1532,10 @@ pub(crate) mod tests {
                 Vec::new(),
             )
             .expect("exact gpu-host integer plus");
-            let Value::Tensor(result) = result else {
-                panic!("expected gathered exact integer tensor");
+            let Value::GpuTensor(result) = result else {
+                panic!("expected resident exact integer tensor");
             };
+            let result = test_support::gather(Value::GpuTensor(result)).expect("gather result");
             assert_eq!(
                 result.integer_storage(),
                 Some(&IntegerStorage::U64(vec![wide + 1, u64::MAX]))

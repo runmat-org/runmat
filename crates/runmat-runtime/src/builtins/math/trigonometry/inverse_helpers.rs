@@ -160,13 +160,6 @@ pub(crate) fn upload_value_protected(
             .build())
         }
     };
-    if expected_precision.is_some_and(|precision| provider.precision() != precision) {
-        return Err(build_runtime_error(format!(
-            "{builtin}: input provider cannot restore the requested result precision"
-        ))
-        .with_builtin(builtin)
-        .build());
-    }
     let handle = match value {
         Value::Num(value) => {
             let tensor = Tensor::new(vec![value], vec![1, 1]).map_err(|error| {
@@ -630,23 +623,29 @@ mod tests {
     }
 
     #[test]
-    fn restore_rejects_double_before_upload_on_f32_only_provider() {
+    fn restore_rejects_double_when_f32_only_provider_declines_typed_upload() {
         let provider = F32OnlyProvider {
             upload_calls: AtomicUsize::new(0),
         };
         let error = upload_value(&provider, Value::Num(1.0000000000000002), "restore-test")
             .expect_err("f32-only provider cannot supply a double result");
-        assert!(error.message().contains("requested result precision"));
-        assert_eq!(provider.upload_calls.load(Ordering::SeqCst), 0);
+        assert!(error.message().contains("failed to restore result"));
+        assert_eq!(provider.upload_calls.load(Ordering::SeqCst), 1);
     }
 
     #[test]
-    fn restore_rejects_single_before_upload_on_f64_only_provider() {
+    fn restore_accepts_single_when_provider_supports_typed_upload() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::from_f32(vec![1.0000001], vec![1, 1]).expect("single");
-            let error = upload_value(provider, Value::Tensor(tensor), "restore-test")
-                .expect_err("f64-only provider cannot supply a single result");
-            assert!(error.message().contains("requested result precision"));
+            let output = upload_value(provider, Value::Tensor(tensor), "restore-test")
+                .expect("typed single result");
+            let Value::GpuTensor(handle) = output else {
+                panic!("expected resident single output");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(&handle),
+                Some(runmat_accelerate_api::ProviderPrecision::F32)
+            );
         });
     }
 }

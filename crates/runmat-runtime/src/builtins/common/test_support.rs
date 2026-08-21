@@ -135,6 +135,9 @@ impl runmat_accelerate_api::AccelProvider for F32TestProvider {
         &self,
         host: &runmat_accelerate_api::HostNumericTensorView,
     ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+        if host.data.element_type() == runmat_accelerate_api::NumericElementType::F64 {
+            anyhow::bail!("f32 test provider cannot store native double payloads");
+        }
         self.inner.upload_numeric(host)
     }
 

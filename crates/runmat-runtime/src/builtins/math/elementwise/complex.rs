@@ -1630,18 +1630,8 @@ pub(crate) mod tests {
             vec![Value::Tensor(imag.clone())],
         )
         .expect("cpu complex");
-        let real_handle = provider
-            .upload(&runmat_accelerate_api::HostTensorView {
-                data: &real.materialize_f64(),
-                shape: &real.shape,
-            })
-            .expect("upload real");
-        let imag_handle = provider
-            .upload(&runmat_accelerate_api::HostTensorView {
-                data: &imag.materialize_f64(),
-                shape: &imag.shape,
-            })
-            .expect("upload imag");
+        let real_handle = gpu_helpers::upload_tensor(provider, &real).expect("upload real");
+        let imag_handle = gpu_helpers::upload_tensor(provider, &imag).expect("upload imag");
         let result = complex_call(
             Value::GpuTensor(real_handle),
             vec![Value::GpuTensor(imag_handle)],
@@ -1707,12 +1697,7 @@ pub(crate) mod tests {
         let imag = Tensor::new(vec![-1.0, 0.5, 4.0], vec![3, 1]).unwrap();
         let expected =
             complex_call(Value::Num(2.0), vec![Value::Tensor(imag.clone())]).expect("cpu complex");
-        let imag_handle = provider
-            .upload(&runmat_accelerate_api::HostTensorView {
-                data: &imag.materialize_f64(),
-                shape: &imag.shape,
-            })
-            .expect("upload imag");
+        let imag_handle = gpu_helpers::upload_tensor(provider, &imag).expect("upload imag");
         let result = complex_call(Value::Num(2.0), vec![Value::GpuTensor(imag_handle)])
             .expect("gpu complex");
         let Value::GpuTensor(out) = result else {

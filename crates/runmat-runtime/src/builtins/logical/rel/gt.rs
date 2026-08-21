@@ -20,6 +20,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::logical::rel::integer_comparison::{
+    restore_explicit_comparison_result, select_comparison_output_source,
     try_complex_ordering_comparison, try_gpu_ordering_comparison, try_integer_comparison,
     IntegerComparisonError, IntegerComparisonOp,
 };
@@ -173,24 +174,7 @@ fn gt_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     builtin_path = "crate::builtins::logical::rel::gt"
 )]
 async fn gt_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let protected_handles = [&lhs, &rhs]
-        .into_iter()
-        .filter_map(|value| match value {
-            Value::GpuTensor(handle) => Some(handle.clone()),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    let has_resident_input =
-        matches!(&lhs, Value::GpuTensor(_)) || matches!(&rhs, Value::GpuTensor(_));
-    let resident_owner = match (&lhs, &rhs) {
-        (Value::GpuTensor(handle), _) | (_, Value::GpuTensor(handle)) => {
-            runmat_accelerate_api::provider_for_handle(handle)
-        }
-        _ => None,
-    };
-    if has_resident_input && resident_owner.is_none() {
-        return Err(gt_error(&GT_ERROR_INVALID_INPUT));
-    }
+    let source = select_comparison_output_source(&lhs, &rhs, BUILTIN_NAME)?;
     match (&lhs, &rhs) {
         (Value::GpuTensor(a), Value::GpuTensor(b)) => {
             if runmat_accelerate_api::handle_integer_type(a).is_none()
@@ -205,10 +189,7 @@ async fn gt_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
         _ => {}
     }
     let result = gt_host(lhs, rhs).await?;
-    if let Some(provider) = resident_owner {
-        return upload_logical_result(provider, result, &protected_handles);
-    }
-    Ok(result)
+    restore_explicit_comparison_result(result, source.as_ref(), BUILTIN_NAME)
 }
 
 async fn try_gt_gpu(
@@ -216,53 +197,6 @@ async fn try_gt_gpu(
     b: &GpuTensorHandle,
 ) -> Option<crate::BuiltinResult<Value>> {
     try_gpu_ordering_comparison(a, b, IntegerComparisonOp::Gt).await
-}
-
-fn upload_logical_result(
-    provider: &'static dyn runmat_accelerate_api::AccelProvider,
-    result: Value,
-    protected_handles: &[GpuTensorHandle],
-) -> crate::BuiltinResult<Value> {
-    let fallback = result.clone();
-    let tensor = match result {
-        Value::Bool(flag) => Tensor::new(vec![if flag { 1.0 } else { 0.0 }], vec![1, 1])
-            .map_err(|_| gt_error(&GT_ERROR_INVALID_INPUT))?,
-        Value::LogicalArray(array) => {
-            tensor::logical_to_tensor(&array).map_err(|_| gt_error(&GT_ERROR_INVALID_INPUT))?
-        }
-        _ => return Err(gt_error(&GT_ERROR_INVALID_INPUT)),
-    };
-    let handle = match gpu_helpers::upload_tensor(provider, &tensor) {
-        Ok(handle) => handle,
-        Err(_) => return Ok(fallback),
-    };
-    let valid = handle.shape == tensor.shape
-        && handle.device_id == provider.device_id()
-        && runmat_accelerate_api::handle_storage(&handle)
-            == runmat_accelerate_api::GpuTensorStorage::Real
-        && runmat_accelerate_api::handle_precision(&handle) == Some(provider.precision())
-        && runmat_accelerate_api::handle_integer_type(&handle).is_none()
-        && !runmat_accelerate_api::handle_is_logical(&handle)
-        && protected_handles.iter().all(|protected| {
-            protected.device_id != handle.device_id || protected.buffer_id != handle.buffer_id
-        })
-        && runmat_accelerate_api::provider_for_handle(&handle)
-            .filter(|owner| owner.device_id() == handle.device_id)
-            .is_some_and(|owner| std::ptr::eq(owner, provider));
-    if !valid {
-        let aliases_protected = protected_handles.iter().any(|protected| {
-            protected.device_id == handle.device_id && protected.buffer_id == handle.buffer_id
-        });
-        if !aliases_protected {
-            if let Some(owner) = runmat_accelerate_api::provider_for_handle(&handle)
-                .filter(|owner| owner.device_id() == handle.device_id)
-            {
-                let _ = owner.free(&handle);
-            }
-        }
-        return Ok(fallback);
-    }
-    Ok(gpu_helpers::logical_gpu_value(handle))
 }
 
 async fn gt_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {

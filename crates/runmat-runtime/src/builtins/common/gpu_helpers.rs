@@ -752,6 +752,50 @@ pub fn restore_class_preserving_value(
     value: Value,
     builtin: &str,
 ) -> crate::BuiltinResult<Value> {
+    let value = match value {
+        Value::Num(number) => {
+            let tensor = Tensor::new(vec![number], vec![1, 1]).map_err(|error| {
+                build_runtime_error(format!("{builtin}: invalid scalar result: {error}"))
+                    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                    .build()
+            })?;
+            return match restore_class_preserving_value(source, Value::Tensor(tensor), builtin)? {
+                Value::Tensor(_) => Ok(Value::Num(number)),
+                restored => Ok(restored),
+            };
+        }
+        Value::Complex(real, imag) => {
+            let tensor = ComplexTensor::new(vec![(real, imag)], vec![1, 1]).map_err(|error| {
+                build_runtime_error(format!("{builtin}: invalid complex scalar result: {error}"))
+                    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                    .build()
+            })?;
+            return match restore_class_preserving_value(
+                source,
+                Value::ComplexTensor(tensor),
+                builtin,
+            )? {
+                Value::ComplexTensor(_) => Ok(Value::Complex(real, imag)),
+                restored => Ok(restored),
+            };
+        }
+        Value::Bool(bit) => {
+            let logical = LogicalArray::new(vec![u8::from(bit)], vec![1, 1]).map_err(|error| {
+                build_runtime_error(format!("{builtin}: invalid logical scalar result: {error}"))
+                    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                    .build()
+            })?;
+            return match restore_class_preserving_value(
+                source,
+                Value::LogicalArray(logical),
+                builtin,
+            )? {
+                Value::LogicalArray(_) => Ok(Value::Bool(bit)),
+                restored => Ok(restored),
+            };
+        }
+        value => value,
+    };
     let provider = exact_provider_for_handle(source).ok_or_else(|| {
         build_runtime_error(format!(
             "{builtin}: no acceleration provider owns the input handle"
@@ -783,7 +827,6 @@ pub fn restore_class_preserving_value(
                 Ok(output) => output,
                 Err(_)
                     if expected_integer.is_none()
-                        && expected_precision != Some(provider.precision())
                         && !runmat_accelerate_api::handle_is_explicit(source) =>
                 {
                     return Ok(value)
@@ -850,7 +893,6 @@ pub fn restore_class_preserving_value(
                 Ok(output) => output,
                 Err(_)
                     if expected_integer.is_none()
-                        && expected_precision != Some(provider.precision())
                         && !runmat_accelerate_api::handle_is_explicit(source) =>
                 {
                     return Ok(value)

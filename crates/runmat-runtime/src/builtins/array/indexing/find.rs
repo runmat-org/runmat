@@ -1474,7 +1474,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn find_f32_resident_fallback_returns_resident_double_indices() {
+    fn find_f32_resident_fallback_returns_host_double_indices_when_owner_cannot_store_double() {
         test_support::with_f32_test_provider(|provider| {
             let values = [0.0, 4.0, 0.0, 7.0];
             let handle = provider
@@ -1485,19 +1485,10 @@ pub(crate) mod tests {
                 .expect("upload f32-owner input");
 
             let eval = evaluate(Value::GpuTensor(handle), &[]).expect("find fallback");
-            let Value::GpuTensor(indices_handle) = eval.linear_value().expect("linear indices")
-            else {
-                panic!("expected resident double indices");
+            let Value::Tensor(indices) = eval.linear_value().expect("linear indices") else {
+                panic!("expected host double indices");
             };
-            assert_eq!(
-                runmat_accelerate_api::handle_precision(&indices_handle),
-                Some(runmat_accelerate_api::ProviderPrecision::F64)
-            );
-            assert_eq!(
-                runmat_accelerate_api::handle_integer_type(&indices_handle),
-                None
-            );
-            let indices = test_support::gather(Value::GpuTensor(indices_handle)).expect("gather");
+            assert_eq!(indices.numeric_dtype(), runmat_value::NumericDType::F64);
             assert_eq!(indices.materialize_f64(), vec![2.0, 4.0]);
         });
     }
@@ -2020,8 +2011,9 @@ pub(crate) mod tests {
             .expect("find last");
 
             let linear = eval.linear_value().expect("linear indices");
-            assert!(matches!(linear, Value::GpuTensor(_)));
-            let linear = test_support::gather(linear).expect("gather linear indices");
+            let Value::Tensor(linear) = linear else {
+                panic!("double indices must fall back to host storage");
+            };
             assert_eq!(linear.shape, vec![1, 2]);
             assert_eq!(linear.materialize_f64(), vec![3.0, 4.0]);
 

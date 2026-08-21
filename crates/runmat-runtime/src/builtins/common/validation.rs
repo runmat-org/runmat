@@ -1141,17 +1141,16 @@ pub fn validate_resident_metadata(value: &Value) -> BuiltinResult<()> {
     let Value::GpuTensor(handle) = value else {
         return Ok(());
     };
-    let owner = crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
-        .ok_or_else(|| {
-            build_runtime_error(VALIDATION_ERROR_PROVIDER_OWNERSHIP.message)
-                .with_identifier(
-                    VALIDATION_ERROR_PROVIDER_OWNERSHIP
-                        .identifier
-                        .expect("validator provider-ownership descriptor identifier"),
-                )
-                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                .build()
-        })?;
+    crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle).ok_or_else(|| {
+        build_runtime_error(VALIDATION_ERROR_PROVIDER_OWNERSHIP.message)
+            .with_identifier(
+                VALIDATION_ERROR_PROVIDER_OWNERSHIP
+                    .identifier
+                    .expect("validator provider-ownership descriptor identifier"),
+            )
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build()
+    })?;
     let storage = handle_storage(handle);
     let integer = handle_integer_type(handle);
     let logical = handle_is_logical(handle);
@@ -1164,9 +1163,9 @@ pub fn validate_resident_metadata(value: &Value) -> BuiltinResult<()> {
     let physical_valid = if integer.is_some() {
         storage == GpuTensorStorage::Real && precision.is_none() && !logical
     } else if logical {
-        storage == GpuTensorStorage::Real && precision == Some(owner.precision())
+        storage == GpuTensorStorage::Real && precision.is_some()
     } else {
-        precision == Some(owner.precision())
+        precision.is_some()
     };
     if !physical_valid || !class_valid {
         return Err(

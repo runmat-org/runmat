@@ -901,7 +901,7 @@ async fn initialize_async() -> Option<NativeAutoOffload> {
     let needs_calibration = calibrate_enabled() && (refresh_calibration || cache_path.is_none());
     if needs_calibration {
         let start = Instant::now();
-        match auto_calibrate(provider, &mut config) {
+        match auto_calibrate(provider, &mut config).await {
             Ok(()) => {
                 calibrate_duration_ms = Some(start.elapsed().as_millis());
                 base_source = ThresholdBase::Calibrated;
@@ -2248,19 +2248,22 @@ fn slugify(input: &str) -> String {
     }
 }
 
-fn auto_calibrate(provider: &'static dyn AccelProvider, cfg: &mut ThresholdConfig) -> Result<()> {
-    if let Some(elem_threshold) = calibrate_elemwise(provider, cfg).transpose()? {
+async fn auto_calibrate(
+    provider: &'static dyn AccelProvider,
+    cfg: &mut ThresholdConfig,
+) -> Result<()> {
+    if let Some(elem_threshold) = calibrate_elemwise(provider, cfg).await.transpose()? {
         if elem_threshold != usize::MAX {
             cfg.binary_min_elems = elem_threshold;
             cfg.unary_min_elems = cfg.unary_min_elems.min(elem_threshold);
         }
     }
-    if let Some(red_threshold) = calibrate_reduction(provider, cfg).transpose()? {
+    if let Some(red_threshold) = calibrate_reduction(provider, cfg).await.transpose()? {
         if red_threshold != usize::MAX {
             cfg.reduction_min_elems = red_threshold;
         }
     }
-    if let Some(matmul_threshold) = calibrate_matmul(provider, cfg).transpose()? {
+    if let Some(matmul_threshold) = calibrate_matmul(provider, cfg).await.transpose()? {
         if matmul_threshold != usize::MAX {
             cfg.matmul_min_flops = matmul_threshold;
         }
@@ -2268,13 +2271,13 @@ fn auto_calibrate(provider: &'static dyn AccelProvider, cfg: &mut ThresholdConfi
     Ok(())
 }
 
-fn calibrate_elemwise(
+async fn calibrate_elemwise(
     provider: &'static dyn AccelProvider,
     cfg: &mut ThresholdConfig,
 ) -> Option<Result<usize>> {
     let sizes = [256usize, 1_024, 4_096, 16_384, 65_536];
     for size in sizes {
-        match compare_elemwise(provider, size, &mut cfg.cpu_elem_per_elem) {
+        match compare_elemwise(provider, size, &mut cfg.cpu_elem_per_elem).await {
             Ok(Some(true)) => return Some(Ok(size)),
             Ok(Some(false)) => continue,
             Ok(None) => return None,
@@ -2284,7 +2287,7 @@ fn calibrate_elemwise(
     Some(Ok(usize::MAX))
 }
 
-fn compare_elemwise(
+async fn compare_elemwise(
     provider: &'static dyn AccelProvider,
     elements: usize,
     cpu_cost_slot: &mut f64,
@@ -2303,9 +2306,16 @@ fn compare_elemwise(
                 .map_err(|e| anyhow!(e))?
         }
     };
-    let a = Value::Tensor(template.clone());
-    let b = Value::Tensor(template.clone());
-    let cpu_time = time(|| runmat_runtime::call_builtin("plus", &[a.clone(), b.clone()]))?;
+    let cpu_data = template.materialize_f64();
+    let cpu_time = time_cpu(|| {
+        std::hint::black_box(
+            cpu_data
+                .iter()
+                .zip(&cpu_data)
+                .map(|(lhs, rhs)| lhs + rhs)
+                .collect::<Vec<_>>(),
+        )
+    });
     let cpu_per_elem = cpu_time.as_secs_f64() / elements as f64;
     update_cpu_cost(cpu_cost_slot, cpu_per_elem);
     if let Some(model) = profile_cost_model() {
@@ -2327,7 +2337,7 @@ fn compare_elemwise(
     let ha = provider.upload(&view).map_err(|e| anyhow!(e.to_string()))?;
     let hb = provider.upload(&view).map_err(|e| anyhow!(e.to_string()))?;
     let start = Instant::now();
-    let hc = match futures::executor::block_on(provider.elem_add(&ha, &hb)) {
+    let hc = match provider.elem_add(&ha, &hb).await {
         Ok(h) => h,
         Err(_) => {
             let _ = provider.free(&ha);
@@ -2342,13 +2352,13 @@ fn compare_elemwise(
     Ok(Some(gpu_time < cpu_time))
 }
 
-fn calibrate_reduction(
+async fn calibrate_reduction(
     provider: &'static dyn AccelProvider,
     cfg: &mut ThresholdConfig,
 ) -> Option<Result<usize>> {
     let sizes = [256usize, 1_024, 4_096, 16_384, 65_536];
     for size in sizes {
-        match compare_reduction(provider, size, &mut cfg.cpu_reduction_per_elem) {
+        match compare_reduction(provider, size, &mut cfg.cpu_reduction_per_elem).await {
             Ok(Some(true)) => return Some(Ok(size)),
             Ok(Some(false)) => continue,
             Ok(None) => return None,
@@ -2358,7 +2368,7 @@ fn calibrate_reduction(
     Some(Ok(usize::MAX))
 }
 
-fn compare_reduction(
+async fn compare_reduction(
     provider: &'static dyn AccelProvider,
     elements: usize,
     cpu_cost_slot: &mut f64,
@@ -2374,8 +2384,8 @@ fn compare_reduction(
                 .map_err(|e| anyhow!(e))?
         }
     };
-    let value = Value::Tensor(template.clone());
-    let cpu_time = time(|| runmat_runtime::call_builtin("sum", std::slice::from_ref(&value)))?;
+    let cpu_data = template.materialize_f64();
+    let cpu_time = time_cpu(|| std::hint::black_box(cpu_data.iter().sum::<f64>()));
     let cpu_per_elem = cpu_time.as_secs_f64() / elements as f64;
     update_cpu_cost(cpu_cost_slot, cpu_per_elem);
     if let Some(model) = profile_cost_model() {
@@ -2396,7 +2406,7 @@ fn compare_reduction(
     };
     let h = provider.upload(&view).map_err(|e| anyhow!(e.to_string()))?;
     let start = Instant::now();
-    let out = match futures::executor::block_on(provider.reduce_sum(&h)) {
+    let out = match provider.reduce_sum(&h).await {
         Ok(hc) => hc,
         Err(_) => {
             provider.free(&h).ok();
@@ -2409,13 +2419,13 @@ fn compare_reduction(
     Ok(Some(gpu_time < cpu_time))
 }
 
-fn calibrate_matmul(
+async fn calibrate_matmul(
     provider: &'static dyn AccelProvider,
     cfg: &mut ThresholdConfig,
 ) -> Option<Result<usize>> {
     let dims = [32usize, 64, 96, 128, 192];
     for n in dims {
-        match compare_matmul(provider, n, &mut cfg.cpu_matmul_per_flop) {
+        match compare_matmul(provider, n, &mut cfg.cpu_matmul_per_flop).await {
             Ok(Some(true)) => {
                 let flops = n * n * n;
                 return Some(Ok(flops));
@@ -2428,7 +2438,7 @@ fn calibrate_matmul(
     Some(Ok(usize::MAX))
 }
 
-fn compare_matmul(
+async fn compare_matmul(
     provider: &'static dyn AccelProvider,
     n: usize,
     cpu_cost_slot: &mut f64,
@@ -2454,9 +2464,21 @@ fn compare_matmul(
             (ta, tb)
         }
     };
-    let a = Value::Tensor(ta.clone());
-    let b = Value::Tensor(tb.clone());
-    let cpu_time = time(|| futures::executor::block_on(runmat_runtime::value_matmul(&a, &b)))?;
+    let cpu_a = ta.materialize_f64();
+    let cpu_b = tb.materialize_f64();
+    let cpu_time = time_cpu(|| {
+        let mut output = vec![0.0; total];
+        for col in 0..n {
+            for row in 0..n {
+                let mut value = 0.0;
+                for inner in 0..n {
+                    value += cpu_a[row + inner * n] * cpu_b[inner + col * n];
+                }
+                output[row + col * n] = value;
+            }
+        }
+        std::hint::black_box(output)
+    });
     let flops = (n * n * n) as f64;
     update_cpu_cost(cpu_cost_slot, cpu_time.as_secs_f64() / flops);
     if let Some(model) = profile_cost_model() {
@@ -2487,7 +2509,7 @@ fn compare_matmul(
         .upload(&view_b)
         .map_err(|e| anyhow!(e.to_string()))?;
     let start = Instant::now();
-    let hc = match futures::executor::block_on(provider.matmul(&ha, &hb)) {
+    let hc = match provider.matmul(&ha, &hb).await {
         Ok(h) => h,
         Err(_) => {
             let _ = provider.free(&ha);
@@ -2502,13 +2524,13 @@ fn compare_matmul(
     Ok(Some(gpu_time < cpu_time))
 }
 
-fn time<F, T>(mut f: F) -> Result<Duration>
+fn time_cpu<F, T>(mut f: F) -> Duration
 where
-    F: FnMut() -> runmat_runtime::BuiltinResult<T>,
+    F: FnMut() -> T,
 {
     let start = Instant::now();
-    let _ = f().map_err(|err| anyhow!(err))?;
-    Ok(start.elapsed())
+    std::hint::black_box(f());
+    start.elapsed()
 }
 
 pub fn auto_offload_report() -> Option<AutoOffloadReport> {

@@ -2681,24 +2681,21 @@ mod tests {
                 Value::String("Normal".into()),
                 vec![Value::GpuTensor(handle), Value::Num(1.0), Value::Num(2.0)],
             ));
-            if provider.precision() == ProviderPrecision::F64 {
-                let output = result.expect("resident random output");
-                let Value::GpuTensor(handle) = &output else {
-                    panic!("expected resident random output");
-                };
-                assert!(runmat_accelerate_api::handle_is_explicit(handle));
-                let gathered = test_support::gather(output).expect("gather random output");
-                assert_eq!(gathered.shape, vec![2, 2]);
-                assert!(gathered
-                    .materialize_f64()
-                    .iter()
-                    .all(|value| value.is_finite()));
-            } else {
-                let error = result.expect_err("f32 owner cannot preserve double output");
-                assert!(error
-                    .message()
-                    .contains("cannot preserve explicit gpuArray"));
-            }
+            let output = result.expect("resident random output");
+            let Value::GpuTensor(output_handle) = &output else {
+                panic!("expected resident random output");
+            };
+            assert!(runmat_accelerate_api::handle_is_explicit(output_handle));
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(output_handle),
+                Some(ProviderPrecision::F64)
+            );
+            let gathered = test_support::gather(output).expect("gather random output");
+            assert_eq!(gathered.shape, vec![2, 2]);
+            assert!(gathered
+                .materialize_f64()
+                .iter()
+                .all(|value| value.is_finite()));
         }
     }
 

@@ -1087,12 +1087,9 @@ pub(crate) mod tests {
                 Value::Int(runmat_value::IntValue::U64((1_u64 << 53) + 1)),
             )
             .expect("exact fallback");
-            assert_eq!(
-                result,
-                Value::LogicalArray(
-                    LogicalArray::new(vec![1, 0], vec![2, 1]).expect("logical result")
-                )
-            );
+            let gathered = test_support::gather(result).expect("gather logical result");
+            assert_eq!(gathered.shape, vec![2, 1]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0]);
             provider.free(&handle).expect("free input");
         });
     }

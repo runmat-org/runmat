@@ -1420,30 +1420,19 @@ mod tests {
             Value::GpuTensor(handle.clone()),
             Value::Num(1.0),
         ]));
-        match runmat_accelerate_api::AccelProvider::precision(provider) {
-            ProviderPrecision::F64 => {
-                let Value::GpuTensor(output) = result.expect("documented WGPU gamrnd") else {
-                    panic!("expected resident output");
-                };
-                assert!(runmat_accelerate_api::handle_is_explicit(&output));
-                assert_eq!(
-                    output.device_id,
-                    runmat_accelerate_api::AccelProvider::device_id(provider)
-                );
-                assert_eq!(output.shape, vec![1, 2]);
-                assert_eq!(
-                    runmat_accelerate_api::handle_precision(&output),
-                    Some(ProviderPrecision::F64)
-                );
-            }
-            ProviderPrecision::F32 => {
-                let error = result.expect_err("double output cannot use an f32-only provider");
-                assert!(error
-                    .message()
-                    .contains("cannot preserve explicit gpuArray output residency"));
-                assert!(runmat_accelerate_api::handle_is_explicit(&handle));
-            }
-        }
+        let Value::GpuTensor(output) = result.expect("documented WGPU gamrnd") else {
+            panic!("expected resident output");
+        };
+        assert!(runmat_accelerate_api::handle_is_explicit(&output));
+        assert_eq!(
+            output.device_id,
+            runmat_accelerate_api::AccelProvider::device_id(provider)
+        );
+        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(
+            runmat_accelerate_api::handle_precision(&output),
+            Some(ProviderPrecision::F64)
+        );
     }
 
     #[test]

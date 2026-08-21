@@ -2467,10 +2467,12 @@ pub(crate) mod tests {
             vec![Value::from("values"), Value::Cell(idx_cell)],
         )
         .expect("gpu indexed field");
-        match indexed {
-            Value::Num(v) => assert_eq!(v, 3.0),
-            other => panic!("expected numeric scalar, got {other:?}"),
-        }
+        let Value::Tensor(indexed) = indexed else {
+            panic!("expected class-preserving scalar tensor");
+        };
+        assert_eq!(indexed.shape, vec![1, 1]);
+        assert_eq!(indexed.numeric_dtype(), runmat_value::NumericDType::F32);
+        assert_eq!(indexed.materialize_f64(), vec![3.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

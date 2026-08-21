@@ -277,6 +277,12 @@ fn is_supported_nonfloating_input(value: &Value) -> bool {
 
 async fn sinc_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+        if runmat_accelerate_api::handle_precision(&handle)
+            .is_some_and(|precision| precision != provider.precision())
+            || runmat_accelerate_api::handle_integer_type(&handle).is_some()
+        {
+            return sinc_gpu_host_fallback(provider, &handle).await;
+        }
         match provider.unary_sinc(&handle).await {
             Ok(out) => return Ok(gpu_helpers::resident_gpu_value(out)),
             Err(err) if provider_error_is_unsupported(&err) => {
@@ -318,7 +324,8 @@ async fn sinc_gpu_host_fallback(
         let complex = chunks.map(|chunk| (chunk[0], chunk[1])).collect::<Vec<_>>();
         let tensor = ComplexTensor::new(complex, shape)
             .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, &e))?;
-        return sinc_complex_tensor(tensor);
+        let host = sinc_complex_tensor(tensor)?;
+        return gpu_helpers::restore_class_preserving_value(handle, host, BUILTIN_NAME);
     }
 
     let dtype = match precision {
@@ -327,7 +334,8 @@ async fn sinc_gpu_host_fallback(
     };
     let tensor = Tensor::new_with_dtype(data, shape, dtype)
         .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, &e))?;
-    Ok(tensor::tensor_into_value(sinc_tensor(tensor)?))
+    let host = tensor::tensor_into_value(sinc_tensor(tensor)?);
+    gpu_helpers::restore_class_preserving_value(handle, host, BUILTIN_NAME)
 }
 
 fn sinc_real(value: Value) -> BuiltinResult<Value> {

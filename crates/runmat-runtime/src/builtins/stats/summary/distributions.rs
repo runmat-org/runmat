@@ -3141,19 +3141,30 @@ mod tests {
             Vec::new(),
         ))
         .expect("normcdf");
-        let Value::Tensor(host) = out else {
-            panic!("F32 owner cannot relabel required double output");
+        let Value::GpuTensor(out) = out else {
+            panic!("expected automatic resident double output");
         };
-        assert_eq!(host.numeric_dtype(), NumericDType::F64);
+        assert_eq!(
+            runmat_accelerate_api::handle_precision(&out),
+            Some(ProviderPrecision::F64)
+        );
+        let host = test_support::gather(Value::GpuTensor(out)).expect("gather automatic output");
         assert_close(host.materialize_f64()[0], 0.5, 1.0e-12);
 
         let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
-        let error = block_on(normcdf::normcdf_builtin(
+        let out = block_on(normcdf::normcdf_builtin(
             Value::GpuTensor(handle),
             Vec::new(),
         ))
-        .expect_err("explicit output class mismatch must reject");
-        assert!(error.message.contains("cannot preserve explicit gpuArray"));
+        .expect("explicit resident double output");
+        let Value::GpuTensor(out) = out else {
+            panic!("expected explicit resident output");
+        };
+        assert!(runmat_accelerate_api::handle_is_explicit(&out));
+        assert_eq!(
+            runmat_accelerate_api::handle_precision(&out),
+            Some(ProviderPrecision::F64)
+        );
     }
 
     #[test]

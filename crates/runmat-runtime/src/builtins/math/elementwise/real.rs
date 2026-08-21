@@ -168,39 +168,30 @@ async fn real_builtin(value: Value) -> BuiltinResult<Value> {
 }
 
 async fn real_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
-        let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
-            builtin_error_with_detail(&REAL_ERROR_INTERNAL, "GPU provider unavailable for input")
-        })?;
-        let input_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
-        let gathered_result =
-            gpu_helpers::download_value_preserving_residency_async(provider, &handle).await;
-        gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
-        let gathered = gathered_result
-            .map_err(|err| builtin_error_with_detail(&REAL_ERROR_INTERNAL, err.to_string()))?;
-        let host = match gathered {
-            Value::Complex(re, _) => Ok(Value::Num(re)),
-            Value::ComplexTensor(ct) => real_complex_tensor(ct),
-            Value::Tensor(tensor) => Ok(tensor::tensor_into_value(real_tensor(tensor)?)),
-            other => real_real(other),
-        }?;
-        return gpu_helpers::restore_class_preserving_value(&handle, host, BUILTIN_NAME)
-            .map_err(|err| builtin_error_with_detail(&REAL_ERROR_INTERNAL, err.to_string()));
-    }
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+        builtin_error_with_detail(&REAL_ERROR_INTERNAL, "GPU provider unavailable for input")
+    })?;
+    let kernel_compatible = runmat_accelerate_api::handle_integer_type(&handle).is_none()
+        && runmat_accelerate_api::handle_precision(&handle) == Some(provider.precision());
+    if kernel_compatible {
         if let Ok(out) = provider.unary_real(&handle).await {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
-        .await
+    let input_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+    let gathered_result =
+        gpu_helpers::download_value_preserving_residency_async(provider, &handle).await;
+    gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
+    let gathered = gathered_result
         .map_err(|err| builtin_error_with_detail(&REAL_ERROR_INTERNAL, err.to_string()))?;
-    match gathered {
+    let host = match gathered {
         Value::Complex(re, _) => Ok(Value::Num(re)),
         Value::ComplexTensor(ct) => real_complex_tensor(ct),
         Value::Tensor(tensor) => Ok(tensor::tensor_into_value(real_tensor(tensor)?)),
         other => real_real(other),
-    }
+    }?;
+    gpu_helpers::restore_class_preserving_value(&handle, host, BUILTIN_NAME)
+        .map_err(|err| builtin_error_with_detail(&REAL_ERROR_INTERNAL, err.to_string()))
 }
 
 fn real_real(value: Value) -> BuiltinResult<Value> {

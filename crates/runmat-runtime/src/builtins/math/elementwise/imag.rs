@@ -189,15 +189,9 @@ async fn imag_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             "GPU input class metadata contradicts its physical storage",
         ));
     }
-    if !exact_host_path
-        && runmat_accelerate_api::handle_precision(&handle) != Some(provider.precision())
-    {
-        return Err(builtin_error_with_detail(
-            &IMAG_ERROR_INTERNAL,
-            "GPU input precision metadata contradicts its owning provider",
-        ));
-    }
-    if !exact_host_path {
+    let kernel_compatible =
+        runmat_accelerate_api::handle_precision(&handle) == Some(provider.precision());
+    if !exact_host_path && kernel_compatible {
         let result = provider.unary_imag(&handle).await;
         gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
         match result {

@@ -457,7 +457,21 @@ async fn cov_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if let Some(result) = cov_try_gpu(&args).await? {
         return Ok(result);
     }
-    cov_host(args).await
+    let output_source = gpu_helpers::select_resident_output_source(
+        std::iter::once(&args.first)
+            .chain(args.second.as_ref())
+            .chain(args.weight_vector.as_ref())
+            .filter_map(|value| match value {
+                Value::GpuTensor(handle) => Some(handle.clone()),
+                _ => None,
+            }),
+        NAME,
+    )?;
+    let result = cov_host(args).await?;
+    match output_source {
+        Some(source) => gpu_helpers::restore_class_preserving_value(&source, result, NAME),
+        None => Ok(result),
+    }
 }
 
 /// Public entry point for providers that need the reference implementation.
@@ -2189,18 +2203,8 @@ pub(crate) mod tests {
         };
         let left = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let right = Tensor::new(vec![5.0, 6.0, 7.0, 8.0], vec![2, 2]).unwrap();
-        let left_handle = provider
-            .upload(&runmat_accelerate_api::HostTensorView {
-                data: &left.materialize_f64(),
-                shape: &left.shape,
-            })
-            .expect("upload left");
-        let right_handle = provider
-            .upload(&runmat_accelerate_api::HostTensorView {
-                data: &right.materialize_f64(),
-                shape: &right.shape,
-            })
-            .expect("upload right");
+        let left_handle = gpu_helpers::upload_tensor(provider, &left).expect("upload left");
+        let right_handle = gpu_helpers::upload_tensor(provider, &right).expect("upload right");
         let result = cov_builtin_sync(
             Value::GpuTensor(left_handle),
             vec![Value::GpuTensor(right_handle)],
@@ -2226,12 +2230,8 @@ pub(crate) mod tests {
             (vec![7.0], Vec::new(), 0.0),
             (Vec::new(), vec![0, 0], f64::NAN),
         ] {
-            let handle = provider
-                .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &data,
-                    shape: &shape,
-                })
-                .expect("upload");
+            let tensor = Tensor::new(data, shape).expect("tensor");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result =
                 cov_builtin_sync(Value::GpuTensor(handle), Vec::new()).expect("covariance");
             assert!(matches!(result, Value::GpuTensor(_)));

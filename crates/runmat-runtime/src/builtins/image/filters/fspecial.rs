@@ -1814,6 +1814,7 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn fspecial_gaussian_gpu_matches_cpu() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _env_guard = fspecial_env_guard();
         let _restore = fspecial_device_env_restore();
         std::env::set_var("RUNMAT_ACCEL_FSPECIAL_DEVICE", "1");

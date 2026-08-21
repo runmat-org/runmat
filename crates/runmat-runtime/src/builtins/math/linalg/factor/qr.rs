@@ -1534,7 +1534,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
-    fn qr_wgpu_economy_device_path() {
+    fn qr_wgpu_economy_fallback_preserves_residency_and_values() {
         let _accel_guard = test_support::accel_test_lock();
         std::env::set_var("RUNMAT_WGPU_FORCE_PRECISION", "f32");
         if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
@@ -1561,7 +1561,7 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("provider");
         let handle = provider.upload(&view).expect("upload");
         let gpu_eval =
-            evaluate(Value::GpuTensor(handle), &[Value::from(0.0)]).expect("gpu economy eval");
+            evaluate(Value::GpuTensor(handle), &[Value::from("econ")]).expect("gpu economy eval");
 
         match gpu_eval.q() {
             Value::GpuTensor(_) => {}
@@ -1605,10 +1605,13 @@ pub(crate) mod tests {
         .unwrap();
         tensor_close(&qtq, &identity, 1e-3);
 
-        // Q*R reconstructs the input (no pivoting)
+        // The evaluation envelope always exposes pivoted factors and their
+        // permutation, so Q*R reconstructs A*P.
         let qr_product = crate::builtins::common::matrix::matrix_mul(&gpu_q, &gpu_r).expect("Q*R");
         let a_matrix = Matrix::new(tensor.materialize_f64().clone(), tensor.shape.clone()).unwrap();
-        tensor_close(&qr_product, &a_matrix, 1e-3);
+        let gpu_p = test_support::gather(gpu_eval.permutation_matrix()).expect("gather P");
+        let permuted = crate::builtins::common::matrix::matrix_mul(&a_matrix, &gpu_p).expect("A*P");
+        tensor_close(&qr_product, &permuted, 1e-3);
     }
 
     fn qr_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

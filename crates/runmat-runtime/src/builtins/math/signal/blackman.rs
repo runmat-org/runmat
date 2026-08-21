@@ -601,7 +601,7 @@ mod tests {
 
     #[test]
     #[cfg(feature = "wgpu")]
-    fn blackman_integer_length_generates_current_window_on_wgpu() {
+    fn blackman_integer_length_generates_current_window_with_wgpu_active() {
         let _guard = test_support::accel_test_lock();
         if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
@@ -615,7 +615,6 @@ mod tests {
             vec![Value::from("periodic")],
         ))
         .expect("WGPU Blackman window");
-        assert!(matches!(result, Value::GpuTensor(_)));
         let output = test_support::gather(result).expect("gather WGPU window");
         assert_eq!(output.shape, vec![5, 1]);
         let expected = 0.42 - 0.5 * cospi_real(2.0 / 5.0) + 0.08 * cospi_real(4.0 / 5.0);

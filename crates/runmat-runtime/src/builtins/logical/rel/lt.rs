@@ -270,7 +270,7 @@ fn restore_explicit_logical_result(
     result: Value,
     residency: Option<ComparisonResidency>,
 ) -> crate::BuiltinResult<Value> {
-    let Some(residency) = residency.filter(|value| value.explicit) else {
+    let Some(residency) = residency else {
         return Ok(result);
     };
     let tensor = match &result {
@@ -283,21 +283,27 @@ fn restore_explicit_logical_result(
             .with_builtin(BUILTIN_NAME)
             .build()
     })?;
-    let mut output = gpu_helpers::upload_tensor(residency.owner, &tensor).map_err(|error| {
-        build_runtime_error(format!(
-            "lt: failed to preserve explicit gpuArray residency: {error}"
-        ))
-        .with_builtin(BUILTIN_NAME)
-        .with_identifier(
-            LT_ERROR_GPU_UPLOAD
-                .identifier
-                .expect("lt GPU-upload descriptor identifier"),
-        )
-        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-        .build()
-    })?;
+    let mut output = match gpu_helpers::upload_tensor(residency.owner, &tensor) {
+        Ok(output) => output,
+        Err(_) if !residency.explicit => return Ok(result),
+        Err(error) => {
+            return Err(build_runtime_error(format!(
+                "lt: failed to preserve explicit gpuArray residency: {error}"
+            ))
+            .with_builtin(BUILTIN_NAME)
+            .with_identifier(
+                LT_ERROR_GPU_UPLOAD
+                    .identifier
+                    .expect("lt GPU-upload descriptor identifier"),
+            )
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build())
+        }
+    };
     runmat_accelerate_api::set_handle_logical(&output, true);
-    runmat_accelerate_api::mark_handle_explicit(&mut output);
+    if residency.explicit {
+        runmat_accelerate_api::mark_handle_explicit(&mut output);
+    }
     Ok(gpu_helpers::resident_gpu_value(output))
 }
 

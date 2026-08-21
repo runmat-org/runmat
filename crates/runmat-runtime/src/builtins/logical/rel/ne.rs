@@ -927,12 +927,9 @@ pub(crate) mod tests {
             };
             let handle = provider.upload(&view).expect("upload");
             let result = run_ne(Value::GpuTensor(handle), Value::Num(2.0)).expect("ne");
-            match result {
-                Value::LogicalArray(array) => {
-                    assert_eq!(array.data, vec![1, 0, 1]);
-                }
-                other => panic!("expected logical array, got {other:?}"),
-            }
+            let gathered = test_support::gather(result).expect("gather logical result");
+            assert_eq!(gathered.shape, vec![3, 1]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 1.0]);
         });
     }
 

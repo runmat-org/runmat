@@ -588,14 +588,12 @@ async fn cumprod_gpu(
     direction: CumprodDirection,
     nan_mode: CumprodNanMode,
 ) -> BuiltinResult<Value> {
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        if handle.device_id != 0 {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
-    }
+    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+        cumprod_error_with_detail(
+            &CUMPROD_ERROR_INVALID_INPUT,
+            "cumprod: no acceleration provider owns the input handle",
+        )
+    })?;
     if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
         if let Some(target) = dim {
             if target == 0 {
@@ -619,12 +617,6 @@ async fn cumprod_gpu(
             CumprodDirection::Forward => ProviderScanDirection::Forward,
             CumprodDirection::Reverse => ProviderScanDirection::Reverse,
         };
-        let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-            cumprod_error_with_detail(
-                &CUMPROD_ERROR_INVALID_INPUT,
-                "cumprod: native integer gpuArray requires an acceleration provider",
-            )
-        })?;
         let device_result = provider
             .integer_cumprod_scan(&handle, target_dim - 1, provider_direction)
             .map_err(|err| cumprod_internal_error(format!("cumprod: {err}")))?;
@@ -659,25 +651,23 @@ async fn cumprod_gpu(
         ));
     }
 
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        let zero_based_dim = fallback_dim.saturating_sub(1);
-        if zero_based_dim < handle.shape.len() {
-            let provider_direction = match direction {
-                CumprodDirection::Forward => ProviderScanDirection::Forward,
-                CumprodDirection::Reverse => ProviderScanDirection::Reverse,
-            };
-            let provider_nan_mode = match nan_mode {
-                CumprodNanMode::Include => ProviderNanMode::Include,
-                CumprodNanMode::Omit => ProviderNanMode::Omit,
-            };
-            if let Ok(device_result) = provider.cumprod_scan(
-                &handle,
-                zero_based_dim,
-                provider_direction,
-                provider_nan_mode,
-            ) {
-                return Ok(Value::GpuTensor(device_result));
-            }
+    let zero_based_dim = fallback_dim.saturating_sub(1);
+    if zero_based_dim < handle.shape.len() {
+        let provider_direction = match direction {
+            CumprodDirection::Forward => ProviderScanDirection::Forward,
+            CumprodDirection::Reverse => ProviderScanDirection::Reverse,
+        };
+        let provider_nan_mode = match nan_mode {
+            CumprodNanMode::Include => ProviderNanMode::Include,
+            CumprodNanMode::Omit => ProviderNanMode::Omit,
+        };
+        if let Ok(device_result) = provider.cumprod_scan(
+            &handle,
+            zero_based_dim,
+            provider_direction,
+            provider_nan_mode,
+        ) {
+            return Ok(Value::GpuTensor(device_result));
         }
     }
 
@@ -685,7 +675,11 @@ async fn cumprod_gpu(
         .await
         .map_err(|err| cumprod_internal_error(err.message()))?;
     let result = cumprod_tensor(tensor, fallback_dim, direction, nan_mode)?;
-    Ok(tensor::tensor_into_value(result))
+    gpu_helpers::restore_class_preserving_value(
+        &handle,
+        tensor::tensor_into_value(result),
+        "cumprod",
+    )
 }
 
 fn cumprod_tensor(

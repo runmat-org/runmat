@@ -1816,15 +1816,24 @@ mod tests {
         let input = Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3]), vec![3, 1]).unwrap();
         let handle = gpu_helpers::upload_tensor(provider, &input).expect("integer upload");
         let out = call(Value::GpuTensor(handle.clone()), Vec::new()).expect("normalize");
-        let Value::Tensor(host) = out else {
-            panic!("F32 owner cannot relabel required double output");
+        let Value::GpuTensor(out) = out else {
+            panic!("expected automatic resident double output");
         };
+        let host = crate::builtins::common::test_support::gather(Value::GpuTensor(out))
+            .expect("gather automatic output");
         assert_eq!(host.numeric_dtype(), NumericDType::F64);
         assert_close(host.materialize_f64()[0], -1.0);
         let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
-        let error = call(Value::GpuTensor(handle), Vec::new())
-            .expect_err("explicit output class mismatch must reject");
-        assert!(error.message.contains("cannot preserve explicit gpuArray"));
+        let out =
+            call(Value::GpuTensor(handle), Vec::new()).expect("explicit resident double output");
+        let Value::GpuTensor(out) = out else {
+            panic!("expected explicit resident output");
+        };
+        assert!(runmat_accelerate_api::handle_is_explicit(&out));
+        assert_eq!(
+            runmat_accelerate_api::handle_precision(&out),
+            Some(runmat_accelerate_api::ProviderPrecision::F64)
+        );
     }
 
     #[test]
