@@ -155,6 +155,11 @@ fn documented_integer_round_and_rotation_preserve_wide_native_storage() {
 #[test]
 fn scatter3_properties_reconstruct_authoritative_integer_coordinates() {
     let _matlab = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
+    let figure = call(
+        "figure",
+        &[Value::String("Visible".into()), Value::String("off".into())],
+    )
+    .expect("invisible figure");
     let wide = 9_007_199_254_740_993_u64;
     let x = integer_tensor(IntegerStorage::U64(vec![wide, wide + 2]), &[1, 2]);
     let y = integer_tensor(IntegerStorage::I16(vec![-2, 3]), &[1, 2]);
@@ -168,6 +173,7 @@ fn scatter3_properties_reconstruct_authoritative_integer_coordinates() {
         xdata.integer_storage(),
         Some(&IntegerStorage::U64(vec![wide, wide + 2]))
     );
+    call("close", &[figure]).expect("close invisible figure");
 }
 
 #[test]
