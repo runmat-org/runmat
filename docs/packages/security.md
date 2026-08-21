@@ -1,10 +1,3 @@
----
-title: "Package Security"
-category: "Packages"
-section: "8.4"
-last_updated: "August 1, 2026"
----
-
 # Package Security
 
 RunMat treats dependency selection, downloaded bytes, cached objects, private decryption, and publication transitions as separate trust boundaries.

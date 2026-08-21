@@ -1,10 +1,3 @@
----
-title: "JIT Compilation Pipeline"
-category: "JIT Compiler"
-section: "5.1"
-last_updated: "August 14, 2026"
----
-
 # JIT Compilation Pipeline
 
 The JIT consumes the same immutable executable unit already produced for a request. It does not reparse source, reconstruct control flow from bytecode, or define a second runtime value representation.

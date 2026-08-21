@@ -1,10 +1,3 @@
----
-title: "Configuration Reference"
-category: "Getting Started"
-section: "1.5"
-last_updated: "August 2, 2026"
----
-
 # Configuration Reference
 
 RunMat utilizes a hierarchical configuration system that manages project-level metadata, source organization, and runtime execution parameters. The configuration is primarily driven by a manifest file (`runmat.toml` or `runmat.json`) and can be overridden by environment variables and CLI arguments.
@@ -171,7 +164,7 @@ All runtime settings are under `[runtime]`. Runtime settings control the behavio
 | Key               | Type    | Default | Notes                                                                                    |
 | ----------------- | ------- | ------- | ---------------------------------------------------------------------------------------- |
 | `callstack_limit` | integer | `200`   | Max retained call stack frames for diagnostics.                                          |
-| `error_namespace` | string  | `""`    | Error ID namespace. Empty value is normalized at startup by [language compatibility mode](/docs/runtime/getting-started/compatability) (set to `RunMat` in `compat = "runmat"` mode). |
+| `error_namespace` | string  | `""`    | Error ID namespace. Empty value is normalized at startup by [language compatibility mode](/docs/runtime/matlab-compatibility) (set to `RunMat` in `compat = "runmat"` mode). |
 | `verbose`         | boolean | `false` | Enables verbose execution output.                                                        |
 
 
@@ -183,7 +176,7 @@ All runtime settings are under `[runtime]`. Runtime settings control the behavio
 | `compat` | string | `"runmat"` | `runmat`, `matlab`, `strict` | Language compatibility mode. |
 
 
-See [MATLAB Language Compatibility](/docs/runtime/getting-started/compatability) for the compatibility modes and [MATLAB Language Extensions](/docs/runtime/getting-started/matlab-language-extensions) for the RunMat-only behavior controlled by those modes.
+See [MATLAB Language Compatibility](/docs/runtime/matlab-compatibility) for the compatibility modes and [MATLAB Language Extensions](/docs/runtime/getting-started/matlab-language-extensions) for the RunMat-only behavior controlled by those modes.
 
 ### `[runtime.jit]`
 

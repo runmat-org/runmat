@@ -1,10 +1,3 @@
----
-title: "Authoring Builtins"
-category: "Builtins"
-section: "6.2"
-last_updated: "August 4, 2026"
----
-
 # Authoring Builtins
 
 Runtime builtins should be easy to discover, easy to call from the VM/JIT, and explicit about their semantic contract. A builtin implementation is not complete just because a Rust function exists; it also needs registration metadata, tests, and clear behavior for errors, output counts, GPU values, and unsupported argument forms.

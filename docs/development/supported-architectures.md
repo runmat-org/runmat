@@ -1,10 +1,3 @@
----
-title: "Supported Architectures"
-category: "Development"
-section: "14.2"
-last_updated: "August 14, 2026"
----
-
 # Supported Architectures
 
 RunMat has two major build families: native binaries for the CLI/runtime and WebAssembly artifacts for browser and TypeScript hosts. Native releases are built for Windows, macOS, and Linux; WASM builds target `wasm32-unknown-unknown`.

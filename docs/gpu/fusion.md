@@ -1,10 +1,3 @@
----
-title: "Fusion Engine & Residency Management"
-category: "GPU Acceleration & Fusion Engine"
-section: "4.1"
-last_updated: "August 14, 2026"
----
-
 # Fusion Engine & Residency Management
 
 The fusion engine identifies semantic regions that can run as a single accelerated unit. MIR analysis first marks fusion-capable statement runs, the bytecode compiler maps those semantic candidates onto VM instruction windows, and runtime planning reconciles those windows with a bytecode-derived `AccelGraph`. Once a plan is accepted, the interpreter can skip a span of ordinary bytecode and push a GPU-resident result instead.

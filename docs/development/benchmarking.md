@@ -1,10 +1,3 @@
----
-title: "Benchmarking"
-category: "Development"
-section: "14.4"
-last_updated: "May 28, 2026"
----
-
 # Benchmarking
 
 RunMat has two benchmarking utilities in this repo. The CLI `benchmark` command measures one MATLAB script through the normal session engine. The `benchmarks/` harness compares RunMat against other implementations across representative workloads and records telemetry for performance analysis.

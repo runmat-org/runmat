@@ -1,10 +1,3 @@
----
-title: "Packages In CI"
-category: "Packages"
-section: "8.6"
-last_updated: "August 1, 2026"
----
-
 # Packages In CI, Offline Use, And Vendoring
 
 CI should treat the manifest and lock as source, the shared package cache as an optional verified acceleration, and vendor output as an explicit hermetic input.

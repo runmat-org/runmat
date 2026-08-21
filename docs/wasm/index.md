@@ -1,10 +1,3 @@
----
-title: "WASM & TypeScript/JavaScript"
-category: "WebAssembly & TypeScript"
-section: "9.0"
-last_updated: "May 28, 2026"
----
-
 # WASM & TypeScript/JavaScript
 
 Use the `runmat` npm package when embedding RunMat in a browser, web worker, Electron app, or Node-based tool.

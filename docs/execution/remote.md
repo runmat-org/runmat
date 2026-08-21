@@ -1,10 +1,3 @@
----
-title: "Remote Execution"
-category: "Execution"
-section: "12.3"
-last_updated: "August 4, 2026"
----
-
 # Remote Execution
 
 RunMat uses the same frozen package graph, portable execution artifacts, value codec, and driver scheduler for local processes, browser workers, customer-managed nodes, and hosted nodes. The Server admits work, assigns coarse resources, relays opaque frames when a direct connection is unavailable, records coarse lifecycle and usage, and stores encrypted artifacts. It does not execute MATLAB code or receive workload plaintext.

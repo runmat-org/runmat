@@ -1,10 +1,3 @@
----
-title: "JIT Compiler"
-category: "JIT Compiler"
-section: "5.0"
-last_updated: "August 14, 2026"
----
-
 # JIT Compiler
 
 RunMat uses adaptive native compilation on supported desktop and server targets. The VM starts execution immediately and remains the semantic baseline. As a function, loop, or interactive input becomes hot, RunMat can compile the same analyzed MIR product to verified Native IR and then to machine code with Cranelift.

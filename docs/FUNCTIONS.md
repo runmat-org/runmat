@@ -1,10 +1,3 @@
----
-title: "Functions"
-category: "Reference"
-section: "functions"
-last_updated: "June 2, 2026"
----
-
 # Functions
 
 Functions are the main way to organize reusable logic in RunMat. You can write named
@@ -290,6 +283,6 @@ need to pass computed values rather than literal words.
   more elaborate MATLAB validation forms may not all be available yet.
 
 For how functions fit into RunMat's broader MATLAB compatibility, see
-[MATLAB Language Compatability](/docs/runtime/getting-started/compatability). For how calls
+[MATLAB Language Compatability](/docs/runtime/matlab-compatibility). For how calls
 are resolved and dispatched at runtime, see
 [Callable Resolution & Function Dispatch](/docs/runtime/vm/dispatch).

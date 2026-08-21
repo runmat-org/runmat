@@ -1,10 +1,3 @@
----
-title: "Rendering Pipeline"
-category: "Plotting System"
-section: "8.2"
-last_updated: "May 28, 2026"
----
-
 # Rendering Pipeline
 
 Rendering starts from figure state. By the time the renderer runs, plotting builtins have already produced a `Figure` containing plot elements, axes metadata, labels, limits, color state, subplot layout, and view configuration.

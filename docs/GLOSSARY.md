@@ -1,10 +1,3 @@
----
-title: "Glossary"
-category: "Reference"
-section: "glossary"
-last_updated: "May 28, 2026"
----
-
 # Glossary
 
 This page defines RunMat-specific terms and abbreviations used across the runtime documentation. It focuses on terms that carry a specific meaning in this codebase.

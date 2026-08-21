@@ -1,10 +1,3 @@
----
-title: "Projects"
-category: "Getting Started"
-section: "1.4"
-last_updated: "July 31, 2026"
----
-
 # Projects
 
 A RunMat project is a folder of MATLAB-syntax code anchored by a `runmat.toml` or `runmat.json` manifest. The manifest tells RunMat where the source lives, which other projects it depends on, and which workflows can be run by name. RunMat discovers it by walking up from the source file or working directory, so the same project resolves consistently across the CLI, Desktop, and the LSP.

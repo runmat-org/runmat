@@ -1,10 +1,3 @@
----
-title: "Verification & Validation"
-category: "FEA"
-section: "13.7"
-last_updated: "June 22, 2026"
----
-
 # Verification & Validation
 
 RunMat uses validation, tests, solver diagnostics, benchmark fixtures, and governance records to decide how much trust a FEA workflow has earned.

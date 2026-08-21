@@ -1,10 +1,3 @@
----
-title: "Using FEA"
-category: "FEA"
-section: "13.1"
-last_updated: "June 22, 2026"
----
-
 # Using FEA
 
 FEA workflows in RunMat start with a geometry file and end with a run result you can inspect or store.

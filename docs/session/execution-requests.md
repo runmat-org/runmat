@@ -1,10 +1,3 @@
----
-title: "Execution Requests"
-category: "Session Engine"
-section: "7.1"
-last_updated: "May 28, 2026"
----
-
 # Execution Requests
 
 The primary session boundary is `RunMatSession::execute_request`. Hosts submit an `ExecutionRequest` and receive an `ExecutionOutcome`. This ABI is explicit enough for CLI output, browser payloads, notebook cells, editor integrations, and future remote execution to share the same execution contract.

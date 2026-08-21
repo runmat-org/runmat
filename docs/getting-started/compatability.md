@@ -1,10 +1,3 @@
----
-title: "MATLAB Language Compatibility"
-category: "Getting Started"
-section: "1.6"
-last_updated: "August 18, 2026"
----
-
 # MATLAB Language Compatibility
 
 RunMat is a high-performance runtime designed for MATLAB-syntax code. It targets the core language grammar and semantics, enabling engineers to execute `.m` scripts, functions, and complex object-oriented systems. Compatibility focuses on the core language (variables, operators, control flow, N-D indexing, and `classdef` OOP) and an extensive standard library of built-in functions.
@@ -15,7 +8,7 @@ Compatibility describes observable program behavior: accepted syntax and call fo
 
 ## Compatibility Target
 
-RunMat's current compatibility version pin is **MATLAB R2026a**. Compatibility-sensitive queries use the same pin: `version("-release")` returns the release label, and `verLessThan("matlab", requiredVersion)` compares against its product version, `26.1`.
+RunMat's current compatibility version pin is **MATLAB R2026a**. Compatibility-sensitive queries use the pin: `version("-release")` returns the release label, and `verLessThan("matlab", requiredVersion)` compares against its product version, `26.1`.
 
 This page is the reader-facing source of truth for the pin. Individual language and builtin pages describe their observable behavior without repeating the release label, so the compatibility target can advance without scattering version-specific text throughout the documentation.
 
@@ -83,6 +76,59 @@ Unlike many alternative MATLAB syntax-based runtimes such as Octave, RunMat prov
 - Events: Full `addlistener` and `notify` support integrated with the runtime event registry.
 
 For a complete guide to writing classes, including value vs. handle classes, inheritance, operator overloading, events, enumerations, and packages, see [Classes (classdef)](/docs/runtime/classes).
+
+## Projects and Execution
+
+Language compatibility extends across the project layouts and execution environments supported by RunMat.
+
+| Area | Current capability |
+| :--- | :--- |
+| Built-in functions | More than 1,200 documented functions across numerical computing, data, plotting, signal processing, file I/O, and engineering workflows. Consult the [generated built-in function reference](/docs/reference/builtins) for supported functions and call forms. |
+| Multi-file projects | Source roots, cross-file resolution, MATLAB-style `+pkg` packages, class folders, private functions, local dependencies, test directories, and named entrypoints. |
+| Execution | Run the same source from the CLI, Desktop, or web browser, subject to the capabilities of the selected host. |
+| Acceleration | Supported operations can use automatic GPU acceleration without requiring separate GPU code. Automatic acceleration preserves the compatibility rules described on this page. |
+
+Use [`runmat.toml`](/docs/runtime/getting-started/config) to define source roots, local dependencies, test directories, compatibility policy, and named entrypoints. See [Projects](/docs/runtime/getting-started/projects) for the supported project layout.
+
+## Check, Run, and Test Existing Code
+
+Validate an existing project in three stages:
+
+```bash
+runmat check analysis.m
+runmat run analysis.m
+runmat test
+```
+
+`runmat check` uses the parser, static analysis, source lookup, and compile validation used by RunMat's editor tooling. It does not execute the program. A clean result means that no static blocker was found.
+
+`runmat run` exercises runtime behavior, external data, files, and integrations reached by the selected entrypoint. Use representative inputs when numerical results or code paths depend on input data.
+
+`runmat test` discovers and executes MATLAB-style script, function, and class tests. Existing project tests provide the strongest project-specific evidence of compatibility for the behavior they exercise. See the [Command Line Interface](/docs/runtime/getting-started/cli) for command options and project test configuration.
+
+## Compatibility Testing
+
+RunMat's codebase contains more than 18,000 automated tests across language semantics, built-in call forms, execution engines, project composition, plotting, filesystem behavior, browser and WebAssembly bindings, and CPU/GPU result parity. Compatibility-focused tests cover successful results as well as accepted inputs, output classes and shapes, warnings, and errors.
+
+The implementation and test infrastructure are public:
+
+- Browse the [generated built-in function reference](/docs/reference/builtins).
+- Inspect the [RunMat source and tests](https://github.com/runmat-org/runmat).
+- Review the [continuous-integration checks](https://github.com/runmat-org/runmat/blob/main/.github/workflows/ci.yml).
+- Read the [testing strategy](/docs/runtime/development/testing).
+
+If supported behavior differs from the compatibility target, [report the difference as a GitHub issue](https://github.com/runmat-org/runmat/issues).
+
+## Current Boundaries
+
+Projects may require changes or a separate MATLAB workflow when they depend on:
+
+- a specialized MathWorks toolbox outside RunMat's current built-in coverage;
+- Simulink or graphical block-diagram models;
+- a MEX extension that RunMat does not support;
+- MathWorks-specific applications or proprietary file formats; or
+
+Check the [built-in function reference](/docs/reference/builtins) for function-level coverage. Compatibility can also depend on a particular option, external dependency, data format, or execution host even when the function itself is available.
 
 ## Compiler Pipeline
 

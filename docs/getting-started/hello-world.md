@@ -1,10 +1,3 @@
----
-title: "Hello World"
-category: "Getting Started"
-section: "1.7"
-last_updated: "May 30, 2026"
----
-
 # Run your first script
 
 ## Hello World in RunMat

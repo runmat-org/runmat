@@ -1,10 +1,3 @@
----
-title: "Migrating Existing Toolboxes"
-category: "Packages"
-section: "8.5"
-last_updated: "August 1, 2026"
----
-
 # Migrating Existing Toolboxes
 
 Existing MATLAB toolboxes can migrate incrementally. Start by making the current lookup roots explicit, then split stable external code into dependencies, generate and commit a lock, and add target/capability declarations for host-specific functionality.

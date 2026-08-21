@@ -1,10 +1,3 @@
----
-title: "Lexer & Parser"
-category: "Compilation Pipeline"
-section: "2.1"
-last_updated: "May 28, 2026"
----
-
 # Lexer & Parser
 
 The RunMat compilation pipeline begins with the transformation of raw MATLAB source text into a structured Abstract Syntax Tree (AST). This process is handled by two primary components: `runmat-lexer`, which tokenizes the input using the `logos` library, and `runmat-parser`, a hand-written recursive descent parser that handles the unique ambiguities of MATLAB syntax, including command-form calls and matrix literals.

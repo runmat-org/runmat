@@ -1,10 +1,3 @@
----
-title: "Async Execution"
-category: "Execution"
-section: "12.1"
-last_updated: "August 13, 2026"
----
-
 # Async Execution
 
 RunMat's execution entrypoints are async so a host can await a complete request while the VM and runtime await host interaction, builtin futures, GPU/provider work, and selected host/provider callbacks.

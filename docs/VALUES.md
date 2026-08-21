@@ -1,10 +1,3 @@
----
-title: "Runtime Values & Type Model"
-category: "Runtime Values"
-section: "10.0"
-last_updated: "July 30, 2026"
----
-
 # Runtime Values & Type Model
 
 `Value` is the concrete runtime representation used for values produced, stored, and passed around during RunMat execution. The VM stack, VM variables, builtin calls, workspace state, session results, GC roots, GPU residency paths, and WASM wire adapters all exchange this value type.

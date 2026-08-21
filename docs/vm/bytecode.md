@@ -1,10 +1,3 @@
----
-title: "Bytecode Compilation (MIR → Bytecode)"
-category: "Virtual Machine (VM)"
-section: "3.1"
-last_updated: "August 14, 2026"
----
-
 # Bytecode Compilation (MIR → Bytecode)
 
 The bytecode compilation stage is the final lowering step before VM execution. It transforms the Mid-Level IR (MIR) into a linear sequence of `Instr` values, plus the metadata the interpreter needs for variable layout, source spans, semantic function dispatch, async execution, pure-region boundaries, and acceleration planning.

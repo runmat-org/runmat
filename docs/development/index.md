@@ -1,10 +1,3 @@
----
-title: "Development"
-category: "Development"
-section: "14.0"
-last_updated: "July 29, 2026"
----
-
 # Development
 
 RunMat is developed as a Rust workspace with a small TypeScript package for the WebAssembly and browser-facing API. Most daily work is done with normal Cargo commands, but the workspace has enough native, GPU, and WASM surface area that developers need to know which command exercises which part of the system.

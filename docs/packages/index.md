@@ -1,10 +1,3 @@
----
-title: "Packages"
-category: "Packages"
-section: "8.1"
-last_updated: "August 1, 2026"
----
-
 # Packages
 
 RunMat packages make a MATLAB-syntax project reproducible across the CLI, Desktop, browser/WASM, the LSP, and CI. A package is described by `runmat.toml`, resolved into one deterministic graph, recorded in `runmat.lock`, and consumed through a serialized frozen-project handoff. Consumers never independently reinterpret the manifest or choose different dependency versions.

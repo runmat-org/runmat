@@ -1,10 +1,3 @@
----
-title: "Testing Strategy"
-category: "Development"
-section: "14.3"
-last_updated: "May 28, 2026"
----
-
 # Testing Strategy
 
 RunMat tests are organized by ownership boundary. Parser and lowering crates test language structure, VM tests exercise bytecode and interpreter behavior, runtime tests cover builtins and providers, integration tests cover cross-crate execution behavior, and WASM tests cover browser and JavaScript-hosted behavior.

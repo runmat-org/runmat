@@ -1,10 +1,3 @@
----
-title: "Publishing Packages"
-category: "Packages"
-section: "8.3"
-last_updated: "August 1, 2026"
----
-
 # Publishing Packages
 
 Publishing is a deterministic build-and-verify workflow. The same manifest and included bytes produce the same canonical inventory, artifact digest, tree digest, release metadata digest, and signing input across supported hosts.

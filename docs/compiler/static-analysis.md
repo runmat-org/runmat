@@ -1,10 +1,3 @@
----
-title: "MIR & Static Analysis"
-category: "Compilation Pipeline"
-section: "2.5"
-last_updated: "August 14, 2026"
----
-
 # MIR Analysis & Static Analysis
 
 Mid-Level IR (MIR) Analysis is the primary stage for dataflow reasoning and validation in the RunMat compilation pipeline. This layer bridges the gap between the structural representation of the High-Level IR (HIR) and the execution-ready bytecode. It performs type/shape inference, definite assignment checking, and spawn-safety validation to ensure program correctness before runtime.

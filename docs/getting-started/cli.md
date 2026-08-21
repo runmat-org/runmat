@@ -1,10 +1,3 @@
----
-title: "Command Line Interface"
-category: "Getting Started"
-section: "1.3"
-last_updated: "July 31, 2026"
----
-
 # RunMat Command Line Interface (CLI)
 
 The RunMat CLI is a fast and easy way to run `.m` files locally, open an interactive REPL, inspect runtime behavior, and work with remote project filesystems.

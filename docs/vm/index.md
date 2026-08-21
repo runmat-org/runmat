@@ -1,10 +1,3 @@
----
-title: "Virtual Machine (VM)"
-category: "Virtual Machine (VM)"
-section: "3.0"
-last_updated: "May 28, 2026"
----
-
 # VM Interpreter & Bytecode
 
 The `runmat-vm` crate provides the core execution engine for RunMat. It defines the custom bytecode format, the compiler that lowers Mid-Level IR (MIR) into that format, and the asynchronous interpreter that executes it. The VM is designed as the middle tier of a tiered execution model, sitting between high-level semantic analysis and low-level JIT or GPU acceleration.

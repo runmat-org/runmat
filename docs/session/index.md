@@ -1,10 +1,3 @@
----
-title: "Session Engine"
-category: "Session Engine"
-section: "7.0"
-last_updated: "August 14, 2026"
----
-
 # Session Engine
 
 `runmat-core` owns the host-agnostic execution session. A `RunMatSession` is the long-lived object that a REPL, notebook host, CLI command, or WebAssembly wrapper uses to submit MATLAB source, keep workspace variables alive, preserve user-defined functions, expose inspection data, handle input, and return structured execution results.

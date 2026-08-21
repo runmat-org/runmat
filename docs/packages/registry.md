@@ -1,10 +1,3 @@
----
-title: "Hosted Package Registry"
-category: "Packages"
-section: "8.2"
-last_updated: "August 1, 2026"
----
-
 # Hosted Package Registry
 
 The RunMat registry stores immutable, versioned package releases. The Server is authoritative for package ownership, visibility, release lifecycle, signing/provenance policy, recipient grants, yanks, revocations, advisories, and transfer authorization. The website, Desktop, CLI, and browser clients consume the same public API and do not reproduce those decisions.

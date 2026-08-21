@@ -1,10 +1,3 @@
----
-title: "Callable Resolution & Function Dispatch"
-category: "Virtual Machine (VM)"
-section: "3.4"
-last_updated: "May 28, 2026"
----
-
 # Callable Resolution & Function Dispatch
 
 RunMat's callable dispatch system bridges source-level calls to bytecode functions, runtime built-ins, closures, `feval`, object methods, and external-name fallbacks. The VM receives call intent through bytecode instructions and resolves it through `CallableIdentity`, `CallableFallbackPolicy`, `CallableDescriptor`, and the runtime semantic function hooks installed by the interpreter.

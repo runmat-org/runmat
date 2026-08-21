@@ -1,10 +1,3 @@
----
-title: "Workspace State"
-category: "Session Engine"
-section: "7.2"
-last_updated: "May 28, 2026"
----
-
 # Workspace State
 
 The session workspace has two jobs: provide fast VM slot access during execution, and expose stable variable identities to hosts after execution. It does this with three related data structures.

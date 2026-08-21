@@ -1,10 +1,3 @@
----
-title: "Operation Reference"
-category: "FEA"
-section: "13.10"
-last_updated: "June 22, 2026"
----
-
 # Operation Reference
 
 This page is for host integrations and tooling that care about operation names, envelopes, error codes, artifact roots, and builtin names.

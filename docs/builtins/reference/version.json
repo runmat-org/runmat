@@ -40,7 +40,7 @@
   "links": [
     { "label": "verLessThan", "url": "./verLessThan" },
     { "label": "isdeployed", "url": "./isdeployed" },
-    { "label": "MATLAB language compatibility", "url": "/docs/runtime/getting-started/compatability" }
+    { "label": "MATLAB language compatibility", "url": "/docs/runtime/matlab-compatibility" }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/introspection/runtime_compat.rs`",

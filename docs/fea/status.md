@@ -1,10 +1,3 @@
----
-title: "Current Status"
-category: "FEA"
-section: "13.9"
-last_updated: "June 22, 2026"
----
-
 # Current Status
 
 This page states what the FEA system supports today, where support is limited, and what evidence backs each claim.

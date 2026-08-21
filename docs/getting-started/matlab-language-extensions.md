@@ -1,10 +1,3 @@
----
-title: "MATLAB Language Extensions"
-category: "Getting Started"
-section: "1.7"
-last_updated: "August 16, 2026"
----
-
 # MATLAB Language Extensions
 
 RunMat runs MATLAB-language source code and also offers optional capabilities that are specific to RunMat. These additions are called language extensions. An extension may be new syntax, a new function, an extra argument form, or support for a data type that is outside the documented MATLAB behavior of an otherwise compatible function.
@@ -52,4 +45,4 @@ Each builtin reference separates ordinary behavior from RunMat-only forms. When 
 
 When `matlab` mode rejects an extension, RunMat reports a compatibility error before performing provider access, file I/O, graphics mutation, or another avoidable side effect. Stable extension identifiers in builtin metadata allow editors and other tooling to explain the rejected form.
 
-For the broader language and builtin coverage model, including the current compatibility target, see [MATLAB Language Compatibility](/docs/runtime/getting-started/compatability). For configuration details, see the [Configuration Reference](/docs/runtime/getting-started/config).
+For the broader language and builtin coverage model, including the current compatibility target, see [MATLAB Language Compatibility](/docs/runtime/matlab-compatibility). For configuration details, see the [Configuration Reference](/docs/runtime/getting-started/config).

@@ -1,10 +1,3 @@
----
-title: "wgpu Backend & Accelerate Provider"
-category: "GPU Acceleration & Fusion Engine"
-section: "4.2"
-last_updated: "August 14, 2026"
----
-
 # WGPU Backend & Accelerate Provider
 
 The `wgpu` backend is RunMat's primary hardware acceleration provider. It implements the `AccelProvider` trait with a `WgpuProvider` that owns the device, queue, adapter metadata, buffer table, residency pool, compute pipelines, kernel resources, caches, telemetry, and autotuning state.

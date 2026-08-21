@@ -1,10 +1,3 @@
----
-title: "Mid-Level IR (MIR)"
-category: "Compilation Pipeline"
-section: "2.4"
-last_updated: "May 28, 2026"
----
-
 # Mid-Level IR (MIR)
 
 The Mid-Level IR (MIR) represents the stage in the RunMat compilation pipeline where High-Level IR (HIR) is lowered into a Control-Flow Graph (CFG) of Basic Blocks. While HIR maintains a structure close to the original MATLAB AST (nested loops, if-statements), MIR flattens these into explicit jumps, branch targets, and local variable slots (locals). This representation is used for dataflow analysis, type inference, and as the primary input for bytecode generation.

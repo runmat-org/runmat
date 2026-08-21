@@ -1,10 +1,3 @@
----
-title: "Results & Trust"
-category: "FEA"
-section: "13.8"
-last_updated: "June 10, 2026"
----
-
 # Results & Trust
 
 A run result is useful when you can inspect it, explain it, reproduce it, and judge it against the workflow's standard.

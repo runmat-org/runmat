@@ -1,10 +1,3 @@
----
-title: "Build System"
-category: "Development"
-section: "14.1"
-last_updated: "August 14, 2026"
----
-
 # Build System
 
 RunMat builds from a single Cargo workspace. The workspace keeps the language pipeline, execution engines, runtime builtins, acceleration layer, plotting, CLI, LSP, snapshotting, filesystem, and WASM bindings in one versioned graph.

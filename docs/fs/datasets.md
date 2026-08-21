@@ -1,10 +1,3 @@
----
-title: "Datasets API"
-category: "Filesystem"
-section: "13.1"
-last_updated: "August 9, 2026"
----
-
 # Datasets API
 
 RunMat's dataset API lets you scale large, long-lived arrays by storing them as named datasets that can be reopened across sessions, read and written in slices, and backed by local or remote storage. The API is built around chunked array storage, so workflows can grow toward petabyte-scale datasets without rewriting whole files for every update.

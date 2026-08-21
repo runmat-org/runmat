@@ -1,10 +1,3 @@
----
-title: "Execution"
-category: "Execution"
-section: "12.0"
-last_updated: "August 14, 2026"
----
-
 # Execution
 
 This section covers the cross-cutting pieces that do not belong only to the compiler, VM, or session API docs: asynchronous boundaries, error propagation, diagnostics, and observability.

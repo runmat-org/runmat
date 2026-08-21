@@ -1,10 +1,3 @@
----
-title: "GPU Acceleration & Fusion Engine"
-category: "GPU Acceleration & Fusion Engine"
-section: "4.0"
-last_updated: "August 14, 2026"
----
-
 # GPU Acceleration & Fusion Engine
 
 RunMat's GPU acceleration layer keeps compute-heavy array work close to device memory when doing so is profitable. The system spans three major surfaces: VM-side promotion and fusion planning, a provider API for GPU-resident tensors, and the `wgpu` backend that executes kernels on Vulkan, Metal, DirectX, or WebGPU-capable devices.

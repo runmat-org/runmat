@@ -1,10 +1,3 @@
----
-title: "Interpreter Dispatch & Execution Loop"
-category: "Virtual Machine (VM)"
-section: "3.2"
-last_updated: "May 28, 2026"
----
-
 # Interpreter Dispatch & Execution Loop
 
 The RunMat interpreter executes the bytecode emitted by the VM compiler. It is an async instruction loop over `Instr` values, with runtime state held in `InterpreterState` and passed into the dispatch layer as a mutable `DispatchState`. The loop owns the program counter, value stack, variable slots, try/catch stack, semantic function resolver hooks, and optional native-acceleration fusion plan.
