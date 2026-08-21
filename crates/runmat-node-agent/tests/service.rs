@@ -56,7 +56,7 @@ impl NodeControlPlane for Control {
                 queue: "default".into(),
                 resources: ResourceRequest {
                     cpu_millicores: 1,
-                    memory_bytes: 8 * 1024 * 1024 * 1024,
+                    memory_bytes: 1024,
                     scratch_bytes: 1024,
                     accelerator_count: 0,
                     accelerator_class: None,
