@@ -5,6 +5,7 @@ use test_helpers::execute_source;
 
 #[test]
 fn compiled_mesh_and_patch_properties_preserve_integer_storage() {
+    let _plot_guard = runmat_runtime::builtins::plotting::lock_plot_test_context();
     let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     execute_source(
         "b=uint64(9007199254740992); z=reshape([b+uint64(1) b+uint64(2) b+uint64(3) b+uint64(4)],[2 2]); hm=mesh(z); zr=get(hm,'ZData'); if ~isa(zr,'uint64') || ~isequal(zr,z); error('mesh integer storage mismatch'); end; f=int16([1 2 3]); v=int16([0 0;1 0;0 1]); hp=patch('Faces',f,'Vertices',v); fr=get(hp,'Faces'); vr=get(hp,'Vertices'); if ~isa(fr,'int16') || ~isequal(fr,f) || ~isa(vr,'int16') || ~isequal(vr,v); error('patch integer storage mismatch'); end;",
@@ -14,6 +15,7 @@ fn compiled_mesh_and_patch_properties_preserve_integer_storage() {
 
 #[test]
 fn compiled_colormap_pan_and_pause_accept_documented_integer_controls() {
+    let _plot_guard = runmat_runtime::builtins::plotting::lock_plot_test_context();
     for constructor in [
         "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
     ] {
@@ -67,6 +69,7 @@ fn compiled_openfig_rejects_integer_filename_roles() {
 
 #[test]
 fn compiled_timer_title_toeplitz_trace_and_tpdf_semantics_are_exact() {
+    let _plot_guard = runmat_runtime::builtins::plotting::lock_plot_test_context();
     let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     execute_source(
         "timerVal=tic(); if ~isa(timerVal,'uint64'); error('tic token class'); end; first=toc(timerVal); pause(0.001); second=toc(); if second<first; error('toc consumed latest timer'); end; wide=bitshift(uint64(1),53)+uint64(1); h=title(wide); if ~strcmp(get(h,'String'),'9007199254740993'); error('title integer formatting'); end; T=toeplitz(uint64([wide wide+uint64(1)])); if ~isa(T,'uint64') || T(2,1)~=wide+uint64(1); error('toeplitz exact storage'); end; tr=trace(uint64([1 2;3 4])); if ~isa(tr,'double') || tr~=5; error('trace integer boundary'); end; p=tpdf(uint16(0),uint16(5)); if ~isa(p,'double') || p<=0; error('tpdf integer extension'); end;",

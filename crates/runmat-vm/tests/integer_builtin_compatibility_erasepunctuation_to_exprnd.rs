@@ -83,6 +83,7 @@ fn compiled_text_and_exist_boundaries_reject_numeric_roles_before_conversion() {
 
 #[test]
 fn compiled_errorbar_accepts_every_integer_class() {
+    let _plot_guard = runmat_runtime::builtins::plotting::lock_plot_test_context();
     for constructor in INTEGER_CONSTRUCTORS {
         let source = format!(
             "handle = errorbar({constructor}([1 2]), {constructor}([3 4]), {constructor}([1 1]));"

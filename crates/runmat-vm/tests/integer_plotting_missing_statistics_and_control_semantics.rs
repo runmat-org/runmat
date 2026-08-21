@@ -5,6 +5,7 @@ use test_helpers::execute_source;
 
 #[test]
 fn compiled_integer_plot_sources_and_defaults_remain_exact() {
+    let _plot_guard = runmat_runtime::builtins::plotting::lock_plot_test_context();
     execute_source("wide=uint64(9007199254740992)+uint64(1); x=[wide wide+uint64(1)]; y=int16([-2 3]); hs=stairs(x,y); sx=get(hs,'XData'); sy=get(hs,'YData'); if ~isa(sx,'uint64') || sx(1)~=wide || ~isa(sy,'int16'); error('stairs typed source'); end; hm=stem(x,y); mx=get(hm,'XData'); my=get(hm,'YData'); if ~isa(mx,'uint64') || mx(2)~=wide+uint64(1) || ~isa(my,'int16'); error('stem typed source'); end; opts=statset(); d=statget(opts,'TolFun',wide); if ~isa(d,'uint64') || d~=wide; error('statget typed default'); end;")
         .expect("compiled exact plotting and statistics value carriers");
 }

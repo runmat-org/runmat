@@ -1,19 +1,11 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use std::sync::{Mutex, MutexGuard, OnceLock};
 use test_helpers::execute_source;
-
-fn plot_test_lock() -> MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-}
 
 #[test]
 fn compiled_histogram_and_image_integer_forms_preserve_contracts() {
-    let _guard = plot_test_lock();
+    let _plot_guard = runmat_runtime::builtins::plotting::lock_plot_test_context();
     execute_source(
         "u = uint16([0 128 65535]); d = im2double(u); if ~isa(d,'double') || d(1) ~= 0 || d(3) ~= 1; error('im2double contract failed'); end; b = im2uint8(uint16([127 128 383 384])); if ~isa(b,'uint8') || ~isequal(b,uint8([0 1 1 2])); error('im2uint8 contract failed'); end; w = im2uint16(uint8([0 128 255])); if ~isa(w,'uint16') || ~isequal(w,uint16([0 32896 65535])); error('im2uint16 contract failed'); end; [n,xe,ye,bx,by] = histcounts2(uint64([9007199254740993 9007199254740994]), uint8([1 2]), uint64([9007199254740993 9007199254740994 9007199254740995]), uint8([1 2 3])); if ~isequal(size(n),[2 2]) || bx(1) ~= 1 || bx(2) ~= 2 || by(1) ~= 1 || by(2) ~= 2; error('histcounts2 contract failed'); end; h = image(uint8(reshape([255 0 0 255 0 0],[1 2 3]))); if ~isa(get(h,'CData'),'uint8') || ~strcmp(get(h,'CDataMapping'),'direct'); error('image CData contract failed'); end; hs = imagesc(uint16([1 2;3 4]), [0 5]); if ~isa(get(hs,'CData'),'uint16') || ~strcmp(get(hs,'CDataMapping'),'scaled'); error('imagesc CData contract failed'); end;",
     )
@@ -22,7 +14,7 @@ fn compiled_histogram_and_image_integer_forms_preserve_contracts() {
 
 #[test]
 fn compiled_histogram_and_image_extensions_have_stable_identifiers() {
-    let _guard = plot_test_lock();
+    let _plot_guard = runmat_runtime::builtins::plotting::lock_plot_test_context();
     let _matlab = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
     for (source, identifier) in [
         (
@@ -49,12 +41,8 @@ fn compiled_histogram_and_image_extensions_have_stable_identifiers() {
 
 #[test]
 fn compiled_histogram_image_cohort_covers_successful_integer_and_logical_forms() {
-    let _guard = plot_test_lock();
+    let _plot_guard = runmat_runtime::builtins::plotting::lock_plot_test_context();
     let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
-    unsafe {
-        std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", "1");
-        std::env::set_var("RUNMAT_HOST_MANAGED_PLOTS", "1");
-    }
     for source in [
         "[hn,hc] = hist(uint8([1 2 2 3]), [1 2 3]); [hm,cm] = hist(uint8([1 2;2 3]),2);",
         "[cn,cb] = histc(uint32([1 2 2 3]),uint32([1 2 3]));",
