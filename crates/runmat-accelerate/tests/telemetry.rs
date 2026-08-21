@@ -7,10 +7,17 @@ use runmat_accelerate_api::{
     AccelProvider, CorrcoefOptions, HostTensorView, ProviderQrOptions, ProviderQrPivot,
 };
 #[cfg(feature = "wgpu")]
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 #[cfg(feature = "wgpu")]
 static TELEMETRY_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+#[cfg(feature = "wgpu")]
+fn telemetry_test_guard() -> MutexGuard<'static, ()> {
+    TELEMETRY_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 #[cfg(feature = "wgpu")]
 fn register_provider() -> &'static dyn AccelProvider {
@@ -22,7 +29,7 @@ fn register_provider() -> &'static dyn AccelProvider {
 #[cfg(feature = "wgpu")]
 #[test]
 fn telemetry_records_basic_dispatches() {
-    let _guard = TELEMETRY_TEST_LOCK.lock().expect("telemetry test lock");
+    let _guard = telemetry_test_guard();
     let provider = register_provider();
     provider.reset_telemetry();
 
@@ -99,7 +106,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 #[cfg(feature = "wgpu")]
 #[test]
 fn telemetry_records_chunked_matmul_activity() {
-    let _guard = TELEMETRY_TEST_LOCK.lock().expect("telemetry test lock");
+    let _guard = telemetry_test_guard();
     let provider = register_provider();
     provider.reset_telemetry();
 
@@ -145,7 +152,7 @@ fn telemetry_records_chunked_matmul_activity() {
 #[cfg(feature = "wgpu")]
 #[test]
 fn corrcoef_device_path_avoids_host_downloads() {
-    let _guard = TELEMETRY_TEST_LOCK.lock().expect("telemetry test lock");
+    let _guard = telemetry_test_guard();
     let provider = register_provider();
 
     let rows = 64usize;
@@ -180,7 +187,7 @@ fn corrcoef_device_path_avoids_host_downloads() {
 #[cfg(feature = "wgpu")]
 #[test]
 fn qr_power_iter_device_path_avoids_host_downloads() {
-    let _guard = TELEMETRY_TEST_LOCK.lock().expect("telemetry test lock");
+    let _guard = telemetry_test_guard();
     std::env::set_var("RUNMAT_WGPU_FORCE_PRECISION", "f32");
     std::env::remove_var("RUNMAT_DEBUG_QR");
     std::env::remove_var("RUNMAT_DEBUG_QR_ZEROHOST");
@@ -241,7 +248,7 @@ fn qr_power_iter_device_path_avoids_host_downloads() {
 #[cfg(feature = "wgpu")]
 #[test]
 fn qr_power_iter_zero_product_path_remains_stable() {
-    let _guard = TELEMETRY_TEST_LOCK.lock().expect("telemetry test lock");
+    let _guard = telemetry_test_guard();
     std::env::set_var("RUNMAT_WGPU_FORCE_PRECISION", "f32");
     std::env::remove_var("RUNMAT_DEBUG_QR");
     std::env::remove_var("RUNMAT_DEBUG_QR_ZEROHOST");
@@ -306,7 +313,7 @@ fn qr_power_iter_zero_product_path_remains_stable() {
 #[cfg(feature = "wgpu")]
 #[test]
 fn qr_power_iter_rank_deficient_path_remains_finite() {
-    let _guard = TELEMETRY_TEST_LOCK.lock().expect("telemetry test lock");
+    let _guard = telemetry_test_guard();
     std::env::set_var("RUNMAT_WGPU_FORCE_PRECISION", "f32");
     std::env::remove_var("RUNMAT_DEBUG_QR");
     std::env::remove_var("RUNMAT_DEBUG_QR_ZEROHOST");
@@ -378,8 +385,8 @@ fn qr_power_iter_rank_deficient_path_remains_finite() {
 
 #[cfg(feature = "wgpu")]
 #[test]
-fn qr_device_column_limit_boundary_uses_expected_path() {
-    let _guard = TELEMETRY_TEST_LOCK.lock().expect("telemetry test lock");
+fn qr_column_counts_use_correctness_fallback() {
+    let _guard = telemetry_test_guard();
     std::env::set_var("RUNMAT_WGPU_FORCE_PRECISION", "f32");
     let provider = register_provider();
 
@@ -405,9 +412,9 @@ fn qr_device_column_limit_boundary_uses_expected_path() {
     provider.reset_telemetry();
     let qr64 = block_on(provider.qr(&h64, options)).expect("qr 64-col");
     let telem64 = provider.telemetry_snapshot();
-    assert_eq!(
-        telem64.download_bytes, 0,
-        "cols=64 should use device QR path without host download"
+    assert!(
+        telem64.download_bytes > 0,
+        "cols=64 should use the correctness-first host QR fallback"
     );
     assert_eq!(qr64.q.shape, vec![rows, cols_device]);
     assert_eq!(qr64.r.shape, vec![cols_device, cols_device]);
@@ -430,7 +437,7 @@ fn qr_device_column_limit_boundary_uses_expected_path() {
     let telem65 = provider.telemetry_snapshot();
     assert!(
         telem65.download_bytes > 0,
-        "cols=65 should bypass device QR kernel and use host fallback path"
+        "cols=65 should use the correctness-first host QR fallback"
     );
     assert_eq!(qr65.q.shape, vec![rows, cols_host]);
     assert_eq!(qr65.r.shape, vec![cols_host, cols_host]);
