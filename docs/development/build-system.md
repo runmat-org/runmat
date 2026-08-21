@@ -154,6 +154,8 @@ The WASM registry has an ordering constraint: proc macros write registry entries
 
 ## Release Helpers
 
-Release versioning is handled by `scripts/cut-release.sh <version>`. The script validates the version and clean branch state, updates workspace crate versions and the TypeScript package version, runs `cargo check -q`, commits, tags, and pushes.
+Prepare release versions on `dev` with `scripts/prepare-release.sh <version>`. The script updates workspace crates, `Cargo.lock`, and the TypeScript package, validates the resulting state, and leaves the changes uncommitted for normal review.
+
+After that versioned commit reaches `main`, run `scripts/cut-release.sh <version>`. The cut script requires a clean checkout that exactly matches `origin/main`, verifies that every workspace crate and TypeScript package already has the requested version, runs a locked build check, and tags that reviewed commit. It does not modify or commit release files.
 
 Native release artifacts are built by GitHub Actions for the supported release triples listed in [Supported Architectures](/docs/runtime/development/supported-architectures). WASM package publication is handled by the `wasm-bindings` workflow.

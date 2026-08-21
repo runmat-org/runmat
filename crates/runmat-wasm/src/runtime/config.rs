@@ -68,6 +68,7 @@ pub(crate) struct SessionConfig {
 
 impl SessionConfig {
     pub(crate) fn from_options(opts: &InitOptions) -> Self {
+        let language_compat = parse_language_compat(opts.language_compat.as_deref());
         Self {
             enable_jit: opts.enable_jit.unwrap_or(false) && cfg!(feature = "jit"),
             verbose: opts.verbose.unwrap_or(false),
@@ -79,7 +80,7 @@ impl SessionConfig {
             wgpu_force_fallback_adapter: opts.wgpu_force_fallback_adapter.unwrap_or(false),
             auto_offload: AutoOffloadOptions::default(),
             emit_fusion_plan: opts.emit_fusion_plan.unwrap_or(false),
-            language_compat: parse_language_compat(opts.language_compat.as_deref()),
+            language_compat,
             gpu_buffer_pool_max_per_key: opts.gpu_buffer_pool_max_per_key,
             callstack_limit: opts
                 .callstack_limit
@@ -87,7 +88,7 @@ impl SessionConfig {
             error_namespace: opts
                 .error_namespace
                 .clone()
-                .unwrap_or_else(|| runmat_runtime::context::DEFAULT_ERROR_NAMESPACE.to_string()),
+                .unwrap_or_else(|| error_namespace_for_compat(language_compat).to_string()),
         }
     }
 
@@ -111,6 +112,13 @@ impl SessionConfig {
             log::info!("RunMat wasm: setting RUNMAT_WGPU_POOL_MAX_PER_KEY={}", max);
             std::env::set_var("RUNMAT_WGPU_POOL_MAX_PER_KEY", max.to_string());
         }
+    }
+}
+
+pub(crate) fn error_namespace_for_compat(mode: CompatMode) -> &'static str {
+    match mode {
+        CompatMode::Matlab => "MATLAB",
+        CompatMode::RunMat | CompatMode::Strict => "RunMat",
     }
 }
 
@@ -182,5 +190,22 @@ mod compatibility_tests {
         assert_eq!(parse_language_compat(Some("matlab")), CompatMode::Matlab);
         assert_eq!(parse_language_compat(Some("strict")), CompatMode::Strict);
         assert_eq!(parse_language_compat_from_str("unknown"), None);
+    }
+
+    #[wasm_bindgen_test]
+    fn language_mode_derives_the_default_error_namespace() {
+        let matlab = InitOptions {
+            language_compat: Some("matlab".to_string()),
+            ..Default::default()
+        };
+        let runmat = InitOptions::default();
+        assert_eq!(
+            SessionConfig::from_options(&matlab).error_namespace,
+            "MATLAB"
+        );
+        assert_eq!(
+            SessionConfig::from_options(&runmat).error_namespace,
+            "RunMat"
+        );
     }
 }

@@ -51,7 +51,7 @@ await session.executeRequest({
 | `plotCanvas` | Attach a default plotting canvas during startup. |
 | `telemetryConsent`, `telemetryId`, `telemetryEmitter` | Configure telemetry before the runtime starts. |
 | `logLevel`, `emitFusionPlan`, `callstackLimit`, `errorNamespace` | Configure diagnostics and execution metadata. |
-| `language.compat` | Choose default MATLAB-compatible behavior or `"strict"` mode. |
+| `language.compat` | Choose `"runmat"` (the default), `"matlab"`, or `"strict"` language policy. |
 
 GPU initialization is opportunistic in browser contexts. If WebGPU is unavailable, RunMat logs a warning and continues on CPU.
 

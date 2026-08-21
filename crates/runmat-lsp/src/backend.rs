@@ -91,7 +91,7 @@ impl RunMatLanguageServer {
             client,
             state: Arc::new(RwLock::new(AnalyzerState {
                 documents: HashMap::new(),
-                compat_mode: CompatMode::Matlab,
+                compat_mode: CompatMode::RunMat,
                 workspace_roots: Vec::new(),
                 project_cache: None,
             })),
@@ -853,6 +853,19 @@ impl LanguageServer for RunMatLanguageServer {
     }
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
+        let Some(mode) = parse_compat_mode(&params.settings) else {
+            debug!("Ignoring configuration update without a valid language.compat value");
+            return;
+        };
+        let uris = {
+            let mut state = self.state.write().await;
+            state.compat_mode = parser_compat(mode);
+            state.project_cache = None;
+            state.documents.keys().cloned().collect::<Vec<_>>()
+        };
+        for uri in uris {
+            self.reanalyze(&uri).await;
+        }
         debug!("Configuration updated: {:?}", params.settings);
         self.client
             .log_message(MessageType::INFO, "RunMat configuration updated")
@@ -921,6 +934,17 @@ mod tests {
     use std::collections::HashSet;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn default_and_configured_compat_modes_preserve_runmat() {
+        assert_eq!(LanguageCompatMode::default(), LanguageCompatMode::RunMat);
+        assert_eq!(
+            parse_compat_mode(&serde_json::json!({
+                "language": { "compat": "runmat" }
+            })),
+            Some(LanguageCompatMode::RunMat)
+        );
+    }
 
     #[test]
     fn dependent_selection_targets_only_docs_referencing_changed_symbols() {

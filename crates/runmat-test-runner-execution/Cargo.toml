@@ -1,6 +1,6 @@
 [package]
 name = "runmat-test-runner-execution"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2021"
 description = "Execution-scheduler bridge for RunMat test worker backends"
 license-file = "../../LICENSE.md"

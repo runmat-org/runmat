@@ -256,6 +256,8 @@ interface NativeSession {
   gpuStatus(): GpuStatus;
   cancelExecution?: () => void;
   setInputHandler?: (handler: ((req: InputRequest) => unknown) | null) => void;
+  setLanguageCompat?: (mode: string) => void;
+  setErrorNamespace?: (namespace: string) => void;
   installProjectHandoff?: (handoff: unknown) => unknown;
   clearProjectHandoff?: () => void;
   projectRevision?: () => unknown | null;
@@ -306,6 +308,25 @@ describe("initRunMat wiring", () => {
   afterEach(() => {
     __internals.setNativeModuleOverride(null);
     vi.restoreAllMocks();
+  });
+
+  it("forwards dynamic language policy and error namespace updates", async () => {
+    const setLanguageCompat = vi.fn();
+    const setErrorNamespace = vi.fn();
+    __internals.setNativeModuleOverride({
+      default: async () => {},
+      initRunMat: async () => createMockNativeSession({
+        setLanguageCompat,
+        setErrorNamespace,
+      }),
+    } as NativeModule);
+
+    const session = await initRunMat({ enableGpu: false });
+    session.setLanguageCompat("runmat");
+    session.setErrorNamespace("Acme");
+
+    expect(setLanguageCompat).toHaveBeenCalledWith("runmat");
+    expect(setErrorNamespace).toHaveBeenCalledWith("Acme");
   });
 
   it("passes provided fs provider into native init options", async () => {
@@ -1062,7 +1083,11 @@ describe("canonical config authority", () => {
   it("delegates resolve, patch, and migration to the Rust/WASM exports", async () => {
     const resolved = {
       desktop: { artifacts: { root: ".artifacts" } },
-      runtime: { accelerate: { enabled: true } },
+      runtime: {
+        error_namespace: "RunMat",
+        language: { compat: "runmat" },
+        accelerate: { enabled: true },
+      },
     };
     const migration = {
       source: '[desktop.artifacts]\nroot = ".artifacts"\n',

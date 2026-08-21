@@ -1,6 +1,6 @@
 [package]
 name = "runmat"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2021"
 description = "High-performance MATLAB/Octave syntax mathematical runtime"
 authors = ["Dystr Team"]
@@ -51,31 +51,31 @@ openssl = { version = "0.10", optional = true }
 openssl-sys = { version = "0.9.109", optional = true }
 
 # RunMat crates
-runmat-core = { version = "=0.6.1", path = "../runmat-core" }
+runmat-core = { version = "=0.6.2", path = "../runmat-core" }
 runmat-aot = { workspace = true }
 runmat-native-codegen = { workspace = true, features = ["compiler"] }
 runmat-execution = { workspace = true }
 runmat-execution-artifact = { workspace = true }
 runmat-execution-runner-native = { workspace = true }
 runmat-process-host = { workspace = true }
-runmat-parser = { version = "=0.6.1", path = "../runmat-parser" }
-runmat-hir = { version = "=0.6.1", path = "../runmat-hir" }
-runmat-mir = { version = "=0.6.1", path = "../runmat-mir" }
-runmat-vm = { version = "=0.6.1", path = "../runmat-vm" }
-runmat-runtime = { version = "=0.6.1", path = "../runmat-runtime" }
-runmat-gc = { version = "=0.6.1", path = "../runmat-gc" }
-runmat-builtins = { version = "=0.6.1", path = "../runmat-builtins" }
-runmat-plot = { version = "=0.6.1", path = "../runmat-plot" }
-runmat-accelerate = { version = "=0.6.1", path = "../runmat-accelerate" }
-runmat-accelerate-api = { version = "=0.6.1", path = "../runmat-accelerate-api" }
-runmat-config = { version = "=0.6.1", path = "../runmat-config", features = ["accelerate"] }
+runmat-parser = { version = "=0.6.2", path = "../runmat-parser" }
+runmat-hir = { version = "=0.6.2", path = "../runmat-hir" }
+runmat-mir = { version = "=0.6.2", path = "../runmat-mir" }
+runmat-vm = { version = "=0.6.2", path = "../runmat-vm" }
+runmat-runtime = { version = "=0.6.2", path = "../runmat-runtime" }
+runmat-gc = { version = "=0.6.2", path = "../runmat-gc" }
+runmat-builtins = { version = "=0.6.2", path = "../runmat-builtins" }
+runmat-plot = { version = "=0.6.2", path = "../runmat-plot" }
+runmat-accelerate = { version = "=0.6.2", path = "../runmat-accelerate" }
+runmat-accelerate-api = { version = "=0.6.2", path = "../runmat-accelerate-api" }
+runmat-config = { version = "=0.6.2", path = "../runmat-config", features = ["accelerate"] }
 runmat-package = { workspace = true }
 runmat-package-cache = { workspace = true }
 runmat-package-cache-native = { workspace = true }
-runmat-time = { version = "=0.6.1", path = "../runmat-time" }
-runmat-filesystem = { version = "=0.6.1", path = "../runmat-filesystem" }
-runmat-telemetry = { version = "=0.6.1", path = "../runmat-telemetry" }
-runmat-static-analysis = { version = "=0.6.1", path = "../runmat-static-analysis" }
+runmat-time = { version = "=0.6.2", path = "../runmat-time" }
+runmat-filesystem = { version = "=0.6.2", path = "../runmat-filesystem" }
+runmat-telemetry = { version = "=0.6.2", path = "../runmat-telemetry" }
+runmat-static-analysis = { version = "=0.6.2", path = "../runmat-static-analysis" }
 runmat-server-client = { workspace = true }
 runmat-node-agent = { workspace = true }
 runmat-test = { workspace = true }

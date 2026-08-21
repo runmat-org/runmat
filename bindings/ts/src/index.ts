@@ -214,7 +214,7 @@ export type {
   FusionPlanAdapter,
   FusionPlanAdapterOptions
 } from "./fusion-plan.js";
-export type LanguageCompatMode = "matlab" | "strict";
+export type LanguageCompatMode = "runmat" | "matlab" | "strict";
 type RunMatPresetLogLevel = "trace" | "debug" | "info" | "warn" | "error";
 export type RunMatLogLevel = RunMatPresetLogLevel | (string & Record<never, never>);
 
@@ -246,6 +246,8 @@ export interface ResolvedDesktopConfig {
 export interface ResolvedRunmatConfig {
   desktop: ResolvedDesktopConfig;
   runtime: Record<string, unknown> & {
+    error_namespace: string;
+    language: Record<string, unknown> & { compat: LanguageCompatMode };
     accelerate: Record<string, unknown> & { enabled: boolean };
     plotting: Record<string, unknown> & {
       export?: Record<string, unknown> & { scene_budget_bytes: number };
@@ -1030,6 +1032,7 @@ export interface RunMatSessionHandle {
   ): Promise<MaterializedVariable>;
   setFusionPlanEnabled(enabled: boolean): void;
   setLanguageCompat(mode: LanguageCompatMode): void;
+  setErrorNamespace(namespace: string): void;
   fusionPlanForSource?(source: string): Promise<FusionPlanSnapshot | null>;
   setFsProvider?(provider: RunMatFilesystemProvider): Promise<void>;
   packageCacheSnapshot(): Promise<PackageCacheSnapshot | null>;
@@ -1131,6 +1134,7 @@ interface RunMatNativeSession {
   ) => MaterializedVariable;
   setFusionPlanEnabled?: (enabled: boolean) => void;
   setLanguageCompat?: (mode: LanguageCompatMode) => void;
+  setErrorNamespace?: (namespace: string) => void;
   fusionPlanForSource?: (source: string) => FusionPlanSnapshot | null;
   setFsProvider?: (provider: RunMatFilesystemProvider) => void;
   packageCacheSnapshot?: () => Promise<PackageCacheSnapshot | null>;
@@ -2387,6 +2391,12 @@ class WebRunMatSession implements RunMatSessionHandle {
     this.ensureActive();
     requireNativeFunction(this.native, "setLanguageCompat");
     this.native.setLanguageCompat(mode);
+  }
+
+  setErrorNamespace(namespace: string): void {
+    this.ensureActive();
+    requireNativeFunction(this.native, "setErrorNamespace");
+    this.native.setErrorNamespace(namespace);
   }
 
   async fusionPlanForSource(source: string): Promise<FusionPlanSnapshot | null> {
