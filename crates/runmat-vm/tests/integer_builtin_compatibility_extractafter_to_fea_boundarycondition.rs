@@ -66,6 +66,7 @@ fn compiled_eye_and_false_accept_every_integer_dimension_class() {
 
 #[test]
 fn compiled_fcontour_and_boundary_condition_accept_every_integer_class() {
+    let _plot_guard = runmat_runtime::builtins::plotting::lock_plot_test_context();
     let _matlab = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
     for constructor in INTEGER_CONSTRUCTORS {
         let source = format!(
