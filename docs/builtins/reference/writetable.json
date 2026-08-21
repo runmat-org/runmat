@@ -10,6 +10,6 @@
   "description": "`writetable(T, filename)` writes table variables to a delimited text file.",
   "behaviors": ["`\"Delimiter\"` controls the field separator and defaults to comma.", "`\"WriteVariableNames\"` controls header emission and defaults to true.", "Fields containing delimiters, quotes, or newlines are CSV-quoted.", "Variables from all eight native integer classes are serialized with their exact decimal values.", "A typed-integer `WriteVariableNames` value, explicit `gpuArray` input, and the bytes-written output are available in RunMat mode."],
   "examples": [{"description": "Write CSV", "input": "writetable(T, 'out.csv')"}],
-  "links": [{"label": "MATLAB language extensions", "url": "/docs/runtime/getting-started/matlab-language-extensions"}, {"label": "readtable", "url": "./readtable"}, {"label": "writetimetable", "url": "./writetimetable"}],
+  "links": [{"label": "MATLAB language extensions", "url": "/docs/runtime/getting-started/language-extensions"}, {"label": "readtable", "url": "./readtable"}, {"label": "writetimetable", "url": "./writetimetable"}],
   "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}
 }

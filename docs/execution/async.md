@@ -43,7 +43,7 @@ If a host-only builtin receives GPU values and the first implementation fails on
 
 ## RunMat Async Language Extensions (Beta)
 
-RunMat accepts `async function` and `await(...)` as RunMat extensions to the MATLAB language. MATLAB-compatible mode rejects these forms before execution. See [MATLAB Language Extensions](/docs/runtime/getting-started/matlab-language-extensions) for the extension model and how to select a compatibility mode.
+RunMat accepts `async function` and `await(...)` as RunMat extensions to the MATLAB language. MATLAB-compatible mode rejects these forms before execution. See [MATLAB Language Extensions](/docs/runtime/getting-started/language-extensions) for the extension model and how to select a compatibility mode.
 
 Calling an async function returns a future. The function body does not run when the future is created; it runs when the future is awaited.
 

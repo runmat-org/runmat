@@ -6,6 +6,6 @@
   "description": "`xlabel(txt)` sets the x-axis label and returns the label object's graphics handle.",
   "behaviors": ["Text may be supplied as a string, character vector, string array, or cell array of strings.", "A numeric scalar is converted to label text. Native integer scalars, including one-element integer arrays, use their exact decimal spelling.", "The `FontSize` property accepts single, double, and all eight native integer classes. Values must be positive, finite, and within the renderer's supported size range.", "An axes handle may be supplied first. RunMat mode additionally accepts a typed-integer alias for an encoded axes handle."],
   "examples": [{"description": "Label an axis", "input": "plot(1:10, rand(1, 10));\nxlabel('Time (s)')"}, {"description": "Use an integer label and font size", "input": "xlabel(intmax('uint64'), 'FontSize', uint8(14))"}],
-  "links": [{"label": "MATLAB language extensions", "url": "/docs/runtime/getting-started/matlab-language-extensions"}, {"label": "ylabel", "url": "./ylabel"}, {"label": "title", "url": "./title"}],
+  "links": [{"label": "MATLAB language extensions", "url": "/docs/runtime/getting-started/language-extensions"}, {"label": "ylabel", "url": "./ylabel"}, {"label": "title", "url": "./title"}],
   "source": {"label": "`crates/runmat-runtime/src/builtins/plotting/ops/xlabel.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/xlabel.rs"}
 }
