@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Uses the provider's unary_asinh hook when available; gathers to host otherwise."
+    "notes": "Uses the provider's unary_asinh hook when available; unsupported floating hooks and admitted resident integer/logical extensions use owner-preserving fallback."
   },
   "fusion": {
     "elementwise": true,
@@ -33,8 +33,9 @@
   "description": "`Y = asinh(X)` evaluates the inverse hyperbolic sine of each element in `X`. Real and complex inputs are handled element-wise, with branch behavior matching MATLAB semantics.",
   "behaviors": [
     "Accepts scalars, vectors, matrices, and N-D tensors and applies the operation element-wise using MATLAB's broadcasting rules.",
-    "Logical inputs are promoted to doubles (`true → 1.0`, `false → 0.0`) before the inverse hyperbolic sine is applied.",
-    "Character arrays are interpreted as numeric code points and return dense double arrays with the same shape.",
+    "The documented table and timetable overloads are not yet implemented in RunMat.",
+    "Documented single and complex-single inputs preserve native single storage; double and complex-double inputs preserve double storage.",
+    "Typed-integer, logical, and character inputs are RunMat-only extensions. They enter an explicit double computation boundary and preserve input shape.",
     "Real inputs produce real outputs for all finite values. Complex inputs follow MATLAB's principal branch definition `asinh(z) = log(z + sqrt(z^2 + 1))`.",
     "NaNs and infinities propagate according to IEEE arithmetic and match MATLAB's special-case tables."
   ],
@@ -76,11 +77,11 @@
     },
     {
       "question": "How are logical or integer inputs handled?",
-      "answer": "They are promoted to double precision before evaluation, mirroring MATLAB's behavior. The result is returned as a dense double tensor (or complex tensor for complex inputs)."
+      "answer": "They are outside the documented single/double data domain. RunMat mode retains logical and all-eight-class integer inputs as explicit extensions and converts them to double at the inverse-hyperbolic-sine computation boundary."
     },
     {
       "question": "What happens if the GPU provider lacks `unary_asinh`?",
-      "answer": "RunMat gathers the data to the host, evaluates `asinh` on the CPU, and keeps the result on the host unless a downstream operation requests GPU residency."
+      "answer": "RunMat gathers the data, evaluates `asinh` on the CPU, and restores the result to the input handle's owning provider."
     },
     {
       "question": "Is there a precision difference between CPU and GPU outputs?",
@@ -92,7 +93,7 @@
     },
     {
       "question": "How are character arrays processed?",
-      "answer": "They are interpreted as their Unicode code points, converted to doubles, and then passed through `asinh`, producing a numeric array that matches MATLAB's output."
+      "answer": "Character input is outside the documented single/double domain. RunMat mode retains it as an explicit extension, interprets Unicode code points as doubles, and applies `asinh` element-wise."
     },
     {
       "question": "What happens with NaN or Inf values?",
@@ -100,7 +101,7 @@
     },
     {
       "question": "Can I keep complex results on the GPU?",
-      "answer": "Currently GPU tensor handles represent real data. When complex values arise, RunMat returns host-resident `Value::Complex` or `Value::ComplexTensor` results to remain MATLAB-compatible."
+      "answer": "Complex floating input is supported. When a provider hook is unavailable, RunMat uses an owner-preserving fallback and restores the complex result to the same provider."
     },
     {
       "question": "Does `asinh` support automatic differentiation plans?",
@@ -169,8 +170,8 @@
     "label": "`crates/runmat-runtime/src/builtins/math/trigonometry/asinh.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/asinh.rs"
   },
-  "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. The fusion planner keeps tensors on the GPU whenever the active provider exposes the necessary hooks (`unary_asinh`) and the runtime can keep the data in real form. When the GPU path is incomplete, RunMat gathers to the host automatically and still returns MATLAB-compatible results. Manual `gpuArray` / `gather` remains available for workflows that require explicit residency control.",
+  "gpu_residency": "The fusion planner keeps tensors on the GPU whenever the active provider exposes `unary_asinh`. When the hook is unavailable, RunMat gathers, computes, and restores the result to the input handle's owning provider. Resident integer and logical inputs remain separately gated RunMat-only extensions.",
   "gpu_behavior": [
-    "RunMat Accelerate keeps tensors on the GPU when:\n\n1. A provider is registered and implements the `unary_asinh` hook. 2. The inputs do not require complex promotion that the provider cannot represent.\n\nIf either condition is not met, RunMat gathers the data to the host, evaluates `asinh` with the CPU reference implementation, and returns the correct MATLAB result. This guarantees correctness without forcing users to manually call `gpuArray` or `gather`."
+    "RunMat Accelerate keeps tensors on the GPU when a provider implements `unary_asinh`. Otherwise, it gathers the authoritative value, evaluates the reference implementation, and restores the result to the input handle's owning provider."
   ]
 }

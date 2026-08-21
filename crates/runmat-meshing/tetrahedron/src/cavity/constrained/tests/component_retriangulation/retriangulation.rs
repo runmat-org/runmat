@@ -1,4 +1,5 @@
 use super::super::*;
+use runmat_meshing_core::NeverCancelled;
 
 #[test]
 fn component_retriangulation_from_nodes_preserves_boundary_and_volume() {
@@ -25,9 +26,15 @@ fn component_retriangulation_from_nodes_preserves_boundary_and_volume() {
     )
     .expect("selected component should define a valid cavity");
 
-    let refill = retriangulate_constrained_cavity_from_nodes(&component_cavity, &nodes, options)
-        .expect("component retriangulation should evaluate")
-        .expect("component should have an exact cover");
+    let refill = retriangulate_constrained_cavity_from_nodes(
+        &component_cavity,
+        &nodes,
+        options,
+        ConstrainedCavityRefillBudget::default(),
+        &NeverCancelled,
+    )
+    .expect("component retriangulation should evaluate")
+    .expect("component should have an exact cover");
 
     validate_constrained_cavity_boundary_preserved(&component_cavity, &refill.boundary_faces)
         .expect("component retriangulation should preserve boundary");
@@ -48,8 +55,14 @@ fn component_retriangulation_rejects_duplicate_node_ids() {
         coordinates_m: [0.1, 0.1, 0.1],
     });
 
-    let err = retriangulate_constrained_cavity_from_nodes(&cavity, &nodes, refill_options())
-        .expect_err("duplicate node ids should be rejected");
+    let err = retriangulate_constrained_cavity_from_nodes(
+        &cavity,
+        &nodes,
+        refill_options(),
+        ConstrainedCavityRefillBudget::default(),
+        &NeverCancelled,
+    )
+    .expect_err("duplicate node ids should be rejected");
 
     assert_eq!(
         err,

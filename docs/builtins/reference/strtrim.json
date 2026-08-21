@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Executes on the CPU; GPU-resident inputs are gathered automatically before trimming."
+    "notes": "Trimming executes on host text. Numeric and provider-resident inputs reject before provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -34,7 +34,7 @@
     "String scalars and arrays keep their type and shape. Missing string scalars (`<missing>`) remain missing and are returned unchanged.",
     "Character arrays are trimmed row by row. The result keeps the original number of rows and shrinks the column count to the longest trimmed row, padding shorter rows with spaces so the output stays rectangular.",
     "Cell arrays must contain string scalars or character vectors. Results preserve the original cell layout with each element trimmed.",
-    "Numeric, logical, or structured inputs raise MATLAB-compatible type errors."
+    "Numeric, logical, or structured inputs raise descriptive type errors. Integer arrays are not interpreted as character codes and are rejected before any provider access."
   ],
   "examples": [
     {
@@ -160,8 +160,8 @@
     "label": "`crates/runmat-runtime/src/builtins/strings/transform/strtrim.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/strtrim.rs"
   },
-  "gpu_residency": "You do not need to call `gpuArray` or `gather` manually. RunMat automatically gathers any GPU-resident text data before applying `strtrim`, so the builtin behaves the same regardless of where the data lives.",
+  "gpu_residency": "`strtrim` accepts host text. Numeric resident values are not text and reject before provider access rather than being gathered and converted.",
   "gpu_behavior": [
-    "`strtrim` runs on the CPU. When the input (or any nested element) resides on the GPU, RunMat gathers it to host memory before trimming so the output matches MATLAB exactly. Providers do not need to implement device kernels for this builtin today."
+    "`strtrim` runs on host text and needs no provider kernel. Numeric resident input is not text and rejects before provider access."
   ]
 }

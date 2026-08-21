@@ -1,6 +1,6 @@
 #[cfg(target_arch = "wasm32")]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
-use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
+use runmat_value::{IntValue, IntegerStorage, Tensor, Value};
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
@@ -12,7 +12,9 @@ fn integer_scalar_variants_arithmetic() {
     assert!(runmat_runtime::call_builtin("plus", &[i8v.clone(), i16v.clone()]).is_err());
     assert!(runmat_runtime::call_builtin("minus", &[u32v.clone(), u64v.clone()]).is_err());
     assert!(runmat_runtime::call_builtin("times", &[i8v.clone(), u32v.clone()]).is_err());
-    assert!(runmat_runtime::call_builtin("rdivide", &[u32v.clone(), i16v.clone()]).is_err());
+    let error = runmat_runtime::call_builtin("rdivide", &[u32v.clone(), i16v.clone()])
+        .expect_err("mixed integer classes are not valid rdivide operands");
+    assert!(error.message().contains("same integer class"));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -230,7 +232,7 @@ fn uint16_builtin_dispatches_and_casts_array() {
     match output {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.shape, vec![1, 3]);
-            assert_eq!(tensor.data, vec![3.0, 0.0, u16::MAX as f64]);
+            assert_eq!(tensor.materialize_f64(), vec![3.0, 0.0, u16::MAX as f64]);
         }
         other => panic!("expected tensor output, got {other:?}"),
     }

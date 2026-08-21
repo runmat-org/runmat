@@ -1,0 +1,16 @@
+{
+  "title": "ifftn",
+  "category": "math/fft",
+  "keywords": ["ifftn", "inverse n-dimensional fft", "multidimensional", "symmetric", "gpu"],
+  "summary": "Compute N-dimensional inverse Fourier transforms in MATLAB and RunMat.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": ["f32", "f64"], "broadcasting": "none", "notes": "Runs sequential validated `ifft_dim` passes through the input handle's owner. Only explicit unsupported-hook responses select exact host fallback."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 1, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::math::fft::ifftn::tests", "integration": "crates/runmat-vm/tests/integer_multidimensional_fft_and_table_selection.rs"},
+  "description": "`ifftn(X)` computes the N-dimensional inverse discrete Fourier transform. Documented integer data through 32 bits enters the double transform domain; host `int64` and `uint64` data and wide size controls are exactness-checked RunMat extensions.",
+  "behaviors": ["`ifftn(X)` transforms every dimension.", "`ifftn(X, SIZE)` pads or truncates each dimension to the requested positive integer size.", "`ifftn(..., 'symmetric')` returns real output; `'nonsymmetric'` preserves the default complex result.", "Documented integer and logical data produces double numeric class while preserving N-D shape.", "Provider outputs are accepted only with the expected owner, device, shape, complex storage, precision, and nonaliasing lifetime.", "Symmetric output and unsupported-hook fallback download through the input owner and restore residency only when the provider can physically preserve the result class."],
+  "examples": [{"description": "Invert a three-dimensional transform", "input": "F = fftn(rand(4, 5, 6));\nX = ifftn(F);"}, {"description": "Use integer input", "input": "X = ifftn(uint16(reshape(1:8, [2 2 2])));"}],
+  "links": [{"label": "fftn", "url": "./fftn"}, {"label": "ifft", "url": "./ifft"}, {"label": "ifft2", "url": "./ifft2"}, {"label": "ifftshift", "url": "./ifftshift"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/math/fft/ifftn.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/fft/ifftn.rs"},
+  "gpu_residency": "RunMat resolves every transform pass through the input owner. Intermediate handles are released after each validated pass without touching the source handle; provider failures, malformed results, and aliases are terminal rather than silently gathered away."
+}

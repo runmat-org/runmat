@@ -10,7 +10,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Host-side compatibility builtin; GPU-resident inputs are gathered before execution."
+    "notes": "Host-only lexical parser. Numeric and provider-resident inputs are invalid text and are rejected before gather or provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -23,11 +23,11 @@
     "unit": "builtins::io::repl_fs::compat::tests",
     "integration": null
   },
-  "description": "Split a path into folder, base filename, and extension.",
+  "description": "Split a textual path into folder, base filename, and extension without consulting the filesystem. Numeric and integer inputs are inapplicable. RunMat currently implements the scalar character-result subset; documented string-array and cell-array type/shape preservation remains incomplete.",
   "behaviors": [
-    "Accepts MATLAB text inputs such as string scalars and character row vectors for path, name, or URL arguments where applicable.",
-    "Runs on the host using the active RunMat filesystem, environment, or HTTP abstraction as appropriate.",
-    "Reports MATLAB-style runtime errors for unsupported argument shapes or unavailable host capabilities."
+    "Accepts a string scalar, scalar string array, or character row vector.",
+    "Runs as a host-only lexical parser and does not require the path to exist.",
+    "Nonscalar string arrays, cell arrays of character vectors, type/shape-preserving output, and complete dotfile/trailing-delimiter behavior remain implementation gaps."
   ],
   "examples": [],
   "faqs": [],

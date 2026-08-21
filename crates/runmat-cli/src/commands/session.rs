@@ -13,6 +13,12 @@ pub(crate) fn create_session(
 ) -> Result<RunMatSession> {
     let mut engine =
         RunMatSession::with_options(enable_jit, verbose).context(create_error_context)?;
+    let execution = runmat_execution_runner_native::NativeExecutionService::new(
+        runmat_execution_runner_native::NativeExecutionConfig::for_current_executable()
+            .context("failed to locate the RunMat execution worker executable")?,
+    )
+    .context("failed to initialize local process execution")?;
+    engine.install_execution_services(std::rc::Rc::new(execution));
     engine.set_telemetry_consent(config.telemetry.enabled);
     engine.set_telemetry_sink(runtime_sink());
     engine.set_compat_mode(parser_compat(config.language.compat));

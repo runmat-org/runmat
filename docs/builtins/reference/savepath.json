@@ -61,7 +61,7 @@
       "output": "% Creates ~/.runmat/projectA/pathdef.m with the current search path."
     },
     {
-      "description": "Override The Target File With RUNMAT_PATHDEF",
+      "description": "Saving the path to a configured target",
       "input": "setenv(\"RUNMAT_PATHDEF\", fullfile(tempdir, \"pathdef-dev.m\"));\nsavepath()",
       "output": "% The file tempdir/pathdef-dev.m now contains the MATLAB path definition."
     },

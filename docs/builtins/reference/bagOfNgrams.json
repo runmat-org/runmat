@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "`bagOfNgrams` builds host text-model metadata and currently stores dense host counts."
+    "notes": "`bagOfNgrams` builds host text-model metadata and currently stores dense host double counts."
   },
   "fusion": {
     "elementwise": false,
@@ -34,11 +34,13 @@
     "`bagOfNgrams(words)` accepts a word vector as one pre-tokenized document.",
     "`bagOfNgrams(___, 'NgramLengths', lengths)` accepts a positive integer scalar or vector of n-gram lengths. Duplicate length values are collapsed in first-seen order. For explicit `uniqueNgrams, counts` input, this option keeps only rows whose nonempty word count matches the requested lengths.",
     "`bagOfNgrams(uniqueNgrams, counts)` accepts a string matrix or text cell matrix whose rows are unique n-grams and a numeric count matrix whose columns match the n-gram rows.",
+    "Explicit `counts` and `NgramLengths` accept all eight integer classes. Values remain authoritative through exact validation and filtering; counts then cross one deliberate conversion into the double `Counts` property, and lengths become bounded host indices before returning as double metadata.",
     "When `NgramLengths` is not supplied for explicit `uniqueNgrams, counts` input, RunMat infers the property from the nonmissing n-gram rows in first-seen order.",
     "Duplicate nonmissing n-grams raise `RunMat:bagOfNgrams:InvalidInput`. Rows containing missing strings are ignored along with their corresponding count columns.",
     "The returned object stores `Ngrams`, `Counts`, `NgramLengths`, `Vocabulary`, `NumNgrams`, and `NumDocuments` properties.",
     "N-gram rows are stored in `Ngrams`; shorter n-grams are padded with empty strings when mixed lengths are present.",
     "Counts are stored as a dense host tensor with one row per document and one column per n-gram. Very large dense count matrices are rejected with a controlled error until native sparse bag storage is implemented.",
+    "GPU-resident counts and lengths reject before provider access because `bagOfNgrams` exposes no interactive GPU-array input surface.",
     "Native sparse bag storage, object-array parity, and the full Text Analytics model method surface remain broader Text Analytics work."
   ],
   "examples": [
@@ -69,7 +71,7 @@
     },
     {
       "question": "Does `bagOfNgrams` execute on the GPU?",
-      "answer": "No. It builds host text-model metadata and has no `runmat-accelerate` provider path."
+      "answer": "No. It builds host text-model metadata and has no `runmat-accelerate` provider path. Resident inputs reject rather than gathering."
     }
   ],
   "links": [
@@ -103,5 +105,5 @@
     "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/ngrams.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/ngrams.rs"
   },
-  "gpu_residency": "`bagOfNgrams` stores host text-model metadata and dense host counts in this slice."
+  "gpu_residency": "`bagOfNgrams` stores host text-model metadata and dense host double counts in this slice; resident inputs reject before provider access."
 }

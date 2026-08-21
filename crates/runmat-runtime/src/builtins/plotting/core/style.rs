@@ -1,10 +1,11 @@
 use glam::Vec4;
-use runmat_builtins::{CellArray, Tensor, Value};
 use runmat_plot::plots::{
     ColorMap, LineMarkerAppearance, LineStyle, MarkerStyle as PlotMarkerStyle, ShadingMode,
     SurfacePlot,
 };
+use runmat_value::{CellArray, Tensor, Value};
 
+use crate::builtins::common::tensor;
 use crate::BuiltinResult;
 
 use super::plotting_error;
@@ -592,8 +593,8 @@ fn parse_name_value_pairs(
             "linewidth" => {
                 let width = value_as_f64(&pair[1])
                     .ok_or_else(|| ctx_err(opts, "LineWidth must be numeric"))?;
-                if width <= 0.0 {
-                    return Err(ctx_err(opts, "LineWidth must be positive"));
+                if !width.is_finite() || width <= 0.0 {
+                    return Err(ctx_err(opts, "LineWidth must be finite and positive"));
                 }
                 options.line_width = Some(width as f32);
             }
@@ -787,11 +788,11 @@ pub(crate) fn parse_color_value(
         ));
     }
     let tensor = Tensor::try_from(value).map_err(|e| ctx_err(opts, e))?;
-    if tensor.data.len() != 3 {
+    let data = tensor::tensor_values_f64(&tensor);
+    if data.len() != 3 {
         return Err(ctx_err(opts, "color vectors must contain three elements"));
     }
-    if tensor
-        .data
+    if data
         .iter()
         .any(|component| !component.is_finite() || !(0.0..=1.0).contains(component))
     {
@@ -801,9 +802,9 @@ pub(crate) fn parse_color_value(
         ));
     }
     Ok(Vec4::new(
-        tensor.data[0] as f32,
-        tensor.data[1] as f32,
-        tensor.data[2] as f32,
+        data[0] as f32,
+        data[1] as f32,
+        data[2] as f32,
         1.0,
     ))
 }
@@ -936,7 +937,7 @@ pub(crate) fn value_as_f64(value: &Value) -> Option<f64> {
     match value {
         Value::Num(v) => Some(*v),
         Value::Int(i) => Some(i.to_f64()),
-        Value::Tensor(tensor) => tensor.data.first().copied(),
+        Value::Tensor(tensor) => tensor::tensor_values_f64(tensor).first().copied(),
         _ => None,
     }
 }
@@ -945,7 +946,9 @@ fn value_as_scalar_f64(value: &Value) -> Option<f64> {
     match value {
         Value::Num(v) => Some(*v),
         Value::Int(i) => Some(i.to_f64()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data.first().copied(),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_values_f64(tensor).first().copied()
+        }
         _ => None,
     }
 }
@@ -1149,8 +1152,11 @@ pub fn parse_bar_style_args(
                     "only one positional width argument is supported",
                 ));
             }
-            if width <= 0.0 {
-                return Err(bar_ctx_err(builtin, "width must be positive"));
+            if !width.is_finite() || !(0.0..=1.0).contains(&width) || width == 0.0 {
+                return Err(bar_ctx_err(
+                    builtin,
+                    "width must be a finite scalar greater than zero and no greater than one",
+                ));
             }
             style.bar_width = width as f32;
             saw_positional_width = true;
@@ -1207,18 +1213,24 @@ pub fn parse_bar_style_args(
                 };
             }
             "linewidth" => {
-                let width = value_as_f64(&pair[1])
-                    .ok_or_else(|| bar_ctx_err(builtin, "LineWidth must be numeric"))?;
-                if width <= 0.0 {
-                    return Err(bar_ctx_err(builtin, "LineWidth must be positive"));
+                let width = value_as_scalar_f64(&pair[1])
+                    .ok_or_else(|| bar_ctx_err(builtin, "LineWidth must be a numeric scalar"))?;
+                if !width.is_finite() || width <= 0.0 {
+                    return Err(bar_ctx_err(
+                        builtin,
+                        "LineWidth must be a finite positive scalar",
+                    ));
                 }
                 style.line_width = width as f32;
             }
             "barwidth" => {
-                let width = value_as_f64(&pair[1])
-                    .ok_or_else(|| bar_ctx_err(builtin, "BarWidth must be numeric"))?;
-                if width <= 0.0 {
-                    return Err(bar_ctx_err(builtin, "BarWidth must be positive"));
+                let width = value_as_scalar_f64(&pair[1])
+                    .ok_or_else(|| bar_ctx_err(builtin, "BarWidth must be a numeric scalar"))?;
+                if !width.is_finite() || !(0.0..=1.0).contains(&width) || width == 0.0 {
+                    return Err(bar_ctx_err(
+                        builtin,
+                        "BarWidth must be a finite scalar greater than zero and no greater than one",
+                    ));
                 }
                 style.bar_width = width as f32;
             }
@@ -1383,6 +1395,7 @@ fn bar_ctx_err(builtin: &str, msg: impl Into<String>) -> crate::RuntimeError {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use runmat_value::IntegerStorage;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -1418,28 +1431,14 @@ pub(crate) mod tests {
         let opts = LineStyleParseOptions::plot();
         parse_color_value(
             &opts,
-            &Value::Tensor(Tensor {
-                data: vec![0.1, 0.2, 1.0],
-                integer_data: None,
-                shape: vec![1, 3],
-                rows: 1,
-                cols: 3,
-                dtype: runmat_builtins::NumericDType::F64,
-            }),
+            &Value::Tensor(Tensor::new(vec![0.1, 0.2, 1.0], vec![1, 3]).expect("RGB triplet")),
         )
         .expect("valid rgb");
 
         for data in [vec![1.2, 0.0, 0.0], vec![0.0, f64::NAN, 0.0]] {
             let err = parse_color_value(
                 &opts,
-                &Value::Tensor(Tensor {
-                    data,
-                    integer_data: None,
-                    shape: vec![1, 3],
-                    rows: 1,
-                    cols: 3,
-                    dtype: runmat_builtins::NumericDType::F64,
-                }),
+                &Value::Tensor(Tensor::new(data, vec![1, 3]).expect("RGB triplet")),
             )
             .expect_err("invalid rgb should fail");
             assert!(err.message.contains("RGB color components"));
@@ -1495,14 +1494,9 @@ pub(crate) mod tests {
     #[test]
     fn bar_style_does_not_treat_rgb_triplet_as_positional_width() {
         let defaults = BarStyleDefaults::new(Vec4::new(0.2, 0.6, 0.9, 1.0), 0.8);
-        let rest = vec![Value::Tensor(Tensor {
-            data: vec![0.8, 0.1, 0.2],
-            integer_data: None,
-            shape: vec![1, 3],
-            rows: 1,
-            cols: 3,
-            dtype: runmat_builtins::NumericDType::F64,
-        })];
+        let rest = vec![Value::Tensor(
+            Tensor::new(vec![0.8, 0.1, 0.2], vec![1, 3]).expect("RGB triplet"),
+        )];
 
         let err = parse_bar_style_args("barh", &rest, defaults).expect_err("rgb is not width");
         assert!(err.message.contains("name-value arguments"));
@@ -1531,5 +1525,26 @@ pub(crate) mod tests {
         let style = parse_bar_style_args("bar", &rest, defaults).expect("parsed");
         assert!(style.face_color_flat);
         assert!(style.requires_cpu_path());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn line_style_scalar_options_read_typed_integer_storage() {
+        let line_width =
+            Tensor::new_integer(IntegerStorage::U64(vec![3]), vec![1, 1]).expect("width");
+        let marker_size =
+            Tensor::new_integer(IntegerStorage::U16(vec![9]), vec![1, 1]).expect("size");
+        let rest = vec![
+            Value::String("LineWidth".into()),
+            Value::Tensor(line_width),
+            Value::String("MarkerSize".into()),
+            Value::Tensor(marker_size),
+        ];
+        let parsed =
+            parse_line_style_args(&rest, &LineStyleParseOptions::plot()).expect("style parsed");
+
+        assert_eq!(parsed.appearance.line_width, 3.0);
+        assert!(parsed.appearance.marker.is_none());
+        assert_eq!(parsed.appearance.handle_visibility, "on");
     }
 }

@@ -25,7 +25,6 @@ pub(crate) struct MissingFaceLocalCapStitchDiagnostic {
     pub uncapped_faces: Vec<[u32; 3]>,
     pub capped_face_count: usize,
     pub inserted_node_count: usize,
-    pub side_connector_candidate_count: usize,
     pub candidate_tetrahedron_count: usize,
     pub cap_side_face_count: usize,
     pub zero_mate_cap_side_face_count: usize,
@@ -49,15 +48,4 @@ pub(crate) struct MissingFaceLocalCapStitchDiagnostic {
     pub found_cover: bool,
     pub reason: &'static str,
     pub max_min_scaled_jacobian: f64,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct BoundaryMissingFaceClusterDiagnostic {
-    pub missing_face_count: usize,
-    pub edge_component_count: usize,
-    pub edge_component_size_histogram: BTreeMap<usize, usize>,
-    pub node_component_count: usize,
-    pub node_component_size_histogram: BTreeMap<usize, usize>,
-    pub node_component_common_node_count_histogram: BTreeMap<usize, usize>,
-    pub node_component_common_node_ids: BTreeMap<u32, usize>,
 }

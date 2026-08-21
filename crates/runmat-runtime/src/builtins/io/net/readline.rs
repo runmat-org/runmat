@@ -3,9 +3,10 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, StructValue, Tensor, Value,
 };
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
+use runmat_value::{StructValue, Tensor, Value};
 use std::io::{self, Read};
 use std::net::TcpStream;
 use std::time::{Duration, Instant};
@@ -76,6 +77,12 @@ pub const READLINE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &READLINE_ERRORS,
 };
+pub const READLINE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "The documented input is a tcpclient object and the output is text or the documented empty double timeout sentinel. Integer host or resident values are invalid clients and are rejected without numeric conversion or provider dispatch.",
+    };
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::readline")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -149,6 +156,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "readline,tcpclient,networking",
     type_resolver(crate::builtins::io::type_resolvers::readline_type),
     descriptor(crate::builtins::io::net::readline::READLINE_DESCRIPTOR),
+    integer_audit(crate::builtins::io::net::readline::READLINE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::net::readline"
 )]
 async fn readline_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -336,8 +344,12 @@ fn extract_client_id(struct_value: &StructValue) -> BuiltinResult<u64> {
         )
     })?;
     match id_value {
-        Value::Int(IntValue::U64(id)) => Ok(*id),
-        Value::Int(iv) => Ok(iv.to_i64() as u64),
+        Value::Int(iv) => iv.try_to_u64().ok_or_else(|| {
+            readline_flow(
+                &READLINE_ERROR_INVALID_CLIENT,
+                "readline: tcpclient struct has invalid handle field",
+            )
+        }),
         _ => Err(readline_flow(
             &READLINE_ERROR_INVALID_CLIENT,
             "readline: tcpclient struct has invalid handle field",
@@ -355,7 +367,7 @@ pub(crate) mod tests {
     use crate::builtins::io::net::accept::{
         client_handle, configure_stream, insert_client, remove_client_for_test,
     };
-    use runmat_builtins::{IntValue, StructValue, Value};
+    use runmat_value::{IntValue, StructValue, Value};
     use std::io::Write;
     use std::net::{TcpListener, TcpStream};
     use std::thread;
@@ -386,6 +398,17 @@ pub(crate) mod tests {
 
     fn assert_error_identifier(err: RuntimeError, expected: &str) {
         assert_eq!(err.identifier(), Some(expected));
+    }
+
+    #[test]
+    fn typed_negative_client_handle_is_rejected() {
+        let mut client = StructValue::new();
+        client.fields.insert(
+            CLIENT_HANDLE_FIELD.to_string(),
+            Value::Int(IntValue::I8(-1)),
+        );
+        let err = extract_client_id(&client).unwrap_err();
+        assert_error_identifier(err, READLINE_ERROR_INVALID_CLIENT.identifier.unwrap());
     }
 
     fn run_readline(client: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -475,7 +498,7 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 0]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected empty 0x0 double, got {other:?}"),
         }
@@ -510,7 +533,7 @@ pub(crate) mod tests {
         match first {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 0]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected timeout as empty 0x0 double, got {other:?}"),
         }

@@ -19,7 +19,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "When the active provider lacks a conv2d hook RunMat gathers inputs to the host and executes the CPU path."
+    "notes": "Same-owner, same-device real floating inputs may use the provider conv2d hook when its result preserves the required f32/f64 class and belongs to the invoked provider/device. Other resident inputs gather through their owning providers; eligible real or complex floating results are restored only when the owner preserves the selected class. Convolution does not accept typed complex-integer inputs."
   },
   "fusion": {
     "elementwise": false,
@@ -35,16 +35,17 @@
       "builtins::math::signal::conv2::tests::conv2_wgpu_fallback_matches_cpu"
     ]
   },
-  "description": "`conv2` performs two-dimensional linear convolution. The default returns full convolution size, while `'same'` and `'valid'` modes select alternate regions; these shape rules match MATLAB and RunMat, including separable `conv2(hcol, hrow, A)` form.",
+  "description": "`conv2` performs two-dimensional linear convolution in direct and separable forms. MATLAB documents all eight integer classes, logical, single, double, and complex inputs; any single numeric input selects single output and every other combination returns double.",
   "behaviors": [
     "`conv2(A, B)` returns the full 2-D convolution of `A` and `B`.",
     "`conv2(A, B, 'same')` slices the central part of the full convolution so the output matches the shape of `A`.",
     "For even-sized kernels with `'same'`, alignment follows MATLAB's top-left convention in each even dimension.",
     "`conv2(A, B, 'valid')` returns only those points where `B` overlaps `A` completely.",
     "`conv2(hcol, hrow, A)` is syntactic sugar for `conv2(hcol(:) * hrow(:)', A)`.",
+    "Direct A/B and separable u/v/A inputs accept every integer class, including mixed classes and complex integer storage. They convert to the selected floating output domain before multiplication and accumulation, so no integer overflow or saturation applies.",
     "Scalars are treated as `1×1` matrices and preserve the orientation of the other input.",
     "Empty inputs follow MATLAB’s rules: `conv2([], X)` and `conv2(X, [])` return empty matrices (or zero-sized slices for `'same'`).",
-    "Logical inputs are promoted to double precision before computation; complex inputs preserve their imaginary part throughout the convolution."
+    "Logical inputs are promoted to double precision before computation; explicit complex inputs remain complex even when the result has zero imaginary components; resident integer inputs gather exactly before conversion."
   ],
   "examples": [
     {
@@ -60,7 +61,7 @@
     {
       "description": "Extracting the same-sized result to preserve dimensions",
       "input": "edge = conv2([1 2 3; 4 5 6; 7 8 9], [1 0 -1; 1 0 -1; 1 0 -1], 'same')",
-      "output": "edge =\n    -7    -4     7\n   -15    -6    15\n   -13    -4    13"
+      "output": "edge =\n     7     4    -7\n    15     6   -15\n    13     4   -13"
     },
     {
       "description": "Valid convolution for sliding-window statistics",
@@ -96,7 +97,7 @@
     },
     {
       "question": "Will the result stay on the GPU?",
-      "answer": "If the active provider exposes the `conv2d` hook the result stays device-resident. Otherwise RunMat falls back to the CPU path and returns a host tensor; this fallback is documented so providers can add native kernels without breaking compatibility."
+      "answer": "Same-owner, same-device real floating operands remain resident when a provider's `conv2d` hook returns the required class. Other resident operands gather independently, and eligible real or complex floating results return to the first owner. Typed complex integers work on the host, but the current provider ABI cannot encode typed complex-integer resident buffers."
     },
     {
       "question": "What does `conv2` actually compute?",
@@ -112,6 +113,10 @@
     }
   ],
   "links": [
+    {
+      "label": "MATLAB conv2 documentation",
+      "url": "https://www.mathworks.com/help/matlab/ref/conv2.html"
+    },
     {
       "label": "conv",
       "url": "./conv"
@@ -146,7 +151,7 @@
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/conv2.rs"
   },
   "gpu_behavior": [
-    "RunMat Accelerate keeps tensors on the GPU when the active provider implements a `conv2d` hook (the in-process provider uses the host implementation and returns a GPU handle; the WGPU backend will adopt a native kernel). When the hook is unavailable, RunMat gathers GPU inputs to the host, performs the convolution on the CPU, and returns a host tensor. Documentation and the GPU metadata make this fallback explicit so providers can add native implementations without changing this builtin."
+    "RunMat Accelerate invokes `conv2d` only for real floating handles owned by the same provider on the same device, and accepts the result only when its precision matches the single-dominant output rule. Otherwise each handle gathers through its owner, the host reference path computes true convolution, and an eligible real or complex result is restored to the first owner when that provider preserves its class."
   ],
   "syntax": {
     "example": {
@@ -154,14 +159,14 @@
       "input": "C = conv2(A, B)\nC = conv2(u, v, A)\nC = conv2(___, shape)"
     },
     "points": [
-      "`A` is the 2-D input matrix (real, complex, or logical; logicals are promoted to double).",
+      "`A` is the 2-D input matrix and can use any documented real or complex numeric class or logical; integer and logical inputs are promoted to floating output.",
       "`B` is the 2-D convolution kernel. It is flipped along both axes before the sum-of-products, which is what makes the operation true convolution rather than correlation.",
       "`conv2(u, v, A)` is the separable form: `u` is a column vector applied down the rows of `A` and `v` is a row vector applied across the columns. This is equivalent to `conv2(u(:) * v(:).', A)` but runs as two 1-D passes, which is much faster whenever the effective kernel `u*v'` is rank-1 (box filters, Gaussians, Sobel components).",
       "`shape` selects the output region: `'full'` (default) returns an array of size `size(A) + size(B) - 1`; `'same'` slices the central portion so the output matches `size(A)`; `'valid'` returns only the fully-overlapping region of size `size(A) - size(B) + 1` (empty when `B` is larger than `A` along any dimension)."
     ]
   },
   "validation": {
-    "summary": "`conv2` uses an in-repo implementation for both the direct (`conv2(A, B)`) and separable (`conv2(u, v, A)`) forms. The module-level tests cover `'full'`, `'same'`, and `'valid'` shapes against reference outputs. The GPU path currently defers to the CPU implementation via the in-process provider and returns a GPU handle; a native WGPU `conv2d` kernel is tracked as follow-up.",
+    "summary": "`conv2` uses one formula-aligned implementation for direct (`conv2(A, B)`) and separable (`conv2(u, v, A)`) forms. Tests cover asymmetric kernels, even-kernel `'same'` alignment, all shape modes, single and complex class retention, exact integer gathers, mixed providers, and resident fallback. Providers may supply a class-preserving native real-floating `conv2d` hook.",
     "implementation": {
       "label": "crates/runmat-runtime/src/builtins/math/signal/conv2.rs",
       "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/conv2.rs"

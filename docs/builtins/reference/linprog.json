@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "The solver runs on the host. GPU-resident numeric inputs are gathered before solving."
+    "notes": "The solver runs on the host. Automatically resident numeric inputs gather transparently; explicit gpuArray inputs are a gated RunMat extension."
   },
   "fusion": {
     "elementwise": false,
@@ -32,6 +32,8 @@
     "`f`, `b`, `beq`, `lb`, and `ub` must be numeric vectors with compatible lengths.",
     "`A` and `Aeq` must be numeric matrices with one column per element of `f`.",
     "`[]` may be passed for omitted optional `Aeq`, `beq`, `lb`, or `ub` arguments.",
+    "Typed-integer values in `f`, `A`, `b`, `Aeq`, `beq`, `lb`, or `ub` are role-specific RunMat extensions. Each value must be exactly representable as double before entering the host solver; otherwise the call errors instead of rounding silently.",
+    "Automatically resident inputs gather transparently for the host solver. Explicit `gpuArray` inputs are a RunMat extension and are rejected while strict compatibility mode disables extensions.",
     "`exitflag` is `1` when an optimum is found, `-2` when no feasible point is found, and `-3` when the objective is unbounded below.",
     "The fourth output is a struct with `iterations`, `algorithm`, `constrviolation`, and `message` fields.",
     "Advanced MATLAB options, algorithms, problem structs, and lambda outputs are intentionally unsupported in this initial implementation."
@@ -70,7 +72,11 @@
     },
     {
       "question": "Does linprog run on the GPU?",
-      "answer": "No. It gathers GPU-resident inputs and runs the active-set solve on the host."
+      "answer": "No. It gathers automatically resident inputs and runs the active-set solve on the host. Explicit `gpuArray` solver inputs are accepted only when RunMat extensions are enabled."
+    },
+    {
+      "question": "Can linprog accept integer arrays?",
+      "answer": "Only as gated RunMat extensions, independently for each solver role. Every integer value must be exactly representable in binary64; outputs remain double precision."
     }
   ],
   "links": [

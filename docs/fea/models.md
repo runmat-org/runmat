@@ -1,10 +1,3 @@
----
-title: "Models"
-category: "FEA"
-section: "13.3"
-last_updated: "June 22, 2026"
----
-
 # Models
 
 A model attaches physics data to geometry. It defines what material exists where, how the model is constrained, what loads or sources apply, which domains are active, and which analysis steps can be run.

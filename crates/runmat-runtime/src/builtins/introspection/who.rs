@@ -5,9 +5,9 @@ use regex::Regex;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, Value};
 use std::path::PathBuf;
 
 use crate::builtins::common::spec::{
@@ -498,7 +498,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use crate::call_builtin_async;
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, CharArray, StringArray, Tensor};
+    use runmat_value::{CellArray, CharArray, StringArray, Tensor};
     use tempfile::tempdir;
 
     fn who_builtin(args: Vec<Value>) -> BuiltinResult<Value> {

@@ -189,7 +189,7 @@ mu = mean(imgs, [2 3]);
 sigma = sqrt(mean((imgs - mu).^2, [2 3]) + eps0);
 out = ((imgs - mu) ./ sigma) * gain + bias;
 out = out .^ gamma;
-mse = mean((out - imgs).^2, 'all');
+mse = mean(abs(out - imgs).^2, 'all');
 
 fprintf('RESULT_ok MSE=%.6e\n', double(mse));
 "#;
@@ -308,7 +308,7 @@ noise = 1.0;
 
 for t = 0:dT:T
     R = sqrt(X.^2 + Y.^2);
-    Z = sin(t*R) ./ R + rand(R) * noise;
+    Z = sin(t*R) ./ R + rand(size(R)) * noise;
     surf(X, Y, Z);
     pause(dT);
 end

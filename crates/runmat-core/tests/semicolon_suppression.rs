@@ -3,9 +3,9 @@
 // runmat-runtime wasm binary per test file with zero executable tests.
 #![cfg(not(target_arch = "wasm32"))]
 
-use runmat_builtins::Value;
 use runmat_core::{ExecutionStreamKind, RunError, RunMatSession, SessionExecutionResult};
 use runmat_gc::gc_test_context;
+use runmat_value::Value;
 
 /// Test basic semicolon suppression behavior
 #[test]
@@ -168,7 +168,7 @@ fn test_matrix_semicolon_suppression() {
         panic!("expected tensor result for row-vector literal");
     };
     assert_eq!(tensor.shape, vec![1, 3]);
-    assert_eq!(tensor.data, vec![1.0, 2.0, 3.0]);
+    assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0, 3.0]);
 
     // Matrix creation with semicolon should suppress output
     let result = runmat_core::execute_text_request_for_testing(&mut engine, "[1, 2, 3];").unwrap();

@@ -3,15 +3,18 @@
   "category": "missing",
   "keywords": ["standardizeMissing", "missing", "NaN", "string", "table"],
   "summary": "Replace user-specified missing indicators with canonical missing values.",
-  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "GPU inputs are gathered before standardization."},
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Standardization is host work. Automatically resident supported inputs gather through their owning provider. An explicitly resident indicator is a separately gated RunMat extension, checked before provider access."},
   "fusion": {"elementwise": false, "reduction": false, "max_inputs": 2, "constants": "inline"},
   "requires_feature": null,
   "tested": {"unit": "builtins::missing::tests", "integration": "crates/runmat-vm/tests/missing_values.rs"},
-  "description": "`standardizeMissing(A, indicators)` converts numeric indicators to `NaN` and text indicators to `<missing>`.",
+  "description": "`standardizeMissing(A, indicators)` replaces user-defined sentinel values with the missing representation appropriate for each input variable. Floating numeric matches become `NaN`, text matches become the missing string sentinel, and table or container inputs are processed recursively. Integer indicators are documented when they identify values in supported floating data. A direct native-integer array has no standard missing value, so RunMat mode treats it as an exact class-preserving no-op; that additional input form is rejected in MATLAB-compatible mode.",
   "behaviors": [
     "Numeric arrays accept scalar or array indicators; `NaN` indicators match existing NaNs.",
     "String arrays and character-array rows accept text indicators and are converted to the missing string sentinel.",
-    "Cell arrays and tables are processed recursively."
+    "Cell arrays and tables are processed recursively.",
+    "All eight integer classes can be used as numeric indicators for supported floating data without enabling RunMat extensions.",
+    "Integer variables inside a table retain their native class and values because standard integer classes have no canonical missing element.",
+    "Passing a native integer array directly as `A` is a named RunMat extension. It returns the original typed storage unchanged and is rejected in MATLAB-compatible mode before any resident input is gathered."
   ],
   "examples": [
     {"description": "Convert sentinel values to NaN", "input": "B = standardizeMissing([-99 2 4], -99)", "output": "B = [NaN 2 4]"}

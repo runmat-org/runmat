@@ -18,7 +18,7 @@
       "double"
     ],
     "broadcasting": "none",
-    "notes": "`fill3` is a plotting sink. It lowers coordinate and color argument groups to `patch` objects, gathering GPU-resident coordinate inputs through the shared patch path."
+    "notes": "`fill3` is a plotting sink. It gathers GPU-resident coordinate and CData inputs exactly through their owning providers, then lowers each vector or matrix column to an independent Patch object."
   },
   "fusion": {
     "elementwise": false,
@@ -33,15 +33,17 @@
   "description": "`fill3` creates filled polygon patch objects from X, Y, and Z coordinate data in 3-D axes. It reuses the shared patch pipeline, so handle behavior and patch name-value properties follow MATLAB semantics.",
   "behaviors": [
     "`fill3(X, Y, Z, C)` creates one or more 3-D filled polygons from matching coordinate arrays.",
-    "Vector coordinate inputs create one polygon.",
-    "Matrix coordinate inputs create one polygon per column through the underlying `patch` parser.",
+    "Equal-length row or column vector coordinate inputs create one polygon regardless of orientation.",
+    "When any coordinate is a matrix, coordinate vectors matching its row count are shared across its columns; square matrices are deterministically grouped by columns.",
+    "Matrix coordinate inputs create one independently addressable Patch object per column and return one handle per column.",
     "Multiple `X,Y,Z,C` groups in one call create multiple patch objects and return a row vector of patch handles.",
     "A single polygon group returns a scalar patch handle.",
     "`fill3` initializes the target axes with the standard 3-D view, so even polygons in the z=0 plane render as 3-D patch content.",
     "Trailing patch property name-value pairs are applied to every polygon group in the call.",
     "The returned patch handles work with `get`, `set`, `ishandle`, and `isgraphics`.",
     "Color strings and RGB triples are supported through the shared patch color parser.",
-    "Indexed or interpolated CData behavior is currently limited by the underlying `patch` implementation; concrete color strings, RGB triples, and common patch properties are the supported color path."
+    "Numeric C is retained as authoritative CData for indexed color mapping; color strings and RGB triples use the shared Patch color parser.",
+    "Integer XData, YData, ZData, and CData preserve their original class, exact values, and shape independently of renderer geometry."
   ],
   "options": [
     "`FaceColor` accepts color names, RGB triples, `flat`, or `none` through `patch`.",
@@ -88,7 +90,7 @@
     },
     {
       "question": "Does fill3 support indexed CData?",
-      "answer": "The current implementation is constrained by `patch`: color strings and RGB triples are supported, while full MATLAB indexed/interpolated CData behavior is deferred."
+      "answer": "Yes. Numeric scalar, vector, and matrix C inputs are retained as Patch CData. Renderer colormap fidelity continues to share the Patch renderer implementation."
     }
   ],
   "links": [

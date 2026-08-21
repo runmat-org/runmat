@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": ["f64"],
     "broadcasting": "none",
-    "notes": "GPU inputs are gathered to host. The coordinate-descent solver runs on CPU."
+    "notes": "Automatic internal residency gathers transparently. Explicit gpuArray input is a mode-gated RunMat extension; the coordinate-descent solver runs on CPU."
   },
   "fusion": {
     "elementwise": false,
@@ -26,7 +26,7 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::stats::ml::lasso::tests",
-    "integration": null
+    "integration": "crates/runmat-vm/tests/integer_json_join_and_statistical_semantics.rs"
   },
   "description": "`lasso(X,y)` fits regularized linear regression coefficients for predictor matrix `X` and response vector `y`. Columns of `B` correspond to ascending `Lambda` values, and `[B,FitInfo] = lasso(...)` returns MATLAB-compatible fit metadata.",
   "behaviors": [
@@ -38,7 +38,8 @@
     "`Weights` accepts a nonnegative observation-weight vector with positive total weight. Weights are normalized internally.",
     "`RelTol` and `MaxIter` control coordinate-descent convergence. The `Iterations` FitInfo field records iterations per Lambda value.",
     "`CV` supports `\"resubstitution\"` and positive integer K-fold cross-validation. K-fold fits add `SE`, `LambdaMinMSE`, `Lambda1SE`, `IndexMinMSE`, and `Index1SE` fields to `FitInfo`.",
-    "`PredictorNames`, `DFmax`, `UseCovariance`, `CacheSize`, `MCReps=1`, `AbsTol`, `B0`, `U0`, `Rho`, and `Options` are accepted for script compatibility. Tall-array ADMM behavior and covariance-matrix acceleration are not implemented; `FitInfo.UseCovariance` is false because RunMat uses direct coordinate descent."
+    "`PredictorNames`, `DFmax`, `UseCovariance`, and `MCReps=1` are accepted for script compatibility. Tall-array ADMM behavior, covariance-matrix acceleration, and the currently unimplemented `CacheSize`, `AbsTol`, `B0`, `U0`, `Rho`, and `Options` forms reject explicitly; `FitInfo.UseCovariance` is false because RunMat uses direct coordinate descent.",
+    "Typed-integer X, y, floating parameters, and structural or logical controls are independently classified RunMat-only extensions. Integer data remains exact until a checked double solver boundary; values not exactly representable as double reject rather than round."
   ],
   "examples": [
     {

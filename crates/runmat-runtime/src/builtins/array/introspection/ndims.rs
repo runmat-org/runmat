@@ -8,9 +8,15 @@ use crate::builtins::common::spec::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type, Value,
+    ResolveContext, Type,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::introspection::ndims")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -45,13 +51,23 @@ fn ndims_type(args: &[Type], _context: &ResolveContext) -> Type {
     if args.is_empty() {
         Type::Unknown
     } else {
-        Type::Int
+        Type::Num
     }
 }
 
+const NDIMS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "A",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "Every integer class is documented; only normalized shape metadata participates.",
+}];
+pub const NDIMS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor { form: "n = ndims(integer_A)", inputs: &NDIMS_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "The result is a host double scalar of at least two, trailing singleton dimensions are ignored, and resident integer payloads are never downloaded." }];
+
 const NDIMS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "n",
-    ty: BuiltinParamType::IntegerScalar,
+    ty: BuiltinParamType::NumericScalar,
     arity: BuiltinParamArity::Required,
     default: None,
     description: "Number of dimensions of input.",
@@ -87,6 +103,7 @@ pub const NDIMS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     keywords = "ndims,number of dimensions,array rank,gpu metadata,MATLAB compatibility",
     accel = "metadata",
     type_resolver(ndims_type),
+    integer_capabilities(crate::builtins::array::introspection::ndims::NDIMS_INTEGER_CAPABILITIES),
     descriptor(crate::builtins::array::introspection::ndims::NDIMS_DESCRIPTOR),
     builtin_path = "crate::builtins::array::introspection::ndims"
 )]
@@ -103,19 +120,20 @@ pub(crate) mod tests {
     fn ndims_builtin(value: Value) -> crate::BuiltinResult<Value> {
         block_on(super::ndims_builtin(value))
     }
-    use runmat_builtins::{
-        CellArray, CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor,
-        Type, Value,
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{
+        CellArray, CharArray, ComplexTensor, IntegerStorage, LogicalArray, StringArray, Tensor,
+        Value,
     };
 
     #[test]
-    fn ndims_type_returns_int() {
+    fn ndims_type_returns_double_numeric() {
         assert_eq!(
             super::ndims_type(
                 &[Type::Tensor { shape: None }],
                 &ResolveContext::new(Vec::new())
             ),
-            Type::Int
+            Type::Num
         );
     }
 
@@ -148,6 +166,27 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![0.0; 40], vec![5, 1, 1, 8]).unwrap();
         let result = ndims_builtin(Value::Tensor(tensor)).expect("ndims");
         assert_eq!(result, Value::Num(4.0));
+    }
+
+    #[test]
+    fn ndims_ignores_trailing_singletons_for_every_integer_class() {
+        let cases = [
+            IntegerStorage::I8(vec![1, 2, 3, 4, 5, 6]),
+            IntegerStorage::I16(vec![1, 2, 3, 4, 5, 6]),
+            IntegerStorage::I32(vec![1, 2, 3, 4, 5, 6]),
+            IntegerStorage::I64(vec![1, 2, 3, 4, 5, 6]),
+            IntegerStorage::U8(vec![1, 2, 3, 4, 5, 6]),
+            IntegerStorage::U16(vec![1, 2, 3, 4, 5, 6]),
+            IntegerStorage::U32(vec![1, 2, 3, 4, 5, 6]),
+            IntegerStorage::U64(vec![1, 2, 3, 4, 5, 6]),
+        ];
+        for storage in cases {
+            let tensor = Tensor::new_integer(storage, vec![2, 3, 1, 1]).expect("integer tensor");
+            assert_eq!(
+                ndims_builtin(Value::Tensor(tensor)).expect("integer ndims"),
+                Value::Num(2.0)
+            );
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -206,7 +245,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new((0..48).map(|x| x as f64).collect(), vec![4, 3, 4]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -222,7 +261,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0], vec![1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -230,6 +269,7 @@ pub(crate) mod tests {
                 shape: vec![],
                 device_id: handle.device_id,
                 buffer_id: handle.buffer_id,
+                descriptor: Default::default(),
             };
             let result = ndims_builtin(Value::GpuTensor(handle)).expect("ndims");
             assert_eq!(result, Value::Num(2.0));
@@ -240,16 +280,16 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn ndims_wgpu_tensor_reads_shape() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let _guard = test_support::accel_test_lock();
+        runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        )
+        .expect("register WGPU provider");
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
-        let tensor = Tensor::new((0..64).map(|x| x as f64).collect(), vec![4, 4, 4]).unwrap();
-        let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
-            shape: &tensor.shape,
-        };
-        let handle = provider.upload(&view).expect("upload");
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX; 64]), vec![4, 4, 4])
+            .expect("integer tensor");
+        let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+            .expect("upload integer");
         let result = ndims_builtin(Value::GpuTensor(handle)).expect("ndims");
         assert_eq!(result, Value::Num(3.0));
     }

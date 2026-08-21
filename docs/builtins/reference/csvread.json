@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Performs host-side file I/O and parsing. Acceleration providers are not involved, and results remain on the CPU."
+    "notes": "Performs host-side file I/O and parsing, and results remain on the CPU. Public host controls do not involve an acceleration provider; with the `csvread-resident-control-inputs` extension enabled, resident controls are gathered through their owning provider before parsing."
   },
   "fusion": {
     "elementwise": false,
@@ -28,15 +28,15 @@
     "unit": "builtins::io::tabular::csvread::tests",
     "integration": "builtins::io::tabular::csvread::tests::csvread_basic_csv_roundtrip"
   },
-  "description": "`csvread(filename)` reads numeric data from comma-separated text files and returns a dense double matrix. Legacy row/column offset handling (including zero-based forms) follows MATLAB and RunMat compatibility behavior.",
+  "description": "`csvread(filename)` reads real or complex numeric data from comma-separated text files and returns a dense double matrix. Row and column controls are zero-based.",
   "behaviors": [
     "Accepts character vectors or string scalars for the file name. String arrays must contain exactly one element.",
     "`csvread(filename, row, col)` starts reading at the zero-based row `row` and column `col`, skipping any data before that offset.",
-    "`csvread(filename, row, col, range)` reads only the rectangle described by `range`. Numeric ranges must contain four elements `[r1 c1 r2 c2]` (zero-based, inclusive). Excel-style ranges use the familiar `\"B2:D6\"` A1 notation, which RunMat converts to zero-based indices internally.",
+    "`csvread(filename, row, col, range)` reads only the rectangle described by `range`. The public forms are a four-element numeric range `[r1 c1 r2 c2]` or an A1 range such as `\"B2..D6\"`. RunMat's colon-separated A1 range and two-element numeric range are independent compatibility-gated extensions.",
     "Empty fields (two consecutive commas or a trailing comma) are interpreted as `0`. Tokens such as `NaN`, `Inf`, and `-Inf` are accepted (case-insensitive).",
     "Any other nonnumeric token raises an error that identifies the offending row and column.",
     "File input is read as byte-oriented CSV text before numeric parsing, so non-UTF-8 bytes in skipped header rows or skipped label columns do not cause an I/O decoding failure.",
-    "Results are dense double-precision tensors using column-major layout. An empty file produces a `0×0` tensor.",
+    "Real input produces a dense double tensor; any complex token (`a+bi`, `a+bj`, or a pure-imaginary form) produces a complex-double tensor without discarding an all-zero imaginary component. An empty file produces a `0×0` tensor.",
     "Paths can contain `~` to reference the home directory; RunMat expands the token before opening the file."
   ],
   "examples": [
@@ -87,11 +87,11 @@
     },
     {
       "question": "How are Excel-style ranges interpreted?",
-      "answer": "Excel ranges such as `\"B2:D5\"` use the familiar 1-based row numbering and column letters. The builtin converts them internally to zero-based indices and includes both endpoints."
+      "answer": "The public A1 form uses two dots, for example `\"B2..D5\"`, with 1-based row numbers and column letters. RunMat also accepts colon syntax such as `\"B2:D5\"` only when the `csvread-colon-range` extension is enabled. Both forms include their endpoints."
     },
     {
       "question": "Can I read files with quoted numeric fields?",
-      "answer": "Quoted numeric fields are not supported. Remove quotes before calling `csvread`, or switch to `readmatrix`, which has full CSV parsing support."
+      "answer": "Yes. A field wrapped in double quotes is parsed as a numeric token; general quoted-field CSV escaping is outside `csvread`'s narrow numeric format."
     },
     {
       "question": "What happens to empty cells?",
@@ -148,8 +148,8 @@
     "label": "`crates/runmat-runtime/src/builtins/io/tabular/csvread.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/csvread.rs"
   },
-  "gpu_residency": "`csvread` always returns a host-resident tensor because it performs file I/O and parsing on the CPU. If you need the data on the GPU, wrap the call with `gpuArray(csvread(...))` or switch to `readmatrix` with the `'Like'` option so that RunMat can place the result directly on the desired device.",
+  "gpu_residency": "`csvread` always returns a host-resident tensor because it performs file I/O and parsing on the CPU. Resident filename, offset, and range controls are accepted only when the `csvread-resident-control-inputs` RunMat extension is enabled.",
   "gpu_behavior": [
-    "`csvread` performs all work on the host CPU. Arguments are gathered from the GPU when necessary, and the resulting tensor is returned in host memory. To keep data on the GPU, call `gpuArray` on the output or switch to `readmatrix` with the `'Like'` option. No provider hooks are required."
+    "`csvread` performs file I/O and parsing on the host CPU. Public host controls require no provider. With the `csvread-resident-control-inputs` extension enabled, resident controls are gathered through their owning provider; the resulting tensor still returns in host memory."
   ]
 }

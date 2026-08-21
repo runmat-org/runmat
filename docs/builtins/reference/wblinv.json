@@ -6,9 +6,9 @@
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
-    "precisions": ["f64"],
+    "precisions": ["f32", "f64"],
     "broadcasting": "matlab",
-    "notes": "gpuArray inputs are gathered to the host reference path."
+    "notes": "Automatic resident inputs use exact owner-aware gather fallback and restore the floating result when the owner can preserve its class. Explicit gpuArray input is a gated RunMat extension."
   },
   "fusion": { "elementwise": false, "reduction": false, "max_inputs": 3, "constants": "inline" },
   "requires_feature": null,
@@ -19,9 +19,11 @@
   "description": "`wblinv(p)` evaluates the unit Weibull inverse CDF. `wblinv(p,a,b)` uses scale parameter `a` and shape parameter `b`.",
   "behaviors": [
     "`p`, `a`, and `b` support scalar expansion and matching array shapes.",
+    "The documented input classes are single and double. Typed-integer probability, scale, and shape roles are independently gated RunMat extensions and must be exactly representable before binary64 Weibull evaluation.",
+    "Output is single when any documented input is single and double otherwise.",
     "`p` must be in `[0,1]`; `a` and `b` must be positive. Invalid parameters produce `NaN` outputs.",
     "`p == 0` returns zero and `p == 1` returns `Inf`.",
-    "Confidence-bound output forms that depend on fitted-parameter covariance are not implemented yet."
+    "Confidence-bound output forms that depend on fitted-parameter covariance are not implemented."
   ],
   "examples": [
     {

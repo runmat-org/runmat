@@ -8,13 +8,17 @@ use runmat_accelerate::fusion::FusionStoreMaterialization;
 use runmat_accelerate::fusion_exec::{
     execute_centered_gram, execute_elementwise, execute_explained_variance,
     execute_image_normalize, execute_matmul_epilogue, execute_power_step_normalize,
-    execute_reduction, FusionExecutionRequest,
+    execute_reduction_with_shape, FusionExecutionRequest,
+};
+use runmat_accelerate::placement::{
+    record_event, PlacementCorrelationId, PlacementEventKind, PlacementVariant,
 };
 use runmat_accelerate::InstrSpan;
 use runmat_accelerate::{value_is_all_keyword, FusionKind, ShapeInfo, ValueOrigin, VarKind};
-use runmat_builtins::Value;
-use runmat_runtime::builtins::common::shape::is_scalar_shape;
+use runmat_runtime::builtins::common::{shape::is_scalar_shape, tensor::scalar_integer_value};
 use runmat_runtime::RuntimeError;
+use runmat_time::{duration_ns_saturating, Instant};
+use runmat_value::Value;
 use std::collections::HashMap;
 
 #[inline]
@@ -36,6 +40,7 @@ pub fn value_kind(value: &Value) -> &'static str {
         Value::Cell(_) => "Cell",
         Value::Struct(_) => "Struct",
         Value::GpuTensor(_) => "GpuTensor",
+        Value::ObjectArray(_) => "ObjectArray",
         Value::Object(_) => "Object",
         Value::HandleObject(_) => "HandleObject",
         Value::Listener(_) => "Listener",
@@ -47,6 +52,11 @@ pub fn value_kind(value: &Value) -> &'static str {
         Value::ClassRef(_) => "ClassRef",
         Value::MException(_) => "MException",
         Value::OutputList(_) => "OutputList",
+        Value::Future(_) => "Future",
+        Value::Task(_) => "Task",
+        Value::Pool(_) => "Pool",
+        Value::Job(_) => "Job",
+        Value::Foreign(_) => "Foreign",
     }
 }
 
@@ -56,7 +66,7 @@ pub fn summarize_value(i: usize, v: &Value) -> String {
         Value::GpuTensor(h) => format!("in#{i}:GpuTensor shape={:?}", h.shape),
         Value::Tensor(t) => format!("in#{i}:Tensor shape={:?}", t.shape),
         Value::Num(n) => format!("in#{i}:Num({n:.6})"),
-        Value::Int(n) => format!("in#{i}:Int({})", n.to_i64()),
+        Value::Int(n) => format!("in#{i}:Int({n:?})"),
         Value::Bool(b) => format!("in#{i}:Bool({})", if *b { 1 } else { 0 }),
         Value::String(s) => format!("in#{i}:String({})", s),
         _ => format!("in#{i}:{}", value_kind(v)),
@@ -71,7 +81,7 @@ fn is_scalarish_runtime_value(value: &Value) -> bool {
         Value::ComplexTensor(tensor) => is_scalar_shape(&tensor.shape),
         Value::LogicalArray(array) => is_scalar_shape(&array.shape),
         Value::GpuTensor(handle) => is_scalar_shape(&handle.shape),
-        Value::CharArray(array) => array.rows * array.cols == 1,
+        Value::CharArray(array) => array.data.len() == 1,
         _ => false,
     }
 }
@@ -156,6 +166,7 @@ pub fn gather_fusion_inputs<'a>(
     stack: &'a mut Vec<Value>,
     vars: &mut [Value],
     context: &mut ExecutionContext,
+    placement: Option<PlacementCorrelationId>,
 ) -> Result<
     (
         StackSliceGuard<'a>,
@@ -164,6 +175,7 @@ pub fn gather_fusion_inputs<'a>(
     ),
     RuntimeError,
 > {
+    let prepare_started = Instant::now();
     if plan.group.stack_layout.is_none() && !plan.stack_pattern.is_empty() {
         return Err(mex(
             "FusionMissingStackLayout",
@@ -405,9 +417,27 @@ pub fn gather_fusion_inputs<'a>(
 
     Ok((
         stack_guard,
-        FusionExecutionRequest { plan, inputs },
+        FusionExecutionRequest {
+            plan,
+            inputs,
+            placement,
+            runtime: Some(context.runtime.clone()),
+        },
         consumed_inputs,
     ))
+    .inspect(|_| {
+        if let Some(correlation) = placement {
+            record_event(
+                correlation,
+                PlacementEventKind::Prepare,
+                Some(PlacementVariant::ProviderFusion),
+                Some("gather_runtime_inputs"),
+                Some(duration_ns_saturating(prepare_started.elapsed())),
+                None,
+                &[],
+            );
+        }
+    })
 }
 
 pub fn write_elementwise_materialized_stores(
@@ -535,6 +565,54 @@ pub struct ReductionGeometry {
     pub axis: usize,
     pub reduce_len: usize,
     pub num_slices: usize,
+    pub output_shape: Vec<usize>,
+}
+
+fn validate_fused_reduction_domain(
+    axes: Option<&runmat_accelerate::ReductionAxes>,
+    runtime_shape: Option<&[usize]>,
+    reduce_all: bool,
+) -> Result<(), RuntimeError> {
+    if matches!(
+        axes,
+        Some(runmat_accelerate::ReductionAxes::Explicit(dims)) if dims.len() != 1
+    ) {
+        return Err(mex(
+            "FusionReductionAxesUnsupported",
+            "fusion: multi-axis reduction requires the provider N-D reduction path",
+        ));
+    }
+    if !reduce_all && runtime_shape.is_some_and(|shape| shape.len() > 2) {
+        return Err(mex(
+            "FusionReductionRankUnsupported",
+            "fusion: N-D reduction requires the provider N-D reduction path",
+        ));
+    }
+    Ok(())
+}
+
+fn fused_reduction_output_shape(
+    runtime_shape: Option<Vec<usize>>,
+    rows: usize,
+    columns: usize,
+    axis: usize,
+    reduce_all: bool,
+) -> Result<Vec<usize>, RuntimeError> {
+    if reduce_all {
+        return Ok(vec![1, 1]);
+    }
+    let mut shape = runtime_shape.unwrap_or_else(|| vec![rows, columns]);
+    if shape.len() < 2 {
+        shape.resize(2, 1);
+    }
+    if axis >= shape.len() {
+        return Err(mex(
+            "FusionReductionAxisUnsupported",
+            "fusion: reduction dimension exceeds the runtime tensor rank",
+        ));
+    }
+    shape[axis] = 1;
+    Ok(shape)
 }
 
 pub fn resolve_reduction_geometry(
@@ -583,7 +661,32 @@ pub fn resolve_reduction_geometry(
         reduce_all
     }
 
-    fn resolve_reduction_axis(plan: &runmat_accelerate::FusionGroupPlan) -> (usize, bool) {
+    fn reduction_axis_from_value(value: &Value) -> Result<Option<usize>, RuntimeError> {
+        if let Some(integer) = scalar_integer_value(value) {
+            return integer
+                .try_to_usize()
+                .and_then(|dim| dim.checked_sub(1))
+                .map(Some)
+                .ok_or_else(|| {
+                    mex(
+                        "FusionReductionAxisUnsupported",
+                        "fusion: integer reduction dimension is outside the platform index range",
+                    )
+                });
+        }
+        match value {
+            // Floating-point dimension arguments deliberately retain MATLAB's
+            // double conversion semantics. Native integers, however, must be
+            // representable by the host index type before acceleration plans
+            // them as an axis.
+            Value::Num(n) if *n >= 1.0 => Ok(Some((*n as usize).saturating_sub(1))),
+            _ => Ok(None),
+        }
+    }
+
+    fn resolve_reduction_axis(
+        plan: &runmat_accelerate::FusionGroupPlan,
+    ) -> Result<(usize, bool), RuntimeError> {
         let mut axis = 0usize;
         let mut axis_explicit = false;
         if let Some(runmat_accelerate::ReductionAxes::Explicit(dims)) = &plan.reduction_axes {
@@ -594,31 +697,25 @@ pub fn resolve_reduction_geometry(
         }
         if let Some(dim_vid) = plan.reduction_dim {
             if let Some(cv) = plan.const_values.get(&dim_vid) {
-                axis = match cv {
-                    Value::Num(n) if *n >= 1.0 => (*n as usize).saturating_sub(1),
-                    Value::Int(i) => (i.to_f64() as usize).saturating_sub(1),
-                    _ => axis,
-                };
+                if let Some(parsed) = reduction_axis_from_value(cv)? {
+                    axis = parsed;
+                }
                 axis_explicit = true;
             } else if let Some(input_idx) = plan.inputs.iter().position(|v| *v == dim_vid) {
                 if let Some(cv) = plan.constants.get(&input_idx) {
-                    axis = match cv {
-                        Value::Num(n) if *n >= 1.0 => (*n as usize).saturating_sub(1),
-                        Value::Int(i) => (i.to_f64() as usize).saturating_sub(1),
-                        _ => axis,
-                    };
+                    if let Some(parsed) = reduction_axis_from_value(cv)? {
+                        axis = parsed;
+                    }
                     axis_explicit = true;
                 }
             }
         } else if let Some(dim_const) = plan.constants.get(&1) {
-            axis = match dim_const {
-                Value::Num(n) if *n >= 1.0 => (*n as usize).saturating_sub(1),
-                Value::Int(i) => (i.to_f64() as usize).saturating_sub(1),
-                _ => axis,
-            };
+            if let Some(parsed) = reduction_axis_from_value(dim_const)? {
+                axis = parsed;
+            }
             axis_explicit = true;
         }
-        (axis, axis_explicit)
+        Ok((axis, axis_explicit))
     }
 
     fn derive_rows_cols(
@@ -759,7 +856,7 @@ pub fn resolve_reduction_geometry(
     let (mut axis, axis_explicit) = if reduce_all {
         (0usize, false)
     } else {
-        resolve_reduction_axis(plan)
+        resolve_reduction_axis(plan)?
     };
     if reduce_all && interp_engine::fusion_debug_enabled() {
         log::debug!(
@@ -770,8 +867,32 @@ pub fn resolve_reduction_geometry(
         );
     }
 
-    let (r, c) =
-        derive_rows_cols(plan, graph, request, consumed_inputs, vars, context).unwrap_or((1, 1));
+    let runtime_shape = plan.reduction_data_shape(graph).or_else(|| {
+        consumed_inputs
+            .iter()
+            .filter_map(|value| value.as_ref())
+            .chain(request.inputs.iter())
+            .find_map(|value| match value {
+                Value::GpuTensor(handle) => Some(handle.shape.clone()),
+                Value::Tensor(tensor) => Some(tensor.shape.clone()),
+                _ => None,
+            })
+    });
+    validate_fused_reduction_domain(
+        plan.reduction_axes.as_ref(),
+        runtime_shape.as_deref(),
+        reduce_all,
+    )?;
+    let (r, c) = runtime_shape
+        .as_ref()
+        .map(|shape| {
+            (
+                shape.first().copied().unwrap_or(1).max(1),
+                shape.get(1).copied().unwrap_or(1).max(1),
+            )
+        })
+        .or_else(|| derive_rows_cols(plan, graph, request, consumed_inputs, vars, context))
+        .unwrap_or((1, 1));
     let (reduce_len, num_slices) = if reduce_all {
         let total_from_runtime = consumed_inputs
             .iter()
@@ -897,6 +1018,7 @@ pub fn resolve_reduction_geometry(
             "fusion: reduction shape unresolved",
         ));
     }
+    let output_shape = fused_reduction_output_shape(runtime_shape, r, c, axis, reduce_all)?;
     if std::env::var("RUNMAT_DISABLE_FUSED_REDUCTION")
         .ok()
         .as_deref()
@@ -912,6 +1034,7 @@ pub fn resolve_reduction_geometry(
         axis,
         reduce_len,
         num_slices,
+        output_shape,
     })
 }
 
@@ -925,7 +1048,13 @@ pub fn execute_fusion_reduction(
     context: &ExecutionContext,
 ) -> Result<Value, RuntimeError> {
     let geom = resolve_reduction_geometry(plan, graph, &request, consumed_inputs, vars, context)?;
-    match execute_reduction(request, geom.reduce_len, geom.num_slices, 256u32) {
+    match execute_reduction_with_shape(
+        request,
+        geom.reduce_len,
+        geom.num_slices,
+        &geom.output_shape,
+        256u32,
+    ) {
         Ok(result) => {
             stack_guard.commit();
             Ok(result)
@@ -940,9 +1069,10 @@ pub async fn try_execute_fusion_group(
     stack: &mut Vec<Value>,
     vars: &mut Vec<Value>,
     context: &mut ExecutionContext,
+    placement: Option<PlacementCorrelationId>,
 ) -> Result<Value, RuntimeError> {
     let (stack_guard, request, consumed_inputs) =
-        gather_fusion_inputs(plan, graph, stack, vars, context)?;
+        gather_fusion_inputs(plan, graph, stack, vars, context, placement)?;
     if plan.group.kind.is_elementwise()
         && !request.inputs.is_empty()
         && request.inputs.iter().all(is_scalarish_runtime_value)
@@ -977,14 +1107,61 @@ pub async fn try_execute_fusion_group(
 
 #[cfg(all(test, feature = "native-accel"))]
 mod tests {
-    use super::write_elementwise_materialized_stores;
+    use super::{
+        fused_reduction_output_shape, validate_fused_reduction_domain,
+        write_elementwise_materialized_stores, StackSliceGuard,
+    };
     use crate::bytecode::program::ExecutionContext;
     use runmat_accelerate::fusion::FusionStoreMaterialization;
     use runmat_accelerate::fusion_residency;
     use runmat_accelerate::graph::VarBinding;
     use runmat_accelerate::VarKind;
     use runmat_accelerate_api::GpuTensorHandle;
-    use runmat_builtins::Value;
+    use runmat_value::Value;
+
+    #[test]
+    fn fused_reduction_domain_defers_multi_axis_and_nd_work_to_provider_paths() {
+        use runmat_accelerate::ReductionAxes;
+
+        assert!(validate_fused_reduction_domain(
+            Some(&ReductionAxes::Explicit(vec![2, 3])),
+            Some(&[2, 4, 5]),
+            false,
+        )
+        .is_err());
+        assert!(validate_fused_reduction_domain(
+            Some(&ReductionAxes::Explicit(vec![2])),
+            Some(&[2, 4, 5]),
+            false,
+        )
+        .is_err());
+        assert!(
+            validate_fused_reduction_domain(Some(&ReductionAxes::All), Some(&[2, 4, 5]), true,)
+                .is_ok()
+        );
+        assert!(validate_fused_reduction_domain(
+            Some(&ReductionAxes::Explicit(vec![2])),
+            Some(&[2, 4]),
+            false,
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn fused_reduction_output_shape_retains_matlab_singleton_axes() {
+        assert_eq!(
+            fused_reduction_output_shape(Some(vec![3, 5]), 3, 5, 0, false).unwrap(),
+            vec![1, 5]
+        );
+        assert_eq!(
+            fused_reduction_output_shape(Some(vec![3, 5]), 3, 5, 1, false).unwrap(),
+            vec![3, 1]
+        );
+        assert_eq!(
+            fused_reduction_output_shape(Some(vec![2, 4, 5]), 2, 4, 0, true).unwrap(),
+            vec![1, 1]
+        );
+    }
 
     #[test]
     fn fusion_writeback_preserves_shared_gpu_handles() {
@@ -992,11 +1169,13 @@ mod tests {
             shape: vec![1],
             device_id: 17,
             buffer_id: 17001,
+            descriptor: Default::default(),
         };
         let old_only = GpuTensorHandle {
             shape: vec![1],
             device_id: 17,
             buffer_id: 17002,
+            descriptor: Default::default(),
         };
         fusion_residency::mark(&shared);
         fusion_residency::mark(&old_only);
@@ -1011,8 +1190,7 @@ mod tests {
             call_stack: Vec::new(),
             locals: Vec::new(),
             instruction_pointer: 0,
-            spawned_task_ids: std::collections::HashSet::new(),
-            next_spawn_task_id: 0,
+            ..ExecutionContext::default()
         };
         write_elementwise_materialized_stores(
             vec![(
@@ -1032,5 +1210,27 @@ mod tests {
         assert!(fusion_residency::is_resident(&shared));
         assert!(!fusion_residency::is_resident(&old_only));
         fusion_residency::clear(&shared);
+    }
+
+    #[test]
+    fn fusion_stack_transaction_restores_before_commit_and_never_replays_after_commit() {
+        let mut failed = vec![Value::Num(1.0), Value::Num(2.0), Value::Num(3.0)];
+        {
+            let guard = StackSliceGuard::new(&mut failed, 1);
+            assert_eq!(guard.slice(), &[Value::Num(2.0), Value::Num(3.0)]);
+            // A provider/placement failure drops the guard without publishing
+            // outputs; the original VM operands are restored exactly once.
+        }
+        assert_eq!(
+            failed,
+            vec![Value::Num(1.0), Value::Num(2.0), Value::Num(3.0)]
+        );
+
+        let mut completed = vec![Value::Num(1.0), Value::Num(2.0), Value::Num(3.0)];
+        {
+            let guard = StackSliceGuard::new(&mut completed, 1);
+            guard.commit();
+        }
+        assert_eq!(completed, vec![Value::Num(1.0)]);
     }
 }

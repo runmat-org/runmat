@@ -18,7 +18,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "RunMat materialises grids on the host and uploads them when GPU residency is requested. Providers may supply dedicated meshgrid hooks to avoid the round-trip."
+    "notes": "RunMat materialises grids on the host and restores them to the requesting GPU owner when a compatible provider hook is unavailable. Native real and paired-complex storage is preserved exactly."
   },
   "fusion": {
     "elementwise": false,
@@ -37,9 +37,9 @@
     "`meshgrid(x, y)` yields `X` of size `length(y) × length(x)` with rows copied from `x`, and `Y` of the same size with columns copied from `y`.",
     "`meshgrid(x, y, z)` returns three outputs sized `length(y) × length(x) × length(z)`, enabling 3-D volume visualisation.",
     "Input vectors may be row or column vectors (or even scalars). Empty vectors propagate to empty grids of matching shape.",
-    "Complex inputs produce complex grids where each output shares the input’s complex values.",
-    "Supplying GPU vectors (or a `'like', gpuArray(...)` prototype) keeps real and complex-interleaved outputs on the GPU when an acceleration provider is active. Without provider support, RunMat gathers inputs, materialises the grid on the host, and uploads the result transparently.",
-    "`'like', prototype` matches both the residency (host or GPU) and numeric class (real or complex) of the prototype. Integer prototypes are promoted to double precision, consistent with MATLAB."
+    "In `runmat` compatibility mode, complex axes are a RunMat extension and produce complex grids that preserve their values and precision.",
+    "Documented single and double GPU vectors keep outputs resident when an acceleration provider is active. Explicit real-integer gpuArray axes reject; automatically resident real-integer axes gather transparently and produce exact host grids. Paired-complex integer axes are a RunMat extension and preserve exact resident output.",
+    "In `runmat` compatibility mode, the RunMat-only `'like', prototype` selector matches both residency and numeric class. Ordinary MATLAB-compatible calls preserve each corresponding input axis class, including all eight integer classes."
   ],
   "examples": [
     {
@@ -62,11 +62,11 @@
       "input": "gx = gpuArray(single(linspace(-pi, pi, 4)));\ngy = gpuArray(single([-1 0 1]));\n[Xg, Yg] = meshgrid(gx, gy)"
     },
     {
-      "description": "Using `'like'` to copy residency from another array",
+      "description": "Matching grid storage to a prototype",
       "input": "proto = gpuArray.zeros(1, 1, 'double');\nangles = linspace(0, 2*pi, 8);\nradius = [0 1 2];\n[X, Y] = meshgrid(angles, radius, 'like', proto)"
     },
     {
-      "description": "Complex inputs produce complex grids automatically",
+      "description": "Creating grids from complex axes",
       "input": "z = [1+1i, 2+4i];\n[Zx, Zy] = meshgrid(z)"
     }
   ],
@@ -89,15 +89,15 @@
     },
     {
       "question": "Can I use integer vectors?",
-      "answer": "Yes. Inputs are promoted to double precision internally so the outputs represent the exact same values as MATLAB."
+      "answer": "Yes. Each output preserves the class of its corresponding input axis, including exact values from all eight integer classes."
     },
     {
       "question": "Does `meshgrid` support complex numbers?",
-      "answer": "Absolutely. Any imaginary components propagate into the outputs. With an acceleration provider active, complex GPU inputs and complex `gpuArray` prototypes produce complex-interleaved GPU outputs."
+      "answer": "Complex axes are a RunMat-only extension available in `runmat` compatibility mode. Their imaginary components and precision propagate to complex outputs, including exact paired-integer components and complex-interleaved GPU output when a provider is active."
     },
     {
       "question": "What does `'like'` do?",
-      "answer": "It matches the numeric class and residency (host or GPU) of the prototype array. Supply a `gpuArray` prototype to keep the resulting grids on the GPU."
+      "answer": "It is a RunMat-only selector available in `runmat` compatibility mode. It matches the numeric class and residency of the prototype array; ordinary MATLAB-compatible code controls class and residency through the input axes."
     },
     {
       "question": "How can providers avoid the host fall-back?",
@@ -186,7 +186,7 @@
     "label": "`crates/runmat-runtime/src/builtins/array/creation/meshgrid.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/meshgrid.rs"
   },
-  "gpu_residency": "You usually do **not** need to wrap vectors with `gpuArray` manually. When the active acceleration provider supports uploads, RunMat keeps real and complex-interleaved outputs on the GPU. Supplying a `'like', gpuArray(...)` prototype produces GPU outputs even when all inputs are host arrays, and complex GPU prototypes request complex-interleaved GPU outputs.",
+  "gpu_residency": "You usually do **not** need to wrap vectors with `gpuArray` manually. When the active acceleration provider supports uploads, RunMat keeps real and complex-interleaved outputs on the GPU. In `runmat` compatibility mode, the RunMat-only `'like', gpuArray(...)` selector can request GPU output even when every input axis is host-resident.",
   "gpu_behavior": [
     "When vector inputs already live on the GPU, RunMat uses provider `reshape` and `repmat` hooks so real and complex-interleaved axis grids can stay resident.",
     "If provider-side construction is unavailable, RunMat gathers the 1-D axes, materialises the grids once on the host, and uploads real or complex-interleaved outputs whenever GPU residency is requested, preserving observable semantics.",

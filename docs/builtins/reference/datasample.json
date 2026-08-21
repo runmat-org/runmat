@@ -6,9 +6,9 @@
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
-    "precisions": ["f64"],
+    "precisions": ["logical", "f32", "f64"],
     "broadcasting": "none",
-    "notes": "GPU inputs are gathered to host for compatibility until provider sampling hooks exist."
+    "notes": "Resident inputs are a gated RunMat extension and are gathered before sampling until provider sampling hooks exist; sampled output is currently host-resident."
   },
   "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
   "requires_feature": null,
@@ -18,8 +18,11 @@
     "Samples with replacement by default.",
     "`\"Replace\",false` samples without replacement and requires `k` to be no larger than the sampled dimension.",
     "`\"Weights\",w` samples proportionally to nonnegative weights with at least one positive value.",
-    "Numeric, logical, string, and char arrays are supported.",
-    "The default sampled dimension is the first nonsingleton dimension."
+    "Documented ordinary populations include single, double, logical, character, string, and table data. RunMat currently supports numeric, logical, character, string, and cell populations; table and tall-array paths remain unimplemented.",
+    "Typed-integer population data is a RunMat extension sampled directly from authoritative integer storage, preserving every selected value and its integer class.",
+    "Typed-integer `k`, typed-integer `dim`, typed-integer weights, logical weights, numeric `Replace`, and resident inputs are independently gated RunMat extensions. Compatibility-mode `k`, `dim`, and weights use documented single or double forms, and `Replace` uses logical.",
+    "The default sampled dimension is the first nonsingleton dimension.",
+    "The documented `RandStream` calling form, tables, and tall-array execution are not yet implemented."
   ],
   "examples": [
     { "description": "Sample rows", "input": "Y = datasample(X, 5)" },

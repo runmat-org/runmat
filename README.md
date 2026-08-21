@@ -174,7 +174,7 @@ See [bindings/ts/README.md](bindings/ts/README.md) and [WASM & TypeScript/JavaSc
 | --- | --- |
 | Language frontend | `runmat-lexer`, `runmat-parser`, `runmat-hir`, `runmat-mir`, `runmat-static-analysis` |
 | Execution | `runmat-core`, `runmat-vm`, `runmat-runtime`, `runmat-builtins` |
-| JIT | `runmat-turbine` |
+| Native execution and compilation | `runmat-native-executor`, `runmat-jit`, `runmat-native-codegen`, `runmat-aot` |
 | GPU acceleration | `runmat-accelerate`, `runmat-accelerate-api` |
 | Memory management | `runmat-gc`, `runmat-gc-api` |
 | Plotting | `runmat-plot` |

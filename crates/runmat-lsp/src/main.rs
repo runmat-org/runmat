@@ -19,7 +19,14 @@ async fn main() {
     let stdin = stdin();
     let stdout = stdout();
 
-    let (service, socket) = LspService::new(RunMatLanguageServer::new);
+    let (service, socket) = LspService::build(RunMatLanguageServer::new)
+        .custom_method("runmat/discoverTests", RunMatLanguageServer::discover_tests)
+        .custom_method(
+            "runmat/quickInformation",
+            RunMatLanguageServer::quick_information,
+        )
+        .custom_method("runmat/semanticFacts", RunMatLanguageServer::semantic_facts)
+        .finish();
     Server::new(stdin, stdout, socket).serve(service).await;
 }
 

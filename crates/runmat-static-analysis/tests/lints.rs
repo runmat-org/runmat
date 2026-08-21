@@ -1,109 +1,105 @@
-use runmat_hir::{LoweringContext, LoweringResult};
+use runmat_hir::{HirDiagnostic, LoweringContext};
 
 use runmat_runtime as _;
 
-fn lower_result(code: &str) -> LoweringResult {
-    let ast = runmat_parser::parse(code).unwrap();
-    runmat_hir::lower(&ast, &LoweringContext::empty()).unwrap()
+fn diagnostics(code: &str) -> Vec<HirDiagnostic> {
+    runmat_static_analysis::frontend::analyze_source(
+        code,
+        runmat_parser::CompatMode::default(),
+        &LoweringContext::empty(),
+    )
+    .diagnostics
 }
 
 #[test]
 fn shape_lint_reports_matmul_mismatch() {
-    let result = lower_result("a = ones(2,3); b = ones(4,2); c = a * b;");
-    let diags = runmat_static_analysis::lint_shapes(&result);
-    assert!(diags.iter().any(|d| d.code == "lint.shape.matmul"));
+    let diags = diagnostics("a = ones(2,3); b = ones(4,2); c = a * b;");
+    assert!(diags.iter().any(|d| d.code == "RM-TYPE-MATMUL"));
 }
 
 #[test]
 fn shape_lint_reports_broadcast_mismatch() {
-    let result = lower_result("a = ones(2,3); b = ones(4,2); c = a + b;");
-    let diags = runmat_static_analysis::lint_shapes(&result);
-    assert!(diags.iter().any(|d| d.code == "lint.shape.broadcast"));
+    let diags = diagnostics("a = ones(2,3); b = ones(4,2); c = a + b;");
+    assert!(diags.iter().any(|d| d.code == "RM-TYPE-BROADCAST"));
 }
 
 #[test]
 fn shape_lint_reports_dot_and_reshape() {
-    let result = lower_result(
+    let diags = diagnostics(
         "a = ones(1,3); b = ones(1,4); c = dot(a, b); d = reshape(a, 2, 2); e = reshape(a, -1, -1);",
     );
-    let diags = runmat_static_analysis::lint_shapes(&result);
-    assert!(diags.iter().any(|d| d.code == "lint.shape.dot"));
-    assert!(diags.iter().any(|d| d.code == "lint.shape.reshape"));
+    assert!(diags.iter().any(|d| d.code == "RM-TYPE-DOT"));
+    assert!(diags.iter().any(|d| d.code == "RM-TYPE-RESHAPE"));
 }
 
 #[test]
 fn shape_lint_reports_logical_index_mismatch() {
-    let result = lower_result("a = ones(2,2); m = ones(1,2) > 0; b = a[m];");
-    let diags = runmat_static_analysis::lint_shapes(&result);
-    assert!(diags.iter().any(|d| d.code == "lint.shape.logical_index"));
+    let diags = diagnostics("a = ones(2,2); m = ones(1,2) > 0; b = a[m];");
+    assert!(diags.iter().any(|d| d.code == "RM-TYPE-LOGICAL-INDEX"));
 }
 
 #[test]
 fn shape_lint_allows_numeric_range_indexing() {
-    let result = lower_result("a = 0:pi/100:2*pi; b = sin(a); c = a(1:10);");
-    let diags = runmat_static_analysis::lint_shapes(&result);
-    assert!(!diags.iter().any(|d| d.code == "lint.shape.logical_index"));
+    let diags = diagnostics("a = 0:pi/100:2*pi; b = sin(a); c = a(1:10);");
+    assert!(!diags.iter().any(|d| d.code == "RM-TYPE-LOGICAL-INDEX"));
 }
 
 #[test]
 fn shape_lint_allows_numeric_vector_and_scalar_indexing() {
-    let vector_result = lower_result("a = ones(1,10); idx = [1 3 5 7]; b = a(idx);");
-    let vector_diags = runmat_static_analysis::lint_shapes(&vector_result);
+    let vector_diags = diagnostics("a = ones(1,10); idx = [1 3 5 7]; b = a(idx);");
     assert!(!vector_diags
         .iter()
-        .any(|d| d.code == "lint.shape.logical_index"));
+        .any(|d| d.code == "RM-TYPE-LOGICAL-INDEX"));
 
-    let scalar_result = lower_result("a = ones(1,10); b = a(3);");
-    let scalar_diags = runmat_static_analysis::lint_shapes(&scalar_result);
+    let scalar_diags = diagnostics("a = ones(1,10); b = a(3);");
     assert!(!scalar_diags
         .iter()
-        .any(|d| d.code == "lint.shape.logical_index"));
+        .any(|d| d.code == "RM-TYPE-LOGICAL-INDEX"));
 }
 
 #[test]
 fn shape_lint_allows_matching_logical_indexing() {
-    let result = lower_result("a = ones(2,2); m = ones(2,2) > 0; b = a(m);");
-    let diags = runmat_static_analysis::lint_shapes(&result);
-    assert!(!diags.iter().any(|d| d.code == "lint.shape.logical_index"));
+    let diags = diagnostics("a = ones(2,2); m = ones(2,2) > 0; b = a(m);");
+    assert!(!diags.iter().any(|d| d.code == "RM-TYPE-LOGICAL-INDEX"));
 }
 
 #[test]
 fn shape_lint_reports_repmat_and_permute() {
-    let bad_result = lower_result(
+    let bad_diags = diagnostics(
         "a = ones(2,2); b = repmat(a, 1.5, 2); c = permute(a, [1 2 3]); d = permute(a, [1 1]);",
     );
-    let bad_diags = runmat_static_analysis::lint_shapes(&bad_result);
-    assert!(bad_diags.iter().any(|d| d.code == "lint.shape.repmat"));
-    assert!(bad_diags.iter().any(|d| d.code == "lint.shape.permute"));
+    assert!(bad_diags.iter().any(|d| d.code == "RM-TYPE-REPMAT"));
+    assert!(bad_diags.iter().any(|d| d.code == "RM-TYPE-PERMUTE"));
 
-    let good_result = lower_result("a = ones(2,2); b = repmat(a, 2, 3); c = permute(a, [2 1]);");
-    let good_diags = runmat_static_analysis::lint_shapes(&good_result);
-    assert!(!good_diags.iter().any(|d| d.code == "lint.shape.repmat"));
-    assert!(!good_diags.iter().any(|d| d.code == "lint.shape.permute"));
+    let good_diags = diagnostics("a = ones(2,2); b = repmat(a, 2, 3); c = permute(a, [2 1]);");
+    assert!(!good_diags.iter().any(|d| d.code == "RM-TYPE-REPMAT"));
+    assert!(
+        !good_diags.iter().any(|d| d.code == "RM-TYPE-PERMUTE"),
+        "valid permute produced diagnostics: {good_diags:#?}"
+    );
 }
 
 #[test]
 fn shape_lint_reports_concat_mismatches() {
-    let bad_result =
-        lower_result("B = ones(2,3); C = ones(4,3); D = ones(2,4); A = [B, C]; E = [B; D];");
-    let bad_diags = runmat_static_analysis::lint_shapes(&bad_result);
-    assert!(bad_diags.iter().any(|d| d.code == "lint.shape.horzcat"));
-    assert!(bad_diags.iter().any(|d| d.code == "lint.shape.vertcat"));
+    let bad_diags =
+        diagnostics("B = ones(2,3); C = ones(4,3); D = ones(2,4); A = [B, C]; E = [B; D];");
+    assert!(bad_diags.iter().any(|d| d.code == "RM-TYPE-CONCAT"));
 
-    let good_result =
-        lower_result("B = ones(2,3); C = ones(2,4); D = ones(4,3); A = [B, C]; E = [B; D];");
-    let good_diags = runmat_static_analysis::lint_shapes(&good_result);
-    assert!(!good_diags.iter().any(|d| d.code == "lint.shape.horzcat"));
-    assert!(!good_diags.iter().any(|d| d.code == "lint.shape.vertcat"));
+    let good_diags =
+        diagnostics("B = ones(2,3); C = ones(2,4); D = ones(4,3); A = [B, C]; E = [B; D];");
+    assert!(!good_diags.iter().any(|d| d.code == "RM-TYPE-CONCAT"));
 }
 
 #[test]
 fn shape_lint_reports_reduction_dim_out_of_range() {
-    let bad_result = lower_result("a = ones(2,2); b = sum(a, 3);");
-    let bad_diags = runmat_static_analysis::lint_shapes(&bad_result);
-    assert!(bad_diags.iter().any(|d| d.code == "lint.shape.reduction"));
+    // MATLAB permits dimensions beyond ndims and returns the input unchanged.
+    let extended_dim = diagnostics("a = ones(2,2); b = sum(a, 3);");
+    assert!(!extended_dim
+        .iter()
+        .any(|d| d.code == "RM-TYPE-REDUCTION-DIMENSION"));
 
-    let good_result = lower_result("a = ones(2,2); b = sum(a, 2);");
-    let good_diags = runmat_static_analysis::lint_shapes(&good_result);
-    assert!(!good_diags.iter().any(|d| d.code == "lint.shape.reduction"));
+    let invalid_zero = diagnostics("a = ones(2,2); b = sum(a, 0);");
+    assert!(invalid_zero
+        .iter()
+        .any(|d| d.code == "RM-TYPE-REDUCTION-DIMENSION"));
 }

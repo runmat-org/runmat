@@ -1,10 +1,3 @@
----
-title: "Physics Families"
-category: "FEA"
-section: "13.4"
-last_updated: "June 21, 2026"
----
-
 # Physics Families
 
 Choose the physics family from the engineering question. The selected model profile determines required model data, selects the solver, validates run options, and shapes diagnostics, result payloads, and current support boundaries.

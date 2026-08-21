@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Reads tensor metadata from handles; falls back to host when provider metadata is incomplete."
+    "notes": "Reads shape metadata directly from resident handles and returns a host double scalar without provider access, downloads, kernels, or allocations."
   },
   "fusion": {
     "elementwise": false,
@@ -33,7 +33,8 @@
     "Empty arrays report `0` when every dimension is zero; otherwise the maximum non-zero dimension is reported (e.g., `0×5` arrays have length `5`).",
     "Character arrays and string arrays follow their array dimensions, not the number of code points.",
     "Cell arrays use their MATLAB array shape (`rows × cols`) with the maximum dimension returned.",
-    "GPU-resident arrays are inspected without gathering when the provider populates shape metadata on the tensor handle; otherwise, RunMat gathers once to recover the correct dimensions.",
+    "GPU-resident arrays are inspected entirely through shape metadata already carried by the tensor handle; `length` never gathers the payload.",
+    "Tables and timetables are rejected; use `height`, `width`, or `size` for tabular values.",
     "Arguments that are not arrays (scalars, logicals, strings, handle objects) are treated as `1×1`."
   ],
   "examples": [
@@ -78,7 +79,7 @@
     },
     {
       "question": "Does `length` gather GPU data?",
-      "answer": "No. The runtime relies on shape metadata stored in the GPU tensor handle. Only when that metadata is missing does RunMat gather the tensor to maintain correctness."
+      "answer": "No. The runtime reads shape metadata stored in the GPU tensor handle and never accesses the provider or downloads the tensor payload."
     },
     {
       "question": "Can I use `length` on cell arrays and structs?",
@@ -140,6 +141,6 @@
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/introspection/length.rs"
   },
   "gpu_behavior": [
-    "`length` is a metadata query. When the input is a GPU tensor, RunMat looks at the shape embedded in the GPU handle (`GpuTensorHandle.shape`). If the active provider leaves that metadata empty, the runtime invokes `provider.download(handle)` a single time to recover the shape, ensuring MATLAB-compatible behaviour. No GPU kernels are launched and no device buffers are allocated by this builtin."
+    "`length` is a metadata-only query. For a resident tensor, RunMat reads `GpuTensorHandle.shape` directly and returns a host double scalar. It does not consult the provider, gather or download the payload, launch a kernel, or allocate a device buffer."
   ]
 }

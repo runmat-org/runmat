@@ -5,8 +5,8 @@ use crate::interpreter::stack::{pop2, pop_value};
 use crate::runtime::workspace::{
     ensure_workspace_slot_name, mark_workspace_assigned, refresh_workspace_state,
 };
-use runmat_builtins::{CharArray, Value};
 use runmat_runtime::{dispatcher::gather_if_needed_async, RuntimeError};
+use runmat_value::{CharArray, Value};
 use std::collections::HashMap;
 
 fn resolve_emit_label_text(
@@ -52,6 +52,11 @@ pub async fn emit_var(
 #[inline]
 pub fn load_const(stack: &mut Vec<Value>, value: f64) {
     stack.push(Value::Num(value));
+}
+
+#[inline]
+pub fn load_int(stack: &mut Vec<Value>, value: runmat_value::IntValue) {
+    stack.push(Value::Int(value));
 }
 
 #[inline]

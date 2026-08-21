@@ -2,9 +2,10 @@ use super::*;
 use base64::engine::general_purpose::STANDARD as BASE64_ENGINE;
 use base64::Engine;
 use runmat_geometry_core::{
-    CadLabelRef, CadRegionOwnership, CadSemanticKind, MeshDescriptor, RegionEntityMapping,
-    SurfaceMesh,
+    CadLabelRef, CadRegionOwnership, CadSemanticKind, GeometryHealingFailure,
+    GeometryHealingOperationKind, MeshDescriptor, RegionEntityMapping, SurfaceMesh,
 };
+use runmat_geometry_io::import::{LabeledSubshapeRemapConflict, LabeledSubshapeRemapConflictKind};
 
 const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
 const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nENDSEC;\nDATA;\n#10=PRODUCT('Bracket_A','',(#1));\nENDSEC;\nEND-ISO-10303-21;\n";
@@ -562,6 +563,71 @@ fn load_op_maps_cancelled_import_error_code() {
     assert_eq!(error.error_code, "RM.GEOMETRY.LOAD.CANCELLED");
     assert_eq!(error.error_type, OperationErrorType::Cancelled);
     cancelled.store(false, Ordering::Relaxed);
+}
+
+#[test]
+fn load_error_mapping_covers_exact_import_failures() {
+    let context = OperationContext::new(None, None);
+    let cases = [
+        (
+            GeometryImportError::InvalidGeometry("open shell".into()),
+            "RM.GEOMETRY.LOAD.INVALID_GEOMETRY",
+            OperationErrorType::Validation,
+        ),
+        (
+            GeometryImportError::InvalidOptions("missing units".into()),
+            "RM.GEOMETRY.LOAD.INVALID_OPTIONS",
+            OperationErrorType::Input,
+        ),
+        (
+            GeometryImportError::ExactRepresentationCapacityExceeded { limit: 8 },
+            "RM.GEOMETRY.LOAD.EXACT_REPRESENTATION_LIMIT_EXCEEDED",
+            OperationErrorType::Capacity,
+        ),
+        (
+            GeometryImportError::ExactEntityCapacityExceeded { limit: 8 },
+            "RM.GEOMETRY.LOAD.EXACT_ENTITY_LIMIT_EXCEEDED",
+            OperationErrorType::Capacity,
+        ),
+        (
+            GeometryImportError::ExactValidationBudgetExceeded("search work".into()),
+            "RM.GEOMETRY.LOAD.EXACT_VALIDATION_BUDGET_EXCEEDED",
+            OperationErrorType::Capacity,
+        ),
+        (
+            GeometryImportError::HealingLimitExceeded {
+                failure: GeometryHealingFailure {
+                    operation: GeometryHealingOperationKind::RepairGap,
+                    affected_entities: Vec::new(),
+                    measured_displacement_m: 2.0,
+                    permitted_displacement_m: 1.0,
+                    original_point_m: [0.0, 0.0, 0.0],
+                    proposed_point_m: [2.0, 0.0, 0.0],
+                    reason: "test witness".into(),
+                },
+            },
+            "RM.GEOMETRY.LOAD.HEALING_LIMIT_EXCEEDED",
+            OperationErrorType::Validation,
+        ),
+        (
+            GeometryImportError::RevisionConflict {
+                conflict: LabeledSubshapeRemapConflict {
+                    kind: LabeledSubshapeRemapConflictKind::Deleted,
+                    label_entries: vec!["0:1:1".into()],
+                    source_topology_ids: vec!["source".into()],
+                    candidate_topology_ids: Vec::new(),
+                },
+            },
+            "RM.GEOMETRY.LOAD.REVISION_CONFLICT",
+            OperationErrorType::Validation,
+        ),
+    ];
+    for (source, code, error_type) in cases {
+        let error = map_geometry_load_error("/part.brep", source, &context);
+        assert_eq!(error.error_code, code);
+        assert_eq!(error.error_type, error_type);
+        assert!(!error.retryable);
+    }
 }
 
 #[test]

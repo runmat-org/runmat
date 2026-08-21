@@ -8,12 +8,15 @@ use crate::core::{
 use crate::gpu::stairs::StairsGpuInputs;
 use crate::gpu::util::readback_scalar_buffer_f64;
 use crate::plots::line::LineMarkerAppearance;
+use crate::plots::NumericPlotData;
 use glam::{Vec3, Vec4};
 
 #[derive(Debug, Clone)]
 pub struct StairsPlot {
     pub x: Vec<f64>,
     pub y: Vec<f64>,
+    pub x_source: Option<NumericPlotData>,
+    pub y_source: Option<NumericPlotData>,
     pub color: Vec4,
     pub line_width: f32,
     pub label: Option<String>,
@@ -82,9 +85,13 @@ impl StairsPlot {
         if x.len() != y.len() || x.is_empty() {
             return Err("stairs: X and Y must be same non-zero length".to_string());
         }
+        let x_source = NumericPlotData::from_f64(x.clone(), vec![1, x.len()])?;
+        let y_source = NumericPlotData::from_f64(y.clone(), vec![1, y.len()])?;
         Ok(Self {
             x,
             y,
+            x_source: Some(x_source),
+            y_source: Some(y_source),
             color: Vec4::new(0.0, 0.5, 1.0, 1.0),
             line_width: 1.0,
             label: None,
@@ -103,6 +110,21 @@ impl StairsPlot {
         })
     }
 
+    pub fn new_with_source(
+        x_source: NumericPlotData,
+        y_source: NumericPlotData,
+    ) -> Result<Self, String> {
+        if x_source.len() != y_source.len() || x_source.is_empty() {
+            return Err("stairs: X and Y must be same non-zero length".to_string());
+        }
+        let x = x_source.materialize_f64();
+        let y = y_source.materialize_f64();
+        let mut plot = Self::new(x, y)?;
+        plot.x_source = Some(x_source);
+        plot.y_source = Some(y_source);
+        Ok(plot)
+    }
+
     /// Build a stairs plot backed directly by a GPU vertex buffer.
     pub fn from_gpu_buffer(
         color: Vec4,
@@ -113,6 +135,8 @@ impl StairsPlot {
         Self {
             x: Vec::new(),
             y: Vec::new(),
+            x_source: None,
+            y_source: None,
             color,
             line_width: 1.0,
             label: None,

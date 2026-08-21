@@ -5,7 +5,17 @@ mod api;
 mod runtime;
 mod wire;
 
+pub use api::config::{migrate_legacy_runmat_config, patch_runmat_config, resolve_runmat_config};
+pub use api::execution_artifact::{
+    build_execution_bundle, materialize_execution_bundle, BrowserExecutionRecipient,
+};
+pub use api::execution_program::execute_program_artifact;
 pub use api::init::init_runmat;
+pub use api::package::{
+    build_git_snapshot, package_cache_acquire_lease, package_cache_gc, package_cache_release_lease,
+    package_cache_renew_lease, package_cache_status, plan_git_acquisition, resolve_project,
+    validate_git_snapshot,
+};
 // Plotting and figure APIs.
 pub use api::plot::{
     bind_surface_to_figure, create_plot_surface, destroy_plot_surface, fit_plot_surface_extents,
@@ -17,8 +27,12 @@ pub use api::plot::{
     wasm_render_figure_image, wasm_render_figure_image_with_camera_state,
     wasm_render_figure_image_with_textmark, wasm_select_figure, wasm_set_hold_mode,
 };
+pub use api::project::{project_handoff, project_revision, validate_project_handoff};
 // Stateful session wrapper.
 pub use api::session::RunMatWasm;
+pub use api::testing::{
+    freeze_test_snapshot, project_test_layout, run_tests, run_tests_with_events,
+};
 // Log and trace streams.
 pub use api::streams::{
     set_log_filter, subscribe_runtime_log, subscribe_stdout, subscribe_trace_events,

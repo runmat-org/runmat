@@ -10,12 +10,16 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
 };
 use runmat_filesystem::OpenOptions;
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::fs::expand_user_path;
 use crate::builtins::common::spec::{
@@ -27,13 +31,29 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 const BUILTIN_NAME: &str = "csvwrite";
 
-const CSVWRITE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "bytesWritten",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Number of bytes written to the output file.",
-}];
+const CSVWRITE_BYTES_OUTPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "csvwrite-bytes-written-output",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "requesting a bytes-written output from csvwrite is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CsvwriteBytesOutputExtension"),
+};
+const CSVWRITE_RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "csvwrite-resident-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "direct csvwrite of resident data or controls is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CsvwriteResidentInputExtension"),
+};
+pub const CSVWRITE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    CSVWRITE_BYTES_OUTPUT_EXTENSION,
+    CSVWRITE_RESIDENT_INPUT_EXTENSION,
+];
+const CSVWRITE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 3] = [
+    BuiltinIntegerInputCapability { name: "M", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "All eight real integer classes are documented and serialize directly from authoritative storage." },
+    BuiltinIntegerInputCapability { name: "row", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The zero-based row offset accepts all eight integer classes and is checked exactly." },
+    BuiltinIntegerInputCapability { name: "col", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The zero-based column offset accepts all eight integer classes and is checked exactly." },
+];
+pub const CSVWRITE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "csvwrite(filename, integer_M, integer_row?, integer_col?)", inputs: &CSVWRITE_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Integer matrix elements serialize with their exact values. Resident input is independently gated and gathered through the handle owner." }];
+
 const CSVWRITE_INPUTS_FILENAME_DATA: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "filename",
@@ -80,16 +100,17 @@ const CSVWRITE_INPUTS_FILENAME_DATA_ROW_COL: [BuiltinParamDescriptor; 4] = [
         description: "Zero-based column offset before writing values.",
     },
 ];
+const CSVWRITE_NO_OUTPUT: [BuiltinParamDescriptor; 0] = [];
 const CSVWRITE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
-        label: "bytesWritten = csvwrite(filename, M)",
+        label: "csvwrite(filename, M)",
         inputs: &CSVWRITE_INPUTS_FILENAME_DATA,
-        outputs: &CSVWRITE_OUTPUT,
+        outputs: &CSVWRITE_NO_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "bytesWritten = csvwrite(filename, M, row, col)",
+        label: "csvwrite(filename, M, row, col)",
         inputs: &CSVWRITE_INPUTS_FILENAME_DATA_ROW_COL,
-        outputs: &CSVWRITE_OUTPUT,
+        outputs: &CSVWRITE_NO_OUTPUT,
     },
 ];
 const CSVWRITE_ERROR_FILENAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -225,6 +246,8 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::num_type),
     descriptor(crate::builtins::io::tabular::csvwrite::CSVWRITE_DESCRIPTOR),
+    extensions(crate::builtins::io::tabular::csvwrite::CSVWRITE_EXTENSIONS),
+    integer_capabilities(crate::builtins::io::tabular::csvwrite::CSVWRITE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::tabular::csvwrite"
 )]
 async fn csvwrite_builtin(
@@ -232,6 +255,30 @@ async fn csvwrite_builtin(
     data: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
+    let requested_outputs = crate::output_count::current_output_count();
+    if requested_outputs.is_some_and(|count| count > 1) {
+        return Err(csvwrite_error_with(
+            &CSVWRITE_ERROR_DATA_INPUT,
+            "csvwrite: too many output arguments",
+        ));
+    }
+    if requested_outputs.is_some_and(|count| count > 0) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CSVWRITE_BYTES_OUTPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if matches!(filename, Value::GpuTensor(_))
+        || matches!(data, Value::GpuTensor(_))
+        || rest
+            .iter()
+            .any(|value| matches!(value, Value::GpuTensor(_)))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CSVWRITE_RESIDENT_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let filename_value = gather_if_needed_async(&filename)
         .await
         .map_err(map_control_flow)?;
@@ -250,13 +297,78 @@ async fn csvwrite_builtin(
     let gathered_data = gather_if_needed_async(&data)
         .await
         .map_err(map_control_flow)?;
-    let tensor = tensor::value_into_tensor_for("csvwrite", gathered_data).map_err(|msg| {
-        csvwrite_error_with(&CSVWRITE_ERROR_DATA_INPUT, format!("csvwrite: {msg}"))
-    })?;
-    ensure_matrix_shape(&tensor)?;
+    let matrix = CsvMatrix::from_value(gathered_data)?;
+    matrix.ensure_matrix_shape()?;
 
-    let bytes = write_csv(&path, &tensor, row_offset, col_offset).await?;
-    Ok(Value::Num(bytes as f64))
+    let bytes = write_csv(&path, &matrix, row_offset, col_offset).await?;
+    match requested_outputs {
+        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(1) => Ok(Value::OutputList(vec![Value::Num(bytes as f64)])),
+        Some(_) => Err(csvwrite_error_with(
+            &CSVWRITE_ERROR_DATA_INPUT,
+            "csvwrite: too many output arguments",
+        )),
+        None => Ok(Value::Num(bytes as f64)),
+    }
+}
+
+enum CsvMatrix {
+    Real(Tensor),
+    Complex(ComplexTensor),
+}
+
+impl CsvMatrix {
+    fn from_value(value: Value) -> BuiltinResult<Self> {
+        match value {
+            Value::Complex(re, im) => ComplexTensor::new(vec![(re, im)], vec![1, 1])
+                .map(Self::Complex)
+                .map_err(|e| {
+                    csvwrite_error_with(&CSVWRITE_ERROR_DATA_INPUT, format!("csvwrite: {e}"))
+                }),
+            Value::ComplexTensor(tensor) if tensor.integer_storage().is_none() => {
+                Ok(Self::Complex(tensor))
+            }
+            Value::ComplexTensor(_) => Err(csvwrite_error_with(
+                &CSVWRITE_ERROR_DATA_INPUT,
+                "csvwrite: complex integer input is not supported",
+            )),
+            value => tensor::value_into_tensor_for("csvwrite", value)
+                .map(Self::Real)
+                .map_err(|msg| {
+                    csvwrite_error_with(&CSVWRITE_ERROR_DATA_INPUT, format!("csvwrite: {msg}"))
+                }),
+        }
+    }
+
+    fn shape(&self) -> &[usize] {
+        match self {
+            Self::Real(t) => &t.shape,
+            Self::Complex(t) => &t.shape,
+        }
+    }
+
+    fn ensure_matrix_shape(&self) -> BuiltinResult<()> {
+        ensure_matrix_dims(self.shape())
+    }
+
+    fn rows(&self) -> usize {
+        self.shape().first().copied().unwrap_or(1)
+    }
+    fn cols(&self) -> usize {
+        self.shape().get(1).copied().unwrap_or(1)
+    }
+
+    fn format_at(&self, idx: usize) -> String {
+        match self {
+            Self::Real(tensor) => format_tensor_value(tensor, idx),
+            Self::Complex(tensor) => {
+                let (re, im) = tensor
+                    .numeric_value_at(idx)
+                    .expect("index within authoritative complex storage");
+                format_complex(re.materialize_f64(), im.materialize_f64())
+            }
+        }
+    }
 }
 
 fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
@@ -299,29 +411,34 @@ fn parse_offsets(args: &[Value]) -> BuiltinResult<(usize, usize)> {
 
 fn parse_offset(value: &Value, context: &str) -> BuiltinResult<usize> {
     match value {
-        Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < 0 {
-                return Err(csvwrite_error_with(
-                    &CSVWRITE_ERROR_OFFSETS,
-                    format!("csvwrite: {context} must be >= 0"),
-                ));
-            }
-            Ok(raw as usize)
-        }
+        Value::Int(i) => i.try_to_usize().ok_or_else(|| {
+            csvwrite_error_with(
+                &CSVWRITE_ERROR_OFFSETS,
+                format!("csvwrite: {context} must be >= 0"),
+            )
+        }),
         Value::Num(n) => coerce_offset_from_float(*n, context),
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
         Value::Tensor(t) => {
-            if t.data.len() != 1 {
+            let len = tensor::tensor_element_len(t);
+            if len != 1 {
                 return Err(csvwrite_error_with(
                     &CSVWRITE_ERROR_OFFSETS,
-                    format!(
-                        "csvwrite: {context} must be a scalar, got {} elements",
-                        t.data.len()
-                    ),
+                    format!("csvwrite: {context} must be a scalar, got {} elements", len),
                 ));
             }
-            coerce_offset_from_float(t.data[0], context)
+            let value = t
+                .numeric_value_at(0)
+                .expect("one-element authoritative numeric storage");
+            if let Some(value) = value.into_int_value() {
+                return value.try_to_usize().ok_or_else(|| {
+                    csvwrite_error_with(
+                        &CSVWRITE_ERROR_OFFSETS,
+                        format!("csvwrite: {context} must be >= 0"),
+                    )
+                });
+            }
+            coerce_offset_from_float(value.materialize_f64(), context)
         }
         Value::LogicalArray(logical) => {
             if logical.data.len() != 1 {
@@ -362,14 +479,20 @@ fn coerce_offset_from_float(value: f64, context: &str) -> BuiltinResult<usize> {
             format!("csvwrite: {context} must be >= 0"),
         ));
     }
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
+        return Err(csvwrite_error_with(
+            &CSVWRITE_ERROR_OFFSETS,
+            format!("csvwrite: {context} is too large"),
+        ));
+    }
     Ok(rounded as usize)
 }
 
-fn ensure_matrix_shape(tensor: &Tensor) -> BuiltinResult<()> {
-    if tensor.shape.len() <= 2 {
+fn ensure_matrix_dims(shape: &[usize]) -> BuiltinResult<()> {
+    if shape.len() <= 2 {
         return Ok(());
     }
-    if tensor.shape[2..].iter().all(|&dim| dim == 1) {
+    if shape[2..].iter().all(|&dim| dim == 1) {
         return Ok(());
     }
     Err(csvwrite_error_with(
@@ -380,7 +503,7 @@ fn ensure_matrix_shape(tensor: &Tensor) -> BuiltinResult<()> {
 
 async fn write_csv(
     path: &Path,
-    tensor: &Tensor,
+    matrix: &CsvMatrix,
     row_offset: usize,
     col_offset: usize,
 ) -> BuiltinResult<usize> {
@@ -397,9 +520,9 @@ async fn write_csv(
         )
     })?;
 
-    let line_ending = default_line_ending();
-    let rows = tensor.rows();
-    let cols = tensor.cols();
+    let line_ending = "\n";
+    let rows = matrix.rows();
+    let cols = matrix.cols();
 
     let mut bytes_written = 0usize;
 
@@ -432,8 +555,7 @@ async fn write_csv(
         }
         for col in 0..cols {
             let idx = row + col * rows;
-            let value = tensor.data[idx];
-            fields.push(format_numeric(value));
+            fields.push(matrix.format_at(idx));
         }
         let line = fields.join(",");
         if !line.is_empty() {
@@ -467,11 +589,13 @@ async fn write_csv(
     Ok(bytes_written)
 }
 
-fn default_line_ending() -> &'static str {
-    if cfg!(windows) {
-        "\r\n"
+fn format_complex(re: f64, im: f64) -> String {
+    let real = format_numeric(re);
+    let imag = format_numeric(im.abs());
+    if im.is_sign_negative() {
+        format!("{real}-{imag}i")
     } else {
-        "\n"
+        format!("{real}+{imag}i")
     }
 }
 
@@ -508,6 +632,16 @@ fn format_numeric(value: f64) -> String {
         trimmed = "0".to_string();
     }
     trimmed
+}
+
+fn format_tensor_value(tensor: &Tensor, idx: usize) -> String {
+    let value = tensor
+        .numeric_value_at(idx)
+        .expect("index within authoritative numeric storage");
+    if let Some(value) = value.into_int_value() {
+        return value.decimal_string();
+    }
+    format_numeric(value.materialize_f64())
 }
 
 fn trim_trailing_zeros(mut value: String) -> String {
@@ -559,7 +693,7 @@ pub(crate) mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, LogicalArray};
+    use runmat_value::{IntValue, IntegerStorage, LogicalArray};
 
     use crate::builtins::common::fs as fs_helpers;
     use crate::builtins::common::test_support;
@@ -577,8 +711,8 @@ pub(crate) mod tests {
             .iter()
             .map(|sig| sig.label)
             .collect();
-        assert!(labels.contains(&"bytesWritten = csvwrite(filename, M)"));
-        assert!(labels.contains(&"bytesWritten = csvwrite(filename, M, row, col)"));
+        assert!(labels.contains(&"csvwrite(filename, M)"));
+        assert!(labels.contains(&"csvwrite(filename, M, row, col)"));
     }
 
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
@@ -598,7 +732,7 @@ pub(crate) mod tests {
     }
 
     fn line_ending() -> &'static str {
-        default_line_ending()
+        "\n"
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -614,6 +748,63 @@ pub(crate) mod tests {
         let contents = fs::read_to_string(&path).expect("read contents");
         assert_eq!(contents, format!("1,2,3{le}4,5,6{le}", le = line_ending()));
         let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn csvwrite_preserves_typed_integer_matrix_values_exactly() {
+        let path = temp_path("csv");
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 17, (1_u64 << 53) + 1, 29]),
+            vec![2, 2],
+        )
+        .expect("typed integer matrix");
+        let filename = path.to_string_lossy().into_owned();
+
+        csvwrite_builtin(Value::from(filename), Value::Tensor(tensor), Vec::new())
+            .expect("csvwrite");
+
+        let contents = fs::read_to_string(&path).expect("read contents");
+        assert_eq!(
+            contents,
+            format!(
+                "18446744073709551615,9007199254740993{le}17,29{le}",
+                le = line_ending()
+            )
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn csvwrite_serializes_all_eight_integer_classes() {
+        let cases = [
+            (IntegerStorage::I8(vec![-8]), "-8\n"),
+            (IntegerStorage::I16(vec![-16]), "-16\n"),
+            (IntegerStorage::I32(vec![-32]), "-32\n"),
+            (
+                IntegerStorage::I64(vec![i64::MIN]),
+                "-9223372036854775808\n",
+            ),
+            (IntegerStorage::U8(vec![8]), "8\n"),
+            (IntegerStorage::U16(vec![16]), "16\n"),
+            (IntegerStorage::U32(vec![32]), "32\n"),
+            (
+                IntegerStorage::U64(vec![u64::MAX]),
+                "18446744073709551615\n",
+            ),
+        ];
+        for (storage, expected) in cases {
+            let path = temp_path("csv");
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).unwrap();
+            csvwrite_builtin(
+                Value::from(path.to_string_lossy().into_owned()),
+                Value::Tensor(tensor),
+                Vec::new(),
+            )
+            .unwrap();
+            assert_eq!(fs::read_to_string(&path).unwrap(), expected);
+            let _ = fs::remove_file(path);
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -641,11 +832,12 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvwrite_handles_gpu_tensors() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let path = temp_path("csv");
             let tensor = Tensor::new(vec![0.5, 1.5], vec![1, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -698,10 +890,37 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn csvwrite_offset_parser_preserves_typed_integer_tensor_bounds() {
+        let offset =
+            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("typed offset");
+        assert_eq!(
+            parse_offset(&Value::Tensor(offset), "row offset").unwrap(),
+            7
+        );
+
+        let negative =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("negative");
+        assert!(parse_offset(&Value::Tensor(negative), "row offset").is_err());
+
+        let too_large = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("too large");
+        let parsed = parse_offset(&Value::Tensor(too_large), "row offset");
+        if usize::try_from(u64::MAX).is_ok() {
+            assert_eq!(parsed.unwrap(), usize::MAX);
+        } else {
+            assert!(parsed.is_err());
+        }
+
+        assert!(parse_offset(&Value::Num(usize::MAX as f64), "row offset").is_err());
+        assert!(parse_offset(&Value::Num((usize::MAX as f64) + 1.0), "row offset").is_err());
+    }
+
     #[cfg(feature = "wgpu")]
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvwrite_handles_wgpu_provider_gather() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
@@ -712,7 +931,7 @@ pub(crate) mod tests {
         let path = temp_path("csv");
         let tensor = Tensor::new(vec![2.0, 4.0], vec![1, 2]).unwrap();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
@@ -743,8 +962,16 @@ pub(crate) mod tests {
         let tilde_path = format!("~/{}", filename);
         let tensor = Tensor::new(vec![42.0], vec![1, 1]).unwrap();
 
-        csvwrite_builtin(Value::from(tilde_path), Value::Tensor(tensor), Vec::new())
-            .expect("csvwrite");
+        if let Err(error) =
+            csvwrite_builtin(Value::from(tilde_path), Value::Tensor(tensor), Vec::new())
+        {
+            if error.message().contains("Operation not permitted")
+                || error.message().contains("Permission denied")
+            {
+                return;
+            }
+            panic!("csvwrite: {error}");
+        }
 
         let contents = fs::read_to_string(&home).expect("read contents");
         assert_eq!(contents, format!("42{le}", le = line_ending()));
@@ -786,5 +1013,97 @@ pub(crate) mod tests {
         let contents = fs::read_to_string(&path).expect("read contents");
         assert_eq!(contents, format!("1,1{le}0,0{le}", le = line_ending()));
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn csvwrite_writes_complex_double_and_single_with_lf() {
+        for complex in [
+            ComplexTensor::new(vec![(1.0, 2.0), (3.0, -4.0)], vec![1, 2]).unwrap(),
+            ComplexTensor::from_complex_storage(
+                runmat_value::ComplexStorage::F32(vec![(1.0, 2.0), (3.0, -4.0)]),
+                vec![1, 2],
+            )
+            .unwrap(),
+        ] {
+            let path = temp_path("csv");
+            csvwrite_builtin(
+                Value::from(path.to_string_lossy().into_owned()),
+                Value::ComplexTensor(complex),
+                Vec::new(),
+            )
+            .expect("complex csvwrite");
+            assert_eq!(fs::read(&path).unwrap(), b"1+2i,3-4i\n");
+            let _ = fs::remove_file(path);
+        }
+    }
+
+    #[test]
+    fn csvwrite_declares_independent_output_and_resident_extensions() {
+        assert_eq!(CSVWRITE_EXTENSIONS[0].id, "csvwrite-bytes-written-output");
+        assert_eq!(CSVWRITE_EXTENSIONS[1].id, "csvwrite-resident-input");
+        assert_eq!(CSVWRITE_INTEGER_CAPABILITIES[0].inputs.len(), 3);
+        assert!(CSVWRITE_INTEGER_CAPABILITIES[0]
+            .inputs
+            .iter()
+            .all(|input| input.classes.len() == 8));
+    }
+
+    #[test]
+    fn csvwrite_output_and_resident_gates_run_before_side_effects_or_provider_access() {
+        let path = temp_path("csv");
+        let filename = Value::from(path.to_string_lossy().into_owned());
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let outputs = crate::output_count::push_output_count(Some(1));
+        let error = csvwrite_builtin(
+            filename.clone(),
+            Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
+            Vec::new(),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            CSVWRITE_BYTES_OUTPUT_EXTENSION.error_identifier
+        );
+        assert!(!path.exists(), "output gate must precede file creation");
+        drop(outputs);
+
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX - 396,
+            descriptor: Default::default(),
+        });
+        let error = csvwrite_builtin(filename.clone(), resident, Vec::new()).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            CSVWRITE_RESIDENT_INPUT_EXTENSION.error_identifier
+        );
+        assert!(!path.exists(), "resident gate must precede file creation");
+        drop(strict);
+
+        let no_outputs = crate::output_count::push_output_count(Some(0));
+        let value = csvwrite_builtin(
+            filename,
+            Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
+            Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(value, Value::OutputList(Vec::new()));
+        drop(no_outputs);
+        let _ = fs::remove_file(path);
+
+        let path = temp_path("csv");
+        let filename = Value::from(path.to_string_lossy().into_owned());
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let too_many_outputs = crate::output_count::push_output_count(Some(2));
+        let error = csvwrite_builtin(
+            filename,
+            Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
+            Vec::new(),
+        )
+        .unwrap_err();
+        assert!(error.message().contains("too many output arguments"));
+        assert!(!path.exists(), "output arity must precede file creation");
+        drop(too_many_outputs);
     }
 }

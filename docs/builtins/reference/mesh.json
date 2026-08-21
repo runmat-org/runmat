@@ -18,7 +18,7 @@
       "double"
     ],
     "broadcasting": "none",
-    "notes": "`mesh` reuses the shared surface pipeline with wireframe-oriented rendering semantics."
+    "notes": "`mesh` retains native host coordinate storage for graphics properties and scene persistence, including an owner-aware exact snapshot of resident inputs, while rendering remains an explicit floating/device boundary."
   },
   "fusion": {
     "elementwise": false,
@@ -33,10 +33,12 @@
   "description": "`mesh` creates wireframe surface plots from vector axes or meshgrid-style coordinates plus height data. Handle behavior and axis integration follow MATLAB semantics.",
   "behaviors": [
     "`mesh(Z)` uses implicit axes, while `mesh(X, Y, Z)` accepts vector axes or meshgrid-style coordinate matrices.",
+    "`XData`, `YData`, and `ZData` retain native `single`, `double`, or integer class and exact host values even when renderer geometry is materialized into a floating domain.",
+    "The documented independent color-array and leading-axes forms are not implemented yet; this is a general graphics-surface gap rather than an integer coercion rule.",
     "The builtin returns a surface handle, so mesh plots can still be inspected through the graphics-object system.",
     "`mesh` is the wireframe-oriented companion to `surf`; for combined wireframe plus contour overlays, use `meshc`.",
     "RunMat uses the shared surface pipeline for mesh rendering, so view, z-axis labeling, and subplot-local state behave consistently across the surface family.",
-    "GPU-backed rendering is preferred when the plotting device can consume exported buffers directly."
+    "GPU-backed rendering is preferred when the plotting device can consume exported buffers directly; automatic resident inputs also take one exact owner-aware host snapshot for property queries and figure persistence."
   ],
   "examples": [
     {

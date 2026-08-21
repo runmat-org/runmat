@@ -1,6 +1,6 @@
 //! MATLAB-compatible `isrow` builtin.
 
-use crate::builtins::common::shape::value_dimensions;
+use crate::builtins::common::shape::{effective_rank, value_dimensions};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
@@ -8,9 +8,11 @@ use crate::builtins::common::spec::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type, Value,
+    ResolveContext, Type,
 };
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::introspection::isrow")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -20,12 +22,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::InheritInputs,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Reads shape metadata and returns a host logical scalar.",
+    notes: "Reads shape metadata without provider access and returns a host logical scalar.",
 };
 
 #[runmat_macros::register_fusion_spec(
@@ -71,6 +73,11 @@ pub const ISROW_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
 };
+pub const ISROW_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "isrow is a universal shape predicate; integer class and values are irrelevant and resident shape metadata is read without gathering payload data.",
+};
 
 fn bool_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Bool
@@ -84,18 +91,21 @@ fn bool_type(_args: &[Type], _context: &ResolveContext) -> Type {
     accel = "metadata",
     type_resolver(bool_type),
     descriptor(crate::builtins::array::introspection::isrow::ISROW_DESCRIPTOR),
+    integer_audit(crate::builtins::array::introspection::isrow::ISROW_INTEGER_AUDIT),
     builtin_path = "crate::builtins::array::introspection::isrow"
 )]
 async fn isrow_builtin(value: Value) -> crate::BuiltinResult<Value> {
     let dims = value_dimensions(&value).await?;
-    Ok(Value::Bool(dims.first().copied().unwrap_or(1) == 1))
+    Ok(Value::Bool(
+        effective_rank(&dims) <= 2 && dims.first().copied().unwrap_or(1) == 1,
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::Tensor;
+    use runmat_value::Tensor;
 
     #[test]
     fn detects_single_row_shape() {
@@ -112,6 +122,20 @@ mod tests {
         assert_eq!(
             block_on(isrow_builtin(Value::Num(1.0))).unwrap(),
             Value::Bool(true)
+        );
+    }
+
+    #[test]
+    fn ignores_trailing_singletons_but_rejects_effective_higher_rank() {
+        let row = Tensor::new(vec![1.0, 2.0], vec![1, 2, 1]).unwrap();
+        assert_eq!(
+            block_on(isrow_builtin(Value::Tensor(row))).unwrap(),
+            Value::Bool(true)
+        );
+        let higher = Tensor::new(vec![1.0, 2.0], vec![1, 1, 2]).unwrap();
+        assert_eq!(
+            block_on(isrow_builtin(Value::Tensor(higher))).unwrap(),
+            Value::Bool(false)
         );
     }
 }

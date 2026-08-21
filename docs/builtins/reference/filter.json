@@ -35,8 +35,8 @@
   "behaviors": [
     "`filter(b, a, X)` applies the filter along the first non-singleton dimension of `X` (column-wise for matrices).",
     "The numerator `b` and denominator `a` must be non-empty vectors. `a(1)` must be non-zero; the runtime divides both coefficient vectors by `a(1)` automatically.",
-    "Optional initial conditions `zi` must have the same size as the output `zf` (the dimension being filtered is replaced by `max(numel(b), numel(a)) - 1`). Use `[]` to indicate zero initial state.",
-    "`filter(b, a, X, zi, dim)` processes `X` along dimension `dim`. Dimensions beyond `ndims(X)` are treated as length-one axes, exactly as in MATLAB.",
+    "Optional initial conditions `zi` must have the same size as the output `zf`: filter order first, followed by the non-operated dimensions of `X`. Use `[]` to indicate zero initial state.",
+    "`filter(b, a, X, zi, dim)` processes `X` along dimension `dim`. Dimensions beyond `ndims(X)` are treated as length-one axes. Filter states place filter order first, followed by the non-operated dimensions of `X`.",
     "Complex coefficients or inputs are supported; results follow MATLAB semantics for real/imaginary propagation.",
     "The function returns a single output `y` by default. Request two outputs (`[y, zf] = filter(...)`) to obtain the final internal states `zf`."
   ],
@@ -79,7 +79,7 @@
     },
     {
       "question": "How large should `zi` be?",
-      "answer": "`zi` must have the same size as `zf` (the returned final state). Replace the filtered dimension with `max(numel(b), numel(a)) - 1`; all other dimensions match `X`. Use `[]` for a zero state."
+      "answer": "`zi` must have the same size as `zf` (the returned final state). Its leading dimension is `max(numel(b), numel(a)) - 1`, followed by the non-operated dimensions of `X`. For vector input, `zf` is a column vector. Use `[]` for a zero state."
     },
     {
       "question": "Can I filter along a dimension greater than `ndims(X)`?",
@@ -91,11 +91,11 @@
     },
     {
       "question": "Do I need to initialise the GPU path manually?",
-      "answer": "No. If the signal is a `gpuArray` value and the active provider supports `iir_filter`, RunMat keeps the entire computation on the device. Otherwise, the runtime gathers operands to the host, ensuring MATLAB-compatible results without extra user code."
+      "answer": "No. If the signal is a `gpuArray` value, its owning provider supports `iir_filter`, and filtering uses the leading dimension, RunMat keeps the computation on the device. Other dimensions currently use the host fallback so final-state layout remains MATLAB-compatible."
     },
     {
       "question": "What shape does `zf` have?",
-      "answer": "`zf` matches `zi` (or the default zero state). The filtered dimension is replaced by `max(numel(b), numel(a)) - 1`; other dimensions mirror the input."
+      "answer": "`zf` matches `zi` (or the default zero state). Filter order is the leading dimension; remaining dimensions correspond to the non-operated dimensions of the input."
     },
     {
       "question": "How are empty signals handled?",

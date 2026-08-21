@@ -1,7 +1,7 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use runmat_builtins::Value;
+use runmat_value::{IntegerStorage, Value};
 use runmat_vm::Instr;
 use test_helpers::{compile_source, interpret};
 
@@ -14,7 +14,7 @@ fn assert_same_real_tensor(lhs: &Value, rhs: &Value) {
     match (lhs, rhs) {
         (Value::Tensor(left), Value::Tensor(right)) => {
             assert_eq!(left.shape, right.shape);
-            assert_eq!(left.data, right.data);
+            assert_eq!(left.materialize_f64(), right.materialize_f64());
         }
         (Value::Num(left), Value::Num(right)) => {
             assert!((left - right).abs() < 1e-12, "left={left} right={right}");
@@ -27,7 +27,7 @@ fn assert_same_complex_tensor(lhs: &Value, rhs: &Value) {
     match (lhs, rhs) {
         (Value::ComplexTensor(left), Value::ComplexTensor(right)) => {
             assert_eq!(left.shape, right.shape);
-            assert_eq!(left.data, right.data);
+            assert_eq!(left.materialize_f64(), right.materialize_f64());
         }
         (Value::Complex(lr, li), Value::Complex(rr, ri)) => {
             assert!((lr - rr).abs() < 1e-12, "re left={lr} right={rr}");
@@ -91,6 +91,49 @@ fn left_division_operator_matches_mldivide_builtin_for_least_squares() {
 fn right_division_operator_matches_mrdivide_builtin_for_square_systems() {
     let vars = execute_program("A = [1 2; 3 4]; B = [2 1; 1 2]; x = A / B; y = mrdivide(A, B);");
     assert_same_real_tensor(&vars[2], &vars[3]);
+}
+
+#[test]
+fn integer_scalar_right_division_is_exact_across_operator_and_builtin_lowerings() {
+    let vars = execute_program(
+        "wide = uint64(9007199254740992) + uint64([2 0]); \
+         scale = uint64(2); \
+         a = wide / scale; \
+         b = mrdivide(wide, 2.0); \
+         signed = int8([-128 6]) / int8(2);",
+    );
+    assert!(
+        vars.iter()
+            .filter(|value| matches!(
+                value,
+                Value::Tensor(tensor)
+                    if tensor.integer_storage()
+                        == Some(&IntegerStorage::U64(vec![
+                            4_503_599_627_370_497,
+                            4_503_599_627_370_496,
+                        ]))
+            ))
+            .count()
+            >= 2
+    );
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::Tensor(tensor)
+            if tensor.integer_storage() == Some(&IntegerStorage::I8(vec![-64, 3]))
+    )));
+
+    for source in [
+        "out = int16([6 4]) / int16([2 2]);",
+        "out = int16([6 4]) / uint16(2);",
+        "out = [6 4] / int16(2);",
+    ] {
+        let bytecode = compile_source(source).expect("compile invalid integer mrdivide");
+        let error = interpret(&bytecode).expect_err("invalid integer mrdivide");
+        assert!(
+            error.to_string().contains("integer"),
+            "{source}: unexpected error: {error}"
+        );
+    }
 }
 
 #[test]

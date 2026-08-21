@@ -1,11 +1,15 @@
 //! MATLAB-compatible sample-rate conversion builtins.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, IntegerStorage, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::builtins::math::signal::type_resolvers::{
@@ -18,6 +22,167 @@ const DOWNSAMPLE_NAME: &str = "downsample";
 const RESAMPLE_NAME: &str = "resample";
 const DEFAULT_RESAMPLE_N: usize = 10;
 const DEFAULT_RESAMPLE_BETA: f64 = 5.0;
+
+const UPSAMPLE_INTEGER_FACTOR_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "upsample-integer-factor",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "upsample with a typed-integer factor is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:UpsampleIntegerFactorExtension"),
+};
+const UPSAMPLE_INTEGER_PHASE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "upsample-integer-phase",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "upsample with a typed-integer phase is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:UpsampleIntegerPhaseExtension"),
+};
+const UPSAMPLE_ND_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "upsample-nd-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "upsample with an input having more than two dimensions is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:UpsampleNdInputExtension"),
+};
+const UPSAMPLE_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    UPSAMPLE_INTEGER_FACTOR_EXTENSION,
+    UPSAMPLE_INTEGER_PHASE_EXTENSION,
+    UPSAMPLE_ND_INPUT_EXTENSION,
+];
+const UPSAMPLE_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The public X argument has no datatype restriction. Zero insertion preserves authoritative integer elements, class, and shape exactly.",
+    }];
+const UPSAMPLE_INTEGER_FACTOR_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "N",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target lists single and double for N; RunMat mode additionally parses typed integers exactly as host sizes.",
+    }];
+const UPSAMPLE_INTEGER_PHASE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "PHASE",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target lists single and double for PHASE; RunMat mode additionally parses typed integers exactly before validating 0 <= PHASE < N.",
+    }];
+pub const UPSAMPLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = upsample(integer_X, N, PHASE?)",
+        inputs: &UPSAMPLE_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Host storage is copied without conversion; resident integer storage uses owner-resolved allocation and scatter with matching device, shape, storage, and integer class.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = upsample(X, integer_N, PHASE?)",
+        inputs: &UPSAMPLE_INTEGER_FACTOR_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The factor is extension-gated before X or any provider is accessed, then converted exactly to a host size.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = upsample(X, N, integer_PHASE)",
+        inputs: &UPSAMPLE_INTEGER_PHASE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The phase is extension-gated before X or any provider is accessed, parsed exactly, and range-checked against N.",
+    },
+];
+
+const DOWNSAMPLE_INTEGER_FACTOR_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "downsample-integer-factor",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "downsample with a typed-integer factor is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:DownsampleIntegerFactorExtension"),
+    };
+const DOWNSAMPLE_INTEGER_PHASE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "downsample-integer-phase",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "downsample with a typed-integer phase is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:DownsampleIntegerPhaseExtension"),
+};
+const DOWNSAMPLE_ND_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "downsample-nd-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "downsample with an input having more than two dimensions is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:DownsampleNdInputExtension"),
+};
+const DOWNSAMPLE_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    DOWNSAMPLE_INTEGER_FACTOR_EXTENSION,
+    DOWNSAMPLE_INTEGER_PHASE_EXTENSION,
+    DOWNSAMPLE_ND_INPUT_EXTENSION,
+];
+const DOWNSAMPLE_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The public X argument is a vector or matrix without a datatype restriction. Downsampling is structural selection, so authoritative integer elements and their class are preserved exactly.",
+    }];
+const DOWNSAMPLE_INTEGER_FACTOR_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "N",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target lists single and double for N; RunMat mode additionally parses typed integers exactly as host sizes.",
+    }];
+const DOWNSAMPLE_INTEGER_PHASE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "PHASE",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target lists single and double for PHASE; RunMat mode additionally parses typed integers exactly before validating 0 <= PHASE < N.",
+    }];
+pub const DOWNSAMPLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = downsample(integer_X, N, PHASE?)",
+        inputs: &DOWNSAMPLE_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Host storage is selected without conversion; resident integer storage uses the owner-resolved linear-gather hook and is accepted only with matching owner, device, shape, storage, and integer class.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = downsample(X, integer_N, PHASE?)",
+        inputs: &DOWNSAMPLE_INTEGER_FACTOR_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The factor is extension-gated before X or any provider is accessed, then converted exactly to a host size.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = downsample(X, N, integer_PHASE)",
+        inputs: &DOWNSAMPLE_INTEGER_PHASE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The phase is extension-gated before X or any provider is accessed, parsed exactly, and range-checked against N.",
+    },
+];
 
 const SAMPLE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
@@ -335,6 +500,70 @@ pub const RESAMPLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &RESAMPLE_ERRORS,
 };
 
+const RESAMPLE_INTEGER_OPTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "resample-integer-options",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "resample accepts typed-integer rate, filter-design, filter, and dimension arguments as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ResampleIntegerOptionsExtension"),
+};
+const RESAMPLE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [RESAMPLE_INTEGER_OPTION_EXTENSION];
+const RESAMPLE_REJECTED_INTEGER_DATA: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Rejected,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double signal input; native integer signals reject before host or provider execution.",
+    }];
+const RESAMPLE_INTEGER_STRUCTURAL_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "P/Q/N/Dimension",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target lists single and double controls; RunMat mode additionally reads typed integer rate and dimension controls exactly as structural values.",
+    }];
+const RESAMPLE_INTEGER_FLOAT_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "BETA/B",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed Kaiser beta or FIR coefficients are a RunMat extension and enter filtering only after exact binary64 representability is proved.",
+    }];
+pub const RESAMPLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "resample(integer_X, P, Q, ...)",
+        inputs: &RESAMPLE_REJECTED_INTEGER_DATA,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Integer signal storage is outside the compatibility surface and rejects from authoritative host or resident dtype metadata before filtering.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = resample(X, integer_P, integer_Q, integer_N, Dimension=integer_dim)",
+        inputs: &RESAMPLE_INTEGER_STRUCTURAL_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Rate and dimension controls remain exact through validation; checked arithmetic owns output and filter geometry.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = resample(X, P, Q, integer_BETA_or_B)",
+        inputs: &RESAMPLE_INTEGER_FLOAT_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Filter-design or coefficient integers cross one named checked binary64 FIR boundary; X retains its documented floating output class and residency behavior.",
+    },
+];
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SampleOp {
     Up,
@@ -343,9 +572,8 @@ enum SampleOp {
 
 enum SampleInput {
     Real {
-        data: Vec<f64>,
+        storage: NumericStorage,
         shape: Vec<usize>,
-        dtype: NumericDType,
     },
     Complex {
         data: Vec<(f64, f64)>,
@@ -369,23 +597,15 @@ impl SampleInput {
                         )
                     })?;
                 match gathered {
-                    Value::Tensor(tensor) => Ok(Self::Real {
-                        data: tensor.data,
-                        shape: tensor.shape,
-                        dtype: tensor.dtype,
-                    }),
+                    Value::Tensor(tensor) => Self::from_tensor(tensor, builtin),
                     Value::LogicalArray(logical) => {
                         let tensor = tensor::logical_to_tensor(&logical).map_err(|err| {
                             sample_error_with_detail(builtin, &SAMPLE_ERROR_INVALID_INPUT, err)
                         })?;
-                        Ok(Self::Real {
-                            data: tensor.data,
-                            shape: tensor.shape,
-                            dtype: NumericDType::F64,
-                        })
+                        Self::from_tensor(tensor, builtin)
                     }
                     Value::ComplexTensor(tensor) => Ok(Self::Complex {
-                        data: tensor.data,
+                        data: tensor.materialize_f64(),
                         shape: tensor.shape,
                     }),
                     other => Err(sample_error_with_detail(
@@ -395,39 +615,28 @@ impl SampleInput {
                     )),
                 }
             }
-            Value::Tensor(tensor) => Ok(Self::Real {
-                data: tensor.data,
-                shape: tensor.shape,
-                dtype: tensor.dtype,
-            }),
+            Value::Tensor(tensor) => Self::from_tensor(tensor, builtin),
             Value::LogicalArray(logical) => {
                 let tensor = tensor::logical_to_tensor(&logical).map_err(|err| {
                     sample_error_with_detail(builtin, &SAMPLE_ERROR_INVALID_INPUT, err)
                 })?;
-                Ok(Self::Real {
-                    data: tensor.data,
-                    shape: tensor.shape,
-                    dtype: NumericDType::F64,
-                })
+                Self::from_tensor(tensor, builtin)
             }
             Value::ComplexTensor(tensor) => Ok(Self::Complex {
-                data: tensor.data,
+                data: tensor.materialize_f64(),
                 shape: tensor.shape,
             }),
             Value::Num(value) => Ok(Self::Real {
-                data: vec![value],
+                storage: NumericStorage::F64(vec![value]),
                 shape: vec![1, 1],
-                dtype: NumericDType::F64,
             }),
             Value::Int(value) => Ok(Self::Real {
-                data: vec![value.to_f64()],
+                storage: NumericStorage::from_integer_storage(IntegerStorage::from_scalar(value)),
                 shape: vec![1, 1],
-                dtype: NumericDType::F64,
             }),
             Value::Bool(value) => Ok(Self::Real {
-                data: vec![if value { 1.0 } else { 0.0 }],
+                storage: NumericStorage::F64(vec![if value { 1.0 } else { 0.0 }]),
                 shape: vec![1, 1],
-                dtype: NumericDType::F64,
             }),
             Value::Complex(re, im) => Ok(Self::Complex {
                 data: vec![(re, im)],
@@ -439,6 +648,14 @@ impl SampleInput {
                 format!("received {other:?}"),
             )),
         }
+    }
+
+    fn from_tensor(tensor: Tensor, builtin: &'static str) -> BuiltinResult<Self> {
+        let shape = tensor.shape.clone();
+        let storage = tensor
+            .into_numeric_storage()
+            .map_err(|err| sample_error_with_detail(builtin, &SAMPLE_ERROR_INVALID_INPUT, err))?;
+        Ok(Self::Real { storage, shape })
     }
 }
 
@@ -491,10 +708,30 @@ fn sample_error_with_source(
     summary = "Increase sample rate by inserting zeros between samples.",
     keywords = "upsample,sample rate,zero insertion,signal processing",
     type_resolver(upsample_type),
+    extensions(UPSAMPLE_EXTENSIONS),
+    integer_capabilities(UPSAMPLE_INTEGER_CAPABILITIES),
     descriptor(crate::builtins::math::signal::sample_rate::UPSAMPLE_DESCRIPTOR),
     builtin_path = "crate::builtins::math::signal::sample_rate"
 )]
 async fn upsample_builtin(x: Value, n: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if is_typed_integer_value(&n) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &UPSAMPLE_INTEGER_FACTOR_EXTENSION,
+            UPSAMPLE_NAME,
+        )?;
+    }
+    if rest.first().is_some_and(is_typed_integer_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &UPSAMPLE_INTEGER_PHASE_EXTENSION,
+            UPSAMPLE_NAME,
+        )?;
+    }
+    if value_rank(&x).is_some_and(|rank| rank > 2) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &UPSAMPLE_ND_INPUT_EXTENSION,
+            UPSAMPLE_NAME,
+        )?;
+    }
     sample_rate_builtin(UPSAMPLE_NAME, SampleOp::Up, x, n, rest).await
 }
 
@@ -504,11 +741,48 @@ async fn upsample_builtin(x: Value, n: Value, rest: Vec<Value>) -> BuiltinResult
     summary = "Decrease sample rate by keeping every Nth sample.",
     keywords = "downsample,sample rate,decimation,signal processing",
     type_resolver(downsample_type),
+    extensions(DOWNSAMPLE_EXTENSIONS),
+    integer_capabilities(DOWNSAMPLE_INTEGER_CAPABILITIES),
     descriptor(crate::builtins::math::signal::sample_rate::DOWNSAMPLE_DESCRIPTOR),
     builtin_path = "crate::builtins::math::signal::sample_rate"
 )]
 async fn downsample_builtin(x: Value, n: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if is_typed_integer_value(&n) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DOWNSAMPLE_INTEGER_FACTOR_EXTENSION,
+            DOWNSAMPLE_NAME,
+        )?;
+    }
+    if rest.first().is_some_and(is_typed_integer_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DOWNSAMPLE_INTEGER_PHASE_EXTENSION,
+            DOWNSAMPLE_NAME,
+        )?;
+    }
+    if value_rank(&x).is_some_and(|rank| rank > 2) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DOWNSAMPLE_ND_INPUT_EXTENSION,
+            DOWNSAMPLE_NAME,
+        )?;
+    }
     sample_rate_builtin(DOWNSAMPLE_NAME, SampleOp::Down, x, n, rest).await
+}
+
+fn is_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn value_rank(value: &Value) -> Option<usize> {
+    match value {
+        Value::Tensor(tensor) => Some(tensor.shape.len()),
+        Value::LogicalArray(array) => Some(array.shape.len()),
+        Value::ComplexTensor(tensor) => Some(tensor.shape.len()),
+        Value::GpuTensor(handle) => Some(handle.shape.len()),
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Some(2),
+        _ => None,
+    }
 }
 
 #[runtime_builtin(
@@ -518,6 +792,8 @@ async fn downsample_builtin(x: Value, n: Value, rest: Vec<Value>) -> BuiltinResu
     keywords = "resample,sample rate,polyphase,antialiasing,FIR,signal processing",
     type_resolver(resample_type),
     descriptor(crate::builtins::math::signal::sample_rate::RESAMPLE_DESCRIPTOR),
+    extensions(RESAMPLE_EXTENSIONS),
+    integer_capabilities(RESAMPLE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::signal::sample_rate"
 )]
 async fn resample_builtin(x: Value, p: Value, q: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -530,6 +806,22 @@ async fn resample_builtin(x: Value, p: Value, q: Value, rest: Vec<Value>) -> Bui
         _ => {}
     }
 
+    if is_typed_integer_value(&x) {
+        return Err(sample_error_with_detail(
+            RESAMPLE_NAME,
+            &SAMPLE_ERROR_INVALID_INPUT,
+            "resample input must be single or double",
+        ));
+    }
+    let typed_options = is_typed_integer_value(&p)
+        || is_typed_integer_value(&q)
+        || rest.iter().any(is_typed_integer_value);
+    if typed_options {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &RESAMPLE_INTEGER_OPTION_EXTENSION,
+            RESAMPLE_NAME,
+        )?;
+    }
     let mut p = parse_factor(&p, RESAMPLE_NAME).await?;
     let mut q = parse_factor(&q, RESAMPLE_NAME).await?;
     let divisor = gcd(p, q);
@@ -635,16 +927,18 @@ impl ResampleFilter {
     async fn host_values(&self) -> BuiltinResult<Vec<f64>> {
         match self {
             Self::Host(filter) => Ok(filter.clone()),
-            Self::Gpu { handle, .. } => Ok(gpu_helpers::gather_tensor_async(handle)
-                .await
-                .map_err(|err| {
-                    sample_error_with_detail(
-                        RESAMPLE_NAME,
-                        &SAMPLE_ERROR_GATHER_FAILED,
-                        err.message(),
-                    )
-                })?
-                .data),
+            Self::Gpu { handle, .. } => {
+                let tensor = gpu_helpers::gather_tensor_async(handle)
+                    .await
+                    .map_err(|err| {
+                        sample_error_with_detail(
+                            RESAMPLE_NAME,
+                            &SAMPLE_ERROR_GATHER_FAILED,
+                            err.message(),
+                        )
+                    })?;
+                Ok(tensor::tensor_into_values_f64(tensor))
+            }
         }
     }
 }
@@ -688,10 +982,29 @@ async fn resample_gpu(
 
     if input_len == 0 || output_len == 0 {
         return match provider.zeros_with_storage(&output_shape, storage) {
-            Ok(output) => Ok(Some(ResampleEval {
-                y: wrap_resampled_gpu(handle, output),
-                filter: options.filter.clone(),
-            })),
+            Ok(output)
+                if valid_class_preserving_gpu_output(
+                    provider,
+                    handle,
+                    &output,
+                    &output_shape,
+                    false,
+                ) =>
+            {
+                Ok(Some(ResampleEval {
+                    y: wrap_resampled_gpu(output),
+                    filter: options.filter.clone(),
+                }))
+            }
+            Ok(output) => {
+                let _ = provider.free(&output);
+                runmat_accelerate_api::clear_handle_metadata(&output);
+                Err(sample_error_with_detail(
+                    RESAMPLE_NAME,
+                    &SAMPLE_ERROR_GATHER_FAILED,
+                    "provider returned an incompatible empty resample result",
+                ))
+            }
             Err(_) => Ok(None),
         };
     }
@@ -812,10 +1125,29 @@ async fn resample_gpu(
     let _ = provider.free(&padded);
 
     match output {
-        Ok(output) => Ok(Some(ResampleEval {
-            y: wrap_resampled_gpu(handle, output),
-            filter: options.filter.clone(),
-        })),
+        Ok(output)
+            if valid_class_preserving_gpu_output(
+                provider,
+                handle,
+                &output,
+                &output_shape,
+                false,
+            ) =>
+        {
+            Ok(Some(ResampleEval {
+                y: wrap_resampled_gpu(output),
+                filter: options.filter.clone(),
+            }))
+        }
+        Ok(output) => {
+            let _ = provider.free(&output);
+            runmat_accelerate_api::clear_handle_metadata(&output);
+            Err(sample_error_with_detail(
+                RESAMPLE_NAME,
+                &SAMPLE_ERROR_GATHER_FAILED,
+                "provider returned an incompatible resample result",
+            ))
+        }
         Err(_) => Ok(None),
     }
 }
@@ -915,10 +1247,18 @@ async fn parse_resample_filter_spec(
 
 async fn scalar_integer_option(value: &Value) -> BuiltinResult<Option<usize>> {
     match value {
-        Value::Tensor(tensor) if tensor.data.len() != 1 => return Ok(None),
+        Value::Tensor(tensor) if !tensor::is_scalar_tensor(tensor) => return Ok(None),
         Value::GpuTensor(handle) if checked_product(&handle.shape) != Some(1) => return Ok(None),
         Value::ComplexTensor(_) => return Ok(None),
         _ => {}
+    }
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return parse_nonnegative_integer_value(
+            integer,
+            RESAMPLE_NAME,
+            &SAMPLE_ERROR_INVALID_OPTION,
+        )
+        .map(Some);
     }
     let Some(raw) = tensor::scalar_f64_from_value_async(value)
         .await
@@ -932,6 +1272,16 @@ async fn scalar_integer_option(value: &Value) -> BuiltinResult<Option<usize>> {
 }
 
 async fn scalar_f64_option(value: &Value) -> BuiltinResult<f64> {
+    if is_typed_integer_value(value)
+        && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(value)
+            .await?
+    {
+        return Err(sample_error_with_detail(
+            RESAMPLE_NAME,
+            &SAMPLE_ERROR_INVALID_OPTION,
+            "typed integer BETA must be exactly representable as double",
+        ));
+    }
     let Some(raw) = tensor::scalar_f64_from_value_async(value)
         .await
         .map_err(|err| {
@@ -955,6 +1305,16 @@ async fn scalar_f64_option(value: &Value) -> BuiltinResult<f64> {
 }
 
 async fn parse_filter_vector(value: Value) -> BuiltinResult<ResampleFilter> {
+    if is_typed_integer_value(&value)
+        && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(&value)
+            .await?
+    {
+        return Err(sample_error_with_detail(
+            RESAMPLE_NAME,
+            &SAMPLE_ERROR_INVALID_OPTION,
+            "typed integer filter coefficients must be exactly representable as double",
+        ));
+    }
     if let Value::GpuTensor(handle) = value {
         let len = checked_product(&handle.shape)
             .ok_or_else(|| sample_error(RESAMPLE_NAME, &SAMPLE_ERROR_SIZE_OVERFLOW))?;
@@ -974,8 +1334,10 @@ async fn parse_filter_vector(value: Value) -> BuiltinResult<ResampleFilter> {
     let tensor = tensor::value_into_tensor_for(RESAMPLE_NAME, value).map_err(|err| {
         sample_error_with_detail(RESAMPLE_NAME, &SAMPLE_ERROR_INVALID_OPTION, err)
     })?;
-    validate_filter_shape(tensor.data.len(), &tensor.shape)?;
-    Ok(ResampleFilter::Host(tensor.data))
+    let shape = tensor.shape.clone();
+    let values = tensor::tensor_into_values_f64(tensor);
+    validate_filter_shape(values.len(), &shape)?;
+    Ok(ResampleFilter::Host(values))
 }
 
 fn validate_filter_shape(len: usize, shape: &[usize]) -> BuiltinResult<()> {
@@ -1003,9 +1365,37 @@ fn apply_resample(
     options: &HostResampleOptions,
 ) -> BuiltinResult<ResampleEval> {
     match input {
-        SampleInput::Real { data, shape, dtype } => {
+        SampleInput::Real { storage, shape } => {
+            let dtype = storage.numeric_dtype();
+            let data = match storage {
+                NumericStorage::F64(values) => values,
+                NumericStorage::F32(values) => {
+                    values.into_iter().map(f64::from).collect::<Vec<_>>()
+                }
+                NumericStorage::I8(_)
+                | NumericStorage::I16(_)
+                | NumericStorage::I32(_)
+                | NumericStorage::I64(_)
+                | NumericStorage::U8(_)
+                | NumericStorage::U16(_)
+                | NumericStorage::U32(_)
+                | NumericStorage::U64(_) => {
+                    return Err(sample_error_with_detail(
+                        RESAMPLE_NAME,
+                        &SAMPLE_ERROR_INVALID_INPUT,
+                        "resample input must be single or double",
+                    ))
+                }
+            };
             let (output, shape) = resample_rational_column_major(data, shape, p, q, options)?;
-            let tensor = Tensor::new_with_dtype(output, shape, dtype).map_err(|err| {
+            let storage = match dtype {
+                runmat_value::NumericDType::F64 => NumericStorage::F64(output),
+                runmat_value::NumericDType::F32 => {
+                    NumericStorage::F32(output.into_iter().map(|value| value as f32).collect())
+                }
+                _ => unreachable!("resample input dtype was validated"),
+            };
+            let tensor = Tensor::from_numeric_storage(storage, shape).map_err(|err| {
                 sample_error_with_detail(RESAMPLE_NAME, &SAMPLE_ERROR_BUILD_OUTPUT, err)
             })?;
             Ok(ResampleEval {
@@ -1018,8 +1408,8 @@ fn apply_resample(
             let tensor = ComplexTensor::new(output, shape).map_err(|err| {
                 sample_error_with_detail(RESAMPLE_NAME, &SAMPLE_ERROR_BUILD_OUTPUT, err)
             })?;
-            let y = if tensor.data.len() == 1 {
-                let (re, im) = tensor.data[0];
+            let y = if tensor.materialize_f64().len() == 1 {
+                let (re, im) = tensor.materialize_f64()[0];
                 Value::Complex(re, im)
             } else {
                 Value::ComplexTensor(tensor)
@@ -1033,6 +1423,9 @@ fn apply_resample(
 }
 
 async fn parse_factor(value: &Value, builtin: &'static str) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return parse_positive_integer_value(integer, builtin, &SAMPLE_ERROR_INVALID_FACTOR);
+    }
     let Some(raw) = tensor::scalar_f64_from_value_async(value)
         .await
         .map_err(|detail| {
@@ -1049,17 +1442,23 @@ async fn parse_factor(value: &Value, builtin: &'static str) -> BuiltinResult<usi
 }
 
 async fn parse_phase(value: &Value, factor: usize, builtin: &'static str) -> BuiltinResult<usize> {
-    let Some(raw) = tensor::scalar_f64_from_value_async(value)
-        .await
-        .map_err(|detail| sample_error_with_detail(builtin, &SAMPLE_ERROR_INVALID_PHASE, detail))?
-    else {
-        return Err(sample_error_with_detail(
-            builtin,
-            &SAMPLE_ERROR_INVALID_PHASE,
-            format!("received {value:?}"),
-        ));
+    let phase = if let Some(integer) = tensor::scalar_integer_value(value) {
+        parse_nonnegative_integer_value(integer, builtin, &SAMPLE_ERROR_INVALID_PHASE)?
+    } else {
+        let Some(raw) = tensor::scalar_f64_from_value_async(value)
+            .await
+            .map_err(|detail| {
+                sample_error_with_detail(builtin, &SAMPLE_ERROR_INVALID_PHASE, detail)
+            })?
+        else {
+            return Err(sample_error_with_detail(
+                builtin,
+                &SAMPLE_ERROR_INVALID_PHASE,
+                format!("received {value:?}"),
+            ));
+        };
+        parse_nonnegative_integer(raw, builtin, &SAMPLE_ERROR_INVALID_PHASE)?
     };
-    let phase = parse_nonnegative_integer(raw, builtin, &SAMPLE_ERROR_INVALID_PHASE)?;
     if phase >= factor {
         return Err(sample_error_with_detail(
             builtin,
@@ -1082,6 +1481,28 @@ fn parse_positive_integer(
     Ok(value)
 }
 
+fn parse_positive_integer_value(
+    value: runmat_value::IntValue,
+    builtin: &'static str,
+    error: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<usize> {
+    let value = parse_nonnegative_integer_value(value, builtin, error)?;
+    if value == 0 {
+        return Err(sample_error(builtin, error));
+    }
+    Ok(value)
+}
+
+fn parse_nonnegative_integer_value(
+    value: runmat_value::IntValue,
+    builtin: &'static str,
+    error: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<usize> {
+    value
+        .try_to_usize()
+        .ok_or_else(|| sample_error(builtin, error))
+}
+
 fn parse_nonnegative_integer(
     raw: f64,
     builtin: &'static str,
@@ -1090,7 +1511,10 @@ fn parse_nonnegative_integer(
     if !raw.is_finite() || raw < 0.0 {
         return Err(sample_error(builtin, error));
     }
-    if raw.trunc() != raw || raw > usize::MAX as f64 {
+    if raw.trunc() != raw
+        || raw > usize::MAX as f64
+        || (usize::BITS == 64 && raw == usize::MAX as f64)
+    {
         return Err(sample_error(builtin, error));
     }
     Ok(raw as usize)
@@ -1104,10 +1528,10 @@ fn apply_sample_rate(
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
     match input {
-        SampleInput::Real { data, shape, dtype } => {
-            let (output, shape) =
-                resample_column_major(data, shape, factor, phase, op, 0.0, builtin)?;
-            let tensor = Tensor::new_with_dtype(output, shape, dtype).map_err(|err| {
+        SampleInput::Real { storage, shape } => {
+            let (storage, shape) =
+                resample_numeric_storage(storage, shape, factor, phase, op, builtin)?;
+            let tensor = Tensor::from_numeric_storage(storage, shape).map_err(|err| {
                 sample_error_with_detail(builtin, &SAMPLE_ERROR_BUILD_OUTPUT, err)
             })?;
             Ok(tensor::tensor_into_value(tensor))
@@ -1118,14 +1542,43 @@ fn apply_sample_rate(
             let tensor = ComplexTensor::new(output, shape).map_err(|err| {
                 sample_error_with_detail(builtin, &SAMPLE_ERROR_BUILD_OUTPUT, err)
             })?;
-            if tensor.data.len() == 1 {
-                let (re, im) = tensor.data[0];
+            if tensor.materialize_f64().len() == 1 {
+                let (re, im) = tensor.materialize_f64()[0];
                 Ok(Value::Complex(re, im))
             } else {
                 Ok(Value::ComplexTensor(tensor))
             }
         }
     }
+}
+
+fn resample_numeric_storage(
+    storage: NumericStorage,
+    shape: Vec<usize>,
+    factor: usize,
+    phase: usize,
+    op: SampleOp,
+    builtin: &'static str,
+) -> BuiltinResult<(NumericStorage, Vec<usize>)> {
+    macro_rules! resample {
+        ($values:expr, $zero:expr, $variant:ident) => {{
+            let (values, shape) =
+                resample_column_major($values, shape, factor, phase, op, $zero, builtin)?;
+            (NumericStorage::$variant(values), shape)
+        }};
+    }
+    Ok(match storage {
+        NumericStorage::F64(values) => resample!(values, 0.0, F64),
+        NumericStorage::F32(values) => resample!(values, 0.0_f32, F32),
+        NumericStorage::I8(values) => resample!(values, 0_i8, I8),
+        NumericStorage::I16(values) => resample!(values, 0_i16, I16),
+        NumericStorage::I32(values) => resample!(values, 0_i32, I32),
+        NumericStorage::I64(values) => resample!(values, 0_i64, I64),
+        NumericStorage::U8(values) => resample!(values, 0_u8, U8),
+        NumericStorage::U16(values) => resample!(values, 0_u16, U16),
+        NumericStorage::U32(values) => resample!(values, 0_u32, U32),
+        NumericStorage::U64(values) => resample!(values, 0_u64, U64),
+    })
 }
 
 fn upsample_gpu(
@@ -1156,11 +1609,24 @@ fn upsample_gpu(
     else {
         return Ok(None);
     };
-    let storage = runmat_accelerate_api::handle_storage(handle);
-    let output = match provider.zeros_with_storage(&output_shape, storage) {
+    let allocation = match runmat_accelerate_api::handle_integer_type(handle) {
+        Some(_) => provider.zeros_integer_like(handle, &output_shape),
+        None => provider
+            .zeros_with_storage(&output_shape, runmat_accelerate_api::handle_storage(handle)),
+    };
+    let output = match allocation {
         Ok(output) => output,
         Err(_) => return Ok(None),
     };
+    if !valid_class_preserving_gpu_output(provider, handle, &output, &output_shape, false) {
+        let _ = provider.free(&output);
+        runmat_accelerate_api::clear_handle_metadata(&output);
+        return Err(sample_error_with_detail(
+            builtin,
+            &SAMPLE_ERROR_GATHER_FAILED,
+            "provider returned an incompatible upsample allocation",
+        ));
+    }
     match provider.scatter_linear(&output, &indices, handle) {
         Ok(()) => Ok(Some(wrap_sample_rate_gpu(handle, output))),
         Err(_) => {
@@ -1186,13 +1652,18 @@ fn downsample_gpu(
     let mut output_shape = shape.clone();
     output_shape[dim] = output_len;
 
+    let provider = resolved_actual_downsample_owner(handle).ok_or_else(|| {
+        sample_error_with_detail(
+            builtin,
+            &SAMPLE_ERROR_GATHER_FAILED,
+            "GPU input has no proven owner for its device",
+        )
+    })?;
+
     if factor == 1 && phase == 0 {
         return Ok(Some(wrap_sample_rate_gpu(handle, handle.clone())));
     }
 
-    let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) else {
-        return Ok(None);
-    };
     let Some(indices) =
         downsample_linear_indices(&shape, dim, input_len, output_len, factor, phase, builtin)?
     else {
@@ -1200,42 +1671,68 @@ fn downsample_gpu(
     };
 
     match provider.gather_linear(handle, &indices, &output_shape) {
-        Ok(output) => Ok(Some(wrap_sample_rate_gpu(handle, output))),
+        Ok(output) => {
+            let output_identity = (output.device_id, output.buffer_id);
+            let input_identity = (handle.device_id, handle.buffer_id);
+            let valid =
+                valid_class_preserving_gpu_output(provider, handle, &output, &output_shape, true);
+            if valid {
+                Ok(Some(wrap_sample_rate_gpu(handle, output)))
+            } else {
+                if output_identity != input_identity {
+                    if let Some(owner) = resolved_actual_downsample_owner(&output) {
+                        let _ = owner.free(&output);
+                    }
+                }
+                Err(sample_error_with_detail(
+                    builtin,
+                    &SAMPLE_ERROR_GATHER_FAILED,
+                    "provider returned an incompatible linear-gather result",
+                ))
+            }
+        }
         Err(_) => Ok(None),
     }
+}
+
+fn resolved_actual_downsample_owner(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+) -> Option<&'static dyn runmat_accelerate_api::AccelProvider> {
+    runmat_accelerate_api::provider_for_handle(handle)
+        .filter(|owner| owner.device_id() == handle.device_id)
 }
 
 fn wrap_sample_rate_gpu(
     source: &runmat_accelerate_api::GpuTensorHandle,
     output: runmat_accelerate_api::GpuTensorHandle,
 ) -> Value {
-    if let Some(precision) = runmat_accelerate_api::handle_precision(source) {
-        runmat_accelerate_api::set_handle_precision(&output, precision);
-    }
     if runmat_accelerate_api::handle_is_logical(source) {
         gpu_helpers::logical_gpu_value(output)
     } else {
-        runmat_accelerate_api::set_handle_storage(
-            &output,
-            runmat_accelerate_api::handle_storage(source),
-        );
         gpu_helpers::resident_gpu_value(output)
     }
 }
 
-fn wrap_resampled_gpu(
-    source: &runmat_accelerate_api::GpuTensorHandle,
-    output: runmat_accelerate_api::GpuTensorHandle,
-) -> Value {
-    if let Some(precision) = runmat_accelerate_api::handle_precision(source) {
-        runmat_accelerate_api::set_handle_precision(&output, precision);
-    }
-    runmat_accelerate_api::set_handle_storage(
-        &output,
-        runmat_accelerate_api::handle_storage(source),
-    );
+fn wrap_resampled_gpu(output: runmat_accelerate_api::GpuTensorHandle) -> Value {
     runmat_accelerate_api::clear_handle_logical(&output);
     gpu_helpers::resident_gpu_value(output)
+}
+
+fn valid_class_preserving_gpu_output(
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    source: &runmat_accelerate_api::GpuTensorHandle,
+    output: &runmat_accelerate_api::GpuTensorHandle,
+    expected_shape: &[usize],
+    require_distinct: bool,
+) -> bool {
+    (!require_distinct || !gpu_helpers::same_gpu_handle(source, output))
+        && output.device_id == provider.device_id()
+        && output.shape == expected_shape
+        && runmat_accelerate_api::provider_for_handle(output)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+        && gpu_helpers::numeric_descriptor_matches_source(source, output)
+        && (!runmat_accelerate_api::handle_is_logical(output)
+            || runmat_accelerate_api::handle_is_logical(source))
 }
 
 fn upsample_linear_indices(
@@ -1643,7 +2140,185 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_accelerate_api::{GpuTensorStorage, HostTensorView};
+    use runmat_accelerate_api::{
+        AccelDownloadFuture, AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorOwned,
+        HostTensorView, ProviderPrecision,
+    };
+    use runmat_value::IntegerStorage;
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicU64, AtomicU8, AtomicUsize, Ordering};
+    use std::sync::Mutex;
+
+    struct HostileDownsampleProvider {
+        device_id: u32,
+        next_buffer: AtomicU64,
+        mode: AtomicU8,
+        frees: AtomicUsize,
+        downloads: AtomicUsize,
+        gathers: AtomicUsize,
+        last_output: AtomicU64,
+        buffers: Mutex<HashMap<u64, HostTensorOwned>>,
+    }
+
+    impl HostileDownsampleProvider {
+        fn new() -> Self {
+            Self {
+                device_id: runmat_accelerate_api::next_device_id(),
+                next_buffer: AtomicU64::new(9_399_100_000),
+                mode: AtomicU8::new(0),
+                frees: AtomicUsize::new(0),
+                downloads: AtomicUsize::new(0),
+                gathers: AtomicUsize::new(0),
+                last_output: AtomicU64::new(0),
+                buffers: Mutex::new(HashMap::new()),
+            }
+        }
+
+        fn allocate(
+            &self,
+            data: Vec<f64>,
+            shape: Vec<usize>,
+            device_id: u32,
+            precision: ProviderPrecision,
+            storage: GpuTensorStorage,
+        ) -> GpuTensorHandle {
+            let buffer_id = self.next_buffer.fetch_add(1, Ordering::Relaxed);
+            self.buffers.lock().unwrap().insert(
+                buffer_id,
+                HostTensorOwned {
+                    data,
+                    shape: shape.clone(),
+                    storage,
+                },
+            );
+            GpuTensorHandle {
+                shape,
+                device_id,
+                buffer_id,
+                descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
+                    match precision {
+                        ProviderPrecision::F32 => runmat_accelerate_api::NumericElementType::F32,
+                        ProviderPrecision::F64 => runmat_accelerate_api::NumericElementType::F64,
+                    },
+                    storage,
+                ),
+            }
+        }
+    }
+
+    impl AccelProvider for HostileDownsampleProvider {
+        fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+            Ok(self.allocate(
+                host.data.to_vec(),
+                host.shape.to_vec(),
+                self.device_id,
+                ProviderPrecision::F64,
+                GpuTensorStorage::Real,
+            ))
+        }
+
+        fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            self.downloads.fetch_add(1, Ordering::Relaxed);
+            Box::pin(async move {
+                self.buffers
+                    .lock()
+                    .unwrap()
+                    .get(&handle.buffer_id)
+                    .cloned()
+                    .ok_or_else(|| anyhow::anyhow!("unknown hostile test buffer"))
+            })
+        }
+
+        fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
+            if self
+                .buffers
+                .lock()
+                .unwrap()
+                .remove(&handle.buffer_id)
+                .is_some()
+            {
+                self.frees.fetch_add(1, Ordering::Relaxed);
+            }
+            runmat_accelerate_api::clear_handle_logical(handle);
+            Ok(())
+        }
+
+        fn device_info(&self) -> String {
+            "hostile-downsample-test-provider".to_string()
+        }
+
+        fn device_id(&self) -> u32 {
+            self.device_id
+        }
+
+        fn gather_linear(
+            &self,
+            source: &GpuTensorHandle,
+            _indices: &[u32],
+            output_shape: &[usize],
+        ) -> anyhow::Result<GpuTensorHandle> {
+            self.gathers.fetch_add(1, Ordering::Relaxed);
+            let mode = self.mode.load(Ordering::Relaxed);
+            if mode == 6 {
+                return Err(anyhow::anyhow!("forced gather fallback"));
+            }
+            if mode == 7 {
+                return Ok(source.clone());
+            }
+            let shape = if mode == 0 {
+                vec![1, output_shape.iter().product::<usize>() + 1]
+            } else {
+                output_shape.to_vec()
+            };
+            let device_id = if mode == 1 {
+                self.device_id.wrapping_add(10_000)
+            } else {
+                self.device_id
+            };
+            let precision = if mode == 3 {
+                ProviderPrecision::F32
+            } else {
+                ProviderPrecision::F64
+            };
+            let storage = if mode == 2 {
+                GpuTensorStorage::ComplexInterleaved
+            } else {
+                GpuTensorStorage::Real
+            };
+            let mut output = self.allocate(
+                vec![99.0; shape.iter().product()],
+                shape,
+                device_id,
+                precision,
+                storage,
+            );
+            if mode == 4 {
+                output.descriptor.element_type =
+                    Some(runmat_accelerate_api::NumericElementType::U8);
+            }
+            if mode == 5 {
+                runmat_accelerate_api::set_handle_logical(&output, true);
+            }
+            self.last_output.store(output.buffer_id, Ordering::Relaxed);
+            Ok(output)
+        }
+    }
+
+    fn first_unrepresentable_usize_double() -> f64 {
+        if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        }
+    }
+
+    fn exact_platform_wide_integer() -> u64 {
+        if usize::BITS == 64 {
+            9_007_199_254_740_993
+        } else {
+            u32::MAX as u64
+        }
+    }
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
@@ -1687,7 +2362,10 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(upsampled.shape, vec![1, 6]);
-        assert_eq!(upsampled.data, vec![1.0, 0.0, 2.0, 0.0, 3.0, 0.0]);
+        assert_eq!(
+            upsampled.materialize_f64(),
+            vec![1.0, 0.0, 2.0, 0.0, 3.0, 0.0]
+        );
     }
 
     #[test]
@@ -1702,7 +2380,7 @@ mod tests {
         };
         assert_eq!(tensor.shape, vec![9, 1]);
         assert_eq!(
-            tensor.data,
+            tensor.materialize_f64(),
             vec![0.0, 1.0, 0.0, 0.0, 2.0, 0.0, 0.0, 3.0, 0.0]
         );
     }
@@ -1713,7 +2391,7 @@ mod tests {
             let input = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let handle = provider
                 .upload(&HostTensorView {
-                    data: &input.data,
+                    data: &input.materialize_f64(),
                     shape: &input.shape,
                 })
                 .expect("upload input");
@@ -1733,9 +2411,74 @@ mod tests {
             let gathered =
                 test_support::gather(Value::GpuTensor(out_handle)).expect("gather output");
             assert_eq!(gathered.shape, vec![4, 2]);
-            assert_eq!(gathered.data, vec![0.0, 1.0, 0.0, 2.0, 0.0, 3.0, 0.0, 4.0]);
+            assert_eq!(
+                gathered.materialize_f64(),
+                vec![0.0, 1.0, 0.0, 2.0, 0.0, 3.0, 0.0, 4.0]
+            );
             let _ = provider.free(&handle);
         });
+    }
+
+    #[test]
+    fn upsample_gpu_preserves_poisoned_uint64_storage_without_host_download() {
+        test_support::with_test_provider(|provider| {
+            let input =
+                Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]), vec![1, 2])
+                    .expect("native uint64 input");
+            let handle = gpu_helpers::upload_tensor(provider, &input)
+                .expect("upload native uint64 input without mirror materialization");
+            provider.reset_telemetry();
+
+            let out = call_upsample(vec![Value::GpuTensor(handle.clone()), Value::Num(2.0)]);
+            let Value::GpuTensor(out_handle) = out else {
+                panic!("expected resident native integer gpu tensor");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&out_handle),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+
+            let gathered = test_support::gather(Value::GpuTensor(out_handle.clone()))
+                .expect("gather native integer output");
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U64(vec![1_u64 << 63, 0, u64::MAX, 0]))
+            );
+            provider.free(&handle).expect("free input");
+            provider.free(&out_handle).expect("free output");
+        });
+    }
+
+    #[test]
+    fn host_sample_rate_preserves_exact_uint64_storage() {
+        let input = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            vec![1, 2],
+        )
+        .unwrap();
+        let Value::Tensor(upsampled) = call_upsample(vec![Value::Tensor(input), Value::Num(2.0)])
+        else {
+            panic!("expected integer upsample output");
+        };
+        assert_eq!(
+            upsampled.integer_storage(),
+            Some(&IntegerStorage::U64(vec![
+                9_007_199_254_740_993,
+                0,
+                u64::MAX,
+                0
+            ]))
+        );
+        let Value::Tensor(downsampled) =
+            call_downsample(vec![Value::Tensor(upsampled), Value::Num(2.0)])
+        else {
+            panic!("expected integer downsample output");
+        };
+        assert_eq!(
+            downsampled.integer_storage(),
+            Some(&IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]))
+        );
     }
 
     #[test]
@@ -1748,7 +2491,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(tensor.shape, vec![1, 3]);
-        assert_eq!(tensor.data, vec![1.0, 3.0, 5.0]);
+        assert_eq!(tensor.materialize_f64(), vec![1.0, 3.0, 5.0]);
     }
 
     #[test]
@@ -1762,7 +2505,355 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(tensor.shape, vec![1, 2]);
-        assert_eq!(tensor.data, vec![2.0, 4.0]);
+        assert_eq!(tensor.materialize_f64(), vec![2.0, 4.0]);
+    }
+
+    #[test]
+    fn downsample_preserves_all_integer_classes_exactly() {
+        macro_rules! check {
+            ($variant:ident, $values:expr, $expected:expr) => {{
+                let input = Value::Tensor(
+                    Tensor::new_integer(IntegerStorage::$variant($values), vec![1, 5]).unwrap(),
+                );
+                let output = call_downsample(vec![input, Value::Num(2.0), Value::Num(1.0)]);
+                let Value::Tensor(output) = output else {
+                    panic!("expected integer tensor")
+                };
+                assert_eq!(
+                    output.integer_storage(),
+                    Some(&IntegerStorage::$variant($expected))
+                );
+                assert_eq!(output.shape, vec![1, 2]);
+            }};
+        }
+        check!(I8, vec![-1, 2, -3, 4, -5], vec![2, 4]);
+        check!(I16, vec![-1, 2, -3, 4, -5], vec![2, 4]);
+        check!(I32, vec![-1, 2, -3, 4, -5], vec![2, 4]);
+        check!(I64, vec![-1, 2, -3, 4, -5], vec![2, 4]);
+        check!(U8, vec![1, 2, 3, 4, 5], vec![2, 4]);
+        check!(U16, vec![1, 2, 3, 4, 5], vec![2, 4]);
+        check!(U32, vec![1, 2, 3, 4, 5], vec![2, 4]);
+        check!(U64, vec![1, 2, 3, u64::MAX, 5], vec![2, u64::MAX]);
+    }
+
+    #[test]
+    fn downsample_typed_controls_are_separately_extension_gated() {
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let factor_error = block_on(downsample_builtin(
+            tensor(vec![1.0, 2.0], vec![1, 2]),
+            Value::Int(runmat_value::IntValue::U8(2)),
+            vec![],
+        ))
+        .expect_err("integer factor extension");
+        assert_eq!(
+            factor_error.identifier(),
+            DOWNSAMPLE_INTEGER_FACTOR_EXTENSION.error_identifier
+        );
+        let phase_error = block_on(downsample_builtin(
+            tensor(vec![1.0, 2.0], vec![1, 2]),
+            Value::Num(2.0),
+            vec![Value::Int(runmat_value::IntValue::U8(1))],
+        ))
+        .expect_err("integer phase extension");
+        assert_eq!(
+            phase_error.identifier(),
+            DOWNSAMPLE_INTEGER_PHASE_EXTENSION.error_identifier
+        );
+        drop(strict);
+    }
+
+    #[test]
+    fn upsample_typed_controls_are_separately_extension_gated() {
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let factor_error = block_on(upsample_builtin(
+            tensor(vec![1.0, 2.0], vec![1, 2]),
+            Value::Int(runmat_value::IntValue::U8(2)),
+            vec![],
+        ))
+        .expect_err("integer factor extension");
+        assert_eq!(
+            factor_error.identifier(),
+            UPSAMPLE_INTEGER_FACTOR_EXTENSION.error_identifier
+        );
+        let phase_error = block_on(upsample_builtin(
+            tensor(vec![1.0, 2.0], vec![1, 2]),
+            Value::Num(2.0),
+            vec![Value::Int(runmat_value::IntValue::U8(1))],
+        ))
+        .expect_err("integer phase extension");
+        assert_eq!(
+            phase_error.identifier(),
+            UPSAMPLE_INTEGER_PHASE_EXTENSION.error_identifier
+        );
+        drop(strict);
+    }
+
+    #[test]
+    fn downsample_nd_input_is_extension_gated() {
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(downsample_builtin(
+            tensor(vec![1.0, 2.0], vec![1, 1, 2]),
+            Value::Num(2.0),
+            Vec::new(),
+        ))
+        .expect_err("N-D input extension gate");
+        assert_eq!(
+            error.identifier(),
+            DOWNSAMPLE_ND_INPUT_EXTENSION.error_identifier
+        );
+        drop(strict);
+
+        let extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let output = block_on(downsample_builtin(
+            tensor(vec![1.0, 2.0, 3.0, 4.0], vec![1, 2, 2]),
+            Value::Num(2.0),
+            Vec::new(),
+        ))
+        .expect("N-D input in RunMat mode");
+        let Value::Tensor(output) = output else {
+            panic!("expected tensor")
+        };
+        assert_eq!(output.shape, vec![1, 1, 2]);
+        assert_eq!(output.materialize_f64(), vec![1.0, 3.0]);
+        drop(extensions);
+    }
+
+    #[test]
+    fn downsample_resident_integer_preserves_owner_class_and_values() {
+        use runmat_accelerate_api::{
+            HostIntegerDataView, HostIntegerTensorView, IntegerElementType,
+        };
+
+        test_support::with_test_provider(|provider| {
+            let values = [1u64, 2, 3, u64::MAX, 5];
+            let input = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&values),
+                    shape: &[1, 5],
+                })
+                .expect("integer upload");
+            let output = call_downsample(vec![
+                Value::GpuTensor(input.clone()),
+                Value::Num(2.0),
+                Value::Num(1.0),
+            ]);
+            let Value::GpuTensor(output) = output else {
+                panic!("expected resident integer output")
+            };
+            assert_eq!(output.device_id, input.device_id);
+            assert_eq!(output.shape, vec![1, 2]);
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&output),
+                Some(IntegerElementType::U64)
+            );
+            assert!(runmat_accelerate_api::provider_for_handle(&output)
+                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            let gathered = block_on(provider.download_integer(&output)).expect("integer download");
+            assert_eq!(
+                gathered.data,
+                runmat_accelerate_api::HostIntegerDataOwned::U64(vec![2, u64::MAX])
+            );
+            let _ = provider.free(&input);
+            let _ = provider.free(&output);
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn downsample_wgpu_integer_data_and_typed_controls_stay_exact_and_resident() {
+        use runmat_accelerate_api::{
+            HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView, IntegerElementType,
+        };
+
+        let _accel_guard = test_support::accel_test_lock();
+        match runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) {
+            Ok(_) => {}
+            Err(error) if error.to_string() == "wgpu: no compatible adapter found" => return,
+            Err(error) => panic!("register wgpu provider failed: {error:?}"),
+        }
+        let provider = runmat_accelerate_api::provider().expect("WGPU provider");
+        let values = [
+            1_u64,
+            9_007_199_254_740_993,
+            3,
+            u64::MAX,
+            5,
+            9_007_199_254_740_995,
+        ];
+        let input = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::U64(&values),
+                shape: &[1, 6],
+            })
+            .expect("upload WGPU uint64 input");
+
+        let extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let output = call_downsample(vec![
+            Value::GpuTensor(input.clone()),
+            Value::Int(runmat_value::IntValue::U8(2)),
+            Value::Int(runmat_value::IntValue::U8(1)),
+        ]);
+        drop(extensions);
+        let Value::GpuTensor(output) = output else {
+            panic!("expected resident WGPU integer output")
+        };
+
+        assert_eq!(output.device_id, input.device_id);
+        assert_eq!(output.shape, vec![1, 3]);
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&output),
+            Some(IntegerElementType::U64)
+        );
+        assert!(runmat_accelerate_api::provider_for_handle(&output)
+            .is_some_and(|owner| std::ptr::eq(owner, provider)));
+        let downloaded =
+            block_on(provider.download_integer(&output)).expect("download WGPU uint64 output");
+        assert_eq!(downloaded.shape, vec![1, 3]);
+        assert_eq!(
+            downloaded.data,
+            HostIntegerDataOwned::U64(
+                vec![9_007_199_254_740_993, u64::MAX, 9_007_199_254_740_995,]
+            )
+        );
+
+        provider.free(&input).expect("free WGPU input");
+        provider.free(&output).expect("free WGPU output");
+    }
+
+    #[test]
+    fn downsample_unknown_input_device_rejects_before_provider_work() {
+        let _guard = test_support::accel_test_lock();
+        let provider = Box::leak(Box::new(HostileDownsampleProvider::new()));
+        unsafe {
+            runmat_accelerate_api::register_provider(provider);
+        }
+
+        let input = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0, 3.0, 4.0],
+                shape: &[1, 4],
+            })
+            .expect("input upload");
+        let hostile = GpuTensorHandle {
+            shape: input.shape.clone(),
+            device_id: input.device_id.wrapping_add(10_000),
+            buffer_id: input.buffer_id,
+            descriptor: Default::default(),
+        };
+        let frees_before = provider.frees.load(Ordering::Relaxed);
+
+        let error = block_on(downsample_builtin(
+            Value::GpuTensor(hostile),
+            Value::Num(2.0),
+            Vec::new(),
+        ))
+        .expect_err("unknown input device must reject before provider work");
+        assert_eq!(error.identifier(), SAMPLE_ERROR_GATHER_FAILED.identifier);
+        assert!(error.message().contains("no proven owner"));
+        assert_eq!(provider.gathers.load(Ordering::Relaxed), 0);
+        assert_eq!(provider.downloads.load(Ordering::Relaxed), 0);
+        assert_eq!(provider.frees.load(Ordering::Relaxed), frees_before);
+        assert!(provider
+            .buffers
+            .lock()
+            .unwrap()
+            .contains_key(&input.buffer_id));
+
+        provider.free(&input).expect("free live input");
+        assert!(provider.buffers.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn downsample_rejects_hostile_provider_results_and_falls_back_only_on_hook_error() {
+        let _guard = test_support::accel_test_lock();
+        let provider = Box::leak(Box::new(HostileDownsampleProvider::new()));
+        unsafe {
+            runmat_accelerate_api::register_provider(provider);
+        }
+
+        for mode in 0..6_u8 {
+            provider.mode.store(mode, Ordering::Relaxed);
+            let input = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 2.0, 3.0, 4.0],
+                    shape: &[1, 4],
+                })
+                .expect("input upload");
+            let frees_before = provider.frees.load(Ordering::Relaxed);
+            let error = downsample_gpu(&input, 2, 0, DOWNSAMPLE_NAME)
+                .expect_err("malformed provider result must be an explicit error");
+            assert_eq!(error.identifier(), SAMPLE_ERROR_GATHER_FAILED.identifier);
+
+            if mode == 1 {
+                assert_eq!(
+                    provider.frees.load(Ordering::Relaxed),
+                    frees_before,
+                    "unknown-owner output must not be freed through the input owner"
+                );
+                let unknown = GpuTensorHandle {
+                    shape: vec![1, 2],
+                    device_id: provider.device_id.wrapping_add(10_000),
+                    buffer_id: provider.last_output.load(Ordering::Relaxed),
+                    descriptor: Default::default(),
+                };
+                provider.free(&unknown).expect("test cleanup");
+            } else {
+                assert_eq!(
+                    provider.frees.load(Ordering::Relaxed),
+                    frees_before + 1,
+                    "known-owner malformed output must be freed exactly once"
+                );
+            }
+            provider.free(&input).expect("free input");
+            assert!(provider.buffers.lock().unwrap().is_empty());
+        }
+
+        provider.mode.store(7, Ordering::Relaxed);
+        let input = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0, 3.0, 4.0],
+                shape: &[1, 4],
+            })
+            .expect("alias input upload");
+        let frees_before = provider.frees.load(Ordering::Relaxed);
+        let error = downsample_gpu(&input, 2, 0, DOWNSAMPLE_NAME)
+            .expect_err("provider output alias must be an explicit error");
+        assert_eq!(error.identifier(), SAMPLE_ERROR_GATHER_FAILED.identifier);
+        assert_eq!(
+            provider.frees.load(Ordering::Relaxed),
+            frees_before,
+            "aliased input must remain caller-owned"
+        );
+        assert!(provider
+            .buffers
+            .lock()
+            .unwrap()
+            .contains_key(&input.buffer_id));
+        provider.free(&input).expect("free aliased input");
+        assert!(provider.buffers.lock().unwrap().is_empty());
+
+        provider.mode.store(6, Ordering::Relaxed);
+        let input = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0, 3.0, 4.0],
+                shape: &[1, 4],
+            })
+            .expect("input upload");
+        let output = block_on(downsample_builtin(
+            Value::GpuTensor(input.clone()),
+            Value::Num(2.0),
+            Vec::new(),
+        ))
+        .expect("unsupported gather hook uses the documented host fallback");
+        let Value::Tensor(output) = output else {
+            panic!("fallback must return a host tensor")
+        };
+        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(output.materialize_f64(), vec![1.0, 3.0]);
+        provider.free(&input).expect("free fallback input");
+        assert!(provider.buffers.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -1771,7 +2862,7 @@ mod tests {
             let input = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0], vec![1, 5]).unwrap();
             let handle = provider
                 .upload(&HostTensorView {
-                    data: &input.data,
+                    data: &input.materialize_f64(),
                     shape: &input.shape,
                 })
                 .expect("upload input");
@@ -1791,7 +2882,7 @@ mod tests {
             let gathered =
                 test_support::gather(Value::GpuTensor(out_handle)).expect("gather output");
             assert_eq!(gathered.shape, vec![1, 2]);
-            assert_eq!(gathered.data, vec![2.0, 4.0]);
+            assert_eq!(gathered.materialize_f64(), vec![2.0, 4.0]);
             let _ = provider.free(&handle);
         });
     }
@@ -1872,18 +2963,22 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(tensor.shape, vec![4, 2]);
-        assert_eq!(tensor.data, vec![1.0, 0.0, 2.0, 0.0, 3.0, 0.0, 4.0, 0.0]);
+        assert_eq!(
+            tensor.materialize_f64(),
+            vec![1.0, 0.0, 2.0, 0.0, 3.0, 0.0, 4.0, 0.0]
+        );
 
         let down = call_downsample(vec![Value::Tensor(tensor), Value::Num(2.0)]);
         let Value::Tensor(tensor) = down else {
             panic!("expected tensor");
         };
         assert_eq!(tensor.shape, vec![2, 2]);
-        assert_eq!(tensor.data, vec![1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]);
     }
 
     #[test]
     fn sample_rate_operates_along_first_non_singleton_nd_dimension() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let out = call_upsample(vec![
             tensor(vec![1.0, 2.0, 3.0, 4.0], vec![1, 2, 2]),
             Value::Num(2.0),
@@ -1892,7 +2987,10 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(tensor.shape, vec![1, 4, 2]);
-        assert_eq!(tensor.data, vec![1.0, 0.0, 2.0, 0.0, 3.0, 0.0, 4.0, 0.0]);
+        assert_eq!(
+            tensor.materialize_f64(),
+            vec![1.0, 0.0, 2.0, 0.0, 3.0, 0.0, 4.0, 0.0]
+        );
     }
 
     #[test]
@@ -1902,14 +3000,14 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(array.shape, vec![1, 0]);
-        assert!(array.data.is_empty());
+        assert!(array.materialize_f64().is_empty());
 
         let out = call_downsample(vec![tensor(Vec::new(), vec![0, 1]), Value::Num(2.0)]);
         let Value::Tensor(array) = out else {
             panic!("expected tensor");
         };
         assert_eq!(array.shape, vec![0, 1]);
-        assert!(array.data.is_empty());
+        assert!(array.materialize_f64().is_empty());
     }
 
     #[test]
@@ -1923,7 +3021,7 @@ mod tests {
         };
         assert_eq!(tensor.shape, vec![1, 4]);
         assert_eq!(
-            tensor.data,
+            tensor.materialize_f64(),
             vec![(1.0, 2.0), (0.0, 0.0), (3.0, 4.0), (0.0, 0.0)]
         );
     }
@@ -1975,7 +3073,10 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(upsampled.shape, vec![1, 6]);
-        assert_eq!(upsampled.data, vec![1.0, 0.0, 2.0, 0.0, 3.0, 0.0]);
+        assert_eq!(
+            upsampled.materialize_f64(),
+            vec![1.0, 0.0, 2.0, 0.0, 3.0, 0.0]
+        );
 
         let down = call_resample(vec![
             tensor(vec![1.0, 2.0, 3.0, 4.0, 5.0], vec![1, 5]),
@@ -1987,7 +3088,99 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(downsampled.shape, vec![1, 3]);
-        assert_eq!(downsampled.data, vec![1.0, 3.0, 5.0]);
+        assert_eq!(downsampled.materialize_f64(), vec![1.0, 3.0, 5.0]);
+    }
+
+    #[test]
+    fn resample_rejects_integer_signal_storage() {
+        let input = Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3]), vec![1, 3]).unwrap();
+        let error = block_on(resample_builtin(
+            Value::Tensor(input),
+            Value::Num(2.0),
+            Value::Num(1.0),
+            Vec::new(),
+        ))
+        .unwrap_err();
+        assert_eq!(error.identifier(), SAMPLE_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn resample_filter_vector_reads_typed_integer_storage_exactly() {
+        let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
+        let filter = Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 0]), vec![1, 3]).unwrap();
+
+        let parsed = block_on(parse_filter_vector(Value::Tensor(filter))).unwrap();
+        let values = block_on(parsed.host_values()).unwrap();
+        assert_eq!(values, vec![0.0, 1.0, 0.0]);
+
+        let out = call_resample(vec![
+            tensor(vec![1.0, 2.0, 3.0], vec![1, 3]),
+            Value::Num(2.0),
+            Value::Num(1.0),
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 0]), vec![1, 3]).unwrap(),
+            ),
+        ]);
+        let Value::Tensor(upsampled) = out else {
+            panic!("expected tensor");
+        };
+        assert_eq!(upsampled.shape, vec![1, 6]);
+        assert_eq!(
+            upsampled.materialize_f64(),
+            vec![1.0, 0.0, 2.0, 0.0, 3.0, 0.0]
+        );
+    }
+
+    #[test]
+    fn resample_scalar_integer_option_decodes_exact_native_value() {
+        let scalar =
+            Tensor::new_integer(IntegerStorage::U16(vec![12]), vec![1, 1]).expect("scalar");
+        let vector =
+            Tensor::new_integer(IntegerStorage::U16(vec![12, 14]), vec![1, 2]).expect("vector");
+
+        assert_eq!(
+            block_on(scalar_integer_option(&Value::Tensor(scalar))).expect("scalar"),
+            Some(12)
+        );
+        assert_eq!(
+            block_on(scalar_integer_option(&Value::Tensor(vector))).expect("vector"),
+            None
+        );
+    }
+
+    #[test]
+    fn sample_rate_integer_parsers_read_typed_integer_storage_exactly() {
+        let wide = exact_platform_wide_integer();
+        let factor =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("factor");
+        let phase =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide - 1]), vec![1, 1]).expect("phase");
+
+        assert_eq!(
+            block_on(parse_factor(&Value::Tensor(factor), UPSAMPLE_NAME)).expect("factor"),
+            wide as usize
+        );
+        assert_eq!(
+            block_on(parse_phase(
+                &Value::Tensor(phase),
+                wide as usize,
+                UPSAMPLE_NAME
+            ))
+            .expect("phase"),
+            (wide - 1) as usize
+        );
+    }
+
+    #[test]
+    fn sample_rate_integer_parsers_reject_unrepresentable_double_boundary() {
+        let err = parse_nonnegative_integer(
+            first_unrepresentable_usize_double(),
+            UPSAMPLE_NAME,
+            &SAMPLE_ERROR_INVALID_FACTOR,
+        )
+        .expect_err("unrepresentable integer should fail");
+
+        assert_eq!(err.identifier(), SAMPLE_ERROR_INVALID_FACTOR.identifier);
     }
 
     #[test]
@@ -1996,7 +3189,7 @@ mod tests {
             let input = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
             let handle = provider
                 .upload(&HostTensorView {
-                    data: &input.data,
+                    data: &input.materialize_f64(),
                     shape: &input.shape,
                 })
                 .expect("upload input");
@@ -2016,7 +3209,10 @@ mod tests {
             let gathered =
                 test_support::gather(Value::GpuTensor(out_handle)).expect("gather output");
             assert_eq!(gathered.shape, vec![1, 6]);
-            assert_eq!(gathered.data, vec![1.0, 0.0, 2.0, 0.0, 3.0, 0.0]);
+            assert_eq!(
+                gathered.materialize_f64(),
+                vec![1.0, 0.0, 2.0, 0.0, 3.0, 0.0]
+            );
             let _ = provider.free(&handle);
         });
     }
@@ -2027,7 +3223,7 @@ mod tests {
             let input = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
             let handle = provider
                 .upload(&HostTensorView {
-                    data: &input.data,
+                    data: &input.materialize_f64(),
                     shape: &input.shape,
                 })
                 .expect("upload input");
@@ -2056,7 +3252,10 @@ mod tests {
             let gathered =
                 test_support::gather(Value::GpuTensor(out_handle.clone())).expect("gather output");
             assert_eq!(gathered.shape, vec![1, 6]);
-            assert_eq!(gathered.data, vec![1.0, 0.0, 2.0, 0.0, 3.0, 0.0]);
+            assert_eq!(
+                gathered.materialize_f64(),
+                vec![1.0, 0.0, 2.0, 0.0, 3.0, 0.0]
+            );
             let _ = provider.free(&handle);
             let _ = provider.free(&filter_handle);
             let _ = provider.free(&out_handle);
@@ -2101,7 +3300,7 @@ mod tests {
             let input = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0], vec![1, 5]).unwrap();
             let handle = provider
                 .upload(&HostTensorView {
-                    data: &input.data,
+                    data: &input.materialize_f64(),
                     shape: &input.shape,
                 })
                 .expect("upload input");
@@ -2123,11 +3322,11 @@ mod tests {
             };
             assert_eq!(signal_handle.shape, vec![1, 3]);
             let gathered = test_support::gather(outputs[0].clone()).expect("gather signal output");
-            assert_eq!(gathered.data, vec![1.0, 3.0, 5.0]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0, 3.0, 5.0]);
             let Value::Tensor(filter) = &outputs[1] else {
                 panic!("expected host filter tensor");
             };
-            assert_eq!(filter.data, vec![0.0, 1.0, 0.0]);
+            assert_eq!(filter.materialize_f64(), vec![0.0, 1.0, 0.0]);
             let _ = provider.free(&handle);
         });
     }
@@ -2138,7 +3337,7 @@ mod tests {
             let input = Tensor::new((1..=10).map(f64::from).collect(), vec![1, 10]).unwrap();
             let handle = provider
                 .upload(&HostTensorView {
-                    data: &input.data,
+                    data: &input.materialize_f64(),
                     shape: &input.shape,
                 })
                 .expect("upload input");
@@ -2155,7 +3354,7 @@ mod tests {
             assert_eq!(out_handle.shape, vec![1, 1]);
             let gathered =
                 test_support::gather(Value::GpuTensor(out_handle)).expect("gather output");
-            assert_eq!(gathered.data, vec![1.0]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0]);
             let _ = provider.free(&handle);
         });
     }
@@ -2167,14 +3366,17 @@ mod tests {
             Value::Num(2.0),
             Value::Num(1.0),
             tensor(vec![0.0, 1.0, 0.0], vec![1, 3]),
-            Value::CharArray(runmat_builtins::CharArray::new_row("Dimension")),
+            Value::CharArray(runmat_value::CharArray::new_row("Dimension")),
             Value::Num(2.0),
         ]);
         let Value::Tensor(tensor) = out else {
             panic!("expected tensor");
         };
         assert_eq!(tensor.shape, vec![2, 4]);
-        assert_eq!(tensor.data, vec![1.0, 2.0, 0.0, 0.0, 3.0, 4.0, 0.0, 0.0]);
+        assert_eq!(
+            tensor.materialize_f64(),
+            vec![1.0, 2.0, 0.0, 0.0, 3.0, 4.0, 0.0, 0.0]
+        );
     }
 
     #[test]
@@ -2193,7 +3395,7 @@ mod tests {
         };
         assert_eq!(tensor.shape, vec![1, 4]);
         assert_eq!(
-            tensor.data,
+            tensor.materialize_f64(),
             vec![(1.0, 2.0), (0.0, 0.0), (3.0, 4.0), (0.0, 0.0)]
         );
     }
@@ -2220,7 +3422,7 @@ mod tests {
         };
         assert_eq!(signal.shape, vec![5, 1]);
         assert_eq!(filter.shape, vec![1, 7]);
-        let sum = filter.data.iter().sum::<f64>();
+        let sum = filter.materialize_f64().iter().sum::<f64>();
         assert!((sum - 3.0).abs() < 1e-10);
     }
 
@@ -2245,7 +3447,7 @@ mod tests {
         };
         assert_eq!(signal.shape, vec![1, 8]);
         assert_eq!(filter.shape, vec![1, 41]);
-        let sum = filter.data.iter().sum::<f64>();
+        let sum = filter.materialize_f64().iter().sum::<f64>();
         assert!((sum - 2.0).abs() < 1e-10);
     }
 
@@ -2270,7 +3472,7 @@ mod tests {
             tensor(vec![1.0, 2.0], vec![1, 2]),
             Value::Num(2.0),
             Value::Num(1.0),
-            vec![Value::CharArray(runmat_builtins::CharArray::new_row(
+            vec![Value::CharArray(runmat_value::CharArray::new_row(
                 "Dimension",
             ))],
         ))

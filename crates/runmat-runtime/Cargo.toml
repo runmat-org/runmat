@@ -1,6 +1,6 @@
 [package]
 name = "runmat-runtime"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../LICENSE.md"
@@ -11,11 +11,14 @@ build = "build.rs"
 links = "runmat_runtime_native"
 
 [dependencies]
+runmat-value = { workspace = true }
+runmat-types = { workspace = true }
 inventory = { workspace = true }
 runmat-builtins = { workspace = true }
+runmat-execution = { workspace = true }
 runmat-macros = { workspace = true }
 runmat-async = { workspace = true }
-runmat-hir = { workspace = true }
+runmat-test = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 runmat-plot = { workspace = true, optional = true }
@@ -88,6 +91,7 @@ arrow-schema = "59.0.0"
 bytes = "1.12.0"
 ndarray = "0.17"
 parquet = { version = "59.0.0", features = ["arrow"] }
+pollster = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "charset", "gzip", "json", "rustls-tls"] }
 tokio = { version = "1.36", features = ["rt"] }
 
@@ -97,6 +101,11 @@ wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = ["XmlHttpRequest", "XmlHttpRequestResponseType", "Window", "TextDecoder", "DomException", "CustomEvent", "CustomEventInit", "EventTarget"] }
 getrandom = { version = "0.2", features = ["js"] }
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+tokio = { version = "1.36", default-features = false, features = ["macros", "rt"] }
+wgpu = "24.0.0"
+runmat-accelerate = { workspace = true, features = ["wgpu"] }
 
 [features]
 default = ["plot-core"]
@@ -142,17 +151,16 @@ occt-wasm-host = ["runmat-geometry-io/occt-wasm-host"]
 [dev-dependencies]
 async-trait = "0.1"
 runmat-macros = { workspace = true } 
-runmat-accelerate = { workspace = true, features = ["wgpu"] }
 matfile = "0.5.0"
 tempfile = "3.10"
 serde = { version = "1.0", features = ["derive"] }
-pollster = "0.3"
-wgpu = "0.19"
 wasm-bindgen-test = "0.3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 axum = "0.7"
 tokio = { version = "1.36", features = ["macros", "rt-multi-thread"] }
+runmat-accelerate = { workspace = true, features = ["wgpu"] }
+wgpu = "0.19"
 
 [dependencies.serde_json]
 version = "1.0"

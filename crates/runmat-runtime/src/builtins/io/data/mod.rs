@@ -5,24 +5,31 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ObjectInstance, StructValue, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor,
 };
 use runmat_filesystem::data_contract::{DataChunkDescriptor, DataChunkUploadRequest};
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, NumericScalar, ObjectInstance, StructValue, Tensor, Value};
 
+use crate::builtins::common::json::int_value_to_json;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::data::{
     array_object, data_error, dataset_object, dataset_root, ensure_manifest_sequence,
     get_object_prop, manifest_path, manifest_version_token, now_rfc3339, parse_schema,
     parse_string, read_array_payload_async, read_manifest_async, remove_tx, sha256_hex, start_tx,
-    transaction_object, with_tx, with_tx_mut, write_array_payload_async, write_manifest_async,
-    DataArrayMeta, DataArrayPayload, DataChunkIndex, DataChunkIndexEntry, DataManifest,
-    PendingCreateArray, PendingFill, PendingResize, PendingWrite, TxnStatus,
+    transaction_object, validate_chunk_shape, with_tx, with_tx_mut, write_array_payload_async,
+    write_manifest_async, DataArrayMeta, DataArrayPayload, DataChunkIndex, DataChunkIndexEntry,
+    DataManifest, PendingCreateArray, PendingFill, PendingResize, PendingWrite, TxnStatus,
 };
 use crate::{make_cell, BuiltinResult};
 
@@ -152,7 +159,7 @@ const OUT_TENSOR: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     description: "Numeric tensor result.",
 }];
 
-const IN_PATH_SCHEMA_REST: [BuiltinParamDescriptor; 3] = [
+const IN_PATH_SCHEMA: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "path",
         ty: BuiltinParamType::StringScalar,
@@ -167,33 +174,17 @@ const IN_PATH_SCHEMA_REST: [BuiltinParamDescriptor; 3] = [
         default: None,
         description: "Dataset schema struct.",
     },
-    BuiltinParamDescriptor {
-        name: "options",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Reserved name/value options.",
-    },
 ];
 
-const IN_PATH_REST: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "path",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Dataset path (.data).",
-    },
-    BuiltinParamDescriptor {
-        name: "options",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Reserved name/value options.",
-    },
-];
+const IN_PATH: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "path",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Dataset path (.data).",
+}];
 
-const IN_FROM_TO_REST: [BuiltinParamDescriptor; 3] = [
+const IN_FROM_TO: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "fromPath",
         ty: BuiltinParamType::StringScalar,
@@ -208,16 +199,33 @@ const IN_FROM_TO_REST: [BuiltinParamDescriptor; 3] = [
         default: None,
         description: "Destination dataset path.",
     },
+];
+
+const IN_PATH_FORMAT_SOURCE: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
-        name: "options",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
+        name: "path",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
         default: None,
-        description: "Reserved name/value options.",
+        description: "Dataset path (.data).",
+    },
+    BuiltinParamDescriptor {
+        name: "format",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Format token (currently 'data').",
+    },
+    BuiltinParamDescriptor {
+        name: "sourcePath",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Source dataset path.",
     },
 ];
 
-const IN_PATH_FORMAT_TARGET_REST: [BuiltinParamDescriptor; 4] = [
+const IN_PATH_FORMAT_TARGET: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "path",
         ty: BuiltinParamType::StringScalar,
@@ -239,31 +247,15 @@ const IN_PATH_FORMAT_TARGET_REST: [BuiltinParamDescriptor; 4] = [
         default: None,
         description: "Target dataset path.",
     },
-    BuiltinParamDescriptor {
-        name: "options",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Reserved name/value options.",
-    },
 ];
 
-const IN_PREFIX_REST: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "prefix",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Filesystem prefix to scan for datasets.",
-    },
-    BuiltinParamDescriptor {
-        name: "options",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Reserved name/value options.",
-    },
-];
+const IN_PREFIX: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "prefix",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Filesystem prefix to scan for datasets.",
+}];
 
 const IN_BASE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "obj",
@@ -643,7 +635,7 @@ const IN_TX_ARRAY_META: [BuiltinParamDescriptor; 3] = [
     },
 ];
 
-const IN_TX_COMMIT_REST: [BuiltinParamDescriptor; 2] = [
+const IN_TX_COMMIT_OPTIONS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "tx",
         ty: BuiltinParamType::Any,
@@ -654,9 +646,9 @@ const IN_TX_COMMIT_REST: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "options",
         ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
+        arity: BuiltinParamArity::Optional,
         default: None,
-        description: "Commit options (e.g. if_manifest).",
+        description: "Optional struct containing an if_manifest version token.",
     },
 ];
 
@@ -679,73 +671,109 @@ macro_rules! one_sig_descriptor {
 one_sig_descriptor!(
     DATA_CREATE_DESCRIPTOR,
     DATA_CREATE_SIGS,
-    "ds = data.create(path, schema, Name, Value, ...)",
-    &IN_PATH_SCHEMA_REST,
+    "ds = data.create(path, schema)",
+    &IN_PATH_SCHEMA,
     &OUT_DATASET
 );
 one_sig_descriptor!(
     DATA_OPEN_DESCRIPTOR,
     DATA_OPEN_SIGS,
-    "ds = data.open(path, Name, Value, ...)",
-    &IN_PATH_REST,
+    "ds = data.open(path)",
+    &IN_PATH,
     &OUT_DATASET
 );
 one_sig_descriptor!(
     DATA_EXISTS_DESCRIPTOR,
     DATA_EXISTS_SIGS,
     "tf = data.exists(path)",
-    &IN_PATH_REST,
+    &IN_PATH,
     &OUT_BOOL
 );
 one_sig_descriptor!(
     DATA_DELETE_DESCRIPTOR,
     DATA_DELETE_SIGS,
-    "tf = data.delete(path, Name, Value, ...)",
-    &IN_PATH_REST,
+    "tf = data.delete(path)",
+    &IN_PATH,
     &OUT_BOOL
 );
 one_sig_descriptor!(
     DATA_COPY_DESCRIPTOR,
     DATA_COPY_SIGS,
-    "tf = data.copy(fromPath, toPath, Name, Value, ...)",
-    &IN_FROM_TO_REST,
+    "tf = data.copy(fromPath, toPath)",
+    &IN_FROM_TO,
     &OUT_BOOL
 );
 one_sig_descriptor!(
     DATA_MOVE_DESCRIPTOR,
     DATA_MOVE_SIGS,
-    "tf = data.move(fromPath, toPath, Name, Value, ...)",
-    &IN_FROM_TO_REST,
+    "tf = data.move(fromPath, toPath)",
+    &IN_FROM_TO,
     &OUT_BOOL
 );
 one_sig_descriptor!(
     DATA_IMPORT_DESCRIPTOR,
     DATA_IMPORT_SIGS,
-    "ds = data.import(path, format, sourcePath, Name, Value, ...)",
-    &IN_PATH_FORMAT_TARGET_REST,
+    "ds = data.import(path, format, sourcePath)",
+    &IN_PATH_FORMAT_SOURCE,
     &OUT_DATASET
 );
 one_sig_descriptor!(
     DATA_EXPORT_DESCRIPTOR,
     DATA_EXPORT_SIGS,
-    "tf = data.export(path, format, targetPath, Name, Value, ...)",
-    &IN_PATH_FORMAT_TARGET_REST,
+    "tf = data.export(path, format, targetPath)",
+    &IN_PATH_FORMAT_TARGET,
     &OUT_BOOL
 );
 one_sig_descriptor!(
     DATA_LIST_DESCRIPTOR,
     DATA_LIST_SIGS,
-    "C = data.list(prefix, Name, Value, ...)",
-    &IN_PREFIX_REST,
+    "C = data.list(prefix)",
+    &IN_PREFIX,
     &OUT_CELL
 );
 one_sig_descriptor!(
     DATA_INSPECT_DESCRIPTOR,
     DATA_INSPECT_SIGS,
     "S = data.inspect(path)",
-    &IN_PATH_REST,
+    &IN_PATH,
     &OUT_STRUCT
 );
+
+const DATA_CREATE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "schema.arrays.*.shape",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Array shapes accept scalar or vector dimensions in every integer class, or exactly integral floating values, within nonnegative platform and checked total-element bounds.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "schema.arrays.*.chunk",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Optional chunk shapes accept scalar or vector dimensions in every integer class, or exactly integral floating values; dimensions must be positive, platform-bounded, and rank-matched to the array shape.",
+    },
+];
+
+pub const DATA_CREATE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "ds = data.create(path, struct_with_integer_shape_and_chunk)",
+        inputs: &DATA_CREATE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Schema dimensions are parsed directly from authoritative typed storage; the host/filesystem constructor allocates zero-filled storage in each array's declared dtype and returns a Dataset object.",
+    }];
+
+const DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "Dataset copy, delete, existence, export, import, inspection, listing, move, and open operations accept only textual paths/formats and return objects, logicals, strings, or host metadata; opaque movement of stored integer payload bytes is owned by the DataArray persistence contract rather than an integer call form.",
+    };
 
 one_sig_descriptor!(
     DATASET_PATH_DESCRIPTOR,
@@ -839,6 +867,112 @@ one_sig_descriptor!(
     &OUT_DATASET
 );
 
+const DATASET_NONATTRIBUTE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "Dataset array lookup/listing, transaction construction, identity/path/version access, membership tests, refresh, and snapshot operations accept a Dataset receiver plus strings or reserved options; they do not accept integer values or controls, return integer-class values, perform integer arithmetic, or expose an integer backend surface.",
+    };
+
+const DATASET_ATTRS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "stored_attribute_values",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Persisted scalar attributes may originate from every integer class and retain their exact mathematical value in the JSON manifest.",
+    }];
+pub const DATASET_ATTRS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "S = Dataset.attrs(ds_with_integer_attributes)",
+        inputs: &DATASET_ATTRS_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Each JSON integer is decoded exactly into a canonical scalar: int64 when its value is representable there, otherwise uint64; the original narrow storage class is not encoded by JSON.",
+    }];
+
+const DATASET_GET_ATTR_STORED_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "stored_attribute",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "A persisted scalar attribute may originate from every integer class and retains its exact mathematical value in the JSON manifest.",
+    }];
+const DATASET_GET_ATTR_DEFAULT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "defaultValue",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "An explicit scalar default accepts every integer class and is returned unchanged when the requested key is absent.",
+    }];
+pub const DATASET_GET_ATTR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "value = Dataset.get_attr(ds_with_integer_attribute, key)",
+        inputs: &DATASET_GET_ATTR_STORED_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "A stored JSON integer is decoded exactly as int64 when representable there and otherwise as uint64; JSON does not encode the original narrow integer class.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "value = Dataset.get_attr(ds, missing_key, integer_defaultValue)",
+        inputs: &DATASET_GET_ATTR_DEFAULT_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "A missing key returns the supplied default Value directly, preserving its exact integer class and value without serialization or floating conversion.",
+    },
+];
+
+const DATASET_SET_ATTR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "value",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "A scalar attribute value accepts every integer class and is serialized as an exact JSON integer, including full-width int64 and uint64 values.",
+    }];
+pub const DATASET_SET_ATTR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = Dataset.set_attr(ds, key, integer_value)",
+        inputs: &DATASET_SET_ATTR_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The scalar is emitted directly as an exact manifest JSON number without an f64 intermediary; the operation returns logical success.",
+    }];
+
+const DATASET_SET_ATTRS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "attribute_values",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Scalar values in the attribute struct accept every integer class and are serialized as exact JSON integers, including full-width int64 and uint64 values.",
+    }];
+pub const DATASET_SET_ATTRS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = Dataset.set_attrs(ds, struct_with_integer_values)",
+        inputs: &DATASET_SET_ATTRS_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "Each scalar integer field is emitted directly as an exact manifest JSON number without an f64 intermediary; the operation returns logical success.",
+    }];
+
 one_sig_descriptor!(
     DATAARRAY_NAME_DESCRIPTOR,
     DATAARRAY_NAME_SIGS,
@@ -921,6 +1055,260 @@ one_sig_descriptor!(
     &OUT_BOOL
 );
 
+const DATAARRAY_METADATA_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "DataArray name, dtype, shape, rank, chunk-shape, and codec accessors accept only a DataArray receiver object; integer storage may be described by the returned metadata but is not an integer argument, control, class-preserving value output, arithmetic form, or backend surface.",
+    };
+
+const DATAARRAY_READ_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "stored_array",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "A DataArray whose declared dtype is any built-in integer class is decoded directly into authoritative same-class real or paired-complex tensor storage.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "sliceSpec",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Scalar indices and two-element inclusive ranges accept all eight integer classes or exactly integral floating values.",
+    },
+];
+pub const DATAARRAY_READ_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "X = DataArray.read(integer_array, integer_sliceSpec)",
+        inputs: &DATAARRAY_READ_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Full and sliced reads preserve the declared integer dtype, real or paired-complex storage, exact values, selected shape, and column-major order; dataset persistence is host/filesystem I/O.",
+    }];
+
+const DATAARRAY_WRITE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "values",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Scalar or tensor values accept every integer class in real or paired-complex storage and are stored exactly when their class matches the declared array dtype.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "sliceSpec",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Optional scalar indices and two-element inclusive ranges accept all eight integer classes or exactly integral floating values.",
+    },
+];
+pub const DATAARRAY_WRITE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = DataArray.write(arr, integer_values) or DataArray.write(arr, integer_sliceSpec, integer_values)",
+        inputs: &DATAARRAY_WRITE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Writes preserve exact same-class real or paired-complex integer storage; unlike source and declared dtypes use the declared numeric cast contract before chunk serialization, and shape or complexity mismatches reject.",
+    }];
+
+const DATAARRAY_RESIZE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "newShape",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Shape scalars and vectors accept all eight integer classes or exactly integral floating values within nonnegative platform and checked total-element bounds.",
+    }];
+pub const DATAARRAY_RESIZE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = DataArray.resize(arr, integer_newShape)",
+        inputs: &DATAARRAY_RESIZE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The exact shape is validated against platform bounds, persisted as metadata, and used to recreate zero-filled storage in the array's declared dtype.",
+    }];
+
+const DATAARRAY_FILL_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "value",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The scalar fill value accepts every integer class and is exact when its class matches the declared array dtype.",
+    }];
+pub const DATAARRAY_FILL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = DataArray.fill(arr, integer_value)",
+        inputs: &DATAARRAY_FILL_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "A scalar is cast once to the declared dtype and that exact typed value is repeated; nonscalar fills reject.",
+    }];
+
+const DATATX_LIFECYCLE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "DataTransaction id, status, commit, abort, and delete-array operations accept a transaction receiver plus, where applicable, string metadata or an array name; they do not accept integer values or controls, return integer-class values, perform integer arithmetic, or expose an integer backend surface.",
+    };
+
+const DATATX_WRITE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "values",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Queued scalar or tensor values accept every integer class and are stored exactly at commit when their class matches the declared array dtype.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "sliceSpec",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Queued scalar indices and two-element inclusive ranges accept all eight integer classes or exactly integral floating values.",
+    },
+];
+pub const DATATX_WRITE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = DataTransaction.write(tx, arrayName, integer_sliceSpec, integer_values)",
+        inputs: &DATATX_WRITE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The transaction retains native integer values and exact slice controls until commit; commit applies the same declared-dtype cast, shape validation, and chunk serialization contract as DataArray.write.",
+    }];
+
+const DATATX_SET_ATTR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "value",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "A scalar attribute value accepts every integer class and is serialized as an exact JSON integer, including full-width int64 and uint64 values.",
+    }];
+pub const DATATX_SET_ATTR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = DataTransaction.set_attr(tx, key, integer_value)",
+        inputs: &DATATX_SET_ATTR_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The queued scalar retains its native integer class through the transaction and is emitted as an exact manifest JSON number at commit without an f64 intermediary.",
+    }];
+
+const DATATX_SET_ATTRS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "attribute_values",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Scalar values in the attribute struct accept every integer class and are serialized as exact JSON integers, including full-width int64 and uint64 values.",
+    }];
+pub const DATATX_SET_ATTRS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = DataTransaction.set_attrs(tx, struct_with_integer_values)",
+        inputs: &DATATX_SET_ATTRS_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "Each queued scalar integer field retains its native class and is emitted as an exact manifest JSON number at commit without an f64 intermediary.",
+    }];
+
+const DATATX_RESIZE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "newShape",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Queued shape scalars and vectors accept all eight integer classes or exactly integral floating values within nonnegative platform and checked total-element bounds.",
+    }];
+pub const DATATX_RESIZE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = DataTransaction.resize(tx, arrayName, integer_newShape)",
+        inputs: &DATATX_RESIZE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The exact shape is validated when queued, retained as platform-sized metadata, and applied at commit by recreating zero-filled storage in the array's declared dtype.",
+    }];
+
+const DATATX_FILL_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "value",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The queued scalar fill value accepts every integer class and is exact at commit when its class matches the declared array dtype.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "sliceSpec",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Optional queued scalar indices and two-element inclusive ranges accept all eight integer classes or exactly integral floating values.",
+    },
+];
+pub const DATATX_FILL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = DataTransaction.fill(tx, arrayName, integer_value, integer_sliceSpec)",
+        inputs: &DATATX_FILL_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The transaction retains the exact scalar and optional slice until commit; commit casts once to the declared dtype and repeats that typed value.",
+    }];
+
+const DATATX_CREATE_ARRAY_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "meta.shape",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The schema shape accepts all eight integer classes or exactly integral floating values within nonnegative platform and checked total-element bounds.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "meta.chunk",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The optional chunk shape accepts all eight integer classes or exactly integral floating values; dimensions must be positive, platform-bounded, and rank-matched to meta.shape.",
+    },
+];
+pub const DATATX_CREATE_ARRAY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = DataTransaction.create_array(tx, arrayName, struct('shape', integer_shape, 'chunk', integer_chunk))",
+        inputs: &DATATX_CREATE_ARRAY_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Exact shape and chunk dimensions are validated when queued, retained as platform-sized metadata, and used at commit to create storage in the schema's declared dtype.",
+    }];
+
 one_sig_descriptor!(
     DATATX_ID_DESCRIPTOR,
     DATATX_ID_SIGS,
@@ -980,15 +1368,15 @@ one_sig_descriptor!(
 one_sig_descriptor!(
     DATATX_COMMIT_DESCRIPTOR,
     DATATX_COMMIT_SIGS,
-    "tf = DataTransaction.commit(tx, Name, Value, ...)",
-    &IN_TX_COMMIT_REST,
+    "tf = DataTransaction.commit(tx, options)",
+    &IN_TX_COMMIT_OPTIONS,
     &OUT_BOOL
 );
 one_sig_descriptor!(
     COMMIT_ALIAS_DESCRIPTOR,
     COMMIT_ALIAS_SIGS,
-    "tf = commit(tx, Name, Value, ...)",
-    &IN_TX_COMMIT_REST,
+    "tf = commit(tx, options)",
+    &IN_TX_COMMIT_OPTIONS,
     &OUT_BOOL
 );
 one_sig_descriptor!(
@@ -1014,20 +1402,17 @@ one_sig_descriptor!(
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_dataset_type),
     descriptor(crate::builtins::io::data::DATA_CREATE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::data::DATA_CREATE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::data"
 )]
-async fn data_create_builtin(
-    path: Value,
-    schema: Value,
-    _rest: Vec<Value>,
-) -> BuiltinResult<Value> {
+async fn data_create_builtin(path: Value, schema: Value) -> BuiltinResult<Value> {
     let path = parse_string(&path, "data.create path")?;
     let root = dataset_root(&path);
     let schema = parse_schema(&schema)?;
     let now = now_rfc3339();
     let mut arrays = BTreeMap::new();
     for (name, mut meta) in schema.arrays {
-        let payload = DataArrayPayload::zeros(meta.dtype.clone(), meta.shape.clone());
+        let payload = DataArrayPayload::zeros(meta.dtype.clone(), meta.shape.clone())?;
         let (payload_path, chunk_index_path) =
             write_array_payload_async(&root, &name, &payload, &meta.chunk_shape).await?;
         meta.data_path = make_rel_data_path(&root, &payload_path)?;
@@ -1057,9 +1442,10 @@ async fn data_create_builtin(
     keywords = "data,dataset,open,persistence",
     type_resolver(crate::builtins::io::type_resolvers::data_dataset_type),
     descriptor(crate::builtins::io::data::DATA_OPEN_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
-async fn data_open_builtin(path: Value, _rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn data_open_builtin(path: Value) -> BuiltinResult<Value> {
     let path = parse_string(&path, "data.open path")?;
     let root = dataset_root(&path);
     let manifest = read_manifest_async(&root).await?;
@@ -1075,6 +1461,7 @@ async fn data_open_builtin(path: Value, _rest: Vec<Value>) -> BuiltinResult<Valu
     keywords = "data,dataset,exists",
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATA_EXISTS_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_exists_builtin(path: Value) -> BuiltinResult<Value> {
@@ -1094,9 +1481,10 @@ async fn data_exists_builtin(path: Value) -> BuiltinResult<Value> {
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATA_DELETE_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
-async fn data_delete_builtin(path: Value, _rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn data_delete_builtin(path: Value) -> BuiltinResult<Value> {
     let path = parse_string(&path, "data.delete path")?;
     let root = dataset_root(&path);
     runmat_filesystem::remove_dir_all_async(&root)
@@ -1118,13 +1506,10 @@ async fn data_delete_builtin(path: Value, _rest: Vec<Value>) -> BuiltinResult<Va
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATA_COPY_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
-async fn data_copy_builtin(
-    from_path: Value,
-    to_path: Value,
-    _rest: Vec<Value>,
-) -> BuiltinResult<Value> {
+async fn data_copy_builtin(from_path: Value, to_path: Value) -> BuiltinResult<Value> {
     let from = parse_string(&from_path, "data.copy fromPath")?;
     let to = parse_string(&to_path, "data.copy toPath")?;
     copy_dir_recursive(&dataset_root(&from), &dataset_root(&to)).await?;
@@ -1139,13 +1524,10 @@ async fn data_copy_builtin(
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATA_MOVE_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
-async fn data_move_builtin(
-    from_path: Value,
-    to_path: Value,
-    _rest: Vec<Value>,
-) -> BuiltinResult<Value> {
+async fn data_move_builtin(from_path: Value, to_path: Value) -> BuiltinResult<Value> {
     let from = parse_string(&from_path, "data.move fromPath")?;
     let to = parse_string(&to_path, "data.move toPath")?;
     runmat_filesystem::rename_async(dataset_root(&from), dataset_root(&to))
@@ -1166,13 +1548,13 @@ async fn data_move_builtin(
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_dataset_type),
     descriptor(crate::builtins::io::data::DATA_IMPORT_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_import_builtin(
     path: Value,
     format: Value,
     source_path: Value,
-    _rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
     let path = parse_string(&path, "data.import path")?;
     let format = parse_string(&format, "data.import format")?;
@@ -1195,13 +1577,13 @@ async fn data_import_builtin(
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATA_EXPORT_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_export_builtin(
     path: Value,
     format: Value,
     target_path: Value,
-    _rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
     let path = parse_string(&path, "data.export path")?;
     let format = parse_string(&format, "data.export format")?;
@@ -1222,9 +1604,10 @@ async fn data_export_builtin(
     keywords = "data,dataset,list",
     type_resolver(crate::builtins::io::type_resolvers::data_cell_string_type),
     descriptor(crate::builtins::io::data::DATA_LIST_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
-async fn data_list_builtin(path_prefix: Value, _rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn data_list_builtin(path_prefix: Value) -> BuiltinResult<Value> {
     let prefix = parse_string(&path_prefix, "data.list prefix")?;
     let root = PathBuf::from(prefix);
     let entries = runmat_filesystem::read_dir_async(&root)
@@ -1262,6 +1645,7 @@ async fn data_list_builtin(path_prefix: Value, _rest: Vec<Value>) -> BuiltinResu
     keywords = "data,dataset,inspect,schema",
     type_resolver(crate::builtins::io::type_resolvers::data_struct_type),
     descriptor(crate::builtins::io::data::DATA_INSPECT_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_inspect_builtin(path: Value) -> BuiltinResult<Value> {
@@ -1288,6 +1672,7 @@ async fn data_inspect_builtin(path: Value) -> BuiltinResult<Value> {
     keywords = "dataset,path",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
     descriptor(crate::builtins::io::data::DATASET_PATH_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATASET_NONATTRIBUTE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_path_builtin(base: Value) -> BuiltinResult<Value> {
@@ -1300,6 +1685,7 @@ async fn dataset_path_builtin(base: Value) -> BuiltinResult<Value> {
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
     descriptor(crate::builtins::io::data::DATASET_ID_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATASET_NONATTRIBUTE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_id_builtin(base: Value) -> BuiltinResult<Value> {
@@ -1312,6 +1698,7 @@ async fn dataset_id_builtin(base: Value) -> BuiltinResult<Value> {
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
     descriptor(crate::builtins::io::data::DATASET_VERSION_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATASET_NONATTRIBUTE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_version_builtin(base: Value) -> BuiltinResult<Value> {
@@ -1324,6 +1711,7 @@ async fn dataset_version_builtin(base: Value) -> BuiltinResult<Value> {
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_cell_string_type),
     descriptor(crate::builtins::io::data::DATASET_ARRAYS_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATASET_NONATTRIBUTE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_arrays_builtin(base: Value) -> BuiltinResult<Value> {
@@ -1342,6 +1730,7 @@ async fn dataset_arrays_builtin(base: Value) -> BuiltinResult<Value> {
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATASET_HAS_ARRAY_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATASET_NONATTRIBUTE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_has_array_builtin(base: Value, name: Value) -> BuiltinResult<Value> {
@@ -1356,6 +1745,7 @@ async fn dataset_has_array_builtin(base: Value, name: Value) -> BuiltinResult<Va
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_array_type),
     descriptor(crate::builtins::io::data::DATASET_ARRAY_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATASET_NONATTRIBUTE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_array_builtin(base: Value, name: Value) -> BuiltinResult<Value> {
@@ -1375,6 +1765,7 @@ async fn dataset_array_builtin(base: Value, name: Value) -> BuiltinResult<Value>
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_struct_type),
     descriptor(crate::builtins::io::data::DATASET_ATTRS_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::data::DATASET_ATTRS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_attrs_builtin(base: Value) -> BuiltinResult<Value> {
@@ -1388,6 +1779,7 @@ async fn dataset_attrs_builtin(base: Value) -> BuiltinResult<Value> {
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_unknown_type),
     descriptor(crate::builtins::io::data::DATASET_GET_ATTR_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::data::DATASET_GET_ATTR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_get_attr_builtin(
@@ -1410,6 +1802,7 @@ async fn dataset_get_attr_builtin(
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATASET_SET_ATTR_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::data::DATASET_SET_ATTR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_set_attr_builtin(base: Value, key: Value, value: Value) -> BuiltinResult<Value> {
@@ -1430,6 +1823,7 @@ async fn dataset_set_attr_builtin(base: Value, key: Value, value: Value) -> Buil
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATASET_SET_ATTRS_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::data::DATASET_SET_ATTRS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_set_attrs_builtin(base: Value, attrs: Value) -> BuiltinResult<Value> {
@@ -1453,6 +1847,7 @@ async fn dataset_set_attrs_builtin(base: Value, attrs: Value) -> BuiltinResult<V
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_tx_type),
     descriptor(crate::builtins::io::data::DATASET_BEGIN_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATASET_NONATTRIBUTE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_begin_builtin(base: Value, _rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -1474,6 +1869,7 @@ async fn dataset_begin_builtin(base: Value, _rest: Vec<Value>) -> BuiltinResult<
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
     descriptor(crate::builtins::io::data::DATASET_SNAPSHOT_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATASET_NONATTRIBUTE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_snapshot_builtin(
@@ -1503,6 +1899,7 @@ async fn dataset_snapshot_builtin(
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_dataset_type),
     descriptor(crate::builtins::io::data::DATASET_REFRESH_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATASET_NONATTRIBUTE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_refresh_builtin(base: Value) -> BuiltinResult<Value> {
@@ -1518,6 +1915,7 @@ async fn dataset_refresh_builtin(base: Value) -> BuiltinResult<Value> {
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
     descriptor(crate::builtins::io::data::DATAARRAY_NAME_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATAARRAY_METADATA_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_name_builtin(base: Value) -> BuiltinResult<Value> {
@@ -1530,6 +1928,7 @@ async fn data_array_name_builtin(base: Value) -> BuiltinResult<Value> {
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
     descriptor(crate::builtins::io::data::DATAARRAY_DTYPE_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATAARRAY_METADATA_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_dtype_builtin(base: Value) -> BuiltinResult<Value> {
@@ -1547,6 +1946,7 @@ async fn data_array_dtype_builtin(base: Value) -> BuiltinResult<Value> {
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_shape_tensor_type),
     descriptor(crate::builtins::io::data::DATAARRAY_SHAPE_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATAARRAY_METADATA_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_shape_builtin(base: Value) -> BuiltinResult<Value> {
@@ -1567,6 +1967,7 @@ async fn data_array_shape_builtin(base: Value) -> BuiltinResult<Value> {
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_int_type),
     descriptor(crate::builtins::io::data::DATAARRAY_RANK_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATAARRAY_METADATA_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_rank_builtin(base: Value) -> BuiltinResult<Value> {
@@ -1584,6 +1985,7 @@ async fn data_array_rank_builtin(base: Value) -> BuiltinResult<Value> {
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_shape_tensor_type),
     descriptor(crate::builtins::io::data::DATAARRAY_CHUNK_SHAPE_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATAARRAY_METADATA_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_chunk_shape_builtin(base: Value) -> BuiltinResult<Value> {
@@ -1608,6 +2010,7 @@ async fn data_array_chunk_shape_builtin(base: Value) -> BuiltinResult<Value> {
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
     descriptor(crate::builtins::io::data::DATAARRAY_CODEC_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATAARRAY_METADATA_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_codec_builtin(base: Value) -> BuiltinResult<Value> {
@@ -1625,6 +2028,7 @@ async fn data_array_codec_builtin(base: Value) -> BuiltinResult<Value> {
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_tensor_type),
     descriptor(crate::builtins::io::data::DATAARRAY_READ_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::data::DATAARRAY_READ_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_read_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -1652,6 +2056,7 @@ async fn data_array_read_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATAARRAY_WRITE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::data::DATAARRAY_WRITE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_write_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -1675,6 +2080,7 @@ async fn data_array_write_builtin(base: Value, rest: Vec<Value>) -> BuiltinResul
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATAARRAY_RESIZE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::data::DATAARRAY_RESIZE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_resize_builtin(
@@ -1691,7 +2097,7 @@ async fn data_array_resize_builtin(
         .get_mut(&name)
         .ok_or_else(|| data_error(format!("DataArray.resize: array '{name}' not found")))?;
     meta.shape = shape.clone();
-    let payload = DataArrayPayload::zeros(meta.dtype.clone(), shape.clone());
+    let payload = DataArrayPayload::zeros(meta.dtype.clone(), shape.clone())?;
     let (payload_path, chunk_index_path) =
         write_array_payload_async(&root, &name, &payload, &meta.chunk_shape).await?;
     meta.data_path = make_rel_data_path(&root, &payload_path)?;
@@ -1708,6 +2114,7 @@ async fn data_array_resize_builtin(
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATAARRAY_FILL_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::data::DATAARRAY_FILL_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_fill_builtin(
@@ -1738,6 +2145,7 @@ async fn data_array_fill_builtin(
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
     descriptor(crate::builtins::io::data::DATATX_ID_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATATX_LIFECYCLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_id_builtin(base: Value) -> BuiltinResult<Value> {
@@ -1751,6 +2159,7 @@ async fn data_tx_id_builtin(base: Value) -> BuiltinResult<Value> {
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATATX_WRITE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::data::DATATX_WRITE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_write_builtin(
@@ -1782,6 +2191,7 @@ async fn data_tx_write_builtin(
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATATX_SET_ATTR_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::data::DATATX_SET_ATTR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_set_attr_builtin(base: Value, key: Value, value: Value) -> BuiltinResult<Value> {
@@ -1805,6 +2215,7 @@ async fn data_tx_set_attr_builtin(base: Value, key: Value, value: Value) -> Buil
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATATX_SET_ATTRS_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::data::DATATX_SET_ATTRS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_set_attrs_builtin(base: Value, attrs: Value) -> BuiltinResult<Value> {
@@ -1834,6 +2245,7 @@ async fn data_tx_set_attrs_builtin(base: Value, attrs: Value) -> BuiltinResult<V
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATATX_RESIZE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::data::DATATX_RESIZE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_resize_builtin(
@@ -1866,6 +2278,7 @@ async fn data_tx_resize_builtin(
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATATX_FILL_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::data::DATATX_FILL_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_fill_builtin(
@@ -1897,6 +2310,7 @@ async fn data_tx_fill_builtin(
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATATX_DELETE_ARRAY_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATATX_LIFECYCLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_delete_array_builtin(base: Value, array_name: Value) -> BuiltinResult<Value> {
@@ -1920,6 +2334,7 @@ async fn data_tx_delete_array_builtin(base: Value, array_name: Value) -> Builtin
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATATX_CREATE_ARRAY_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::data::DATATX_CREATE_ARRAY_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_create_array_builtin(
@@ -1951,9 +2366,24 @@ async fn data_tx_create_array_builtin(
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATATX_COMMIT_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATATX_LIFECYCLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_commit_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let options = match rest.as_slice() {
+        [] => None,
+        [Value::Struct(options)] => Some(options),
+        [_] => {
+            return Err(data_error(
+                "DataTransaction.commit: options must be a scalar struct",
+            ))
+        }
+        _ => {
+            return Err(data_error(
+                "DataTransaction.commit: expected at most one options struct",
+            ))
+        }
+    };
     let tx_id = tx_id_from_object(&base, "DataTransaction.commit")?;
     let (dataset_path, base_sequence, writes, resizes, fills, create_arrays, delete_arrays, attrs) =
         with_tx(&tx_id, |tx| {
@@ -1984,7 +2414,7 @@ async fn data_tx_commit_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<
     let root = dataset_root(&dataset_path);
     let mut manifest = read_manifest_async(&root).await?;
     ensure_manifest_sequence(base_sequence, &manifest)?;
-    if let Some(Value::Struct(options)) = rest.first() {
+    if let Some(options) = options {
         if let Some(expected) = options.fields.get("if_manifest") {
             let expected = parse_string(expected, "DataTransaction.commit if_manifest")?;
             let actual = manifest_version_token(&manifest);
@@ -2064,14 +2494,12 @@ async fn data_tx_commit_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::COMMIT_ALIAS_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATATX_LIFECYCLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_commit_alias_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     match &base {
         Value::Object(obj) if obj.class_name == "DataTransaction" => {
-            data_tx_commit_builtin(base, rest).await
-        }
-        Value::HandleObject(handle) if handle.class_name == "DataTransaction" => {
             data_tx_commit_builtin(base, rest).await
         }
         _ => Err(data_error(
@@ -2086,6 +2514,7 @@ async fn data_tx_commit_alias_builtin(base: Value, rest: Vec<Value>) -> BuiltinR
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATATX_ABORT_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATATX_LIFECYCLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_abort_builtin(base: Value) -> BuiltinResult<Value> {
@@ -2108,6 +2537,7 @@ async fn data_tx_abort_builtin(base: Value) -> BuiltinResult<Value> {
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
     descriptor(crate::builtins::io::data::DATATX_STATUS_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATATX_LIFECYCLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_status_builtin(base: Value) -> BuiltinResult<Value> {
@@ -2232,7 +2662,7 @@ async fn create_array_in_manifest(
             "DataTransaction.create_array: array '{array_name}' already exists"
         )));
     }
-    let payload = DataArrayPayload::zeros(meta.dtype.clone(), meta.shape.clone());
+    let payload = DataArrayPayload::zeros(meta.dtype.clone(), meta.shape.clone())?;
     let (payload_path, chunk_index_path) =
         write_array_payload_async(root, array_name, &payload, &meta.chunk_shape).await?;
     meta.data_path = make_rel_data_path(root, &payload_path)?;
@@ -2252,7 +2682,7 @@ async fn resize_array_in_manifest(
         .get_mut(array_name)
         .ok_or_else(|| data_error(format!("array '{array_name}' not found")))?;
     meta.shape = shape.clone();
-    let payload = DataArrayPayload::zeros(meta.dtype.clone(), shape.clone());
+    let payload = DataArrayPayload::zeros(meta.dtype.clone(), shape.clone())?;
     let (payload_path, chunk_index_path) =
         write_array_payload_async(root, array_name, &payload, &meta.chunk_shape).await?;
     meta.data_path = make_rel_data_path(root, &payload_path)?;
@@ -2345,6 +2775,7 @@ fn parse_array_meta(array_name: &str, meta: &Value) -> BuiltinResult<DataArrayMe
         .map(parse_shape_from_value)
         .transpose()?
         .unwrap_or_else(|| default_chunk_shape(&shape));
+    validate_chunk_shape(&shape, &chunk_shape)?;
     let codec = meta_struct
         .fields
         .get("codec")
@@ -2364,7 +2795,7 @@ fn parse_array_meta(array_name: &str, meta: &Value) -> BuiltinResult<DataArrayMe
 
 fn default_chunk_shape(shape: &[usize]) -> Vec<usize> {
     if shape.is_empty() {
-        return vec![1024];
+        return Vec::new();
     }
     let mut out = shape.to_vec();
     if out.len() == 1 {
@@ -2411,33 +2842,52 @@ async fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> BuiltinResult<()> {
 fn parse_shape_from_value(value: &Value) -> BuiltinResult<Vec<usize>> {
     match value {
         Value::Tensor(t) => {
-            let mut out = Vec::with_capacity(t.data.len());
-            for v in &t.data {
-                if !v.is_finite() || *v < 0.0 {
-                    return Err(data_error(
-                        "shape dimensions must be non-negative finite numbers",
-                    ));
-                }
-                out.push(*v as usize);
+            let len = tensor_utils::tensor_element_len(t);
+            let mut out = Vec::with_capacity(len);
+            for index in 0..len {
+                let value = t
+                    .numeric_value_at(index)
+                    .ok_or_else(|| data_error("shape dimensions require valid numeric storage"))?;
+                out.push(numeric_dimension_to_usize(value).ok_or_else(|| {
+                    data_error(
+                        "shape dimensions must be non-negative finite integers within platform limits",
+                    )
+                })?);
             }
             Ok(out)
         }
-        Value::Num(v) => {
-            if !v.is_finite() || *v < 0.0 {
-                return Err(data_error(
-                    "shape dimensions must be non-negative finite numbers",
-                ));
-            }
-            Ok(vec![*v as usize])
-        }
-        Value::Int(v) => {
-            let n = v.to_i64();
-            if n < 0 {
-                return Err(data_error("shape dimensions must be non-negative"));
-            }
-            Ok(vec![n as usize])
-        }
+        Value::Num(v) => floating_dimension_to_usize(*v)
+            .map(|value| vec![value])
+            .ok_or_else(|| {
+                data_error(
+                    "shape dimensions must be non-negative finite integers within platform limits",
+                )
+            }),
+        Value::Int(v) => v
+            .try_to_usize()
+            .map(|n| vec![n])
+            .ok_or_else(|| data_error("shape dimensions must be non-negative integers")),
         _ => Err(data_error("shape must be a numeric vector")),
+    }
+}
+
+fn floating_dimension_to_usize(value: f64) -> Option<usize> {
+    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 {
+        return None;
+    }
+    let integer = value as u128;
+    (integer <= usize::MAX as u128 && integer as f64 == value)
+        .then(|| usize::try_from(integer).ok())
+        .flatten()
+}
+
+fn numeric_dimension_to_usize(value: NumericScalar) -> Option<usize> {
+    match value {
+        NumericScalar::F64(value) => floating_dimension_to_usize(value),
+        NumericScalar::F32(value) => floating_dimension_to_usize(f64::from(value)),
+        value => value
+            .into_int_value()
+            .and_then(|value| value.try_to_usize()),
     }
 }
 
@@ -2566,6 +3016,16 @@ async fn apply_slice_write_chunked_async(
             &chunk_index,
         )
         .await?;
+        if chunk_payload.imaginary_values.is_none() && rhs.imaginary_values.is_some() {
+            chunk_payload.imaginary_values = Some(crate::data::DataArrayValues::zeros(
+                &meta.dtype,
+                chunk_payload.values.len(),
+            )?);
+        } else if chunk_payload.imaginary_values.is_some() && rhs.imaginary_values.is_none() {
+            return Err(data_error(
+                "CLASS_MISMATCH: real and complex data-array slices cannot be assigned to one another",
+            ));
+        }
 
         let mut local = vec![0usize; intersection.len()];
         let intersection_shape: Vec<usize> = intersection
@@ -2592,6 +3052,11 @@ async fn apply_slice_write_chunked_async(
             chunk_payload
                 .values
                 .set(chunk_linear, rhs.values.get(rhs_linear)?)?;
+            if let (Some(target), Some(source)) =
+                (&mut chunk_payload.imaginary_values, &rhs.imaginary_values)
+            {
+                target.set(chunk_linear, source.get(rhs_linear)?)?;
+            }
             if !advance_index(&mut local, &intersection_shape) {
                 break;
             }
@@ -2673,7 +3138,12 @@ fn read_slice_payload(
         .iter()
         .map(|r| r.end.saturating_sub(r.start))
         .collect();
-    let mut out_values = crate::data::DataArrayValues::zeros(&payload.dtype, 0);
+    let mut out_values = crate::data::DataArrayValues::zeros(&payload.dtype, 0)?;
+    let mut out_imaginary_values = payload
+        .imaginary_values
+        .as_ref()
+        .map(|_| crate::data::DataArrayValues::zeros(&payload.dtype, 0))
+        .transpose()?;
     let mut out_index = vec![0usize; out_shape.len()];
     loop {
         let source_index: Vec<usize> = out_index
@@ -2683,6 +3153,10 @@ fn read_slice_payload(
             .collect();
         let linear = linear_index_column_major(&source_index, &payload.shape)?;
         out_values.push(payload.values.get(linear)?)?;
+        if let (Some(source), Some(target)) = (&payload.imaginary_values, &mut out_imaginary_values)
+        {
+            target.push(source.get(linear)?)?;
+        }
 
         if !advance_index(&mut out_index, &out_shape) {
             break;
@@ -2692,6 +3166,7 @@ fn read_slice_payload(
         dtype: payload.dtype.clone(),
         shape: out_shape,
         values: out_values,
+        imaginary_values: out_imaginary_values,
     })
 }
 
@@ -2714,6 +3189,12 @@ fn write_slice_payload(
     }
 
     let mut next = payload.values.clone();
+    if payload.imaginary_values.is_some() != rhs.imaginary_values.is_some() {
+        return Err(data_error(
+            "CLASS_MISMATCH: real and complex data-array slices cannot be assigned to one another",
+        ));
+    }
+    let mut next_imaginary = payload.imaginary_values.clone();
     let mut rhs_index = vec![0usize; target_shape.len()];
     let mut rhs_linear = 0usize;
     loop {
@@ -2724,6 +3205,9 @@ fn write_slice_payload(
             .collect();
         let target_linear = linear_index_column_major(&target_index, &payload.shape)?;
         next.set(target_linear, rhs.values.get(rhs_linear)?)?;
+        if let (Some(target), Some(source)) = (&mut next_imaginary, &rhs.imaginary_values) {
+            target.set(target_linear, source.get(rhs_linear)?)?;
+        }
         rhs_linear += 1;
 
         if !advance_index(&mut rhs_index, &target_shape) {
@@ -2735,6 +3219,7 @@ fn write_slice_payload(
         dtype: payload.dtype.clone(),
         shape: payload.shape.clone(),
         values: next,
+        imaginary_values: next_imaginary,
     })
 }
 
@@ -2780,34 +3265,46 @@ fn parse_dim_range(value: &Value, extent: usize) -> BuiltinResult<DimRange> {
             end: extent,
         }),
         Value::Num(n) => {
-            let idx = (*n as isize) - 1;
-            if idx < 0 || idx as usize >= extent {
+            let idx = floating_dimension_to_usize(*n)
+                .and_then(|index| index.checked_sub(1))
+                .ok_or_else(|| data_error("INVALID_SLICE: index out of bounds"))?;
+            if idx >= extent {
                 return Err(data_error("INVALID_SLICE: index out of bounds"));
             }
             Ok(DimRange {
-                start: idx as usize,
-                end: idx as usize + 1,
+                start: idx,
+                end: idx + 1,
             })
         }
         Value::Int(i) => {
-            let idx = i.to_i64() - 1;
-            if idx < 0 || idx as usize >= extent {
+            let Some(idx) = i.try_to_usize().and_then(|index| index.checked_sub(1)) else {
+                return Err(data_error("INVALID_SLICE: index out of bounds"));
+            };
+            if idx >= extent {
                 return Err(data_error("INVALID_SLICE: index out of bounds"));
             }
             Ok(DimRange {
-                start: idx as usize,
-                end: idx as usize + 1,
+                start: idx,
+                end: idx + 1,
             })
         }
-        Value::Tensor(t) if t.data.len() == 2 => {
-            let start = (t.data[0] as isize) - 1;
-            let end_inclusive = (t.data[1] as isize) - 1;
-            if start < 0 || end_inclusive < start || end_inclusive as usize >= extent {
+        Value::Tensor(t) if tensor_utils::tensor_element_len(t) == 2 => {
+            let start = t
+                .numeric_value_at(0)
+                .and_then(numeric_dimension_to_usize)
+                .and_then(|index| index.checked_sub(1))
+                .ok_or_else(|| data_error("INVALID_SLICE: range out of bounds"))?;
+            let end_inclusive = t
+                .numeric_value_at(1)
+                .and_then(numeric_dimension_to_usize)
+                .and_then(|index| index.checked_sub(1))
+                .ok_or_else(|| data_error("INVALID_SLICE: range out of bounds"))?;
+            if end_inclusive < start || end_inclusive >= extent {
                 return Err(data_error("INVALID_SLICE: range out of bounds"));
             }
             Ok(DimRange {
-                start: start as usize,
-                end: end_inclusive as usize + 1,
+                start,
+                end: end_inclusive + 1,
             })
         }
         _ => Err(data_error(
@@ -3029,7 +3526,7 @@ async fn load_or_init_chunk(
         shape: chunk_extent.to_vec(),
         data_path: chunk_rel_path(array_name, &object_id),
     };
-    let payload = DataArrayPayload::zeros(dtype.to_string(), chunk_extent.to_vec());
+    let payload = DataArrayPayload::zeros(dtype.to_string(), chunk_extent.to_vec())?;
     Ok((chunk_index.chunks.len(), false, entry, payload))
 }
 
@@ -3046,7 +3543,7 @@ fn value_to_json(value: &Value) -> serde_json::Value {
         Value::String(s) => serde_json::Value::String(s.clone()),
         Value::CharArray(chars) => serde_json::Value::String(chars.data.iter().collect::<String>()),
         Value::Num(n) => serde_json::json!(n),
-        Value::Int(i) => serde_json::json!(i.to_i64()),
+        Value::Int(i) => int_value_to_json(i),
         Value::Bool(b) => serde_json::json!(b),
         _ => serde_json::Value::String(format!("{value:?}")),
     }
@@ -3055,7 +3552,15 @@ fn value_to_json(value: &Value) -> serde_json::Value {
 fn json_to_value(value: &serde_json::Value) -> Value {
     match value {
         serde_json::Value::Bool(b) => Value::Bool(*b),
-        serde_json::Value::Number(n) => Value::Num(n.as_f64().unwrap_or_default()),
+        serde_json::Value::Number(n) => {
+            if let Some(value) = n.as_i64() {
+                Value::Int(IntValue::I64(value))
+            } else if let Some(value) = n.as_u64() {
+                Value::Int(IntValue::U64(value))
+            } else {
+                Value::Num(n.as_f64().unwrap_or_default())
+            }
+        }
         serde_json::Value::String(s) => Value::String(s.clone()),
         serde_json::Value::Array(arr) => {
             let vals = arr.iter().map(json_to_value).collect::<Vec<_>>();
@@ -3076,19 +3581,129 @@ fn json_to_value(value: &serde_json::Value) -> Value {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
+    use runmat_value::IntValue;
+    use runmat_value::{ComplexTensor, IntegerComplexStorage};
+
+    fn tensor_values(tensor: &Tensor) -> Vec<f64> {
+        tensor.materialize_f64()
+    }
+
+    #[test]
+    fn typed_data_slice_indices_do_not_saturate_through_i64() {
+        let extent = usize::MAX;
+        let result = parse_dim_range(&Value::Int(IntValue::U64(u64::MAX)), extent);
+        match usize::try_from(u64::MAX)
+            .ok()
+            .and_then(|value| value.checked_sub(1))
+        {
+            Some(index) if index < extent => {
+                let range = result.expect("index");
+                assert_eq!(range.start, index);
+                assert_eq!(range.end, index + 1);
+            }
+            _ => assert!(result.is_err()),
+        }
+        assert!(parse_dim_range(&Value::Int(IntValue::I64(-1)), extent).is_err());
+    }
+
+    #[test]
+    fn data_shape_and_slice_parsers_read_typed_integer_storage_exactly() {
+        let cases = [
+            runmat_value::IntegerStorage::I8(vec![2, 3]),
+            runmat_value::IntegerStorage::I16(vec![2, 3]),
+            runmat_value::IntegerStorage::I32(vec![2, 3]),
+            runmat_value::IntegerStorage::I64(vec![2, 3]),
+            runmat_value::IntegerStorage::U8(vec![2, 3]),
+            runmat_value::IntegerStorage::U16(vec![2, 3]),
+            runmat_value::IntegerStorage::U32(vec![2, 3]),
+            runmat_value::IntegerStorage::U64(vec![2, 3]),
+        ];
+        for storage in cases {
+            let shape = Tensor::new_integer(storage.clone(), vec![1, 2]).expect("shape");
+            assert_eq!(
+                parse_shape_from_value(&Value::Tensor(shape)).expect("shape"),
+                vec![2, 3]
+            );
+
+            let range = Tensor::new_integer(storage, vec![1, 2]).expect("range");
+            let parsed = parse_dim_range(&Value::Tensor(range), 5).expect("range");
+            assert_eq!(parsed.start, 1);
+            assert_eq!(parsed.end, 3);
+        }
+
+        let negative = Tensor::new_integer(runmat_value::IntegerStorage::I16(vec![-1]), vec![1, 1])
+            .expect("shape");
+        assert!(parse_shape_from_value(&Value::Tensor(negative)).is_err());
+
+        let invalid = Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![u64::MAX, u64::MAX]),
+            vec![1, 2],
+        )
+        .expect("range");
+        assert!(parse_dim_range(&Value::Tensor(invalid), 5).is_err());
+    }
+
+    #[test]
+    fn data_shape_and_slice_floating_parsers_reject_fractional_and_unrepresentable_bounds() {
+        assert!(parse_shape_from_value(&Value::Num(1.5)).is_err());
+        let boundary_shape = parse_shape_from_value(&Value::Num(usize::MAX as f64));
+        if usize::BITS == 64 {
+            assert!(boundary_shape.is_err());
+        } else {
+            assert_eq!(boundary_shape.unwrap(), vec![usize::MAX]);
+        }
+        assert!(parse_shape_from_value(&Value::Num((usize::MAX as f64) + 1.0)).is_err());
+
+        let fractional_shape = Tensor::new(vec![2.0, 3.25], vec![1, 2]).expect("shape");
+        assert!(parse_shape_from_value(&Value::Tensor(fractional_shape)).is_err());
+        let single_shape = Tensor::from_f32(vec![2.0, 3.0], vec![1, 2]).expect("single shape");
+        assert_eq!(
+            parse_shape_from_value(&Value::Tensor(single_shape)).expect("single shape"),
+            vec![2, 3]
+        );
+        let fractional_single_shape =
+            Tensor::from_f32(vec![2.0, 3.25], vec![1, 2]).expect("fractional single shape");
+        assert!(parse_shape_from_value(&Value::Tensor(fractional_single_shape)).is_err());
+
+        assert!(parse_dim_range(&Value::Num(1.5), 5).is_err());
+        let boundary_range = parse_dim_range(&Value::Num(usize::MAX as f64), usize::MAX);
+        if usize::BITS == 64 {
+            assert!(boundary_range.is_err());
+        } else {
+            let parsed = boundary_range.expect("32-bit boundary");
+            assert_eq!(parsed.start, usize::MAX - 1);
+            assert_eq!(parsed.end, usize::MAX);
+        }
+
+        let fractional_range = Tensor::new(vec![1.0, 3.5], vec![1, 2]).expect("range");
+        assert!(parse_dim_range(&Value::Tensor(fractional_range), 5).is_err());
+        let single_range = Tensor::from_f32(vec![2.0, 3.0], vec![1, 2]).expect("single range");
+        let parsed = parse_dim_range(&Value::Tensor(single_range), 5).expect("single range");
+        assert_eq!((parsed.start, parsed.end), (1, 3));
+
+        let too_large_range = Tensor::new(vec![1.0, usize::MAX as f64], vec![1, 2]).expect("range");
+        let tensor_boundary = parse_dim_range(&Value::Tensor(too_large_range), usize::MAX);
+        if usize::BITS == 64 {
+            assert!(tensor_boundary.is_err());
+        } else {
+            let parsed = tensor_boundary.expect("32-bit tensor boundary");
+            assert_eq!(parsed.start, 0);
+            assert_eq!(parsed.end, usize::MAX);
+        }
+    }
     use crate::dispatcher::call_builtin;
     use async_trait::async_trait;
     use axum::extract::{Query, State};
     use axum::http::{HeaderMap, StatusCode};
     use axum::routing::{post, put};
     use axum::{Json, Router};
-    use runmat_builtins::{CellArray, IntegerStorage};
     use runmat_filesystem::data_contract::{
         DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
     };
     use runmat_filesystem::{
         DirEntry, FileHandle, FsMetadata, FsProvider, NativeFsProvider, OpenFlags,
     };
+    use runmat_value::{CellArray, IntegerStorage};
     use serde::Deserialize;
     use std::path::Path;
     use std::sync::{Arc, Mutex, MutexGuard};
@@ -3104,13 +3719,32 @@ mod tests {
     }
 
     #[test]
+    fn attribute_json_preserves_native_integer_text() {
+        for value in [
+            runmat_value::IntValue::I64(i64::MIN),
+            runmat_value::IntValue::U64(u64::MAX),
+        ] {
+            let json = value_to_json(&Value::Int(value.clone()));
+            assert_eq!(json.to_string(), value.decimal_string());
+        }
+    }
+
+    #[test]
+    fn attribute_json_roundtrips_wide_integer_values_without_f64() {
+        for value in [IntValue::I64(i64::MIN), IntValue::U64(u64::MAX)] {
+            let json = value_to_json(&Value::Int(value.clone()));
+            assert_eq!(json_to_value(&json), Value::Int(value));
+        }
+    }
+
+    #[test]
     fn io_data_descriptors_cover_constructor_and_transaction_surface() {
         let data_labels: Vec<&str> = DATA_CREATE_DESCRIPTOR
             .signatures
             .iter()
             .map(|sig| sig.label)
             .collect();
-        assert!(data_labels.contains(&"ds = data.create(path, schema, Name, Value, ...)"));
+        assert!(data_labels.contains(&"ds = data.create(path, schema)"));
 
         let read_labels: Vec<&str> = DATAARRAY_READ_DESCRIPTOR
             .signatures
@@ -3132,7 +3766,452 @@ mod tests {
             .iter()
             .map(|sig| sig.label)
             .collect();
-        assert!(tx_labels.contains(&"tf = DataTransaction.commit(tx, Name, Value, ...)"));
+        assert!(tx_labels.contains(&"tf = DataTransaction.commit(tx, options)"));
+
+        assert_eq!(DATA_CREATE_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(DATAARRAY_READ_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(DATAARRAY_WRITE_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(DATAARRAY_RESIZE_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(DATAARRAY_FILL_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(DATASET_ATTRS_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(DATASET_GET_ATTR_INTEGER_CAPABILITIES.len(), 2);
+        assert_eq!(DATASET_SET_ATTR_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(DATASET_SET_ATTRS_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(DATATX_WRITE_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(DATATX_SET_ATTR_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(DATATX_SET_ATTRS_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(DATATX_RESIZE_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(DATATX_FILL_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(DATATX_CREATE_ARRAY_INTEGER_CAPABILITIES.len(), 1);
+        for capability in [
+            &DATA_CREATE_INTEGER_CAPABILITIES[0],
+            &DATAARRAY_READ_INTEGER_CAPABILITIES[0],
+            &DATAARRAY_WRITE_INTEGER_CAPABILITIES[0],
+            &DATAARRAY_RESIZE_INTEGER_CAPABILITIES[0],
+            &DATAARRAY_FILL_INTEGER_CAPABILITIES[0],
+            &DATASET_ATTRS_INTEGER_CAPABILITIES[0],
+            &DATASET_GET_ATTR_INTEGER_CAPABILITIES[0],
+            &DATASET_GET_ATTR_INTEGER_CAPABILITIES[1],
+            &DATASET_SET_ATTR_INTEGER_CAPABILITIES[0],
+            &DATASET_SET_ATTRS_INTEGER_CAPABILITIES[0],
+            &DATATX_WRITE_INTEGER_CAPABILITIES[0],
+            &DATATX_SET_ATTR_INTEGER_CAPABILITIES[0],
+            &DATATX_SET_ATTRS_INTEGER_CAPABILITIES[0],
+            &DATATX_RESIZE_INTEGER_CAPABILITIES[0],
+            &DATATX_FILL_INTEGER_CAPABILITIES[0],
+            &DATATX_CREATE_ARRAY_INTEGER_CAPABILITIES[0],
+        ] {
+            assert!(capability.inputs.iter().all(|input| input.classes
+                == crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES));
+        }
+    }
+
+    #[test]
+    fn data_create_uses_exact_all_class_schema_controls_and_integer_payloads() {
+        let _serial = serial_test_guard();
+        let _provider = native_provider_guard();
+        let cases = vec![
+            (
+                "int8",
+                IntegerStorage::I8(vec![2, 3]),
+                IntegerStorage::I8(vec![1, 3]),
+                IntegerStorage::I8(vec![0; 6]),
+            ),
+            (
+                "int16",
+                IntegerStorage::I16(vec![2, 3]),
+                IntegerStorage::I16(vec![1, 3]),
+                IntegerStorage::I16(vec![0; 6]),
+            ),
+            (
+                "int32",
+                IntegerStorage::I32(vec![2, 3]),
+                IntegerStorage::I32(vec![1, 3]),
+                IntegerStorage::I32(vec![0; 6]),
+            ),
+            (
+                "int64",
+                IntegerStorage::I64(vec![2, 3]),
+                IntegerStorage::I64(vec![1, 3]),
+                IntegerStorage::I64(vec![0; 6]),
+            ),
+            (
+                "uint8",
+                IntegerStorage::U8(vec![2, 3]),
+                IntegerStorage::U8(vec![1, 3]),
+                IntegerStorage::U8(vec![0; 6]),
+            ),
+            (
+                "uint16",
+                IntegerStorage::U16(vec![2, 3]),
+                IntegerStorage::U16(vec![1, 3]),
+                IntegerStorage::U16(vec![0; 6]),
+            ),
+            (
+                "uint32",
+                IntegerStorage::U32(vec![2, 3]),
+                IntegerStorage::U32(vec![1, 3]),
+                IntegerStorage::U32(vec![0; 6]),
+            ),
+            (
+                "uint64",
+                IntegerStorage::U64(vec![2, 3]),
+                IntegerStorage::U64(vec![1, 3]),
+                IntegerStorage::U64(vec![0; 6]),
+            ),
+        ];
+
+        for (dtype, shape, chunk, expected) in cases {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let path = dir
+                .path()
+                .join(format!("schema-{dtype}.data"))
+                .to_string_lossy()
+                .to_string();
+            let mut meta = StructValue::new();
+            meta.fields
+                .insert("dtype".to_string(), Value::String(dtype.to_string()));
+            meta.fields.insert(
+                "shape".to_string(),
+                Value::Tensor(Tensor::new_integer(shape, vec![1, 2]).expect("shape")),
+            );
+            meta.fields.insert(
+                "chunk".to_string(),
+                Value::Tensor(Tensor::new_integer(chunk, vec![1, 2]).expect("chunk")),
+            );
+            let mut arrays = StructValue::new();
+            arrays
+                .fields
+                .insert("samples".to_string(), Value::Struct(meta));
+            let mut schema = StructValue::new();
+            schema
+                .fields
+                .insert("arrays".to_string(), Value::Struct(arrays));
+
+            let dataset =
+                call_builtin("data.create", &[Value::String(path), Value::Struct(schema)])
+                    .unwrap_or_else(|error| panic!("{dtype}: create failed: {error}"));
+            let array = call_builtin(
+                "Dataset.array",
+                &[dataset, Value::String("samples".to_string())],
+            )
+            .expect("array handle");
+            let Value::Tensor(values) =
+                call_builtin("DataArray.read", &[array]).expect("read zeros")
+            else {
+                panic!("{dtype}: expected tensor");
+            };
+            assert_eq!(values.shape, vec![2, 3], "{dtype}");
+            assert_eq!(values.integer_storage(), Some(&expected), "{dtype}");
+        }
+    }
+
+    #[test]
+    fn data_namespace_lifecycle_rejects_integer_arguments_and_unsupported_extras() {
+        let integer_values = [
+            IntValue::I8(1),
+            IntValue::I16(1),
+            IntValue::I32(1),
+            IntValue::I64(1),
+            IntValue::U8(1),
+            IntValue::U16(1),
+            IntValue::U32(1),
+            IntValue::U64(1),
+        ];
+        for integer in integer_values {
+            let value = Value::Int(integer);
+            for (name, args) in [
+                (
+                    "data.create",
+                    vec![value.clone(), Value::Struct(StructValue::new())],
+                ),
+                ("data.open", vec![value.clone()]),
+                ("data.exists", vec![value.clone()]),
+                ("data.delete", vec![value.clone()]),
+                ("data.inspect", vec![value.clone()]),
+                ("data.list", vec![value.clone()]),
+                (
+                    "data.copy",
+                    vec![value.clone(), Value::String("to.data".to_string())],
+                ),
+                (
+                    "data.copy",
+                    vec![Value::String("from.data".to_string()), value.clone()],
+                ),
+                (
+                    "data.move",
+                    vec![value.clone(), Value::String("to.data".to_string())],
+                ),
+                (
+                    "data.move",
+                    vec![Value::String("from.data".to_string()), value.clone()],
+                ),
+                (
+                    "data.import",
+                    vec![
+                        value.clone(),
+                        Value::String("data".to_string()),
+                        Value::String("source.data".to_string()),
+                    ],
+                ),
+                (
+                    "data.import",
+                    vec![
+                        Value::String("path.data".to_string()),
+                        value.clone(),
+                        Value::String("source.data".to_string()),
+                    ],
+                ),
+                (
+                    "data.import",
+                    vec![
+                        Value::String("path.data".to_string()),
+                        Value::String("data".to_string()),
+                        value.clone(),
+                    ],
+                ),
+                (
+                    "data.export",
+                    vec![
+                        value.clone(),
+                        Value::String("data".to_string()),
+                        Value::String("target.data".to_string()),
+                    ],
+                ),
+                (
+                    "data.export",
+                    vec![
+                        Value::String("path.data".to_string()),
+                        value.clone(),
+                        Value::String("target.data".to_string()),
+                    ],
+                ),
+                (
+                    "data.export",
+                    vec![
+                        Value::String("path.data".to_string()),
+                        Value::String("data".to_string()),
+                        value.clone(),
+                    ],
+                ),
+                ("commit", vec![value]),
+            ] {
+                let error = call_builtin(name, &args).expect_err("expected integer rejection");
+                assert!(!error.message().is_empty(), "{name}");
+            }
+        }
+
+        let error = call_builtin(
+            "data.exists",
+            &[
+                Value::String("missing.data".to_string()),
+                Value::Int(IntValue::U8(1)),
+            ],
+        )
+        .expect_err("fixed documented arity must reject extras");
+        assert!(!error.message().is_empty());
+
+        let error = call_builtin(
+            "DataTransaction.commit",
+            &[Value::Int(IntValue::U8(1)), Value::Int(IntValue::U8(1))],
+        )
+        .expect_err("commit options must be a struct");
+        assert!(error.message().contains("options must be a scalar struct"));
+
+        let error = call_builtin(
+            "DataTransaction.commit",
+            &[
+                Value::Int(IntValue::U8(1)),
+                Value::Struct(StructValue::new()),
+                Value::Struct(StructValue::new()),
+            ],
+        )
+        .expect_err("commit must reject more than one options struct");
+        assert!(error.message().contains("at most one options struct"));
+    }
+
+    #[test]
+    fn dataset_nonattribute_methods_reject_integer_receivers() {
+        for (name, extra) in [
+            ("Dataset.array", Some(Value::String("samples".to_string()))),
+            ("Dataset.arrays", None),
+            ("Dataset.begin", None),
+            (
+                "Dataset.has_array",
+                Some(Value::String("samples".to_string())),
+            ),
+            ("Dataset.id", None),
+            ("Dataset.path", None),
+            ("Dataset.refresh", None),
+            (
+                "Dataset.snapshot",
+                Some(Value::String("checkpoint".to_string())),
+            ),
+            ("Dataset.version", None),
+        ] {
+            let mut args = vec![Value::Int(IntValue::U64(u64::MAX))];
+            args.extend(extra);
+            let error = call_builtin(name, &args).expect_err("method requires a Dataset receiver");
+            assert!(
+                error.message().contains("expected object"),
+                "{name}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn dataset_attributes_keep_exact_integer_values_and_documented_class_boundaries() {
+        let _serial = serial_test_guard();
+        let _provider = native_provider_guard();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir
+            .path()
+            .join("integer-attrs.data")
+            .to_string_lossy()
+            .to_string();
+        let mut array_meta = StructValue::new();
+        array_meta
+            .fields
+            .insert("dtype".to_string(), Value::String("f64".to_string()));
+        array_meta.fields.insert(
+            "shape".to_string(),
+            Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).expect("shape")),
+        );
+        let mut arrays = StructValue::new();
+        arrays
+            .fields
+            .insert("base".to_string(), Value::Struct(array_meta));
+        let mut schema = StructValue::new();
+        schema
+            .fields
+            .insert("arrays".to_string(), Value::Struct(arrays));
+        let ds = call_builtin("data.create", &[Value::String(path), Value::Struct(schema)])
+            .expect("create dataset");
+        let cases = [
+            ("int8", IntValue::I8(i8::MIN), IntValue::I64(i8::MIN as i64)),
+            (
+                "int16",
+                IntValue::I16(i16::MIN),
+                IntValue::I64(i16::MIN as i64),
+            ),
+            (
+                "int32",
+                IntValue::I32(i32::MIN),
+                IntValue::I64(i32::MIN as i64),
+            ),
+            ("int64", IntValue::I64(i64::MIN), IntValue::I64(i64::MIN)),
+            (
+                "uint8",
+                IntValue::U8(u8::MAX),
+                IntValue::I64(u8::MAX as i64),
+            ),
+            (
+                "uint16",
+                IntValue::U16(u16::MAX),
+                IntValue::I64(u16::MAX as i64),
+            ),
+            (
+                "uint32",
+                IntValue::U32(u32::MAX),
+                IntValue::I64(u32::MAX as i64),
+            ),
+            ("uint64", IntValue::U64(u64::MAX), IntValue::U64(u64::MAX)),
+        ];
+
+        let mut bulk = StructValue::new();
+        for (name, source, _) in &cases {
+            call_builtin(
+                "Dataset.set_attr",
+                &[
+                    ds.clone(),
+                    Value::String(format!("direct_{name}")),
+                    Value::Int(source.clone()),
+                ],
+            )
+            .expect("set integer attribute");
+            bulk.fields
+                .insert(format!("bulk_{name}"), Value::Int(source.clone()));
+        }
+        call_builtin("Dataset.set_attrs", &[ds.clone(), Value::Struct(bulk)])
+            .expect("set integer attributes");
+
+        let Value::Struct(attrs) =
+            call_builtin("Dataset.attrs", std::slice::from_ref(&ds)).expect("read attributes")
+        else {
+            panic!("expected attribute struct");
+        };
+        for (name, source, canonical) in cases {
+            let expected = Value::Int(canonical);
+            assert_eq!(
+                call_builtin(
+                    "Dataset.get_attr",
+                    &[ds.clone(), Value::String(format!("direct_{name}"))],
+                )
+                .expect("get integer attribute"),
+                expected,
+                "{name} direct"
+            );
+            assert_eq!(
+                attrs.fields.get(&format!("bulk_{name}")),
+                Some(&expected),
+                "{name} bulk"
+            );
+            assert_eq!(
+                call_builtin(
+                    "Dataset.get_attr",
+                    &[
+                        ds.clone(),
+                        Value::String(format!("missing_{name}")),
+                        Value::Int(source.clone()),
+                    ],
+                )
+                .expect("get integer default"),
+                Value::Int(source),
+                "{name} default"
+            );
+        }
+    }
+
+    #[test]
+    fn data_transaction_lifecycle_methods_reject_integer_receivers() {
+        for (name, extra) in [
+            ("DataTransaction.abort", None),
+            ("DataTransaction.commit", None),
+            (
+                "DataTransaction.delete_array",
+                Some(Value::String("samples".to_string())),
+            ),
+            ("DataTransaction.id", None),
+            ("DataTransaction.status", None),
+        ] {
+            let mut args = vec![Value::Int(IntValue::U64(u64::MAX))];
+            args.extend(extra);
+            let error = call_builtin(name, &args)
+                .expect_err("lifecycle method requires a DataTransaction receiver");
+            assert!(
+                error.message().contains("expected object"),
+                "{name}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn data_array_metadata_accessors_reject_integer_receivers() {
+        for name in [
+            "DataArray.chunk_shape",
+            "DataArray.codec",
+            "DataArray.dtype",
+            "DataArray.name",
+            "DataArray.rank",
+            "DataArray.shape",
+        ] {
+            let error = call_builtin(name, &[Value::Int(IntValue::U64(u64::MAX))])
+                .expect_err("metadata accessor requires a DataArray receiver");
+            assert!(
+                error.message().contains("expected object"),
+                "{name}: {error}"
+            );
+        }
     }
 
     #[derive(Default)]
@@ -3483,11 +4562,7 @@ mod tests {
 
         let ds = call_builtin(
             "data.create",
-            &[
-                Value::String(path.clone()),
-                Value::Struct(schema),
-                Value::Cell(runmat_builtins::CellArray::new(vec![], 1, 0).expect("cell")),
-            ],
+            &[Value::String(path.clone()), Value::Struct(schema)],
         )
         .expect("create dataset");
 
@@ -3508,7 +4583,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(t.shape, vec![2, 2]);
-        assert_eq!(t.data, vec![1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(tensor_values(&t), vec![1.0, 2.0, 3.0, 4.0]);
     }
 
     #[test]
@@ -3537,11 +4612,7 @@ mod tests {
 
         let ds = call_builtin(
             "data.create",
-            &[
-                Value::String(path.clone()),
-                Value::Struct(schema),
-                Value::Cell(CellArray::new(vec![], 1, 0).expect("cell")),
-            ],
+            &[Value::String(path.clone()), Value::Struct(schema)],
         )
         .expect("create dataset");
         let arr = call_builtin(
@@ -3571,7 +4642,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(t.shape, vec![2, 3]);
-        assert_eq!(t.data, vec![10.0, 11.0, 12.0, 13.0, 14.0, 15.0]);
+        assert_eq!(tensor_values(&t), vec![10.0, 11.0, 12.0, 13.0, 14.0, 15.0]);
     }
 
     #[test]
@@ -3608,11 +4679,7 @@ mod tests {
 
         let ds = call_builtin(
             "data.create",
-            &[
-                Value::String(path.clone()),
-                Value::Struct(schema),
-                Value::Cell(CellArray::new(vec![], 1, 0).expect("cell")),
-            ],
+            &[Value::String(path.clone()), Value::Struct(schema)],
         )
         .expect("create dataset");
         let arr = call_builtin(
@@ -3698,11 +4765,7 @@ mod tests {
 
         let ds = call_builtin(
             "data.create",
-            &[
-                Value::String(path.clone()),
-                Value::Struct(schema),
-                Value::Cell(CellArray::new(vec![], 1, 0).expect("cell")),
-            ],
+            &[Value::String(path.clone()), Value::Struct(schema)],
         )
         .expect("create dataset");
         let arr = call_builtin(
@@ -3797,11 +4860,7 @@ mod tests {
 
         let ds = call_builtin(
             "data.create",
-            &[
-                Value::String(path.clone()),
-                Value::Struct(schema),
-                Value::Cell(CellArray::new(vec![], 1, 0).expect("cell")),
-            ],
+            &[Value::String(path.clone()), Value::Struct(schema)],
         )
         .expect("create dataset");
         let arr = call_builtin(
@@ -3893,11 +4952,7 @@ mod tests {
 
         let ds = call_builtin(
             "data.create",
-            &[
-                Value::String(path.clone()),
-                Value::Struct(schema),
-                Value::Cell(CellArray::new(vec![], 1, 0).expect("cell")),
-            ],
+            &[Value::String(path.clone()), Value::Struct(schema)],
         )
         .expect("create dataset");
         let arr = call_builtin(
@@ -3982,11 +5037,7 @@ mod tests {
 
         let ds = call_builtin(
             "data.create",
-            &[
-                Value::String(path.clone()),
-                Value::Struct(schema),
-                Value::Cell(CellArray::new(vec![], 1, 0).expect("cell")),
-            ],
+            &[Value::String(path.clone()), Value::Struct(schema)],
         )
         .expect("create dataset");
 
@@ -4031,16 +5082,10 @@ mod tests {
             &[tx.clone(), Value::String("base".to_string())],
         )
         .expect("delete array in tx");
-        call_builtin("DataTransaction.commit", &[tx]).expect("commit tx");
+        call_builtin("commit", &[tx, Value::Struct(StructValue::new())])
+            .expect("commit tx through alias options form");
 
-        let ds = call_builtin(
-            "data.open",
-            &[
-                Value::String(path),
-                Value::Cell(CellArray::new(vec![], 1, 0).expect("cell")),
-            ],
-        )
-        .expect("open dataset");
+        let ds = call_builtin("data.open", &[Value::String(path)]).expect("open dataset");
         let has_base = call_builtin(
             "Dataset.has_array",
             &[ds.clone(), Value::String("base".to_string())],
@@ -4057,7 +5102,204 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(t.shape, vec![3, 1]);
-        assert_eq!(t.data, vec![7.0, 7.0, 7.0]);
+        assert_eq!(tensor_values(&t), vec![7.0, 7.0, 7.0]);
+    }
+
+    #[test]
+    fn data_transactions_preserve_every_integer_class_and_typed_controls() {
+        let _serial = serial_test_guard();
+        let _provider = native_provider_guard();
+        let cases = vec![
+            (
+                "int8",
+                IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+                IntegerStorage::I8(vec![2, 1]),
+                IntegerStorage::I8(vec![1, 1]),
+                IntegerStorage::I8(vec![1, 2]),
+                IntValue::I8(1),
+                IntValue::I8(i8::MIN),
+            ),
+            (
+                "int16",
+                IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+                IntegerStorage::I16(vec![2, 1]),
+                IntegerStorage::I16(vec![1, 1]),
+                IntegerStorage::I16(vec![1, 2]),
+                IntValue::I16(1),
+                IntValue::I16(i16::MIN),
+            ),
+            (
+                "int32",
+                IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+                IntegerStorage::I32(vec![2, 1]),
+                IntegerStorage::I32(vec![1, 1]),
+                IntegerStorage::I32(vec![1, 2]),
+                IntValue::I32(1),
+                IntValue::I32(i32::MIN),
+            ),
+            (
+                "int64",
+                IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+                IntegerStorage::I64(vec![2, 1]),
+                IntegerStorage::I64(vec![1, 1]),
+                IntegerStorage::I64(vec![1, 2]),
+                IntValue::I64(1),
+                IntValue::I64(i64::MIN),
+            ),
+            (
+                "uint8",
+                IntegerStorage::U8(vec![0, u8::MAX]),
+                IntegerStorage::U8(vec![2, 1]),
+                IntegerStorage::U8(vec![1, 1]),
+                IntegerStorage::U8(vec![1, 2]),
+                IntValue::U8(1),
+                IntValue::U8(u8::MAX),
+            ),
+            (
+                "uint16",
+                IntegerStorage::U16(vec![0, u16::MAX]),
+                IntegerStorage::U16(vec![2, 1]),
+                IntegerStorage::U16(vec![1, 1]),
+                IntegerStorage::U16(vec![1, 2]),
+                IntValue::U16(1),
+                IntValue::U16(u16::MAX),
+            ),
+            (
+                "uint32",
+                IntegerStorage::U32(vec![0, u32::MAX]),
+                IntegerStorage::U32(vec![2, 1]),
+                IntegerStorage::U32(vec![1, 1]),
+                IntegerStorage::U32(vec![1, 2]),
+                IntValue::U32(1),
+                IntValue::U32(u32::MAX),
+            ),
+            (
+                "uint64",
+                IntegerStorage::U64(vec![0, u64::MAX]),
+                IntegerStorage::U64(vec![2, 1]),
+                IntegerStorage::U64(vec![1, 1]),
+                IntegerStorage::U64(vec![1, 2]),
+                IntValue::U64(1),
+                IntValue::U64(u64::MAX),
+            ),
+        ];
+
+        for (dtype, values, shape, chunk, range, one, attribute) in cases {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let path = dir
+                .path()
+                .join(format!("tx-{dtype}.data"))
+                .to_string_lossy()
+                .to_string();
+            let mut base_meta = StructValue::new();
+            base_meta
+                .fields
+                .insert("dtype".to_string(), Value::String("f64".to_string()));
+            base_meta.fields.insert(
+                "shape".to_string(),
+                Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).expect("base shape")),
+            );
+            let mut arrays = StructValue::new();
+            arrays
+                .fields
+                .insert("base".to_string(), Value::Struct(base_meta));
+            let mut schema = StructValue::new();
+            schema
+                .fields
+                .insert("arrays".to_string(), Value::Struct(arrays));
+            let ds = call_builtin("data.create", &[Value::String(path), Value::Struct(schema)])
+                .expect("create dataset");
+            let tx = call_builtin("Dataset.begin", std::slice::from_ref(&ds))
+                .expect("begin transaction");
+
+            let mut meta = StructValue::new();
+            meta.fields
+                .insert("dtype".to_string(), Value::String(dtype.to_string()));
+            meta.fields.insert(
+                "shape".to_string(),
+                Value::Tensor(Tensor::new_integer(shape.clone(), vec![1, 2]).expect("shape")),
+            );
+            meta.fields.insert(
+                "chunk".to_string(),
+                Value::Tensor(Tensor::new_integer(chunk, vec![1, 2]).expect("chunk")),
+            );
+            call_builtin(
+                "DataTransaction.create_array",
+                &[
+                    tx.clone(),
+                    Value::String("typed".to_string()),
+                    Value::Struct(meta),
+                ],
+            )
+            .expect("queue create");
+            call_builtin(
+                "DataTransaction.resize",
+                &[
+                    tx.clone(),
+                    Value::String("typed".to_string()),
+                    Value::Tensor(Tensor::new_integer(shape, vec![1, 2]).expect("resize shape")),
+                ],
+            )
+            .expect("queue resize");
+            call_builtin(
+                "DataTransaction.fill",
+                &[
+                    tx.clone(),
+                    Value::String("typed".to_string()),
+                    Value::Int(attribute.clone()),
+                ],
+            )
+            .expect("queue fill");
+            let slice = Value::Cell(
+                CellArray::new(
+                    vec![
+                        Value::Tensor(Tensor::new_integer(range, vec![1, 2]).expect("row range")),
+                        Value::Int(one),
+                    ],
+                    1,
+                    2,
+                )
+                .expect("slice"),
+            );
+            call_builtin(
+                "DataTransaction.write",
+                &[
+                    tx.clone(),
+                    Value::String("typed".to_string()),
+                    slice,
+                    Value::Tensor(Tensor::new_integer(values.clone(), vec![2, 1]).expect("values")),
+                ],
+            )
+            .expect("queue write");
+            call_builtin(
+                "DataTransaction.set_attr",
+                &[
+                    tx.clone(),
+                    Value::String(format!("{dtype}_one")),
+                    Value::Int(attribute.clone()),
+                ],
+            )
+            .expect("queue attribute");
+            let mut attrs = StructValue::new();
+            attrs
+                .fields
+                .insert(format!("{dtype}_many"), Value::Int(attribute));
+            call_builtin(
+                "DataTransaction.set_attrs",
+                &[tx.clone(), Value::Struct(attrs)],
+            )
+            .expect("queue attributes");
+            call_builtin("DataTransaction.commit", &[tx]).expect("commit transaction");
+
+            let arr = call_builtin("Dataset.array", &[ds, Value::String("typed".to_string())])
+                .expect("open typed array");
+            let Value::Tensor(read_back) =
+                call_builtin("DataArray.read", &[arr]).expect("read typed array")
+            else {
+                panic!("expected tensor");
+            };
+            assert_eq!(read_back.integer_storage(), Some(&values), "{dtype}");
+        }
     }
 
     #[test]
@@ -4065,17 +5307,57 @@ mod tests {
         let _serial = serial_test_guard();
         let _provider = native_provider_guard();
         let cases = vec![
-            ("int8", IntegerStorage::I8(vec![i8::MIN, i8::MAX])),
-            ("int16", IntegerStorage::I16(vec![i16::MIN, i16::MAX])),
-            ("int32", IntegerStorage::I32(vec![i32::MIN, i32::MAX])),
-            ("int64", IntegerStorage::I64(vec![i64::MIN, i64::MAX])),
-            ("uint8", IntegerStorage::U8(vec![0, u8::MAX])),
-            ("uint16", IntegerStorage::U16(vec![0, u16::MAX])),
-            ("uint32", IntegerStorage::U32(vec![0, u32::MAX])),
-            ("uint64", IntegerStorage::U64(vec![0, u64::MAX])),
+            (
+                "int8",
+                IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+                IntValue::I8(i8::MIN),
+                IntegerStorage::I8(vec![i8::MIN; 2]),
+            ),
+            (
+                "int16",
+                IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+                IntValue::I16(i16::MIN),
+                IntegerStorage::I16(vec![i16::MIN; 2]),
+            ),
+            (
+                "int32",
+                IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+                IntValue::I32(i32::MIN),
+                IntegerStorage::I32(vec![i32::MIN; 2]),
+            ),
+            (
+                "int64",
+                IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+                IntValue::I64(i64::MIN),
+                IntegerStorage::I64(vec![i64::MIN; 2]),
+            ),
+            (
+                "uint8",
+                IntegerStorage::U8(vec![0, u8::MAX]),
+                IntValue::U8(u8::MAX),
+                IntegerStorage::U8(vec![u8::MAX; 2]),
+            ),
+            (
+                "uint16",
+                IntegerStorage::U16(vec![0, u16::MAX]),
+                IntValue::U16(u16::MAX),
+                IntegerStorage::U16(vec![u16::MAX; 2]),
+            ),
+            (
+                "uint32",
+                IntegerStorage::U32(vec![0, u32::MAX]),
+                IntValue::U32(u32::MAX),
+                IntegerStorage::U32(vec![u32::MAX; 2]),
+            ),
+            (
+                "uint64",
+                IntegerStorage::U64(vec![0, u64::MAX]),
+                IntValue::U64(u64::MAX),
+                IntegerStorage::U64(vec![u64::MAX; 2]),
+            ),
         ];
 
-        for (dtype, storage) in cases {
+        for (dtype, storage, fill, filled_storage) in cases {
             let dir = tempfile::tempdir().expect("tempdir");
             let path = dir
                 .path()
@@ -4103,26 +5385,33 @@ mod tests {
                 .fields
                 .insert("arrays".to_string(), Value::Struct(arrays));
 
-            let ds = call_builtin(
-                "data.create",
-                &[
-                    Value::String(path),
-                    Value::Struct(schema),
-                    Value::Cell(CellArray::new(vec![], 1, 0).expect("cell")),
-                ],
-            )
-            .expect("create dataset");
+            let ds = call_builtin("data.create", &[Value::String(path), Value::Struct(schema)])
+                .expect("create dataset");
             let arr = call_builtin("Dataset.array", &[ds, Value::String("samples".to_string())])
                 .expect("array");
             let input = Tensor::new_integer(storage.clone(), vec![2, 1]).expect("integer tensor");
             call_builtin("DataArray.write", &[arr.clone(), Value::Tensor(input)])
                 .expect("write integer array");
 
-            let Value::Tensor(read_back) = call_builtin("DataArray.read", &[arr]).expect("read")
+            let Value::Tensor(read_back) =
+                call_builtin("DataArray.read", std::slice::from_ref(&arr)).expect("read")
             else {
                 panic!("expected tensor");
             };
             assert_eq!(read_back.integer_storage(), Some(&storage), "{dtype}");
+
+            call_builtin("DataArray.fill", &[arr.clone(), Value::Int(fill)])
+                .expect("fill integer array");
+            let Value::Tensor(read_back) =
+                call_builtin("DataArray.read", &[arr]).expect("read filled array")
+            else {
+                panic!("expected tensor");
+            };
+            assert_eq!(
+                read_back.integer_storage(),
+                Some(&filled_storage),
+                "{dtype} fill"
+            );
         }
     }
 
@@ -4152,15 +5441,8 @@ mod tests {
         schema
             .fields
             .insert("arrays".to_string(), Value::Struct(arrays));
-        let ds = call_builtin(
-            "data.create",
-            &[
-                Value::String(path),
-                Value::Struct(schema),
-                Value::Cell(CellArray::new(vec![], 1, 0).expect("cell")),
-            ],
-        )
-        .expect("create dataset");
+        let ds = call_builtin("data.create", &[Value::String(path), Value::Struct(schema)])
+            .expect("create dataset");
         let arr = call_builtin(
             "Dataset.array",
             &[ds.clone(), Value::String("samples".to_string())],
@@ -4171,14 +5453,14 @@ mod tests {
             "DataArray.fill",
             &[
                 arr.clone(),
-                Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+                Value::Int(runmat_value::IntValue::U64(u64::MAX)),
             ],
         )
         .expect("fill");
         let slice = Value::Cell(
             CellArray::new(
                 vec![
-                    Value::Int(runmat_builtins::IntValue::I32(1)),
+                    Value::Int(runmat_value::IntValue::I32(1)),
                     Value::String(":".to_string()),
                 ],
                 1,
@@ -4203,7 +5485,7 @@ mod tests {
             &[
                 tx.clone(),
                 Value::String("samples".to_string()),
-                Value::Int(runmat_builtins::IntValue::U64(1_u64 << 63)),
+                Value::Int(runmat_value::IntValue::U64(1_u64 << 63)),
             ],
         )
         .expect("queue transaction fill");
@@ -4215,6 +5497,98 @@ mod tests {
         assert_eq!(
             read_back.integer_storage(),
             Some(&IntegerStorage::U64(vec![1_u64 << 63; 4]))
+        );
+    }
+
+    #[test]
+    fn paired_complex_uint64_data_array_chunk_and_slice_paths_remain_exact() {
+        let _serial = serial_test_guard();
+        let _provider = native_provider_guard();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir
+            .path()
+            .join("complex-uint64.data")
+            .to_string_lossy()
+            .to_string();
+        let mut array_meta = StructValue::new();
+        array_meta
+            .fields
+            .insert("dtype".to_string(), Value::String("uint64".to_string()));
+        array_meta.fields.insert(
+            "shape".to_string(),
+            Value::Tensor(Tensor::new(vec![2.0, 2.0], vec![1, 2]).expect("shape")),
+        );
+        array_meta.fields.insert(
+            "chunk".to_string(),
+            Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).expect("chunk")),
+        );
+        let mut arrays = StructValue::new();
+        arrays
+            .fields
+            .insert("samples".to_string(), Value::Struct(array_meta));
+        let mut schema = StructValue::new();
+        schema
+            .fields
+            .insert("arrays".to_string(), Value::Struct(arrays));
+        let ds = call_builtin("data.create", &[Value::String(path), Value::Struct(schema)])
+            .expect("create dataset");
+        let arr = call_builtin("Dataset.array", &[ds, Value::String("samples".to_string())])
+            .expect("array");
+        let wide = (1_u64 << 53) + 1;
+        let initial_storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![wide, u64::MAX, 3, 4]),
+            IntegerStorage::U64(vec![u64::MAX, wide, 5, 6]),
+        )
+        .expect("initial paired storage");
+        let initial = ComplexTensor::new_integer(initial_storage.clone(), vec![2, 2])
+            .expect("initial paired tensor");
+        call_builtin(
+            "DataArray.write",
+            &[arr.clone(), Value::ComplexTensor(initial)],
+        )
+        .expect("write paired array");
+
+        let Value::ComplexTensor(read_back) =
+            call_builtin("DataArray.read", std::slice::from_ref(&arr)).expect("read paired array")
+        else {
+            panic!("expected paired tensor");
+        };
+        assert_eq!(read_back.integer_storage(), Some(&initial_storage));
+
+        let slice = Value::Cell(
+            CellArray::new(
+                vec![Value::Int(IntValue::I32(1)), Value::String(":".to_string())],
+                1,
+                2,
+            )
+            .expect("slice"),
+        );
+        let replacement_storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![1_u64 << 63, u64::MAX - 1]),
+            IntegerStorage::U64(vec![u64::MAX - 2, 1_u64 << 63]),
+        )
+        .expect("replacement storage");
+        let replacement = ComplexTensor::new_integer(replacement_storage, vec![1, 2])
+            .expect("replacement tensor");
+        call_builtin(
+            "DataArray.write",
+            &[arr.clone(), slice, Value::ComplexTensor(replacement)],
+        )
+        .expect("write paired slice");
+
+        let Value::ComplexTensor(read_back) =
+            call_builtin("DataArray.read", &[arr]).expect("read paired slice result")
+        else {
+            panic!("expected paired tensor");
+        };
+        let storage = read_back.integer_storage().expect("paired storage");
+        assert_eq!(
+            storage.real,
+            IntegerStorage::U64(vec![1_u64 << 63, u64::MAX, u64::MAX - 1, 4])
+        );
+        assert_eq!(
+            storage.imag,
+            IntegerStorage::U64(vec![u64::MAX - 2, wide, 1_u64 << 63, 6])
         );
     }
 }

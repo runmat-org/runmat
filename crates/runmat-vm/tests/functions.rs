@@ -5,12 +5,26 @@ use std::convert::TryFrom;
 use test_helpers::compile_source;
 use test_helpers::interpret;
 
-fn execute_source(source: &str) -> Vec<runmat_builtins::Value> {
+struct ProviderSelectionCleanup;
+
+impl Drop for ProviderSelectionCleanup {
+    fn drop(&mut self) {
+        runmat_accelerate_api::set_thread_provider(None);
+        runmat_accelerate_api::clear_provider();
+    }
+}
+
+fn execute_source(source: &str) -> Vec<runmat_value::Value> {
     let bytecode = compile_source(source).expect("compile source");
     interpret(&bytecode).expect("execute bytecode")
 }
 
-fn execute_source_with_catalog(source: &str, name: &str) -> Vec<runmat_builtins::Value> {
+fn execute_source_with_extensions(source: &str) -> Vec<runmat_value::Value> {
+    let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    execute_source(source)
+}
+
+fn execute_source_with_catalog(source: &str, name: &str) -> Vec<runmat_value::Value> {
     let bytecode = compile_source(source).expect("compile source");
     let source_id = bytecode.source_id.unwrap_or(runmat_hir::SourceId(0));
     let source_text = source.to_string();
@@ -25,41 +39,48 @@ fn execute_source_with_catalog(source: &str, name: &str) -> Vec<runmat_builtins:
 
 fn execute_source_result(
     source: &str,
-) -> Result<Vec<runmat_builtins::Value>, Box<runmat_runtime::RuntimeError>> {
+) -> Result<Vec<runmat_value::Value>, Box<runmat_runtime::RuntimeError>> {
     let bytecode = compile_source(source).expect("compile source");
     interpret(&bytecode).map_err(Box::new)
 }
 
-fn has_num(values: &[runmat_builtins::Value], expected: f64) -> bool {
-    values
-        .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - expected).abs() < 1e-9))
+fn execute_source_result_with_extensions(
+    source: &str,
+) -> Result<Vec<runmat_value::Value>, Box<runmat_runtime::RuntimeError>> {
+    let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    execute_source_result(source)
 }
 
-fn numeric_workspace_value(values: &[runmat_builtins::Value], expected: f64) -> bool {
+fn has_num(values: &[runmat_value::Value], expected: f64) -> bool {
+    values
+        .iter()
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - expected).abs() < 1e-9))
+}
+
+fn numeric_workspace_value(values: &[runmat_value::Value], expected: f64) -> bool {
     has_num(values, expected)
 }
 
-fn has_object_class(values: &[runmat_builtins::Value], class_name: &str) -> bool {
+fn has_object_class(values: &[runmat_value::Value], class_name: &str) -> bool {
     values.iter().any(|v| match v {
-        runmat_builtins::Value::Object(obj) => obj.class_name == class_name,
-        runmat_builtins::Value::HandleObject(obj) => obj.class_name == class_name,
+        runmat_value::Value::Object(obj) => obj.class_name == class_name,
+        runmat_value::Value::HandleObject(obj) => obj.class_name == class_name,
         _ => false,
     })
 }
 
-fn has_class_ref(values: &[runmat_builtins::Value], class_name: &str) -> bool {
+fn has_class_ref(values: &[runmat_value::Value], class_name: &str) -> bool {
     values
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::ClassRef(name) if name == class_name))
+        .any(|v| matches!(v, runmat_value::Value::ClassRef(name) if name == class_name))
 }
 
-fn has_numeric_tensor(values: &[runmat_builtins::Value], expected: &[f64]) -> bool {
+fn has_numeric_tensor(values: &[runmat_value::Value], expected: &[f64]) -> bool {
     values.iter().any(|value| match value {
-        runmat_builtins::Value::Tensor(tensor) => {
-            tensor.data.len() == expected.len()
+        runmat_value::Value::Tensor(tensor) => {
+            tensor.materialize_f64().len() == expected.len()
                 && tensor
-                    .data
+                    .materialize_f64()
                     .iter()
                     .zip(expected)
                     .all(|(actual, expected)| (*actual - *expected).abs() < 1e-9)
@@ -68,22 +89,22 @@ fn has_numeric_tensor(values: &[runmat_builtins::Value], expected: &[f64]) -> bo
     })
 }
 
-fn cell_char_row_values(value: &runmat_builtins::Value) -> Option<((usize, usize), Vec<String>)> {
-    let runmat_builtins::Value::Cell(cell) = value else {
+fn cell_char_row_values(value: &runmat_value::Value) -> Option<((usize, usize), Vec<String>)> {
+    let runmat_value::Value::Cell(cell) = value else {
         return None;
     };
     let values = cell
         .data
         .iter()
         .map(|entry| match entry {
-            runmat_builtins::Value::CharArray(chars) => Some(chars.data.iter().collect::<String>()),
+            runmat_value::Value::CharArray(chars) => Some(chars.data.iter().collect::<String>()),
             _ => None,
         })
         .collect::<Option<Vec<_>>>()?;
     Some(((cell.rows, cell.cols), values))
 }
 
-fn has_cell_char_row(values: &[runmat_builtins::Value], expected: &[&str]) -> bool {
+fn has_cell_char_row(values: &[runmat_value::Value], expected: &[&str]) -> bool {
     values.iter().any(|value| {
         cell_char_row_values(value).is_some_and(|((rows, cols), actual)| {
             rows == 1
@@ -98,16 +119,16 @@ fn has_cell_char_row(values: &[runmat_builtins::Value], expected: &[&str]) -> bo
 }
 
 fn has_object_num_property(
-    values: &[runmat_builtins::Value],
+    values: &[runmat_value::Value],
     class_name: &str,
     property_name: &str,
     expected: f64,
 ) -> bool {
     values.iter().any(|v| match v {
-        runmat_builtins::Value::Object(obj) if obj.class_name == class_name => {
+        runmat_value::Value::Object(obj) if obj.class_name == class_name => {
             matches!(
                 obj.properties.get(property_name),
-                Some(runmat_builtins::Value::Num(n)) if (*n - expected).abs() < 1e-9
+                Some(runmat_value::Value::Num(n)) if (*n - expected).abs() < 1e-9
             )
         }
         _ => false,
@@ -115,16 +136,16 @@ fn has_object_num_property(
 }
 
 fn has_object_string_property(
-    values: &[runmat_builtins::Value],
+    values: &[runmat_value::Value],
     class_name: &str,
     property_name: &str,
     expected: &str,
 ) -> bool {
     values.iter().any(|v| match v {
-        runmat_builtins::Value::Object(obj) if obj.class_name == class_name => {
+        runmat_value::Value::Object(obj) if obj.class_name == class_name => {
             matches!(
                 obj.properties.get(property_name),
-                Some(runmat_builtins::Value::String(s)) if s == expected
+                Some(runmat_value::Value::String(s)) if s == expected
             )
         }
         _ => false,
@@ -343,12 +364,88 @@ fn argument_validation_helpers_are_callable_builtins() {
     assert!(
         values
             .iter()
-            .any(|v| matches!(v, runmat_builtins::Value::Bool(true))),
+            .any(|v| matches!(v, runmat_value::Value::Bool(true))),
         "expected isvarname true value, got {values:?}"
     );
     assert!(
         has_num(&values, 4.0),
         "expected namedargs2cell numel, got {values:?}"
+    );
+}
+
+#[test]
+fn arguments_block_validators_preserve_wide_integer_values() {
+    let values = execute_source(
+        r#"
+        x = uint64(9007199254740992) + uint64(1);
+        y = checked(x);
+        function out = checked(value)
+            arguments
+                value {mustBeInteger, mustBePositive, mustBeNonzero, mustBeGreaterThan(9007199254740992)}
+            end
+            out = value;
+        end
+        "#,
+    );
+    assert!(
+        values.iter().any(|value| matches!(
+            value,
+            runmat_value::Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_993))
+        )),
+        "expected exact uint64 output, got {values:?}"
+    );
+}
+
+#[test]
+fn arguments_block_in_range_requires_matching_numeric_classes() {
+    let err = execute_source_result(
+        r#"
+        x = uint64(3);
+        y = checked(x);
+        function out = checked(value)
+            arguments
+                value {mustBeInRange(1, 5)}
+            end
+            out = value;
+        end
+        "#,
+    )
+    .expect_err("double bounds must not silently validate uint64 data");
+    assert!(
+        err.message().contains("same numeric class"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn arguments_block_resident_integer_validation_preserves_source_ownership() {
+    runmat_accelerate::simple_provider::register_inprocess_provider();
+    let _provider_cleanup = ProviderSelectionCleanup;
+    let provider = runmat_accelerate_api::provider().expect("test provider");
+    let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    execute_source(
+        r#"
+        x = uint64(9007199254740993);
+        g = gpuArray(x);
+        y = checked(g);
+        if ~isgpuarray(y) || gather(y) ~= x
+            error('resident validator changed the source');
+        end
+        function out = checked(value)
+            arguments
+                value {mustBePositive, mustBeNonzero}
+            end
+            out = value;
+        end
+        "#,
+    );
+    drop(_provider);
+    runmat_accelerate_api::set_thread_provider(None);
+    runmat_accelerate_api::clear_provider();
+    assert!(
+        runmat_accelerate_api::provider().is_none(),
+        "resident validator test must restore the active provider"
     );
 }
 
@@ -514,10 +611,9 @@ fn unresolved_external_function_handle_multi_output_feval_fails_without_legacy_f
 
 #[test]
 fn unresolved_external_function_handle_expand_feval_fails_without_legacy_fallback() {
-    let err = execute_source_result(
-        "h = @definitely_missing_callback; C = deal(1,2); y = feval(h, C{:});",
-    )
-    .expect_err("unresolved external expanded callback should fail");
+    let err =
+        execute_source_result("h = @definitely_missing_callback; C = {1,2}; y = feval(h, C{:});")
+            .expect_err("unresolved external expanded callback should fail");
     assert_eq!(
         err.identifier(),
         Some("RunMat:UndefinedFunction"),
@@ -528,9 +624,8 @@ fn unresolved_external_function_handle_expand_feval_fails_without_legacy_fallbac
 
 #[test]
 fn unresolved_external_function_handle_expand_zero_output_feval_fails_without_legacy_fallback() {
-    let err =
-        execute_source_result("h = @definitely_missing_callback; C = deal(1,2); feval(h, C{:});")
-            .expect_err("unresolved external expanded callback should fail");
+    let err = execute_source_result("h = @definitely_missing_callback; C = {1,2}; feval(h, C{:});")
+        .expect_err("unresolved external expanded callback should fail");
     assert_eq!(
         err.identifier(),
         Some("RunMat:UndefinedFunction"),
@@ -542,7 +637,7 @@ fn unresolved_external_function_handle_expand_zero_output_feval_fails_without_le
 #[test]
 fn unresolved_external_function_handle_expand_multi_output_feval_fails_without_legacy_fallback() {
     let err = execute_source_result(
-        "h = @definitely_missing_callback; C = deal(1,2); [a,b] = feval(h, C{:});",
+        "h = @definitely_missing_callback; C = {1,2}; [a,b] = feval(h, C{:});",
     )
     .expect_err("unresolved external expanded callback should fail");
     assert_eq!(
@@ -615,7 +710,7 @@ fn unresolved_qualified_external_handle_multi_output_feval_uses_typed_instructio
 
 #[test]
 fn unresolved_qualified_external_handle_expand_zero_output_feval_uses_typed_instruction() {
-    let source = "h = @pkg.remote_inc; C = deal(1,2); feval(h, C{:});";
+    let source = "h = @pkg.remote_inc; C = {1,2}; feval(h, C{:});";
     let bytecode = compile_source(source)
         .expect("qualified external handle expanded zero-output feval source should compile");
     assert!(bytecode.instructions.iter().any(
@@ -638,7 +733,7 @@ fn unresolved_qualified_external_handle_expand_zero_output_feval_uses_typed_inst
 
 #[test]
 fn unresolved_qualified_external_handle_expand_feval_uses_typed_instruction() {
-    let source = "h = @pkg.remote_inc; C = deal(1,2); y = feval(h, C{:});";
+    let source = "h = @pkg.remote_inc; C = {1,2}; y = feval(h, C{:});";
     let bytecode = compile_source(source)
         .expect("qualified external handle expanded feval source should compile");
     assert!(bytecode.instructions.iter().any(
@@ -660,7 +755,7 @@ fn unresolved_qualified_external_handle_expand_feval_uses_typed_instruction() {
 
 #[test]
 fn unresolved_qualified_external_handle_expand_multi_output_feval_uses_typed_instruction() {
-    let source = "h = @pkg.remote_inc; C = deal(1,2); [a,b] = feval(h, C{:});";
+    let source = "h = @pkg.remote_inc; C = {1,2}; [a,b] = feval(h, C{:});";
     let bytecode = compile_source(source)
         .expect("qualified external handle expanded multi-output feval source should compile");
     assert!(bytecode.instructions.iter().any(
@@ -745,7 +840,7 @@ fn unresolved_nested_qualified_external_handle_multi_output_feval_uses_typed_ins
 
 #[test]
 fn unresolved_nested_qualified_external_handle_expand_zero_output_feval_uses_typed_instruction() {
-    let source = "h = @pkg.sub.remote; C = deal(1,2); feval(h, C{:});";
+    let source = "h = @pkg.sub.remote; C = {1,2}; feval(h, C{:});";
     let bytecode = compile_source(source)
         .expect("nested qualified external handle expanded zero-output feval compiles");
     assert!(bytecode.instructions.iter().any(
@@ -769,7 +864,7 @@ fn unresolved_nested_qualified_external_handle_expand_zero_output_feval_uses_typ
 
 #[test]
 fn unresolved_nested_qualified_external_handle_expand_single_output_feval_uses_typed_instruction() {
-    let source = "h = @pkg.sub.remote; C = deal(1,2); y = feval(h, C{:});";
+    let source = "h = @pkg.sub.remote; C = {1,2}; y = feval(h, C{:});";
     let bytecode = compile_source(source)
         .expect("nested qualified external handle expanded single-output feval compiles");
     assert!(bytecode.instructions.iter().any(
@@ -793,7 +888,7 @@ fn unresolved_nested_qualified_external_handle_expand_single_output_feval_uses_t
 
 #[test]
 fn unresolved_nested_qualified_external_handle_expand_feval_uses_typed_instruction() {
-    let source = "h = @pkg.sub.remote; C = deal(1,2); [a,b] = feval(h, C{:});";
+    let source = "h = @pkg.sub.remote; C = {1,2}; [a,b] = feval(h, C{:});";
     let bytecode =
         compile_source(source).expect("nested qualified external handle expanded feval compiles");
     assert!(bytecode.instructions.iter().any(
@@ -882,7 +977,7 @@ fn unresolved_qualified_external_handle_multi_output_direct_call_uses_typed_inst
 
 #[test]
 fn unresolved_qualified_external_handle_expand_zero_output_direct_call_uses_typed_instruction() {
-    let source = "h = @pkg.remote_inc; C = deal(1,2); h(C{:});";
+    let source = "h = @pkg.remote_inc; C = {1,2}; h(C{:});";
     let bytecode = compile_source(source)
         .expect("qualified external handle expanded zero-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
@@ -905,7 +1000,7 @@ fn unresolved_qualified_external_handle_expand_zero_output_direct_call_uses_type
 
 #[test]
 fn unresolved_qualified_external_handle_expand_direct_call_uses_typed_instruction() {
-    let source = "h = @pkg.remote_inc; C = deal(1,2); y = h(C{:});";
+    let source = "h = @pkg.remote_inc; C = {1,2}; y = h(C{:});";
     let bytecode =
         compile_source(source).expect("qualified external handle expanded direct call compiles");
     assert!(bytecode.instructions.iter().any(
@@ -928,7 +1023,7 @@ fn unresolved_qualified_external_handle_expand_direct_call_uses_typed_instructio
 
 #[test]
 fn unresolved_qualified_external_handle_expand_multi_output_direct_call_uses_typed_instruction() {
-    let source = "h = @pkg.remote_inc; C = deal(1,2); [a,b] = h(C{:});";
+    let source = "h = @pkg.remote_inc; C = {1,2}; [a,b] = h(C{:});";
     let bytecode = compile_source(source)
         .expect("qualified external handle expanded multi-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
@@ -1021,7 +1116,7 @@ fn unresolved_nested_qualified_external_handle_multi_output_direct_call_uses_typ
 #[test]
 fn unresolved_nested_qualified_external_handle_expand_zero_output_direct_call_uses_typed_instruction(
 ) {
-    let source = "h = @pkg.sub.remote; C = deal(1,2); h(C{:});";
+    let source = "h = @pkg.sub.remote; C = {1,2}; h(C{:});";
     let bytecode = compile_source(source)
         .expect("nested qualified external handle expanded zero-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
@@ -1045,7 +1140,7 @@ fn unresolved_nested_qualified_external_handle_expand_zero_output_direct_call_us
 
 #[test]
 fn unresolved_nested_qualified_external_handle_expand_direct_call_uses_typed_instruction() {
-    let source = "h = @pkg.sub.remote; C = deal(1,2); y = h(C{:});";
+    let source = "h = @pkg.sub.remote; C = {1,2}; y = h(C{:});";
     let bytecode = compile_source(source)
         .expect("nested qualified external handle expanded direct call compiles");
     assert!(bytecode.instructions.iter().any(
@@ -1069,7 +1164,7 @@ fn unresolved_nested_qualified_external_handle_expand_direct_call_uses_typed_ins
 #[test]
 fn unresolved_nested_qualified_external_handle_expand_multi_output_direct_call_uses_typed_instruction(
 ) {
-    let source = "h = @pkg.sub.remote; C = deal(1,2); [a,b] = h(C{:});";
+    let source = "h = @pkg.sub.remote; C = {1,2}; [a,b] = h(C{:});";
     let bytecode = compile_source(source)
         .expect("nested qualified external handle expanded multi-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
@@ -1194,7 +1289,7 @@ fn unresolved_qualified_direct_call_multi_output_uses_external_boundary_typed_in
 
 #[test]
 fn unresolved_qualified_direct_call_expand_zero_output_uses_external_boundary_typed_instruction() {
-    let source = "C = deal(1,2); pkg.remote_inc(C{:});";
+    let source = "C = {1,2}; pkg.remote_inc(C{:});";
     let bytecode = compile_source(source)
         .expect("qualified expanded zero-output direct call source should compile");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
@@ -1227,7 +1322,7 @@ fn unresolved_qualified_direct_call_expand_zero_output_uses_external_boundary_ty
 
 #[test]
 fn unresolved_qualified_direct_call_expand_multi_output_uses_external_boundary_typed_instruction() {
-    let source = "C = deal(1,2); [a,b] = pkg.remote_inc(C{:});";
+    let source = "C = {1,2}; [a,b] = pkg.remote_inc(C{:});";
     let bytecode = compile_source(source)
         .expect("qualified expanded multi-output direct call source should compile");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
@@ -1354,7 +1449,7 @@ fn unresolved_nested_qualified_direct_call_multi_output_uses_external_boundary_t
 #[test]
 fn unresolved_nested_qualified_direct_call_expand_zero_output_uses_external_boundary_typed_instruction(
 ) {
-    let source = "C = deal(1,2); pkg.sub.remote(C{:});";
+    let source = "C = {1,2}; pkg.sub.remote(C{:});";
     let bytecode = compile_source(source)
         .expect("nested qualified expanded zero-output direct call source should compile");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
@@ -1389,7 +1484,7 @@ fn unresolved_nested_qualified_direct_call_expand_zero_output_uses_external_boun
 #[test]
 fn unresolved_nested_qualified_direct_call_expand_single_output_uses_external_boundary_typed_instruction(
 ) {
-    let source = "C = deal(1,2); a = pkg.sub.remote(C{:});";
+    let source = "C = {1,2}; a = pkg.sub.remote(C{:});";
     let bytecode = compile_source(source)
         .expect("nested qualified expanded single-output direct call source should compile");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
@@ -1424,7 +1519,7 @@ fn unresolved_nested_qualified_direct_call_expand_single_output_uses_external_bo
 #[test]
 fn unresolved_nested_qualified_direct_call_expand_multi_output_uses_external_boundary_typed_instruction(
 ) {
-    let source = "C = deal(1,2); [a,b] = pkg.sub.remote(C{:});";
+    let source = "C = {1,2}; [a,b] = pkg.sub.remote(C{:});";
     let bytecode = compile_source(source)
         .expect("nested qualified expanded multi-output direct call source should compile");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
@@ -1616,7 +1711,7 @@ fn nargin_nargout_in_user_functions() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-3.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-3.0).abs()<1e-9)));
 
     // Multi-output context: nargout seen inside should match requested outs
     let program2 = r#"
@@ -1629,10 +1724,10 @@ fn nargin_nargout_in_user_functions() {
     let vars2 = execute_source(program2);
     assert!(vars2
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-1.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-1.0).abs()<1e-9)));
     assert!(vars2
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-2.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-2.0).abs()<1e-9)));
 }
 
 #[test]
@@ -1648,7 +1743,7 @@ fn narginchk_nargoutchk_validate_function_arity() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-4.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-4.0).abs()<1e-9)));
 }
 
 #[test]
@@ -1681,6 +1776,92 @@ fn dynamic_workspace_evalin_caller_from_function_targets_vm_script_workspace() {
 }
 
 #[test]
+fn assignin_compiled_transfer_preserves_all_integer_classes_exactly() {
+    let vars = execute_source(
+        "assignin('base','ai_i8',int8([-128 127])); assignin('base','ai_i16',int16([-32768 32767])); assignin('base','ai_i32',int32([-2147483648 2147483647])); assignin('base','ai_i64',int64([-7 9])); assignin('base','ai_u8',uint8([0 255])); assignin('base','ai_u16',uint16([0 65535])); assignin('base','ai_u32',uint32([0 4294967295])); base = uint64(9007199254740992); assignin('base','ai_u64',base + uint64([1 2]));",
+    );
+    for expected in [
+        runmat_value::IntegerStorage::I8(vec![-128, 127]),
+        runmat_value::IntegerStorage::I16(vec![-32768, 32767]),
+        runmat_value::IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+        runmat_value::IntegerStorage::I64(vec![-7, 9]),
+        runmat_value::IntegerStorage::U8(vec![0, 255]),
+        runmat_value::IntegerStorage::U16(vec![0, u16::MAX]),
+        runmat_value::IntegerStorage::U32(vec![0, u32::MAX]),
+        runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993, 9_007_199_254_740_994]),
+    ] {
+        assert!(
+            vars.iter().any(|value| {
+                matches!(
+                    value,
+                    runmat_value::Value::Tensor(tensor)
+                        if tensor.integer_storage() == Some(&expected)
+                )
+            }),
+            "missing exact assignin storage {expected:?}"
+        );
+    }
+}
+
+#[test]
+fn assignin_preserves_resident_integer_provider_ownership() {
+    runmat_accelerate::simple_provider::register_inprocess_provider();
+    let _provider_cleanup = ProviderSelectionCleanup;
+    let vars = execute_source(
+        "base = uint64(9007199254740992); source_gpu = gpuArray([base + uint64(1) intmax('uint64')]); assignin('base','assigned_gpu',source_gpu); copied = evalin('base','gather(assigned_gpu)');",
+    );
+    let resident_ids = vars
+        .iter()
+        .filter_map(|value| match value {
+            runmat_value::Value::GpuTensor(handle) => Some(handle.buffer_id),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        resident_ids.iter().any(|id| resident_ids
+            .iter()
+            .filter(|candidate| *candidate == id)
+            .count()
+            >= 2),
+        "assignin should clone the same resident handle, got {resident_ids:?}"
+    );
+    assert!(vars.iter().any(|value| {
+        matches!(
+            value,
+            runmat_value::Value::Tensor(tensor)
+                if tensor.integer_storage()
+                    == Some(&runmat_value::IntegerStorage::U64(vec![
+                        9_007_199_254_740_993,
+                        u64::MAX,
+                    ]))
+        )
+    }));
+}
+
+#[test]
+fn assignin_rejects_outputs_and_invalid_variable_names() {
+    let output_err = execute_source_result("out = assignin('base', 'x', uint64(1));")
+        .expect_err("assignin must expose no output");
+    assert_eq!(
+        output_err.identifier(),
+        Some("RunMat:assignin:TooManyOutputs")
+    );
+
+    for name in ["_leading", "for", "éclair"] {
+        let source = format!("assignin('base', '{name}', int8(1));");
+        let err = execute_source_result(&source).expect_err("invalid variable name must reject");
+        assert_eq!(err.identifier(), Some("RunMat:DynamicWorkspaceName"));
+    }
+
+    let overlong = format!(
+        "assignin('base', '{}', uint8(1));",
+        "a".repeat(runmat_runtime::builtins::common::identifiers::MATLAB_NAME_LENGTH_MAX + 1)
+    );
+    let err = execute_source_result(&overlong).expect_err("overlong variable name must reject");
+    assert_eq!(err.identifier(), Some("RunMat:DynamicWorkspaceName"));
+}
+
+#[test]
 fn dynamic_workspace_invalid_selector_errors_are_catchable() {
     let vars = execute_source(
         r#"
@@ -1693,7 +1874,7 @@ fn dynamic_workspace_invalid_selector_errors_are_catchable() {
     "#,
     );
     assert!(vars.iter().any(
-        |v| matches!(v, runmat_builtins::Value::String(s) if s == "RunMat:DynamicWorkspaceSelector")
+        |v| matches!(v, runmat_value::Value::String(s) if s == "RunMat:DynamicWorkspaceSelector")
     ));
 }
 
@@ -1813,9 +1994,9 @@ fn arity_check_helper_errors_are_catchable() {
         end
     "#;
     let vars = execute_source(program);
-    assert!(vars.iter().any(|v| {
-        matches!(v, runmat_builtins::Value::String(s) if s == "RunMat:TooManyInputs")
-    }));
+    assert!(vars
+        .iter()
+        .any(|v| { matches!(v, runmat_value::Value::String(s) if s == "RunMat:TooManyInputs") }));
 }
 
 #[test]
@@ -1848,9 +2029,9 @@ fn dynamic_narginchk_errors_are_catchable() {
         end
     "#;
     let vars = execute_source(program);
-    assert!(vars.iter().any(|v| {
-        matches!(v, runmat_builtins::Value::String(s) if s == "RunMat:TooManyInputs")
-    }));
+    assert!(vars
+        .iter()
+        .any(|v| { matches!(v, runmat_value::Value::String(s) if s == "RunMat:TooManyInputs") }));
 }
 
 #[test]
@@ -1884,9 +2065,9 @@ fn dynamic_nargoutchk_errors_are_catchable() {
         end
     "#;
     let vars = execute_source(program);
-    assert!(vars.iter().any(|v| {
-        matches!(v, runmat_builtins::Value::String(s) if s == "RunMat:TooManyOutputs")
-    }));
+    assert!(vars
+        .iter()
+        .any(|v| { matches!(v, runmat_value::Value::String(s) if s == "RunMat:TooManyOutputs") }));
 }
 
 #[test]
@@ -1903,15 +2084,15 @@ fn inputname_reports_direct_caller_argument_names() {
         end
     "#;
     let vars = execute_source_with_catalog(source, "/tmp/runmat_vm_inputname_probe.m");
-    assert!(vars
-        .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "alpha")));
-    assert!(vars
-        .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "beta")));
+    assert!(vars.iter().any(|v| {
+        matches!(v, runmat_value::Value::CharArray(chars) if chars.data.iter().collect::<String>() == "alpha")
+    }), "expected alpha character row; vars={vars:?}");
+    assert!(vars.iter().any(|v| {
+        matches!(v, runmat_value::Value::CharArray(chars) if chars.data.iter().collect::<String>() == "beta")
+    }), "expected beta character row; vars={vars:?}");
     let empty_strings = vars
         .iter()
-        .filter(|v| matches!(v, runmat_builtins::Value::String(s) if s.is_empty()))
+        .filter(|v| matches!(v, runmat_value::Value::CharArray(chars) if chars.data.is_empty()))
         .count();
     assert!(
         empty_strings >= 2,
@@ -1930,12 +2111,12 @@ fn inputname_reports_feval_caller_argument_names() {
         end
     "#;
     let vars = execute_source_with_catalog(source, "/tmp/runmat_vm_inputname_feval_probe.m");
+    assert!(vars.iter().any(|v| {
+        matches!(v, runmat_value::Value::CharArray(chars) if chars.data.iter().collect::<String>() == "beta")
+    }), "expected beta character row; vars={vars:?}");
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "beta")));
-    assert!(vars
-        .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s.is_empty())));
+        .any(|v| matches!(v, runmat_value::Value::CharArray(chars) if chars.data.is_empty())));
 }
 
 #[test]
@@ -1946,7 +2127,7 @@ fn display_script_surface_uses_variable_header() {
     let vars = execute_source_with_catalog(source, "/tmp/runmat_vm_display_probe.m");
     assert!(vars.iter().any(|v| matches!(
         v,
-        runmat_builtins::Value::String(s)
+        runmat_value::Value::String(s)
             if s.contains("alpha =")
                 && s.contains("1       2")
                 && s.contains("3       4")
@@ -1969,12 +2150,18 @@ fn mfilename_reads_current_source_context() {
     )]);
     let vars =
         futures::executor::block_on(runmat_vm::interpret(&bytecode)).expect("execute bytecode");
-    assert!(vars.iter().any(|v| {
-        matches!(v, runmat_builtins::Value::String(s) if s == "runmat_vm_mfilename_probe")
-    }));
-    assert!(vars.iter().any(|v| {
-        matches!(v, runmat_builtins::Value::String(s) if s == "/tmp/runmat_vm_mfilename_probe")
-    }));
+    assert!(
+        vars.iter().any(|v| {
+            matches!(v, runmat_value::Value::String(s) if s == "runmat_vm_mfilename_probe")
+        }),
+        "expected source stem; vars={vars:?}"
+    );
+    assert!(
+        vars.iter().any(|v| {
+            matches!(v, runmat_value::Value::String(s) if s == "/tmp/runmat_vm_mfilename_probe")
+        }),
+        "expected full source path; vars={vars:?}"
+    );
 }
 
 #[test]
@@ -1995,16 +2182,16 @@ fn functions_builtin_reports_function_handle_metadata() {
     let vars = execute_source(source);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "sin")));
+        .any(|v| matches!(v, runmat_value::Value::String(s) if s == "sin")));
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "simple")));
+        .any(|v| matches!(v, runmat_value::Value::String(s) if s == "simple")));
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "local_id")));
+        .any(|v| matches!(v, runmat_value::Value::String(s) if s == "local_id")));
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "anonymous")));
+        .any(|v| matches!(v, runmat_value::Value::String(s) if s == "anonymous")));
 }
 
 #[test]
@@ -2027,6 +2214,7 @@ fn localfunctions_returns_callable_local_function_handles() {
             y = x + 2;
         end
     "#;
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let vars = execute_source_with_catalog(source, "/tmp/runmat_vm_localfunctions_probe.m");
     assert!(
         has_num(&vars, 13.0),
@@ -2034,10 +2222,10 @@ fn localfunctions_returns_callable_local_function_handles() {
     );
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "helper_one")));
+        .any(|v| matches!(v, runmat_value::Value::String(s) if s == "helper_one")));
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "helper_two")));
+        .any(|v| matches!(v, runmat_value::Value::String(s) if s == "helper_two")));
 }
 
 #[test]
@@ -2054,7 +2242,7 @@ fn missing_fixed_input_can_be_guarded_with_nargin() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-4.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-4.0).abs()<1e-9)));
 }
 
 #[test]
@@ -2073,10 +2261,10 @@ fn bare_nargin_counts_varargin_inputs() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-0.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-0.0).abs()<1e-9)));
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-3.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-3.0).abs()<1e-9)));
 }
 
 #[test]
@@ -2093,7 +2281,7 @@ fn varargout_indexed_fill_respects_nargout_loop() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-2.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-2.0).abs()<1e-9)));
 }
 
 #[test]
@@ -2105,11 +2293,11 @@ fn implicit_array_creation_from_linear_index_assignment() {
     let vars = execute_source(program);
     assert!(vars.iter().any(|v| matches!(
         v,
-        runmat_builtins::Value::Tensor(t) if t.shape == vec![1, 3] && t.data == vec![0.0, 0.0, 10.0]
+        runmat_value::Value::Tensor(t) if t.shape == vec![1, 3] && t.materialize_f64() == vec![0.0, 0.0, 10.0]
     )));
     assert!(vars.iter().any(|v| matches!(
         v,
-        runmat_builtins::Value::Tensor(t) if t.shape == vec![1, 1] && t.data == vec![0.0]
+        runmat_value::Value::Tensor(t) if t.shape == vec![1, 1] && t.materialize_f64() == vec![0.0]
     )));
 }
 
@@ -2158,7 +2346,7 @@ fn inputs_with_varargin_minimum_only() {
     let vars_ok = execute_source(program_ok);
     assert!(vars_ok
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-10.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-10.0).abs()<1e-9)));
     // 1+2+3+4
 }
 
@@ -2200,7 +2388,7 @@ fn nested_function_calls() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 20.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 20.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2346,7 +2534,7 @@ fn shared_input_output_name_updates_in_place() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2361,10 +2549,10 @@ fn shared_input_output_name_multi_output_reads_original_input() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 4.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 4.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2384,7 +2572,7 @@ fn user_function_multi_assign_executes() {
 
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2405,7 +2593,7 @@ fn feval_multi_assign_executes() {
 
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 13.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 13.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2459,7 +2647,7 @@ fn feval_single_output_uses_typed_instruction() {
     let vars = interpret(&bytecode).expect("execute semantic feval single-output");
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2469,7 +2657,7 @@ fn feval_expand_multi_assign_uses_typed_instruction() {
             a = x;
             b = y;
         end
-        C = deal(7,8);
+        C = {7,8};
         h = @pair;
         [u,v] = feval(h, C{:});
         s = u + v;
@@ -2484,7 +2672,7 @@ fn feval_expand_multi_assign_uses_typed_instruction() {
     let vars = interpret(&bytecode).expect("execute semantic feval expanded multi-assign");
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 15.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 15.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2494,7 +2682,7 @@ fn feval_expand_zero_output_uses_typed_instruction() {
             a = x;
             b = y;
         end
-        C = deal(7,8);
+        C = {7,8};
         h = @pair;
         feval(h, C{:});
     "#;
@@ -2514,7 +2702,7 @@ fn feval_expand_single_output_uses_typed_instruction() {
             a = x;
             b = y;
         end
-        C = deal(7,8);
+        C = {7,8};
         h = @pair;
         u = feval(h, C{:});
     "#;
@@ -2527,7 +2715,7 @@ fn feval_expand_single_output_uses_typed_instruction() {
     let vars = interpret(&bytecode).expect("execute semantic feval expanded single-output");
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 7.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 7.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2537,7 +2725,7 @@ fn size_builtin_multi_assign_executes() {
 
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 4.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 4.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2549,20 +2737,25 @@ fn min_max_builtin_multi_assign_execute() {
 
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 8.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 8.0).abs() < 1e-9)));
 }
 
 #[test]
-fn cummin_cummax_builtin_multi_assign_execute() {
-    let bytecode = compile_source(
-        "[mx,mi] = cummax([2 1 3]); [mn,ni] = cummin([2 1 3]); z = sum(mx) + sum(mi) + sum(mn) + sum(ni);",
-    )
-    .unwrap();
-    let vars = interpret(&bytecode).expect("semantic cummin/cummax multi-assign should execute");
-
-    assert!(vars
-        .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 21.0).abs() < 1e-9)));
+fn cummin_cummax_builtin_reject_undocumented_second_output() {
+    for (builtin, source) in [
+        ("cummax", "[values,indices] = cummax([2 1 3]);"),
+        ("cummin", "[values,indices] = cummin([2 1 3]);"),
+    ] {
+        let error = execute_source_result(source).expect_err("second output must be rejected");
+        assert_eq!(
+            error.identifier(),
+            Some(if builtin == "cummax" {
+                "RunMat:cummax:InvalidArgument"
+            } else {
+                "RunMat:cummin:InvalidArgument"
+            })
+        );
+    }
 }
 
 #[test]
@@ -2575,7 +2768,7 @@ fn sort_unique_find_builtin_multi_assign_execute() {
 
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 24.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 24.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2589,7 +2782,49 @@ fn union_ismember_sortrows_builtin_multi_assign_execute() {
 
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 24.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 24.0).abs() < 1e-9)));
+}
+
+#[test]
+fn compiled_set_functions_enforce_integer_class_compatibility() {
+    for builtin in ["ismember", "intersect", "union", "setdiff", "setxor"] {
+        let source = format!("out = {builtin}(int8([1 2]), uint8([1 2]));");
+        let error = execute_source_result(&source).expect_err("unlike integer classes must reject");
+        assert_eq!(
+            error.identifier(),
+            Some(match builtin {
+                "ismember" => "RunMat:ismember:NumericClassMismatch",
+                "intersect" => "RunMat:intersect:NumericClassMismatch",
+                "union" => "RunMat:union:NumericClassMismatch",
+                "setdiff" => "RunMat:setdiff:NumericClassMismatch",
+                "setxor" => "RunMat:setxor:NumericClassMismatch",
+                _ => unreachable!(),
+            })
+        );
+    }
+}
+
+#[test]
+fn compiled_set_functions_preserve_integer_double_result_classes() {
+    let vars = execute_source(
+        "a = uint32([1 3]); b = [2 3]; [i,ii,ij] = intersect(a,b); [u,ui,uj] = union(b,a); [d,di] = setdiff(a,b); [x,xi,xj] = setxor(b,a); [tf,loc] = ismember(a,b); ci = class(i); cu = class(u); cd = class(d); cx = class(x); cii = class(ii); cui = class(ui); cdi = class(di); cxi = class(xi); cloc = class(loc);",
+    );
+    assert!(
+        vars.iter()
+            .filter(
+                |value| matches!(value, runmat_value::Value::String(class) if class == "uint32")
+            )
+            .count()
+            >= 4
+    );
+    assert!(
+        vars.iter()
+            .filter(
+                |value| matches!(value, runmat_value::Value::String(class) if class == "double")
+            )
+            .count()
+            >= 5
+    );
 }
 
 #[test]
@@ -2599,7 +2834,7 @@ fn chol_builtin_multi_assign_execute() {
 
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2612,7 +2847,7 @@ fn lu_builtin_multi_assign_execute() {
 
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 9.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 9.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2625,7 +2860,7 @@ fn qr_builtin_multi_assign_execute() {
 
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n + 1.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n + 1.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2638,7 +2873,7 @@ fn svd_builtin_multi_assign_execute() {
 
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 7.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 7.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2651,7 +2886,7 @@ fn eig_builtin_multi_assign_execute() {
 
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 7.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 7.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2662,7 +2897,7 @@ fn eig_generalized_builtin_execute() {
 
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2683,7 +2918,7 @@ fn sprintf_inline_cast_argument_formats_value() {
     "#;
     let vars = execute_source(program);
     assert!(vars.iter().any(|value| {
-        if let runmat_builtins::Value::CharArray(chars) = value {
+        if let runmat_value::Value::CharArray(chars) = value {
             let rendered: String = chars.data.iter().collect();
             rendered == "Value: 3.1400"
         } else {
@@ -2695,20 +2930,20 @@ fn sprintf_inline_cast_argument_formats_value() {
 #[test]
 fn member_get_set_and_method_call_skeleton() {
     let input = "obj = new_object('Point'); obj = setfield(obj, 'x', 3); ax = getfield(obj, 'x');";
-    let vars = execute_source(input);
+    let vars = execute_source_with_extensions(input);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < f64::EPSILON)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 3.0).abs() < f64::EPSILON)));
 
     // call Point.move which exists as example method: dx=1,dy=2
     let input2 = "obj = new_object('Point'); obj = setfield(obj,'x',5); obj = setfield(obj,'y',7); obj = call_method(obj, 'move', 1, 2); rx = getfield(obj,'x'); ry = getfield(obj,'y');";
-    let vars2 = execute_source(input2);
+    let vars2 = execute_source_with_extensions(input2);
     assert!(vars2
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 6.0).abs() < f64::EPSILON)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 6.0).abs() < f64::EPSILON)));
     assert!(vars2
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 9.0).abs() < f64::EPSILON)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 9.0).abs() < f64::EPSILON)));
 }
 
 #[test]
@@ -2717,7 +2952,7 @@ fn implicit_struct_creation_for_root_variable_assignment() {
     let vars = execute_source(input);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 30.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 30.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2727,7 +2962,7 @@ fn member_read_write_executes() {
 
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 30.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 30.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2735,7 +2970,7 @@ fn dynamic_member_read_executes() {
     let vars = execute_source("s = struct('x', 9); f = 'x'; y = s.(f);");
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 9.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 9.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2743,7 +2978,7 @@ fn indexed_dynamic_member_read_executes() {
     let vars = execute_source("s = struct('x', {1, 2, 3}); f = 'x'; y = s.(f){2};");
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 2.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 2.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2753,7 +2988,7 @@ fn indexed_member_store_back_executes() {
 
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 9.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 9.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2780,7 +3015,7 @@ fn indexed_member_vector_store_back_lowers_to_slice_instruction() {
     let vars = interpret(&bytecode).expect("execute indexed member vector store");
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 99.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 99.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2807,7 +3042,7 @@ fn indexed_member_logical_store_back_lowers_to_slice_instruction() {
     let vars = interpret(&bytecode).expect("execute indexed member logical store");
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 0.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 0.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2827,7 +3062,7 @@ fn indexed_base_member_vector_store_back_lowers_to_slice_instruction() {
     let vars = interpret(&bytecode).expect("execute indexed-base member vector store");
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 99.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 99.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2847,7 +3082,7 @@ fn indexed_base_member_logical_store_back_lowers_to_slice_instruction() {
     let vars = interpret(&bytecode).expect("execute indexed-base member logical store");
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 0.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 0.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2874,7 +3109,7 @@ fn indexed_dynamic_member_vector_store_back_lowers_to_slice_instruction() {
     let vars = interpret(&bytecode).expect("execute indexed dynamic member vector store");
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 99.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 99.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2902,7 +3137,7 @@ fn indexed_dynamic_member_logical_store_back_lowers_to_slice_instruction() {
     let vars = interpret(&bytecode).expect("execute indexed dynamic member logical store");
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 0.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 0.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2910,7 +3145,7 @@ fn cell_paren_delete_executes_with_semantic_store_back() {
     let vars = execute_source("c = {1, 2, 3}; c(2) = []; y = c{2};");
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2918,7 +3153,7 @@ fn indexed_member_delete_executes_with_semantic_store_back() {
     let vars = execute_source("s.a = {1, 2, 3}; s.a(2) = []; y = s.a{2};");
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2926,7 +3161,7 @@ fn indexed_cell_content_delete_executes_with_semantic_store_back() {
     let vars = execute_source("c = {{1, 2, 3}}; c{1}(2) = []; y = c{1}{2};");
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2960,7 +3195,7 @@ fn cell_member_store_back_executes() {
 
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -2987,7 +3222,7 @@ fn indexed_cell_member_vector_store_back_lowers_to_slice_instruction() {
     let vars = interpret(&bytecode).expect("execute indexed cell member vector store");
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 99.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 99.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -3015,7 +3250,7 @@ fn indexed_cell_member_logical_store_back_lowers_to_slice_instruction() {
     let vars = interpret(&bytecode).expect("execute indexed cell member logical store");
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 0.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 0.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -3028,7 +3263,7 @@ fn empty_array_member_assignment_assigns_empty_value() {
     assert!(vars.iter().any(|v| {
         matches!(
             v,
-            runmat_builtins::Value::Tensor(t) if t.data.is_empty()
+            runmat_value::Value::Tensor(t) if t.materialize_f64().is_empty()
         )
     }));
 }
@@ -3041,7 +3276,7 @@ fn empty_array_cell_content_assignment_assigns_empty_value() {
     assert!(vars.iter().any(|v| {
         matches!(
             v,
-            runmat_builtins::Value::Tensor(t) if t.data.is_empty()
+            runmat_value::Value::Tensor(t) if t.materialize_f64().is_empty()
         )
     }));
 }
@@ -3060,10 +3295,10 @@ fn implicit_struct_creation_for_function_output_variable() {
     let vars = execute_source(input);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 10.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 10.0).abs() < 1e-9)));
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 20.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 20.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -3072,7 +3307,7 @@ fn nested_member_assignment_materializes_missing_intermediate_structs() {
     let vars = execute_source(input);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 1.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 1.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -3082,22 +3317,22 @@ fn struct_field_indexing_read_path_uses_member_then_index_semantics() {
     let vars = execute_source(input);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 20.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 20.0).abs() < 1e-9)));
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 10.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 10.0).abs() < 1e-9)));
 }
 
 #[test]
 fn dotted_invoke_preserves_object_method_dispatch() {
     let input = "obj = new_object('Point'); obj = setfield(obj,'x',5); obj = setfield(obj,'y',7); obj = obj.move(1,2); rx = getfield(obj,'x'); ry = getfield(obj,'y');";
-    let vars = execute_source(input);
+    let vars = execute_source_with_extensions(input);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 6.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 6.0).abs() < 1e-9)));
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 9.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 9.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -3113,7 +3348,7 @@ fn dotted_invoke_runtime_struct_dispatch_when_base_type_unknown() {
     let vars = execute_source(input);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 20.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 20.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -3123,7 +3358,7 @@ fn nested_dynamic_member_assignment_materializes_and_writes_back() {
     let vars = execute_source(input);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -3132,7 +3367,7 @@ fn mixed_member_cell_and_index_read_chain() {
     let vars = execute_source(input);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 30.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 30.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -3141,10 +3376,10 @@ fn function_handle_anon_round_trip() {
     let vars = execute_source(input);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::FunctionHandle(_))));
+        .any(|v| matches!(v, runmat_value::Value::FunctionHandle(_))));
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s.starts_with("@anon"))));
+        .any(|v| matches!(v, runmat_value::Value::String(s) if s.starts_with("@anon"))));
 }
 
 #[test]
@@ -3154,7 +3389,7 @@ fn builtin_function_handle_feval_executes() {
 
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if n.abs() < 1e-12)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if n.abs() < 1e-12)));
 }
 
 #[test]
@@ -3164,7 +3399,7 @@ fn anonymous_function_handle_feval_executes() {
 
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-12)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 5.0).abs() < 1e-12)));
 }
 
 #[test]
@@ -3189,7 +3424,7 @@ fn function_handle_index_call_executes() {
     let vars = interpret(&bytecode).expect("semantic handle index call should execute");
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-12)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 3.0).abs() < 1e-12)));
 }
 
 #[test]
@@ -3442,7 +3677,7 @@ fn method_syntax_with_semantic_function_callee_executes_directly() {
     let vars = interpret(&bytecode).expect("semantic method-style call executes");
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-12)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 5.0).abs() < 1e-12)));
 }
 
 #[test]
@@ -3453,7 +3688,7 @@ fn cellfun_upper_function_handle_round_trip() {
 
     let mut found = false;
     for value in vars {
-        if let runmat_builtins::Value::Cell(ca) = value {
+        if let runmat_value::Value::Cell(ca) = value {
             if ca.data.len() != 3 {
                 continue;
             }
@@ -3480,7 +3715,99 @@ fn cellfun_str2func_local_semantic_callback_executes() {
     );
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-12)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 5.0).abs() < 1e-12)));
+}
+
+#[test]
+fn cellfun_compiled_identity_preserves_all_integer_classes_and_wide_values() {
+    let vars = execute_source(
+        "a = cellfun(@(x) x, {int8(-128), int8(127)}); b = cellfun(@(x) x, {int16(-32768), int16(32767)}); c = cellfun(@(x) x, {int32(-2147483648), int32(2147483647)}); d = cellfun(@(x) x, {int64(-7), int64(9)}); e = cellfun(@(x) x, {uint8(0), uint8(255)}); f = cellfun(@(x) x, {uint16(0), uint16(65535)}); g = cellfun(@(x) x, {uint32(0), uint32(4294967295)}); base = uint64(9007199254740992); h = cellfun(@(x) x, {base + uint64(1), base + uint64(2)});",
+    );
+    for expected in [
+        runmat_value::IntegerStorage::I8(vec![-128, 127]),
+        runmat_value::IntegerStorage::I16(vec![-32768, 32767]),
+        runmat_value::IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+        runmat_value::IntegerStorage::I64(vec![-7, 9]),
+        runmat_value::IntegerStorage::U8(vec![0, 255]),
+        runmat_value::IntegerStorage::U16(vec![0, 65535]),
+        runmat_value::IntegerStorage::U32(vec![0, u32::MAX]),
+        runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993, 9_007_199_254_740_994]),
+    ] {
+        assert!(
+            vars.iter().any(|value| {
+                matches!(
+                    value,
+                    runmat_value::Value::Tensor(tensor)
+                        if tensor.integer_storage() == Some(&expected)
+                )
+            }),
+            "missing compiled cellfun storage {expected:?}"
+        );
+    }
+}
+
+#[test]
+fn compiled_cell_container_integer_cohort_preserves_native_storage() {
+    let vars = execute_source(
+        "wide = uint64(9007199254740992) + uint64(1); a = cell2mat({wide, wide + uint64(1)}); s = cell2struct({wide}, {'value'}, uint8(1)); b = s.value; t = cell2table({uint16(7); uint16(9)}); c = t.Var1; text = char(uint16([65, 66]));",
+    );
+    for expected in [
+        runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993, 9_007_199_254_740_994]),
+        runmat_value::IntegerStorage::U16(vec![7, 9]),
+    ] {
+        assert!(vars.iter().any(|value| {
+            matches!(value, runmat_value::Value::Tensor(tensor) if tensor.integer_storage() == Some(&expected))
+        }));
+    }
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_value::Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_993))
+    )));
+    assert!(vars.iter().any(
+        |value| matches!(value, runmat_value::Value::CharArray(chars) if chars.data == vec!['A', 'B'])
+    ));
+}
+
+#[test]
+fn compiled_cellstr_rejects_integer_before_conversion() {
+    let err = execute_source_result("x = cellstr(uint8(65));").expect_err("integer cellstr");
+    assert_eq!(err.identifier(), Some("RunMat:cellstr:InvalidInput"));
+}
+
+#[test]
+fn compiled_numeric_integer_cohort_executes_in_runmat_mode() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let vars = execute_source(
+        "[n, wn] = cheb2ord(uint8(10), uint8(20), uint8(1), uint8(40), 's'); p = chi2cdf(uint16(3), uint16(5)); r = chol(uint16([4, 2; 2, 3])); sample = uint8([0; 3]); training = uint8([0; 1; 2; 3]); base = uint64(9007199254740992); group = [base + uint64(1); base + uint64(1); base + uint64(2); base + uint64(2)]; labels = classify(sample, training, group);",
+    );
+    assert!(vars.iter().any(
+        |value| matches!(value, runmat_value::Value::Num(number) if (*number - 5.0).abs() < 1.0e-12)
+    ));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, runmat_value::Value::Num(number) if (*number - 0.300_014_164_121_372).abs() < 1.0e-12)));
+    assert!(vars.iter().any(|value| {
+        matches!(value, runmat_value::Value::Tensor(tensor) if tensor.integer_storage() == Some(&runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993, 9_007_199_254_740_994])))
+    }));
+}
+
+#[test]
+fn compiled_colon_to_cond_integer_cohort_preserves_exact_values_and_boundaries() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let vars = execute_source(
+        "base = uint64(9007199254740992); sequence = colon(base + uint64(1), base + uint64(3)); z = complex(base + uint64(1), uint64(7)); choices = combinations(uint8([1 2]), int16([3 4])); text = compose(\"%d\", base + uint64(1)); estimate = cond(uint8([1 0; 0 2]));",
+    );
+    assert!(vars.iter().any(|value| {
+        matches!(value, runmat_value::Value::Tensor(tensor) if tensor.integer_storage() == Some(&runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993, 9_007_199_254_740_994, 9_007_199_254_740_995])))
+    }));
+    assert!(vars.iter().any(|value| {
+        matches!(value, runmat_value::Value::ComplexTensor(tensor) if tensor.integer_storage().is_some_and(|storage| storage.real == runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993]) && storage.imag == runmat_value::IntegerStorage::U64(vec![7])))
+    }));
+    assert!(has_object_class(&vars, "table"));
+    assert!(vars.iter().any(|value| {
+        matches!(value, runmat_value::Value::StringArray(strings) if strings.data == vec!["9007199254740993"])
+    }));
+    assert!(has_num(&vars, 2.0));
 }
 
 #[test]
@@ -3490,38 +3817,75 @@ fn arrayfun_str2func_local_semantic_callback_executes() {
     );
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-12)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 5.0).abs() < 1e-12)));
+}
+
+#[test]
+fn arrayfun_compiled_identity_preserves_all_integer_classes_and_single() {
+    let vars = execute_source(
+        "a = arrayfun(@(x) x, int8([-128 127])); b = arrayfun(@(x) x, int16([-32768 32767])); c = arrayfun(@(x) x, int32([-2147483648 2147483647])); d = arrayfun(@(x) x, int64([-7 9])); e = arrayfun(@(x) x, uint8([0 255])); f = arrayfun(@(x) x, uint16([0 65535])); g = arrayfun(@(x) x, uint32([0 4294967295])); base = uint64(9007199254740992); h = arrayfun(@(x) x, base + uint64([1 2])); s = arrayfun(@(x) x, single([0.25 -1.5]));",
+    );
+    for expected in [
+        runmat_value::IntegerStorage::I8(vec![-128, 127]),
+        runmat_value::IntegerStorage::I16(vec![-32768, 32767]),
+        runmat_value::IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+        runmat_value::IntegerStorage::I64(vec![-7, 9]),
+        runmat_value::IntegerStorage::U8(vec![0, 255]),
+        runmat_value::IntegerStorage::U16(vec![0, 65535]),
+        runmat_value::IntegerStorage::U32(vec![0, u32::MAX]),
+        runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993, 9_007_199_254_740_994]),
+    ] {
+        assert!(
+            vars.iter().any(|value| {
+                matches!(
+                    value,
+                    runmat_value::Value::Tensor(tensor)
+                        if tensor.integer_storage() == Some(&expected)
+                )
+            }),
+            "missing compiled arrayfun storage {expected:?}"
+        );
+    }
+    assert!(vars.iter().any(|value| {
+        matches!(
+            value,
+            runmat_value::Value::Tensor(tensor)
+                if tensor.as_f32_slice() == Some(&[0.25, -1.5][..])
+        )
+    }));
 }
 
 #[test]
 fn classes_static_and_inheritance() {
     // Register classes
-    assert!(execute_source_result("__register_test_classes();").is_ok());
+    assert!(execute_source_result_with_extensions("__register_test_classes();").is_ok());
 
     // Default init and namespaced
-    let vars2 = execute_source("__register_test_classes(); p = new_object('Point'); ax = getfield(p,'x'); ns = new_object('pkg.PointNS'); nsx = getfield(ns,'x');");
+    let vars2 = execute_source_with_extensions("__register_test_classes(); p = new_object('Point'); ax = getfield(p,'x'); ns = new_object('pkg.PointNS'); nsx = getfield(ns,'x');");
     assert!(vars2
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 0.0).abs()<f64::EPSILON)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 0.0).abs()<f64::EPSILON)));
     assert!(vars2
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 1.0).abs()<f64::EPSILON)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 1.0).abs()<f64::EPSILON)));
 
     // Static method and property
-    let vars3 = execute_source("__register_test_classes(); o = classref('Point').origin(); sv = classref('Point').staticValue;");
+    let vars3 = execute_source_with_extensions("__register_test_classes(); o = classref('Point').origin(); sv = classref('Point').staticValue;");
     assert!(vars3
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
+        .any(|v| matches!(v, runmat_value::Value::Object(_))));
     assert!(vars3
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 42.0).abs()<f64::EPSILON)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 42.0).abs()<f64::EPSILON)));
 
     // Inheritance override: use feval(getmethod(...))()
-    let vars4 = execute_source("__register_test_classes(); c = new_object('Circle'); c = setfield(c,'r', 2); a = feval(getmethod(c,'area'));");
-    assert!(vars4.iter().any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - std::f64::consts::PI*4.0).abs() < 1e-9)));
+    let vars4 = execute_source_with_extensions("__register_test_classes(); c = new_object('Circle'); c = setfield(c,'r', 2); a = feval(getmethod(c,'area'));");
+    assert!(vars4.iter().any(
+        |v| matches!(v, runmat_value::Value::Num(n) if (*n - std::f64::consts::PI*4.0).abs() < 1e-9)
+    ));
 
     // Access control violations
-    let err = execute_source_result(
+    let err = execute_source_result_with_extensions(
         "__register_test_classes(); p = new_object('Point'); s = getfield(p,'secret');",
     )
     .expect_err("private property get should error");
@@ -3554,10 +3918,10 @@ fn classes_constructor_and_overloaded_indexing() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
+        .any(|v| matches!(v, runmat_value::Value::Object(_))));
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
 }
 
 #[cfg(any(feature = "test-classes", test))]
@@ -3584,7 +3948,7 @@ fn import_builtin_resolution_for_static_method() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
+        .any(|v| matches!(v, runmat_value::Value::Object(_))));
 }
 
 #[test]
@@ -3595,7 +3959,7 @@ fn import_specific_resolution_for_builtin() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
+        .any(|v| matches!(v, runmat_value::Value::Object(_))));
 }
 
 #[test]
@@ -3627,10 +3991,10 @@ fn import_static_method_via_specific_class_import() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
+        .any(|v| matches!(v, runmat_value::Value::Object(_))));
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(_))));
+        .any(|v| matches!(v, runmat_value::Value::Num(_))));
 }
 
 #[test]
@@ -3643,7 +4007,7 @@ fn import_static_method_function_handle_executes() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
+        .any(|v| matches!(v, runmat_value::Value::Object(_))));
 }
 
 #[test]
@@ -3656,7 +4020,7 @@ fn import_static_method_function_handle_direct_call_executes() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
+        .any(|v| matches!(v, runmat_value::Value::Object(_))));
 }
 
 #[test]
@@ -3670,7 +4034,7 @@ fn import_wildcard_static_method_function_handle_executes() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
+        .any(|v| matches!(v, runmat_value::Value::Object(_))));
 }
 
 #[test]
@@ -3684,7 +4048,7 @@ fn import_wildcard_static_method_function_handle_direct_call_executes() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
+        .any(|v| matches!(v, runmat_value::Value::Object(_))));
 }
 
 #[test]
@@ -3701,7 +4065,7 @@ fn qualified_static_method_function_handle_executes() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
+        .any(|v| matches!(v, runmat_value::Value::Object(_))));
 }
 
 #[test]
@@ -3718,21 +4082,21 @@ fn qualified_static_method_function_handle_direct_call_executes() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
+        .any(|v| matches!(v, runmat_value::Value::Object(_))));
 }
 
 #[test]
 fn classref_getmethod_static_method_handle_executes() {
     let program = "__register_test_classes(); h = getmethod(classref('Point'), 'origin'); name = func2str(h); o = feval(h);";
-    let vars = execute_source(program);
+    let vars = execute_source_with_extensions(program);
     assert!(
         vars.iter()
-            .any(|v| matches!(v, runmat_builtins::Value::String(name) if name == "Point.origin")),
+            .any(|v| matches!(v, runmat_value::Value::String(name) if name == "Point.origin")),
         "expected getmethod(classref(...)) handle to preserve qualified method name"
     );
     assert!(
         vars.iter()
-            .any(|v| matches!(v, runmat_builtins::Value::Object(_))),
+            .any(|v| matches!(v, runmat_value::Value::Object(_))),
         "expected feval(getmethod(classref(...))) to execute static method"
     );
 }
@@ -3740,15 +4104,15 @@ fn classref_getmethod_static_method_handle_executes() {
 #[test]
 fn classref_getmethod_static_method_handle_direct_call_executes() {
     let program = "__register_test_classes(); h = getmethod(classref('Point'), 'origin'); name = func2str(h); o = h();";
-    let vars = execute_source(program);
+    let vars = execute_source_with_extensions(program);
     assert!(
         vars.iter()
-            .any(|v| matches!(v, runmat_builtins::Value::String(name) if name == "Point.origin")),
+            .any(|v| matches!(v, runmat_value::Value::String(name) if name == "Point.origin")),
         "expected getmethod(classref(...)) direct-call handle to preserve qualified method name"
     );
     assert!(
         vars.iter()
-            .any(|v| matches!(v, runmat_builtins::Value::Object(_))),
+            .any(|v| matches!(v, runmat_value::Value::Object(_))),
         "expected direct call through getmethod(classref(...)) handle to execute static method"
     );
 }
@@ -3756,9 +4120,9 @@ fn classref_getmethod_static_method_handle_direct_call_executes() {
 #[test]
 fn object_getmethod_instance_method_handle_direct_call_executes() {
     let program = "__register_test_classes(); c = new_object('Circle'); c = setfield(c,'r', 2); h = getmethod(c, 'area'); a = h();";
-    let vars = execute_source(program);
+    let vars = execute_source_with_extensions(program);
     assert!(vars.iter().any(
-        |v| matches!(v, runmat_builtins::Value::Num(n) if (*n - std::f64::consts::PI * 4.0).abs() < 1e-9)
+        |v| matches!(v, runmat_value::Value::Num(n) if (*n - std::f64::consts::PI * 4.0).abs() < 1e-9)
     ));
 }
 
@@ -3842,8 +4206,10 @@ fn subsasgn_missing_protocol_errors_with_identifier_contract() {
 
 #[test]
 fn object_paren_index_missing_subsref_errors_with_identifier_contract() {
-    let err = execute_source_result("__register_test_classes(); p = new_object('Point'); p(1);")
-        .expect_err("object paren indexing without subsref should fail");
+    let err = execute_source_result_with_extensions(
+        "__register_test_classes(); p = new_object('Point'); p(1);",
+    )
+    .expect_err("object paren indexing without subsref should fail");
     assert_eq!(
         err.identifier(),
         Some("RunMat:MissingSubsref"),
@@ -3891,10 +4257,10 @@ fn import_precedence_specific_over_wildcard_and_locals() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 10.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 10.0).abs()<1e-9)));
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 42.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 42.0).abs()<1e-9)));
 }
 
 #[test]
@@ -3934,7 +4300,7 @@ fn import_specific_conflict_with_user_function_prefers_local() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 33.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 33.0).abs()<1e-9)));
 }
 
 #[test]
@@ -3949,7 +4315,7 @@ fn import_static_property_shadowed_by_local_variable() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 7.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 7.0).abs()<1e-9)));
 }
 
 #[test]
@@ -3963,7 +4329,7 @@ fn import_specific_beats_wildcard_for_function_resolution() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 10.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 10.0).abs()<1e-9)));
 }
 
 #[test]
@@ -3994,7 +4360,7 @@ fn local_function_shadows_class_static_method_under_class_star() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 123.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 123.0).abs()<1e-9)));
 }
 
 #[test]
@@ -4011,7 +4377,7 @@ fn multi_segment_import_builtin_vs_user_function_specific_prefers_user_function(
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 77.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 77.0).abs()<1e-9)));
 }
 
 #[test]
@@ -4037,7 +4403,7 @@ fn unqualified_static_property_shadowed_by_local_variable() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 9.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 9.0).abs()<1e-9)));
 }
 
 #[test]
@@ -4054,7 +4420,7 @@ fn import_nested_package_class_static_method_resolution() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 5.0).abs()<1e-9)));
 }
 
 #[test]
@@ -4104,7 +4470,7 @@ fn metaclass_context_with_imports() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-1.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-1.0).abs()<1e-9)));
 }
 
 #[test]
@@ -4163,11 +4529,11 @@ fn ismethod_script_surface_checks_registered_class_methods() {
         __register_test_classes();
         p = new_object('Point');
         circle = new_object('Circle');
-        ok = ismethod(p, 'move') && ismethod(p, "origin") && ismethod('Point', 'move') && ismethod("Point", "origin") && ~ismethod(p, 'missing') && ~ismethod('Point', 'missing') && ismethod(circle, 'area');
+        ok = ismethod(p, 'move') && ismethod(p, "origin") && ~ismethod(p, 'missing') && ismethod(circle, 'area');
     "#;
     let vars = execute_source(program);
     assert!(
-        matches!(vars.last(), Some(runmat_builtins::Value::Bool(true))),
+        matches!(vars.last(), Some(runmat_value::Value::Bool(true))),
         "expected per-case ismethod checks to produce ok=true: {vars:?}"
     );
 }
@@ -4189,14 +4555,160 @@ fn underlying_type_script_surface() {
     for expected in ["double", "single", "logical", "char", "string", "Point"] {
         assert!(
             vars.iter()
-                .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == expected)),
+                .any(|v| matches!(v, runmat_value::Value::String(s) if s == expected)),
             "expected underlyingType output {expected:?}; vars={vars:?}"
         );
     }
     assert!(
-        matches!(vars.last(), Some(runmat_builtins::Value::Bool(true))),
+        matches!(vars.last(), Some(runmat_value::Value::Bool(true))),
         "expected isUnderlyingType combined predicate to be true: {vars:?}"
     );
+}
+
+#[test]
+fn typed_complex_integer_metadata_script_surface() {
+    let vars = execute_source(
+        "z = complex(uint64(9223372036854775808), uint64(1)); c = class(z); t = underlyingType(z); ok = isUnderlyingType(z, 'uint64');",
+    );
+    assert!(
+        vars.iter()
+            .filter(|value| matches!(value, runmat_value::Value::String(name) if name == "uint64"))
+            .count()
+            >= 2,
+        "class and underlyingType must preserve typed complex integer class: {vars:?}"
+    );
+    assert!(
+        vars.iter()
+            .any(|value| matches!(value, runmat_value::Value::Bool(true))),
+        "isUnderlyingType must recognize typed complex integer class: {vars:?}"
+    );
+}
+
+#[test]
+fn typed_complex_integer_jsonencode_script_surface_preserves_exact_components() {
+    let vars = execute_source_with_extensions(
+        "z = complex(uint64(18446744073709551615), uint64(9223372036854775808)); encoded = jsonencode(z);",
+    );
+    assert!(
+        vars.iter().any(|value| matches!(
+            value,
+            runmat_value::Value::CharArray(chars)
+                if chars.data.iter().collect::<String>()
+                    == "{\"real\":18446744073709551615,\"imag\":9223372036854775808}"
+        )),
+        "jsonencode must use exact typed-complex integer components: {vars:?}"
+    );
+}
+
+#[test]
+fn primes_script_surface_preserves_signed_and_unsigned_integer_classes() {
+    let vars = execute_source(
+        "signed = primes(int64(12)); unsigned = primes(uint64(12)); signed_class = class(signed); unsigned_class = class(unsigned);",
+    );
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_value::Value::Tensor(tensor)
+            if tensor.integer_storage()
+                == Some(&runmat_value::IntegerStorage::I64(vec![2, 3, 5, 7, 11]))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_value::Value::Tensor(tensor)
+            if tensor.integer_storage()
+                == Some(&runmat_value::IntegerStorage::U64(vec![2, 3, 5, 7, 11]))
+    )));
+    for expected in ["int64", "uint64"] {
+        assert!(
+            vars.iter().any(
+                |value| matches!(value, runmat_value::Value::String(class) if class == expected)
+            ),
+            "expected class {expected:?}; vars={vars:?}"
+        );
+    }
+}
+
+#[test]
+fn randi_script_surface_preserves_explicit_and_like_integer_classes() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let vars = execute_source(
+        "signed = randi(5, 2, 2, 'int64'); prototype = uint64(zeros(2, 2)); unsigned = randi(5, 'like', prototype); signed_class = class(signed); unsigned_class = class(unsigned);",
+    );
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_value::Value::Tensor(tensor)
+            if matches!(tensor.integer_storage(), Some(runmat_value::IntegerStorage::I64(_)))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_value::Value::Tensor(tensor)
+            if matches!(tensor.integer_storage(), Some(runmat_value::IntegerStorage::U64(_)))
+    )));
+    for expected in ["int64", "uint64"] {
+        assert!(
+            vars.iter().any(
+                |value| matches!(value, runmat_value::Value::String(class) if class == expected)
+            ),
+            "expected class {expected:?}; vars={vars:?}"
+        );
+    }
+}
+
+#[test]
+fn randi_script_surface_gates_wide_integer_classes_by_compatibility_policy() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
+    for source in [
+        "out = randi(5, 2, 2, 'int64');",
+        "prototype = uint64(zeros(2, 2)); out = randi(5, 'like', prototype);",
+    ] {
+        let error = execute_source_result(source).expect_err("wide randi output must be gated");
+        assert!(
+            error.to_string().contains("RunMat extensions"),
+            "unexpected error: {error}"
+        );
+    }
+}
+
+#[test]
+fn missing_integer_cast_names_are_registered_on_script_surface() {
+    let vars = execute_source(
+        "a = int32([2147483648 -2147483649 3.5]); b = uint8([-1 260 4.5]); c = uint16([-1 70000 5.5]); d = uint32([-1 4294967296 6.5]); ca = class(a); cb = class(b); cc = class(c); cd = class(d);",
+    );
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_value::Value::Tensor(tensor)
+            if tensor.integer_storage()
+                == Some(&runmat_value::IntegerStorage::I32(vec![
+                    i32::MAX,
+                    i32::MIN,
+                    4,
+                ]))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_value::Value::Tensor(tensor)
+            if tensor.integer_storage()
+                == Some(&runmat_value::IntegerStorage::U8(vec![0, u8::MAX, 5]))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_value::Value::Tensor(tensor)
+            if tensor.integer_storage()
+                == Some(&runmat_value::IntegerStorage::U16(vec![0, u16::MAX, 6]))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_value::Value::Tensor(tensor)
+            if tensor.integer_storage()
+                == Some(&runmat_value::IntegerStorage::U32(vec![0, u32::MAX, 7]))
+    )));
+    for expected in ["int32", "uint8", "uint16", "uint32"] {
+        assert!(
+            vars.iter().any(
+                |value| matches!(value, runmat_value::Value::String(class) if class == expected)
+            ),
+            "expected class {expected:?}; vars={vars:?}"
+        );
+    }
 }
 
 #[test]
@@ -4248,7 +4760,7 @@ fn object_saveobj_loadobj_script_surface() {
     let vars = execute_source(program);
     assert!(
         vars.iter()
-            .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "OverIdx.saveobj")),
+            .any(|v| matches!(v, runmat_value::Value::String(s) if s == "OverIdx.saveobj")),
         "expected saveobj payload marker: {vars:?}"
     );
     assert!(
@@ -4275,14 +4787,14 @@ fn findobj_script_surface_finds_graphics_handles() {
     let line_handle = vars
         .iter()
         .find_map(|value| match value {
-            runmat_builtins::Value::Num(value) if *value > 1.0e6 => Some(*value),
+            runmat_value::Value::Num(value) if *value > 1.0e6 => Some(*value),
             _ => None,
         })
         .expect("line handle");
     let figure_handle = vars
         .iter()
         .find_map(|value| match value {
-            runmat_builtins::Value::Num(value) if *value > 0.0 && *value < 1.0e6 => Some(*value),
+            runmat_value::Value::Num(value) if *value > 0.0 && *value < 1.0e6 => Some(*value),
             _ => None,
         })
         .expect("figure handle");
@@ -4291,8 +4803,8 @@ fn findobj_script_surface_finds_graphics_handles() {
         vars.iter()
             .filter(|value| matches!(
                 value,
-                runmat_builtins::Value::Tensor(tensor)
-                    if tensor.data.len() == 1 && (tensor.data[0] - line_handle).abs() < 1e-9
+                runmat_value::Value::Tensor(tensor)
+                    if tensor.materialize_f64().len() == 1 && (tensor.materialize_f64()[0] - line_handle).abs() < 1e-9
             ))
             .count()
             >= 2
@@ -4307,7 +4819,7 @@ fn classdef_with_attributes_enforced() {
     let vars = execute_source(src);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 1.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 1.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -4334,39 +4846,40 @@ end
     assert!(has_num(&vars, 7.0));
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Bool(true))));
+        .any(|v| matches!(v, runmat_value::Value::Bool(true))));
     assert!(has_cell_char_row(&vars, &["dynamicprops", "handle"]));
     assert!(has_num(&vars, 1.0));
 }
 
 #[test]
 fn builtin_call_with_expanded_middle_argument() {
-    // Use deal to produce a cell row and index into it to pass as middle arg
+    // Use a cell row and index into it to pass as middle arg
     // max(a,b) with b coming from C{1}
-    let program = "C = deal(10, 20); r = max(5, C{1});";
+    let program = "C = {10, 20}; r = max(5, C{1});";
     let vars = execute_source(program);
     // Expect 10 as result appears in vars somewhere
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 10.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 10.0).abs() < 1e-9)));
 }
 
 #[test]
 fn builtin_call_with_two_expanded_args() {
-    let program = "C = deal(3, 4); D = deal(5, 6); r = max(C{1}, D{1});";
+    let program = "C = {3, 4}; D = {5, 6}; r = max(C{1}, D{1});";
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
 }
 
 #[test]
 fn user_function_with_two_expanded_args() {
-    let program = "function y = sum2(a,b); y = a + b; end; C = deal(7,8); D = deal(11,12); r = sum2(C{2}, D{1});";
+    let program =
+        "function y = sum2(a,b); y = a + b; end; C = {7,8}; D = {11,12}; r = sum2(C{2}, D{1});";
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 19.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 19.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -4384,35 +4897,35 @@ fn object_cell_expansion_via_subsref() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 42.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 42.0).abs() < 1e-9)));
 }
 
 #[cfg(any(feature = "test-classes", test))]
 #[test]
 fn method_expand_multi_output_uses_typed_instruction() {
-    let source = "obj = new_object('Point'); C = deal(7, 3); [a,b] = obj.deal(C{:}); s = b;";
+    let source = "obj = new_object('Point'); C = {7, 3}; [a,b,c] = obj.deal(C{:}); s = b;";
     let bytecode = compile_source(source).expect("compile method expand multi-output source");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CallMethodOrMemberIndexExpandMultiOutput { specs, out_count, .. }
-            if *out_count == 2 && specs.len() == 2 && specs[1].is_expand && specs[1].expand_all
+            if *out_count == 3 && specs.len() == 2 && specs[1].is_expand && specs[1].expand_all
     )));
 
     let vars = interpret(&bytecode).expect("execute method expand multi-output");
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 7.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 7.0).abs() < 1e-9)));
 }
 
 #[test]
 fn expand_all_elements_in_args() {
     // C{:} expands all elements of C into separate arguments
     // max takes two args; here C has more; we only assert no crash and presence of some expected nums
-    let program = "C = deal(1,2); a = max(C{:});";
+    let program = "C = {1,2}; a = max(C{:});";
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(_))));
+        .any(|v| matches!(v, runmat_value::Value::Num(_))));
 }
 
 #[test]
@@ -4425,12 +4938,12 @@ fn mixed_cell_colon_expansion_in_call_args() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-6.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-6.0).abs()<1e-9)));
 }
 
 #[test]
 fn builtin_expand_multi_output_uses_typed_instruction() {
-    let source = "C = deal(7,3); [a,b] = deal(C{:}); s = a + b;";
+    let source = "C = {7,3}; [a,b] = deal(C{:}); s = a + b;";
     let bytecode = compile_source(source).expect("compile builtin expand multi-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -4441,12 +4954,12 @@ fn builtin_expand_multi_output_uses_typed_instruction() {
     let vars = interpret(&bytecode).expect("execute builtin expand multi-output");
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 10.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 10.0).abs() < 1e-9)));
 }
 
 #[test]
 fn builtin_expand_single_output_uses_typed_instruction() {
-    let source = "C = deal(7,3); a = max(C{:});";
+    let source = "C = {7,3}; a = max(C{:});";
     let bytecode = compile_source(source).expect("compile builtin expand single output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -4457,7 +4970,7 @@ fn builtin_expand_single_output_uses_typed_instruction() {
 
 #[test]
 fn expand_single_output_uses_typed_instruction() {
-    let source = "function y = sum2(a,b); y = a + b; end; C = deal(7,8); r = sum2(C{:});";
+    let source = "function y = sum2(a,b); y = a + b; end; C = {7,8}; r = sum2(C{:});";
     let bytecode = compile_source(source).expect("compile semantic expand single output source");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -4468,7 +4981,8 @@ fn expand_single_output_uses_typed_instruction() {
 
 #[test]
 fn expand_multi_output_uses_typed_instruction() {
-    let source = "function [u,v] = pair(a,b); u = a; v = b; end; C = deal(7,8); [x,y] = pair(C{:}); s = x + y;";
+    let source =
+        "function [u,v] = pair(a,b); u = a; v = b; end; C = {7,8}; [x,y] = pair(C{:}); s = x + y;";
     let bytecode = compile_source(source).expect("compile semantic expand multi-output source");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -4479,19 +4993,20 @@ fn expand_multi_output_uses_typed_instruction() {
     let vars = interpret(&bytecode).expect("execute semantic expand multi-output");
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 15.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 15.0).abs() < 1e-9)));
 }
 
 #[cfg(any(feature = "test-classes", test))]
 #[test]
 fn method_expand_single_output_uses_typed_instruction() {
-    let source = "obj = new_object('Point'); C = deal(7,3); a = obj.deal(C{:});";
+    let source = "obj = new_object('Point'); C = {}; a = obj.deal(C{:});";
     let bytecode = compile_source(source).expect("compile method expand single-output source");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CallMethodOrMemberIndexExpandMultiOutput { specs, out_count, .. }
             if *out_count == 1 && specs.len() == 2 && specs[1].is_expand && specs[1].expand_all
     )));
+    interpret(&bytecode).expect("execute valid method expand single-output fallback");
 }
 
 #[test]
@@ -4507,7 +5022,7 @@ fn builtin_multi_output_uses_typed_instruction() {
     let vars = interpret(&bytecode).expect("execute builtin multi-output");
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 10.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 10.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -4524,7 +5039,7 @@ fn builtin_single_output_uses_typed_instruction() {
 #[cfg(any(feature = "test-classes", test))]
 #[test]
 fn method_multi_output_uses_typed_instruction() {
-    let source = "obj = new_object('Point'); [a,b] = obj.deal(7,3); s = b;";
+    let source = "obj = new_object('Point'); [a,b,c] = obj.deal(7,3); s = b;";
     let bytecode = compile_source(source).expect("compile method multi-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -4532,19 +5047,19 @@ fn method_multi_output_uses_typed_instruction() {
             arg_count,
             out_count,
             ..
-        } if *arg_count == 2 && *out_count == 2
+        } if *arg_count == 2 && *out_count == 3
     )));
 
     let vars = interpret(&bytecode).expect("execute method multi-output");
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 7.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 7.0).abs() < 1e-9)));
 }
 
 #[cfg(any(feature = "test-classes", test))]
 #[test]
 fn method_single_output_uses_typed_instruction() {
-    let source = "obj = new_object('Point'); a = obj.deal(7,3);";
+    let source = "obj = new_object('Point'); a = obj.deal();";
     let bytecode = compile_source(source).expect("compile method single-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -4552,8 +5067,9 @@ fn method_single_output_uses_typed_instruction() {
             arg_count,
             out_count,
             ..
-        } if *arg_count == 2 && *out_count == 1
+        } if *arg_count == 0 && *out_count == 1
     )));
+    interpret(&bytecode).expect("execute valid method single-output fallback");
 }
 
 #[test]
@@ -4624,7 +5140,7 @@ fn unresolved_function_multi_output_uses_typed_instruction_and_errors() {
 
 #[test]
 fn unresolved_function_expand_single_output_uses_typed_instruction() {
-    let source = "C = deal(7,3); a = definitely_missing_callback(C{:});";
+    let source = "C = {7,3}; a = definitely_missing_callback(C{:});";
     let bytecode = compile_source(source).expect("compile unresolved expanded call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -4648,7 +5164,7 @@ fn unresolved_function_expand_single_output_uses_typed_instruction() {
 
 #[test]
 fn unresolved_function_expand_zero_output_uses_typed_instruction_and_errors() {
-    let source = "C = deal(7,3); definitely_missing_callback(C{:});";
+    let source = "C = {7,3}; definitely_missing_callback(C{:});";
     let bytecode = compile_source(source).expect("compile unresolved expanded zero-output call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -4672,7 +5188,7 @@ fn unresolved_function_expand_zero_output_uses_typed_instruction_and_errors() {
 
 #[test]
 fn unresolved_function_expand_multi_output_uses_typed_instruction_and_errors() {
-    let source = "C = deal(7,3); [a,b] = definitely_missing_callback(C{:});";
+    let source = "C = {7,3}; [a,b] = definitely_missing_callback(C{:});";
     let bytecode = compile_source(source).expect("compile unresolved expanded call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -4696,20 +5212,20 @@ fn unresolved_function_expand_multi_output_uses_typed_instruction_and_errors() {
 
 #[test]
 fn builtin_vector_index_expansion() {
-    let program = "C = deal(9, 2); r = max(C{[1 2]});";
+    let program = "C = {9, 2}; r = max(C{[1 2]});";
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 9.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 9.0).abs() < 1e-9)));
 }
 
 #[test]
 fn user_function_vector_index_expansion() {
-    let program = "function y = sum2(a,b); y = a + b; end; C = deal(3,4); r = sum2(C{[1 2]});";
+    let program = "function y = sum2(a,b); y = a + b; end; C = {3,4}; r = sum2(C{[1 2]});";
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 7.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 7.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -4718,7 +5234,7 @@ fn end_minus_one_1d_slice_collect() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -4728,7 +5244,7 @@ fn end_minus_one_1d_slice_assign_broadcast() {
     // A becomes [1 9 9 4] => sum 23
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 23.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 23.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -4739,30 +5255,27 @@ fn multidim_range_end_assign() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 32.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 32.0).abs() < 1e-9)));
 }
 
 #[test]
-fn multidim_range_end_assign_non_scalar_rhs_broadcast() {
-    // 2x3; assign the middle column selection with a 2x1 rhs, which should broadcast along the selection length
+fn multidim_range_end_assign_exact_nonscalar_rhs() {
+    // 2x3; assign the middle 2x1 column selection with an exact 2x1 RHS.
     let program = "A = [1 2 3; 4 5 6]; B = [7;8]; A(:,2:2:end-1) = B; s = sum(sum(A));";
     // Becomes [1 7 3; 4 8 6] => sum 29
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 29.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 29.0).abs() < 1e-9)));
 }
 
 #[test]
-fn mixed_range_end_assign_vector_broadcast() {
-    // 3x4 matrix; select rows 2:end (rows {2,3}) and cols 1:2:end-1 (cols {1,3}); assign 2x1 vector broadcast across selected cols
+fn mixed_range_end_assign_rejects_nonscalar_expansion() {
     let program =
         "A = [1 2 3 4; 5 6 7 8; 9 10 11 12]; B = [100;200]; A(2:end, 1:2:end-1) = B; s = sum(sum(A));";
-    let vars = execute_source(program);
-    // Expected sum 646 (see analysis)
-    assert!(vars
-        .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 646.0).abs() < 1e-9)));
+    let error = execute_source_result(program)
+        .expect_err("indexed assignment must not implicitly expand a nonscalar RHS");
+    assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
 }
 
 #[test]
@@ -4775,7 +5288,7 @@ fn mixed_range_end_assign_matrix_rhs_exact_shape() {
     // New values: positions (2,1)=1,(3,1)=2,(2,3)=3,(3,3)=4. Change from original 5,9,7,11 -> delta = (1-5)+(2-9)+(3-7)+(4-11) = -22; sum 78-22=56
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 56.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 56.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -4788,24 +5301,11 @@ fn mixed_range_end_assign_shape_mismatch_error() {
 }
 
 #[test]
-fn broadcasting_roundtrip_property_like() {
-    // After assignment with broadcasted column vector, selected columns equal the vector
+fn indexed_assignment_rejects_column_vector_expansion_across_columns() {
     let program = "A = zeros(3,4); v = [7;8;9]; A(:, 1:2:end-1) = v; x = A(:,1); y = A(:,3);";
-    let vars = execute_source(program);
-    // Expect 7,8,9 present for x and y
-    let mut count = 0;
-    for v in vars {
-        if let runmat_builtins::Value::Tensor(t) = v {
-            if t.shape == vec![3, 1]
-                && (t.data[0] - 7.0).abs() < 1e-9
-                && (t.data[1] - 8.0).abs() < 1e-9
-                && (t.data[2] - 9.0).abs() < 1e-9
-            {
-                count += 1;
-            }
-        }
-    }
-    assert!(count >= 1);
+    let error = execute_source_result(program)
+        .expect_err("indexed assignment must not implicitly expand a column vector");
+    assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
 }
 
 #[test]
@@ -4816,11 +5316,11 @@ fn logical_mask_write_scalar_and_vector() {
     // After A(m)=9, A becomes [9 2 9 4 9 6] => sum 39
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-39.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-39.0).abs()<1e-9)));
     // After B(idx)=[7 8 9], B becomes [7 2 8 4 9 6] => sum 36
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-36.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-36.0).abs()<1e-9)));
 }
 
 #[test]
@@ -4831,22 +5331,74 @@ fn gather_scatter_roundtrip_nd() {
     // Sum remains 45
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-45.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-45.0).abs()<1e-9)));
 }
 
 #[test]
-fn shape_broadcasting_laws() {
-    // Broadcast column vector over selected columns
-    let program = "A = zeros(3,4); v = [1;2;3]; A(:, 2:2:4) = v; x = sum(A(:));\nC = zeros(2,3,2); w = [5;6]; C(:,2,:) = w; y = sum(C(:));";
-    let vars = execute_source(program);
-    // A has 2 columns set to v => sum = (1+2+3)*2 = 12
-    assert!(vars
-        .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-12.0).abs()<1e-9)));
-    // C zeros 2x3x2; assignment sets middle column across both slices => positions: (1,2,1)=5,(2,2,1)=6,(1,2,2)=5,(2,2,2)=6 => sum 22
-    assert!(vars
-        .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-22.0).abs()<1e-9)));
+fn indexed_assignment_rejects_nonscalar_expansion_across_2d_and_nd_selections() {
+    for program in [
+        "A = zeros(3,4); v = [1;2;3]; A(:, 2:2:4) = v;",
+        "C = zeros(2,3,2); w = [5;6]; C(:,2,:) = w;",
+    ] {
+        let error = execute_source_result(program)
+            .expect_err("indexed assignment must not implicitly expand a nonscalar RHS");
+        assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
+    }
+}
+
+#[test]
+fn compiled_integer_implicit_expansion_uses_trailing_singletons_and_strict_zero_rules() {
+    for class_name in [
+        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+    ] {
+        let source = format!(
+            "a = reshape({class_name}([1 2]), 2, 1); b = reshape({class_name}([10 20 30 40 50 60]), 2, 1, 3); c = a + b;"
+        );
+        let values = execute_source(&source);
+        assert!(
+            values.iter().any(|value| {
+                let runmat_value::Value::Tensor(tensor) = value else {
+                    return false;
+                };
+                tensor.shape == [2, 1, 3]
+                    && tensor.integer_storage().map(|storage| storage.class_name())
+                        == Some(class_name)
+                    && tensor.materialize_f64() == [11.0, 22.0, 31.0, 42.0, 51.0, 62.0]
+            }),
+            "missing exact compiled {class_name} broadcast result: {values:?}"
+        );
+    }
+
+    let front_alignment_error = execute_source_result(
+        "a = reshape(int8(1:6), 2, 3); b = reshape(int8(1:6), 1, 2, 3); c = a + b;",
+    )
+    .expect_err("front-aligned rank expansion must be rejected");
+    assert!(
+        front_alignment_error
+            .message()
+            .contains("dimension mismatch"),
+        "unexpected rank mismatch error: {front_alignment_error}"
+    );
+
+    let empty_values = execute_source("a = reshape(int8([]), 0, 3); b = int8([1 2 3]); c = a + b;");
+    assert!(empty_values.iter().any(|value| {
+        matches!(
+            value,
+            runmat_value::Value::Tensor(tensor)
+                if tensor.shape == [0, 3]
+                    && tensor.integer_storage().is_some_and(|storage| storage.class_name() == "int8")
+                    && tensor.is_empty()
+        )
+    }));
+
+    let zero_error = execute_source_result(
+        "a = reshape(int8([]), 0, 3); b = reshape(int8(1:6), 2, 3); c = a + b;",
+    )
+    .expect_err("zero extent cannot expand against a nonsingleton");
+    assert!(
+        zero_error.message().contains("dimension mismatch"),
+        "unexpected zero mismatch error: {zero_error}"
+    );
 }
 
 #[test]
@@ -4855,9 +5407,11 @@ fn column_major_rhs_mapping() {
     let program = "A = zeros(3,3); R = [10 13 16; 11 14 17; 12 15 18]; A(:, [1 3]) = R(:, [1 3]); s = sum(A(:));";
     let vars = execute_source(program);
     // Selected columns are 1 and 3, filled from R(:,[1 3]) which in column-major is [10;11;12;16;17;18] => sum 84
-    assert!(vars
-        .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-84.0).abs()<1e-9)));
+    assert!(
+        vars.iter()
+            .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-84.0).abs()<1e-9)),
+        "expected column-major sum; vars={vars:?}"
+    );
 }
 #[test]
 fn builtin_call_with_function_return_propagation() {
@@ -4866,18 +5420,18 @@ fn builtin_call_with_function_return_propagation() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 9.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 9.0).abs() < 1e-9)));
 }
 
 #[test]
 fn function_call_base_expand_all() {
     let program = r#"
-        function y = sum2(a,b); y = a + b; end; r = sum2(deal(5,6){:});
+        function y = sum2(a,b); y = a + b; end; C = {5,6}; r = sum2(C{:});
     "#;
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 11.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 11.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -4887,7 +5441,7 @@ fn function_return_propagation_in_args() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -4906,10 +5460,10 @@ fn varargin_pack_and_forward() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-6.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-6.0).abs()<1e-9)));
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-22.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-22.0).abs()<1e-9)));
 }
 
 #[test]
@@ -4926,7 +5480,7 @@ fn feval_expand_multi_forwards_expanded_cell_args() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-22.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-22.0).abs()<1e-9)));
 }
 
 #[test]
@@ -4941,7 +5495,7 @@ fn feval_expand_cell_indices_support_end_offsets() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-50.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-50.0).abs()<1e-9)));
 }
 
 #[test]
@@ -4963,7 +5517,7 @@ fn feval_expand_cell_indices_support_2d_end_selectors() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -4978,7 +5532,7 @@ fn feval_expand_cell_indices_support_2d_end_offsets() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 2.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 2.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -5013,7 +5567,7 @@ fn varargout_argument_supplies_first_output_without_implicit_expansion() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-11.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-11.0).abs()<1e-9)));
 }
 
 #[test]
@@ -5110,10 +5664,10 @@ fn import_precedence_and_class_static_shadowing() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-7.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-7.0).abs()<1e-9)));
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-123.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-123.0).abs()<1e-9)));
 }
 
 #[test]
@@ -5137,30 +5691,30 @@ fn operator_overloading_numeric_results_and_bitwise_arrays() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 8.0).abs() < 1e-9))); // r1 = 5+3
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 8.0).abs() < 1e-9))); // r1 = 5+3
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 10.0).abs() < 1e-9))); // r2 = 5*2
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 10.0).abs() < 1e-9))); // r2 = 5*2
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 20.0).abs() < 1e-9))); // r3 = 5*4
-                                                                                            // a and b push logicals (1.0/0.0) somewhere in vars
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 20.0).abs() < 1e-9))); // r3 = 5*4
+                                                                                         // a and b push logicals (1.0/0.0) somewhere in vars
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 1.0).abs() < 1e-9))); // 5<10 true
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 1.0).abs() < 1e-9))); // 5<10 true
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 1.0).abs() < 1e-9))); // 5==5 true
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 1.0).abs() < 1e-9))); // 5==5 true
 
     // Bitwise and/or on arrays: verify element-wise behavior
     let program2 = "A = [1 0 1; 0 1 0]; B = [1 1 0; 0 0 1]; C = A & B; D = A | B; Sc = sum(C(:)); Sd = sum(D(:));";
     let vars2 = execute_source(program2);
     assert!(vars2
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-1.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-1.0).abs()<1e-9)));
     assert!(vars2
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-5.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-5.0).abs()<1e-9)));
 }
 
 #[test]
@@ -5219,10 +5773,10 @@ fn nested_try_catch_rethrow_unified_exception_ids() {
             out_id = id; out_msg = msg; out_exc = e;
         end
     "#;
-    let vars = execute_source(program);
+    let vars = execute_source_with_extensions(program);
     // Look for the exception object with identifier/message
     let has_exc = vars.iter().any(|v| match v {
-        runmat_builtins::Value::MException(me) => {
+        runmat_value::Value::MException(me) => {
             me.identifier == "RunMat:inner:bad" && me.message == "inner fail"
         }
         _ => false,
@@ -5230,10 +5784,10 @@ fn nested_try_catch_rethrow_unified_exception_ids() {
     // If out_exc wasn't preserved as MException, ensure at least identifier/message strings are present
     let has_id = vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s=="RunMat:inner:bad"));
+        .any(|v| matches!(v, runmat_value::Value::String(s) if s=="RunMat:inner:bad"));
     let has_msg = vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s=="inner fail"));
+        .any(|v| matches!(v, runmat_value::Value::String(s) if s=="inner fail"));
     assert!(has_exc || (has_id && has_msg));
 }
 
@@ -5243,7 +5797,7 @@ fn globals_basic_and_shadowing() {
     let vars = execute_source(prog);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 8.0).abs() < 1e-12)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 8.0).abs() < 1e-12)));
 }
 
 #[test]
@@ -5253,7 +5807,7 @@ fn persistents_init_once_across_calls() {
     // Expect last value 3 somewhere in vars
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-12)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 3.0).abs() < 1e-12)));
 }
 
 #[test]
@@ -5265,10 +5819,10 @@ fn import_precedence_and_shadowing() {
     // Expect 7 and 123 present
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-7.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-7.0).abs()<1e-9)));
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-123.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-123.0).abs()<1e-9)));
 }
 
 #[test]
@@ -5286,10 +5840,10 @@ fn class_dependent_property_get_set() {
         % get.p should return p_backing
         v = getfield(d, 'p');
     "#;
-    let vars = execute_source(program);
+    let vars = execute_source_with_extensions(program);
     let sevens = vars
         .iter()
-        .filter(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-7.0).abs()<1e-9))
+        .filter(|v| matches!(v, runmat_value::Value::Num(n) if (*n-7.0).abs()<1e-9))
         .count();
     assert!(
         sevens >= 2,
@@ -5310,12 +5864,12 @@ fn struct_isfield_multi_and_fieldnames() {
     let mut found_f_ok = false;
     for v in &vars {
         match v {
-            runmat_builtins::Value::LogicalArray(arr) => {
+            runmat_value::Value::LogicalArray(arr) => {
                 if arr.shape == vec![2, 2] && arr.data == vec![1, 1, 0, 1] {
                     found_r_ok = true;
                 }
             }
-            runmat_builtins::Value::Cell(ca) => {
+            runmat_value::Value::Cell(ca) => {
                 // fieldnames returns a column cell array with at least two entries
                 if ca.cols == 1 && ca.rows >= 2 {
                     found_f_ok = true;
@@ -5338,7 +5892,7 @@ fn struct_isfield_string_array_names() {
     // Expect r to be 2x2 logical matrix [[1,0];[0,1]] in column-major data [1,0,0,1]
     assert!(vars.iter().any(|v| matches!(
         v,
-        runmat_builtins::Value::LogicalArray(arr)
+        runmat_value::Value::LogicalArray(arr)
             if arr.shape == vec![2, 2] && arr.data == vec![1, 0, 0, 1]
     )));
 }
@@ -5363,7 +5917,7 @@ fn oop_negative_undefined_property_and_missing_subsref() {
     if let Ok(vars) = res {
         assert!(vars
             .iter()
-            .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-1.0).abs()<1e-9)));
+            .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-1.0).abs()<1e-9)));
     }
 
     // Class without subsref should error on () indexing
@@ -5384,7 +5938,7 @@ fn oop_negative_undefined_property_and_missing_subsref() {
     if let Ok(vars2) = res2 {
         assert!(vars2
             .iter()
-            .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-2.0).abs()<1e-9)));
+            .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-2.0).abs()<1e-9)));
     }
 }
 
@@ -5397,7 +5951,7 @@ fn containers_map_parenthesis_indexing() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 99.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 99.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -5411,16 +5965,23 @@ fn containers_map_dot_properties() {
     let vars = execute_source(program);
 
     assert!(vars.iter().any(|v| match v {
-        runmat_builtins::Value::CharArray(ca) => ca.data.iter().collect::<String>() == "char",
+        runmat_value::Value::CharArray(ca) => ca.data.iter().collect::<String>() == "char",
         _ => false,
     }));
     assert!(vars.iter().any(|v| match v {
-        runmat_builtins::Value::CharArray(ca) => ca.data.iter().collect::<String>() == "any",
+        runmat_value::Value::CharArray(ca) => ca.data.iter().collect::<String>() == "any",
         _ => false,
     }));
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Int(runmat_value::IntValue::U64(0)))));
+}
+
+#[test]
+fn containers_map_preserves_wide_integer_keys_values_and_count() {
+    let _ = execute_source(
+        "m = containers.Map('KeyType','uint64','ValueType','uint64'); k = intmax('uint64'); m(k) = k-uint64(1); if m.Count ~= uint64(1) || m(k) ~= k-uint64(1) || ~isKey(m,k); error('integer Map mismatch'); end; ks = keys(m); vs = values(m,{k}); if ks{1} ~= k || vs{1} ~= k-uint64(1); error('integer Map collection mismatch'); end; remove(m,k); if isKey(m,k) || m.Count ~= uint64(0); error('integer Map removal mismatch'); end;",
+    );
 }
 
 #[test]
@@ -5442,7 +6003,7 @@ fn string_array_literal_concat_index_and_compare() {
     let mut saw_e2 = false;
     for v in vars {
         match v {
-            runmat_builtins::Value::StringArray(sa) => {
+            runmat_value::Value::StringArray(sa) => {
                 println!("SA shape={:?} data={:?}", sa.shape, sa.data);
                 if sa.shape == vec![2, 2] {
                     saw_a = true;
@@ -5457,20 +6018,20 @@ fn string_array_literal_concat_index_and_compare() {
                     saw_x = true;
                 }
             }
-            runmat_builtins::Value::String(s) => {
+            runmat_value::Value::String(s) => {
                 println!("S {s}");
                 if s == "ccc" {
                     saw_x = true;
                 }
             }
-            runmat_builtins::Value::CharArray(ca) => {
+            runmat_value::Value::CharArray(ca) => {
                 let s: String = ca.data.iter().collect();
                 if s == "ccc" {
                     saw_x = true;
                 }
             }
-            runmat_builtins::Value::Tensor(t) => {
-                println!("T shape={:?} data={:?}", t.shape, t.data);
+            runmat_value::Value::Tensor(t) => {
+                println!("T shape={:?} data={:?}", t.shape, t.materialize_f64());
                 if t.shape == vec![2, 2] {
                     saw_e1 = true;
                     saw_e2 = true;
@@ -5491,7 +6052,7 @@ fn string_literal_and_num2str_horzcat_promotes_and_runs() {
     let vars = execute_source(program);
     let mut saw_label = false;
     for value in vars {
-        if let runmat_builtins::Value::StringArray(sa) = value {
+        if let runmat_value::Value::StringArray(sa) = value {
             if sa.shape == vec![1, 3] && sa.data == vec!["wn = ", "6", " rad/s"] {
                 saw_label = true;
             }
@@ -5515,21 +6076,24 @@ fn computed_integer_indices_work_for_column_slice_read_and_assign() {
 
     let mut saw_read = false;
     let mut saw_assign = false;
-    for value in vars {
-        if let runmat_builtins::Value::Tensor(t) = value {
-            if t.shape == vec![2, 1] && t.data == vec![2.0, 5.0] {
+    for value in &vars {
+        if let runmat_value::Value::Tensor(t) = value {
+            if t.shape == vec![2, 1] && t.materialize_f64() == vec![2.0, 5.0] {
                 saw_read = true;
             }
-            if t.shape == vec![2, 1] && t.data == vec![7.0, 9.0] {
+            if t.shape == vec![2, 1] && t.materialize_f64() == vec![7.0, 9.0] {
                 saw_assign = true;
             }
         }
     }
 
-    assert!(saw_read, "expected computed integer slice read to succeed");
+    assert!(
+        saw_read,
+        "expected computed integer slice read to succeed; vars={vars:?}"
+    );
     assert!(
         saw_assign,
-        "expected computed integer slice assign to succeed"
+        "expected computed integer slice assign to succeed; vars={vars:?}"
     );
 }
 
@@ -5545,7 +6109,7 @@ fn import_deep_multiseg_package_specific_vs_wildcard() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-10.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-10.0).abs()<1e-9)));
 }
 
 #[test]
@@ -5565,14 +6129,14 @@ fn import_shadowing_matrix_locals_user_specific_wildcard_classstar() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-77.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-77.0).abs()<1e-9)));
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-33.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-33.0).abs()<1e-9)));
     // presence of an Object from origin()
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
+        .any(|v| matches!(v, runmat_value::Value::Object(_))));
 }
 
 #[test]
@@ -5603,7 +6167,7 @@ fn import_specific_vs_wildcard_same_name_prefers_specific_under_nesting() {
     let vars = execute_source(program);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-10.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-10.0).abs()<1e-9)));
 }
 
 #[test]
@@ -5615,13 +6179,16 @@ fn type_class_static_method_zeros() {
     "#;
     let vars = execute_source(program);
     // The result should be a 2x3 matrix of zeros
-    assert!(vars.iter().any(|v| {
-        if let runmat_builtins::Value::Tensor(t) = v {
-            t.shape == vec![2, 3] && t.data.iter().all(|&x| x == 0.0)
-        } else {
-            false
-        }
-    }));
+    assert!(
+        vars.iter().any(|v| {
+            if let runmat_value::Value::Tensor(t) = v {
+                t.shape == vec![2, 3] && t.materialize_f64().iter().all(|&x| x == 0.0)
+            } else {
+                false
+            }
+        }),
+        "expected double.zeros 2x3 tensor; vars={vars:?}"
+    );
 }
 
 #[test]
@@ -5633,10 +6200,143 @@ fn type_class_static_method_logical_zeros() {
     let vars = execute_source(program);
     // The result should be a 2x2 logical array of zeros
     assert!(vars.iter().any(|v| {
-        if let runmat_builtins::Value::LogicalArray(l) = v {
+        if let runmat_value::Value::LogicalArray(l) = v {
             l.shape == vec![2, 2] && l.data.iter().all(|&x| x == 0)
         } else {
             false
         }
     }));
+}
+
+#[test]
+fn integer_type_class_static_method_zeros_preserves_integer_classes() {
+    let program = r#"
+        a = int8.zeros(2, 3);
+        b = int32.zeros([1 4]);
+        c = uint16.zeros(3, 1);
+        d = uint64.zeros(1, 2);
+        ca = class(a);
+        cb = class(b);
+        cc = class(c);
+        cd = class(d);
+    "#;
+    let vars = execute_source(program);
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_value::Value::Tensor(tensor)
+            if tensor.shape == vec![2, 3]
+                && tensor.integer_storage()
+                    == Some(&runmat_value::IntegerStorage::I8(vec![0; 6]))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_value::Value::Tensor(tensor)
+            if tensor.shape == vec![1, 4]
+                && tensor.integer_storage()
+                    == Some(&runmat_value::IntegerStorage::I32(vec![0; 4]))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_value::Value::Tensor(tensor)
+            if tensor.shape == vec![3, 1]
+                && tensor.integer_storage()
+                    == Some(&runmat_value::IntegerStorage::U16(vec![0; 3]))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_value::Value::Tensor(tensor)
+            if tensor.shape == vec![1, 2]
+                && tensor.integer_storage()
+                    == Some(&runmat_value::IntegerStorage::U64(vec![0; 2]))
+    )));
+    for expected in ["int8", "int32", "uint16", "uint64"] {
+        assert!(
+            vars.iter().any(
+                |value| matches!(value, runmat_value::Value::String(class) if class == expected)
+            ),
+            "expected class {expected:?}; vars={vars:?}"
+        );
+    }
+}
+
+#[test]
+fn eye_integer_class_strings_preserve_integer_storage_on_script_surface() {
+    let program = r#"
+        a = eye(2, 3, 'int16');
+        b = eye([2 2], 'uint32');
+        c = eye(1, 4, 'uint64');
+        ca = class(a);
+        cb = class(b);
+        cc = class(c);
+    "#;
+    let vars = execute_source(program);
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_value::Value::Tensor(tensor)
+            if tensor.shape == vec![2, 3]
+                && tensor.integer_storage()
+                    == Some(&runmat_value::IntegerStorage::I16(vec![1, 0, 0, 1, 0, 0]))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_value::Value::Tensor(tensor)
+            if tensor.shape == vec![2, 2]
+                && tensor.integer_storage()
+                    == Some(&runmat_value::IntegerStorage::U32(vec![1, 0, 0, 1]))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_value::Value::Tensor(tensor)
+            if tensor.shape == vec![1, 4]
+                && tensor.integer_storage()
+                    == Some(&runmat_value::IntegerStorage::U64(vec![1, 0, 0, 0]))
+    )));
+    for expected in ["int16", "uint32", "uint64"] {
+        assert!(
+            vars.iter().any(
+                |value| matches!(value, runmat_value::Value::String(class) if class == expected)
+            ),
+            "expected class {expected:?}; vars={vars:?}"
+        );
+    }
+}
+
+#[test]
+fn diag_integer_class_strings_preserve_integer_storage_on_script_surface() {
+    let program = r#"
+        a = diag([1.5 -2.5 300], 'int16');
+        b = diag(uint64([18446744073709551615 9223372036854775808]), 'int64');
+        ca = class(a);
+        cb = class(b);
+    "#;
+    let vars = execute_source_with_extensions(program);
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_value::Value::Tensor(tensor)
+            if tensor.shape == vec![3, 3]
+                && tensor.integer_storage()
+                    == Some(&runmat_value::IntegerStorage::I16(vec![
+                        2, 0, 0, 0, -3, 0, 0, 0, 300
+                    ]))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_value::Value::Tensor(tensor)
+            if tensor.shape == vec![2, 2]
+                && tensor.integer_storage()
+                    == Some(&runmat_value::IntegerStorage::I64(vec![
+                        i64::MAX,
+                        0,
+                        0,
+                        i64::MAX
+                    ]))
+    )));
+    for expected in ["int16", "int64"] {
+        assert!(
+            vars.iter().any(
+                |value| matches!(value, runmat_value::Value::String(class) if class == expected)
+            ),
+            "expected class {expected:?}; vars={vars:?}"
+        );
+    }
 }

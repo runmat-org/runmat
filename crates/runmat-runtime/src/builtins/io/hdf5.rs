@@ -4,10 +4,14 @@ use std::path::{Path, PathBuf};
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, IntegerStorage, LogicalArray, StringArray, Tensor, Type, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
 };
 use runmat_macros::runtime_builtin;
+#[cfg(not(target_arch = "wasm32"))]
+use runmat_value::NumericStorage;
+use runmat_value::{
+    IntValue, IntegerStorage, LogicalArray, NumericScalar, StringArray, Tensor, Value,
+};
 
 use crate::builtins::common::fs::expand_user_path;
 use crate::builtins::common::spec::{
@@ -776,36 +780,82 @@ fn numeric_vector_usize(
     builtin: &'static str,
     label: &str,
 ) -> BuiltinResult<Vec<usize>> {
-    let numbers = match value {
-        Value::Num(v) => vec![*v],
-        Value::Int(v) => vec![v.to_f64()],
-        Value::Tensor(t) => t.data.clone(),
-        _ => {
-            return Err(hdf5_error(
-                builtin,
-                &ERR_ARGUMENT,
-                format!("{builtin}: expected {label} as a numeric vector"),
-            ))
-        }
-    };
-    numbers
-        .into_iter()
-        .map(|value| {
-            if !value.is_finite()
-                || value < 1.0
-                || value > usize::MAX as f64
-                || value.fract() != 0.0
-            {
-                Err(hdf5_error(
-                    builtin,
-                    &ERR_ARGUMENT,
-                    format!("{builtin}: {label} entries must be positive finite integers"),
-                ))
+    match value {
+        Value::Num(v) => Ok(vec![numeric_usize_entry(*v, builtin, label)?]),
+        Value::Int(v) => Ok(vec![int_usize_entry(v, builtin, label)?]),
+        Value::Tensor(t) => {
+            if let Some(storage) = t.integer_storage() {
+                storage
+                    .exact_values()
+                    .iter()
+                    .map(|value| int_usize_entry(value, builtin, label))
+                    .collect()
             } else {
-                Ok(value as usize)
+                (0..t.shape.iter().product())
+                    .map(|index| {
+                        let value = match t
+                            .numeric_value_at(index)
+                            .expect("numeric vector index is in bounds")
+                        {
+                            NumericScalar::F64(value) => value,
+                            NumericScalar::F32(value) => f64::from(value),
+                            NumericScalar::I8(_)
+                            | NumericScalar::I16(_)
+                            | NumericScalar::I32(_)
+                            | NumericScalar::I64(_)
+                            | NumericScalar::U8(_)
+                            | NumericScalar::U16(_)
+                            | NumericScalar::U32(_)
+                            | NumericScalar::U64(_) => {
+                                unreachable!("integer vectors use the exact parser")
+                            }
+                        };
+                        numeric_usize_entry(value, builtin, label)
+                    })
+                    .collect()
             }
-        })
-        .collect()
+        }
+        _ => Err(hdf5_error(
+            builtin,
+            &ERR_ARGUMENT,
+            format!("{builtin}: expected {label} as a numeric vector"),
+        )),
+    }
+}
+
+fn int_usize_entry(value: &IntValue, builtin: &'static str, label: &str) -> BuiltinResult<usize> {
+    let Some(parsed) = value.try_to_usize() else {
+        return Err(hdf5_error(
+            builtin,
+            &ERR_ARGUMENT,
+            format!("{builtin}: {label} entries must be positive finite integers"),
+        ));
+    };
+    if parsed == 0 {
+        return Err(hdf5_error(
+            builtin,
+            &ERR_ARGUMENT,
+            format!("{builtin}: {label} entries must be positive finite integers"),
+        ));
+    }
+    Ok(parsed)
+}
+
+fn numeric_usize_entry(value: f64, builtin: &'static str, label: &str) -> BuiltinResult<usize> {
+    if !value.is_finite()
+        || value < 1.0
+        || value > usize::MAX as f64
+        || (usize::BITS == 64 && value == usize::MAX as f64)
+        || value.fract() != 0.0
+    {
+        Err(hdf5_error(
+            builtin,
+            &ERR_ARGUMENT,
+            format!("{builtin}: {label} entries must be positive finite integers"),
+        ))
+    } else {
+        Ok(value as usize)
+    }
 }
 
 fn col_major_to_row_major<T: Clone>(data: &[T], shape: &[usize]) -> Vec<T> {
@@ -1007,7 +1057,7 @@ mod imp {
 
     use hdf5::types::{FloatSize, IntSize, TypeDescriptor, VarLenAscii, VarLenUnicode};
     use hdf5::{Attribute, Dataset, File, Group, Hyperslab, Location, SliceOrIndex};
-    use runmat_builtins::{CharArray, StructValue};
+    use runmat_value::{CharArray, StructValue};
 
     use super::*;
 
@@ -1099,6 +1149,9 @@ mod imp {
                     )
                 })?;
             }
+            WritableData::Single { data, shape } => {
+                create_typed_dataset::<f32>(builtin, &file, &dataset_path, data, &shape)?;
+            }
             WritableData::Integer { storage, shape } => {
                 create_integer_dataset(builtin, &file, &dataset_path, storage, &shape)?;
             }
@@ -1169,6 +1222,17 @@ mod imp {
                     )
                 })
             }
+            WritableData::Single { data, shape } => {
+                validate_full_write_shape(builtin, &shape, &ds.shape())?;
+                let row_major = col_major_to_row_major(&data, &shape);
+                ds.write_raw(&row_major).map_err(|err| {
+                    io_error(
+                        builtin,
+                        format!("{builtin}: unable to write existing dataset {dataset_path}"),
+                        err,
+                    )
+                })
+            }
             WritableData::Integer { storage, shape } => {
                 validate_full_write_shape(builtin, &shape, &ds.shape())?;
                 write_existing_integer_dataset(builtin, ds, dataset_path, storage, &shape)
@@ -1226,6 +1290,11 @@ mod imp {
                 validate_write_selection_shape(builtin, &shape, &selection.count)?;
                 let row_major = col_major_to_row_major(&data, &shape);
                 write_hyperslab::<f64>(builtin, &ds, &selection, row_major)
+            }
+            WritableData::Single { data, shape } => {
+                validate_write_selection_shape(builtin, &shape, &selection.count)?;
+                let row_major = col_major_to_row_major(&data, &shape);
+                write_hyperslab::<f32>(builtin, &ds, &selection, row_major)
             }
             WritableData::Integer { storage, shape } => {
                 validate_write_selection_shape(builtin, &shape, &selection.count)?;
@@ -1333,6 +1402,10 @@ mod imp {
             data: Vec<f64>,
             shape: Vec<usize>,
         },
+        Single {
+            data: Vec<f32>,
+            shape: Vec<usize>,
+        },
         Integer {
             storage: IntegerStorage,
             shape: Vec<usize>,
@@ -1358,16 +1431,22 @@ mod imp {
                     storage: integer_storage_from_scalar(v),
                     shape: vec![1, 1],
                 }),
-                Value::Tensor(t) => match t.integer_data {
-                    Some(storage) => Ok(Self::Integer {
-                        storage,
-                        shape: t.shape,
-                    }),
-                    None => Ok(Self::Numeric {
-                        data: t.data,
-                        shape: t.shape,
-                    }),
-                },
+                Value::Tensor(t) => {
+                    let shape = t.shape.clone();
+                    let storage = t.into_numeric_storage().map_err(|error| {
+                        hdf5_error(builtin, &ERR_UNSUPPORTED, format!("{builtin}: {error}"))
+                    })?;
+                    match storage {
+                        NumericStorage::F64(data) => Ok(Self::Numeric { data, shape }),
+                        NumericStorage::F32(data) => Ok(Self::Single { data, shape }),
+                        storage => Ok(Self::Integer {
+                            storage: storage
+                                .into_integer_storage()
+                                .expect("non-floating numeric storage is integer"),
+                            shape,
+                        }),
+                    }
+                }
                 Value::Bool(v) => Ok(Self::Logical {
                     data: vec![v],
                     shape: vec![1, 1],
@@ -1416,8 +1495,10 @@ mod imp {
         match dtype {
             TypeDescriptor::Float(FloatSize::U4) => {
                 let (raw, out_shape) = read_raw_or_slice::<f32>(builtin, ds, &shape, selection)?;
-                let raw: Vec<f64> = raw.into_iter().map(|v| v as f64).collect();
-                matlab_value_from_f64(row_major_to_col_major(&raw, &out_shape), out_shape)
+                let data = row_major_to_col_major(&raw, &out_shape);
+                Tensor::from_f32(data, out_shape)
+                    .map(Value::Tensor)
+                    .map_err(|error| hdf5_error(builtin, &ERR_IO, format!("{builtin}: {error}")))
             }
             TypeDescriptor::Float(FloatSize::U8) => {
                 let (raw, out_shape) = read_raw_or_slice::<f64>(builtin, ds, &shape, selection)?;
@@ -1732,6 +1813,27 @@ mod imp {
                 let row_major = col_major_to_row_major(&data, &shape);
                 let attr = location
                     .new_attr::<f64>()
+                    .shape(shape.as_slice())
+                    .create(name)
+                    .map_err(|err| {
+                        io_error(
+                            builtin,
+                            format!("{builtin}: unable to create attribute {name}"),
+                            err,
+                        )
+                    })?;
+                attr.write_raw(&row_major).map_err(|err| {
+                    io_error(
+                        builtin,
+                        format!("{builtin}: unable to write attribute {name}"),
+                        err,
+                    )
+                })?;
+            }
+            WritableData::Single { data, shape } => {
+                let row_major = col_major_to_row_major(&data, &shape);
+                let attr = location
+                    .new_attr::<f32>()
                     .shape(shape.as_slice())
                     .create(name)
                     .map_err(|err| {
@@ -2175,7 +2277,7 @@ mod imp {
 #[cfg(not(target_arch = "wasm32"))]
 mod tests {
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage};
+    use runmat_value::{ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage};
     use tempfile::tempdir;
 
     use super::imp::type_name;
@@ -2205,10 +2307,98 @@ mod tests {
         match out {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
-                assert_eq!(t.data, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn hdf5_round_trips_native_single_storage() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("single_roundtrip.h5");
+        let tensor = Tensor::from_f32(vec![1.25, 2.5, 3.75, 5.0], vec![2, 2]).unwrap();
+
+        block_on(h5write_builtin(
+            Value::String(path.display().to_string()),
+            Value::String("/single".to_string()),
+            Value::Tensor(tensor),
+            Vec::new(),
+        ))
+        .expect("write single");
+
+        let out = block_on(h5read_builtin(
+            Value::String(path.display().to_string()),
+            Value::String("/single".to_string()),
+            Vec::new(),
+        ))
+        .expect("read single");
+        let Value::Tensor(tensor) = out else {
+            panic!("expected tensor");
+        };
+        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(
+            tensor.into_numeric_storage().expect("single storage"),
+            NumericStorage::F32(vec![1.25, 2.5, 3.75, 5.0])
+        );
+    }
+
+    #[test]
+    fn h5write_rejects_typed_complex_integer_without_float_coercion() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("typed_complex.h5");
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX]),
+            IntegerStorage::U64(vec![1_u64 << 63]),
+        )
+        .expect("matching components");
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("typed complex");
+
+        let err = block_on(h5write_builtin(
+            Value::String(path.display().to_string()),
+            Value::String("/data".to_string()),
+            Value::ComplexTensor(tensor),
+            Vec::new(),
+        ))
+        .expect_err("typed complex integer HDF5 writes are unsupported");
+
+        assert_eq!(err.identifier(), Some("RunMat:hdf5:UnsupportedType"));
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn hdf5_selection_vectors_read_integer_storage_exactly() {
+        let exact = (1_u64 << 53) + 1;
+
+        assert_eq!(
+            numeric_vector_usize(&Value::Int(IntValue::U64(exact)), H5READ_NAME, "start")
+                .expect("scalar vector"),
+            vec![exact as usize]
+        );
+
+        let vector =
+            Tensor::new_integer(IntegerStorage::U64(vec![exact, 3]), vec![1, 2]).expect("vector");
+        assert_eq!(
+            numeric_vector_usize(&Value::Tensor(vector), H5WRITE_NAME, "count").expect("vector"),
+            vec![exact as usize, 3]
+        );
+
+        assert!(numeric_vector_usize(&Value::Int(IntValue::U8(0)), H5READ_NAME, "start").is_err());
+        assert!(numeric_vector_usize(&Value::Int(IntValue::I8(-1)), H5READ_NAME, "start").is_err());
+    }
+
+    #[test]
+    fn hdf5_selection_vectors_reject_unrepresentable_double_bounds() {
+        let boundary = numeric_vector_usize(&Value::Num(usize::MAX as f64), H5READ_NAME, "start");
+        if usize::BITS == 64 {
+            assert!(boundary.is_err());
+        } else {
+            assert_eq!(boundary.unwrap(), vec![usize::MAX]);
+        }
+        assert!(
+            numeric_vector_usize(&Value::Num((usize::MAX as f64) + 1.0), H5READ_NAME, "start")
+                .is_err()
+        );
     }
 
     #[test]
@@ -2356,7 +2546,7 @@ mod tests {
         match out {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![4.0, 6.0, 7.0, 9.0]);
+                assert_eq!(t.materialize_f64(), vec![4.0, 6.0, 7.0, 9.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -2399,7 +2589,7 @@ mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 4]);
                 assert_eq!(
-                    t.data,
+                    t.materialize_f64(),
                     vec![0.0, 0.0, 0.0, 40.0, 0.0, 60.0, 70.0, 0.0, 90.0, 0.0, 0.0, 0.0]
                 );
             }
@@ -2440,7 +2630,7 @@ mod tests {
             Vec::new(),
         ))
         .expect("read rewritten");
-        assert!(matches!(out, Value::Tensor(t) if t.data == vec![3.0, 4.0]));
+        assert!(matches!(out, Value::Tensor(t) if t.materialize_f64() == vec![3.0, 4.0]));
 
         let info = block_on(h5info_builtin(
             Value::String(path.display().to_string()),

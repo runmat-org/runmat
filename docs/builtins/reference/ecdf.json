@@ -3,6 +3,13 @@
   "category": "stats/summary",
   "keywords": ["ecdf", "empirical cdf", "survivor", "cumulative hazard", "statistics"],
   "summary": "Compute or plot empirical distribution functions.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64", "f32"],
+    "broadcasting": "none",
+    "notes": "Documented floating gpuArray sample data uses an owner-aware host fallback and restores numeric outputs to the source provider. Plotting remains a host graphics sink."
+  },
   "signatures": [
     "[f,x] = ecdf(y)",
     "[f,x] = ecdf(y,Name,Value)",
@@ -15,9 +22,12 @@
     "NaN sample, censoring, and frequency entries are omitted.",
     "`Function` accepts `\"cdf\"`, `\"survivor\"`, and `\"cumulative hazard\"`.",
     "`Frequency` supplies nonnegative observation counts.",
+    "Typed-integer or logical sample data, typed-integer or logical Frequency data, and typed-integer Censoring data are separately named RunMat-only extensions. Strict modes reject each role before provider access.",
+    "Admitted integer values must be exactly representable at the explicit binary64 statistics boundary; all numeric outputs from an integer extension call are double.",
     "`Censoring` supports fully observed data (`0`), left-censored observations (`-1`), and right-censored observations (`1`). Interval and double-censored Turnbull estimation are reported as unsupported instead of approximated.",
     "`Function`, `\"cumulative hazard\"` uses Nelson-Aalen cumulative hazard steps for fully observed and right-censored data.",
-    "`Alpha` controls pointwise confidence bounds. `Bounds`, `\"on\"` includes confidence-bound lines when plotting."
+    "`Alpha` controls pointwise confidence bounds. `Bounds`, `\"on\"` includes confidence-bound lines when plotting.",
+    "Interval-censored EMICM estimation, double-censored Turnbull estimation, and their iteration controls remain explicit implementation gaps and return stable unsupported-form errors."
   ],
   "examples": [
     {

@@ -1,10 +1,3 @@
----
-title: "Glossary"
-category: "Reference"
-section: "glossary"
-last_updated: "May 28, 2026"
----
-
 # Glossary
 
 This page defines RunMat-specific terms and abbreviations used across the runtime documentation. It focuses on terms that carry a specific meaning in this codebase.
@@ -108,7 +101,7 @@ This page defines RunMat-specific terms and abbreviations used across the runtim
 
 | Term | Definition | More |
 | --- | --- | --- |
-| JIT | Just-in-time compilation. RunMat's JIT tier compiles eligible bytecode through Turbine into native execution paths while preserving VM fallback behavior. | [JIT Compiler](/docs/runtime/jit) |
+| JIT | Just-in-time compilation. RunMat adaptively compiles hot, eligible MIR through verified Native IR into guarded native execution paths while preserving VM semantics. | [JIT Compiler](/docs/runtime/jit) |
 
 ## L
 
@@ -176,7 +169,6 @@ This page defines RunMat-specific terms and abbreviations used across the runtim
 | --- | --- | --- |
 | Telemetry | Bounded runtime analytics and provider counters used to understand installation health, execution behavior, acceleration usage, failures, and benchmark characteristics. | [Telemetry](/docs/runtime/development/telemetry) |
 | Terminator | The MIR instruction that ends a basic block, such as branch, return, jump, or await. Terminators make control flow explicit. | [Mid-Level IR (MIR)](/docs/runtime/compiler/mir) |
-| Turbine | RunMat's JIT compiler crate. It compiles eligible bytecode paths into native code and falls back to the VM when a path cannot be compiled safely. | [JIT Compiler](/docs/runtime/jit) |
 | TypeScript bindings | The `bindings/ts` package that exposes RunMat's WASM runtime, session API, LSP bundle, plotting hooks, and host integration types to JavaScript and TypeScript callers. | [WASM & TypeScript/JavaScript](/docs/runtime/wasm) |
 
 ## V

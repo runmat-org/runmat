@@ -1,0 +1,109 @@
+{
+  "title": "empty",
+  "category": "array/creation",
+  "keywords": [
+    "empty",
+    "ClassName.empty",
+    "integer",
+    "preallocate",
+    "array"
+  ],
+  "summary": "Create an empty array of a specified class.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Primitive integer ClassName.empty forms construct exact host integer storage. A resident size control is a compatibility-gated RunMat extension and is gathered only after validation and gating."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::creation::empty::tests",
+    "integration": null
+  },
+  "description": "`ClassName.empty` creates a 0-by-0 empty array of the receiver class. Size arguments can specify other empty shapes, but at least one normalized dimension must be zero.",
+  "behaviors": [
+    "RunMat registers class-qualified forms for `int8.empty`, `int16.empty`, `int32.empty`, `int64.empty`, `uint8.empty`, `uint16.empty`, `uint32.empty`, and `uint64.empty`.",
+    "All eight integer classes are accepted for scalar dimension controls and row size vectors. Values are decoded from authoritative integer storage without conversion through double.",
+    "Signed negative dimensions become zero. Nonnegative dimensions must be integer-valued and within the platform size range.",
+    "A single scalar dimension requests a square shape. A size-vector argument must be a row vector; column vectors reject.",
+    "Trailing singleton dimensions after dimension two are removed. At least one remaining dimension must be zero.",
+    "Integer outputs contain exact empty `IntegerStorage` of the receiver class.",
+    "The global `empty(...)` shorthand and its trailing typename selector are RunMat-only extensions. MATLAB-compatible mode requires class-qualified syntax.",
+    "The former global `\"like\"` shorthand is not retained because it did not inherit output class and is not part of the documented class-static surface.",
+    "User-defined and general object-class empty arrays require broader class-array storage and static-method dispatch support."
+  ],
+  "examples": [
+    {
+      "description": "Create an empty unsigned integer array",
+      "input": "A = uint8.empty",
+      "output": "`A` is a 0-by-0 uint8 array with authoritative uint8 storage."
+    },
+    {
+      "description": "Create an empty integer array with a nonzero second dimension",
+      "input": "A = int16.empty(int64(0), uint64(5))",
+      "output": "`A` is a 0-by-5 int16 array."
+    },
+    {
+      "description": "Use a row size vector",
+      "input": "A = uint64.empty(uint32([0 0 6]))",
+      "output": "`A` is a 0-by-0-by-6 uint64 array."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does the class come from a size argument?",
+      "answer": "No. In MATLAB-compatible syntax the receiver in `ClassName.empty` determines the output class. Integer size arguments are structural controls only."
+    },
+    {
+      "question": "Are wide uint64 dimensions converted through double?",
+      "answer": "No. Host integer controls are decoded exactly from integer storage and checked against the platform size range."
+    },
+    {
+      "question": "Can empty create a nonempty array?",
+      "answer": "No. After signed-negative clamping and trailing-singleton normalization, at least one dimension must be zero."
+    },
+    {
+      "question": "Can I call empty as a global function?",
+      "answer": "Only in RunMat mode. The global shorthand is explicitly compatibility-gated; portable MATLAB-compatible code uses `ClassName.empty`."
+    }
+  ],
+  "links": [
+    {
+      "label": "MathWorks empty documentation",
+      "url": "https://www.mathworks.com/help/matlab/ref/empty.html"
+    },
+    {
+      "label": "isempty",
+      "url": "./isempty"
+    },
+    {
+      "label": "zeros",
+      "url": "./zeros"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported MATLAB-compatible forms",
+      "input": "A = ClassName.empty\nA = ClassName.empty(sz1, ..., szN)\nA = ClassName.empty(sizeVector)",
+      "output": "`A` is empty and preserves the receiver class."
+    },
+    "points": [
+      "At least one normalized dimension must be zero.",
+      "A size vector must be a row vector.",
+      "Signed negative dimensions are treated as zero.",
+      "Trailing singleton dimensions after dimension two are omitted."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/creation/empty.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/empty.rs"
+  },
+  "gpu_residency": "Integer class-static forms construct host empty storage. Resident numeric size controls are accepted only in RunMat mode and reject before provider access when extensions are disabled."
+}

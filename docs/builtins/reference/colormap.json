@@ -8,19 +8,22 @@
     "surface palette",
     "matlab colormap"
   ],
-  "summary": "Set the active colormap in MATLAB and RunMat plotting.",
+  "summary": "Set or query a plotting colormap.",
   "requires_feature": null,
   "tested": {
     "unit": "builtins::plotting::cmds"
   },
-  "description": "`colormap` sets the active color palette for the current plotting context. It accepts a named palette or an m-by-3 RGB matrix with values in [0, 1], and affects colormap-driven visualizations such as `imagesc`, `surf`, and `contourf`, scoped to the active axes in MATLAB and RunMat.",
+  "description": "`colormap` sets or queries the color palette for the current or explicitly targeted plotting context. Public custom maps accept m-by-3 single or double RGB values in [0,1], or uint8 RGB values in [0,255]. Query output is a normalized host double matrix.",
   "behaviors": [
     "Supported colormap names include `parula`, `colorcube`, `viridis`, `plasma`, `inferno`, `magma`, `turbo`, `jet`, `hot`, `cool`, `spring`, `summer`, `autumn`, `winter`, `gray`, `bone`, `copper`, `pink`, and `lines`.",
     "Named colormaps are also available as RGB array generator functions, so MATLAB forms such as `colormap(jet)`, `colormap(gray(64))`, and `c = turbo(128)` are supported.",
-    "RGB matrix inputs are validated as m-by-3 numeric arrays with finite values in [0, 1] and are preserved in plotting state and scene serialization.",
+    "`cmap = colormap()` and `cmap = colormap(target)` return an m-by-3 normalized host double matrix. Setter forms do not expose an output.",
+    "Public RGB maps are m-by-3 single or double arrays in [0,1], or uint8 arrays in [0,255]. uint8 channels are normalized by division by 255 at the host graphics-state boundary.",
+    "The other seven integer classes are a RunMat extension. They are accepted only when every native integer channel is exactly 0 or 1, and strict compatibility mode rejects the form before conversion.",
+    "Resident RGB maps are rejected without provider access; colormap metadata and query results are host-resident.",
     "Unknown colormap names raise errors rather than silently falling back.",
     "Colormap state composes naturally with `colorbar`, `imagesc`, `surf`, and filled contour plots.",
-    "Colormap changes apply to the current axes context in the plotting state model."
+    "Untargeted changes apply to the current axes. Targeted axes and figure forms update only the selected plotting context."
   ],
   "examples": [
     {
@@ -51,7 +54,7 @@
     },
     {
       "question": "Can I define a custom colormap?",
-      "answer": "Yes. Pass an m-by-3 RGB matrix with finite values in [0, 1], for example `colormap([0 0 0; 1 0.5 0; 1 1 1])`. RunMat preserves matrix inputs in plotting state and scene serialization."
+      "answer": "Yes. Pass an m-by-3 single or double matrix in [0,1], or a uint8 matrix in [0,255]. RunMat mode also admits other integer classes when every channel is exactly 0 or 1."
     }
   ],
   "links": [

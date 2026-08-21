@@ -19,7 +19,7 @@
       "double"
     ],
     "broadcasting": "none",
-    "notes": "`area` uses a GPU-backed geometry path, including stacked-series geometry generation."
+    "notes": "Documented GPU-array inputs execute on the client. RunMat additionally preserves compatible floating-point data on a GPU-backed geometry path; resident integer data gathers exactly before the graphics conversion."
   },
   "fusion": {
     "elementwise": false,
@@ -32,16 +32,19 @@
     "unit": "builtins::plotting::area::tests",
     "integration": "runmat-plot/src/gpu/area.rs::tests"
   },
-  "description": "`area` creates filled area plots from vector or matrix-style inputs. It returns an area handle, supports baseline/stacked behaviors, and participates in the shared MATLAB/RunMat plotting handle-property system.",
+  "description": "`area` creates filled area plots from vector or matrix-style inputs. It returns one area handle per plotted series, supports baseline and stacked behaviors, and participates in the shared MATLAB/RunMat plotting handle-property system.",
   "behaviors": [
     "`area(y)` uses implicit x-values `1:n`, while `area(x, y)` uses explicit x coordinates.",
+    "If explicit x-values are not increasing, each series is sorted by x before rendering; integer x-values are ordered in their native class before conversion to graphics coordinates.",
     "Matrix-style `y` inputs create stacked area series in the MATLAB style.",
-    "The returned value is an area-handle object that works with `get` and `set`.",
+    "Vector `y` returns one area handle, while matrix `y` returns a row vector with one handle for each column; every handle works with `get` and `set`.",
     "Baseline and color workflows flow through the shared plotting property model.",
-    "Stacked-series geometry can be emitted directly from GPU buffers on the happy path."
+    "All eight integer classes are accepted for X, Y, `BaseValue`, and `LineWidth`; integer plot data crosses one explicit client graphics conversion boundary.",
+    "Compatible floating stacked-series geometry can be emitted directly from GPU buffers on the RunMat acceleration path."
   ],
   "options": [
-    "`'BaseValue'` sets the baseline used by area filling.",
+    "A positional numeric scalar or `'BaseValue'` name-value pair sets the baseline used by area filling.",
+    "`'LineWidth'` accepts a positive numeric scalar, including every integer class.",
     "Color and display-name workflows are available through the returned handle and the shared plotting property path."
   ],
   "examples": [
@@ -123,9 +126,10 @@
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/area.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/area.rs"
   },
-  "gpu_residency": "`area` preserves GPU residency on the direct path, including stacked-series geometry generation. Fallback rendering still preserves the same visible semantics and handle behavior when a direct GPU path is not available.",
+  "gpu_residency": "The documented GPU-array surface executes on the client, so resident integer X and Y gather with typed storage intact and convert only at the graphics boundary. RunMat preserves floating-point residency on a compatible direct path, including stacked-series geometry generation; other inputs use the semantics-preserving fallback.",
   "gpu_behavior": [
-    "The direct area path emits filled geometry from GPU data on the happy path.",
-    "Baseline semantics, stacked-series behavior, and handle/property workflows remain aligned across GPU and fallback paths."
+    "The direct RunMat area path emits filled geometry from compatible floating GPU data when X is implicit or a known nondecreasing host vector.",
+    "Resident integer data and explicit resident X gather on the client so exact integer ordering and documented sorting occur before conversion.",
+    "Baseline semantics, stacked-series behavior, and one-handle-per-series output remain aligned across direct and fallback paths."
   ]
 }

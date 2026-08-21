@@ -6,9 +6,9 @@
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
-    "precisions": ["f64"],
-    "broadcasting": "evaluation input shape",
-    "notes": "GPU inputs are gathered to host. Fitted-distribution evaluation currently runs on CPU."
+    "precisions": ["f32", "f64"],
+    "broadcasting": "x and named-distribution parameters use common-size scalar expansion",
+    "notes": "Resident inputs use an owning-provider gather/evaluate/re-upload fallback, preserving output residency and native single precision."
   },
   "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
   "requires_feature": null,
@@ -19,9 +19,12 @@
   "description": "`cdf(pd,x)` evaluates the cumulative distribution function for a `ProbabilityDistribution` object returned by `fitdist`. `cdf(distname,x,params...)` evaluates supported named distributions directly.",
   "behaviors": [
     "`pd` must be a fitted distribution object returned by `fitdist`, or `distname` must name a supported distribution.",
-    "Supported named distributions are `\"Normal\"`, `\"Exponential\"`, `\"Lognormal\"`, `\"Gamma\"`, `\"Weibull\"`, and `\"Poisson\"` with their standard scalar parameters.",
-    "`x` may be a scalar or numeric array; the output has the same shape as `x`.",
-    "Supported fitted distributions are normal, exponential, lognormal, gamma, Weibull, and Poisson."
+    "Supported named distributions are `\"Normal\"`, `\"Exponential\"`, `\"Lognormal\"`, `\"Gamma\"`, `\"Weibull\"`, and `\"Poisson\"`; named parameters may be scalars or arrays with the same size as other nonscalar numeric inputs.",
+    "`x` and named-distribution parameters accept `single` or `double` under MATLAB-compatible semantics; scalar inputs expand to the common nonscalar shape and the output uses that shape.",
+    "Appending `\"upper\"` computes the complementary probability directly, including stable extreme-tail formulas for the supported families.",
+    "Typed-integer `x` and typed-integer named parameters are independent RunMat-only extensions across all eight integer classes; logical numeric inputs are another RunMat-only extension.",
+    "Admitted typed integers must be exactly representable as binary64 at the distribution boundary, and resident inputs return resident output on the first owning provider.",
+    "The output is single when any numeric `x` or named parameter input is single, otherwise double. Supported fitted distributions are normal, exponential, lognormal, gamma, Weibull, and Poisson."
   ],
   "examples": [
     {
@@ -31,6 +34,10 @@
     {
       "description": "Evaluate a named Poisson CDF",
       "input": "p = cdf(\"Poisson\", 2, 3)"
+    },
+    {
+      "description": "Evaluate a normal upper tail with scalar expansion",
+      "input": "p = cdf(\"Normal\", single([0;2]), [0;1], 1, \"upper\")"
     }
   ],
   "faqs": [

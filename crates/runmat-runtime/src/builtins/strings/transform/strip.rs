@@ -3,16 +3,19 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, StringArray, Value,
 };
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, StringArray, Value};
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
+use crate::builtins::strings::common::{
+    char_row_to_string_slice, contains_resident_text_input, is_missing_string,
+};
 use crate::builtins::strings::type_resolvers::text_preserve_type;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
@@ -212,6 +215,12 @@ pub const STRIP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &STRIP_ERRORS,
 };
 
+pub const STRIP_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "strip accepts host string, character, and cell text plus textual direction and strip-character inputs. Numeric, logical, symbolic, and provider-resident values reject before gather or provider access.",
+};
+
 fn map_flow(err: RuntimeError) -> RuntimeError {
     map_control_flow_with_builtin(err, BUILTIN_NAME)
 }
@@ -304,9 +313,13 @@ impl PatternSpec {
     accel = "sink",
     type_resolver(text_preserve_type),
     descriptor(crate::builtins::strings::transform::strip::STRIP_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::transform::strip::STRIP_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::transform::strip"
 )]
 async fn strip_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if contains_resident_text_input(&value) || rest.iter().any(contains_resident_text_input) {
+        return Err(strip_error(&STRIP_ERROR_INVALID_INPUT));
+    }
     let gathered = gather_if_needed_async(&value).await.map_err(map_flow)?;
     match gathered {
         Value::String(text) => strip_string(text, &rest).await,
@@ -348,12 +361,22 @@ async fn strip_string_array(array: StringArray, args: &[Value]) -> BuiltinResult
 }
 
 async fn strip_char_array(array: CharArray, args: &[Value]) -> BuiltinResult<Value> {
-    let CharArray { data, rows, cols } = array;
+    let CharArray {
+        data,
+        shape,
+        rows,
+        cols,
+    } = array;
     let expectation = PatternExpectation::with_len(rows);
     let (direction, pattern_spec) = parse_arguments(args, &expectation).await?;
 
     if rows == 0 {
-        return Ok(Value::CharArray(CharArray { data, rows, cols }));
+        return Ok(Value::CharArray(CharArray {
+            data,
+            shape,
+            rows,
+            cols,
+        }));
     }
 
     let mut stripped_rows: Vec<String> = Vec::with_capacity(rows);

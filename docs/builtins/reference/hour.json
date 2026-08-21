@@ -13,24 +13,26 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "datetime values are host-side objects; `hour` extracts the hour on the CPU."
+    "notes": "Documented datetime and legacy serial/text inputs execute on the host. RunMat-only resident inputs gather through their owning provider after compatibility admission."
   },
   "fusion": {
     "elementwise": false,
     "reduction": false,
-    "max_inputs": 1,
+    "max_inputs": 2,
     "constants": "inline"
   },
   "requires_feature": null,
   "tested": {
-    "integration": "runmat-ignition/tests/datetime.rs"
+    "unit": "builtins::datetime::tests::hour_minute_and_month_typed_legacy_serials_cover_every_integer_class",
+    "integration": "crates/runmat-vm/tests/integer_datetime_metadata_and_nonzero_semantics.rs"
   },
-  "description": "`hour(dt)` extracts hour-of-day values from datetime scalars or arrays and returns doubles with matching shape. Extraction behavior follows MATLAB semantics.",
+  "description": "`hour(t)` extracts hour-of-day values from datetime input. The documented legacy forms also accept serial date numbers or date text, with an optional input format for legacy non-datetime input.",
   "behaviors": [
     "`hour(t)` accepts datetime scalars and datetime arrays.",
     "The output shape matches the input shape.",
     "Hour values are returned in 24-hour clock form.",
-    "Passing a non-datetime value raises a datetime-specific error."
+    "Documented legacy binary64 serial date numbers and date text return double hour values with matching shape.",
+    "Single-precision and all eight typed-integer legacy serial inputs are a gated RunMat extension; exact native values are range-checked before one binary64 serial-date conversion."
   ],
   "examples": [
     {
@@ -76,8 +78,8 @@
     "label": "`crates/runmat-runtime/src/builtins/datetime/mod.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/datetime/mod.rs"
   },
-  "gpu_residency": "No. `hour` reads datetime objects on the CPU and returns ordinary host-side numeric arrays.",
+  "gpu_residency": "Documented `hour` forms are host-side. RunMat can admit resident legacy numeric input as an extension, gathers it non-destructively through the exact owner, and returns the documented host double result.",
   "gpu_behavior": [
-    "`hour` does not dispatch GPU kernels; it extracts the hour component from CPU-side datetime objects."
+    "`hour` does not dispatch a GPU kernel. Explicit resident input is a separately gated RunMat extension, while internal automatic residency can gather transparently."
   ]
 }

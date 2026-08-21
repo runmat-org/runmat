@@ -33,10 +33,11 @@
   "description": "`real(x)` returns the real component of each element in `x`. Real-valued inputs pass through unchanged, while complex inputs drop their imaginary component with MATLAB-compatible typing rules.",
   "behaviors": [
     "Complex scalars, vectors, matrices, and higher-dimensional tensors return only their real parts.",
-    "Real inputs (double, single, logical) are preserved exactly, but results are materialised as double precision when necessary (e.g., logical masks become doubles).",
+    "Real double and single inputs retain their floating class. All eight real integer classes are exact identities, and paired complex-integer arrays project their authoritative real storage without arithmetic while preserving integer class and shape; logical masks become doubles.",
     "Character arrays are converted to their numeric code points and returned as doubles, matching MATLAB semantics.",
     "String arrays are not supported and raise an error (`real` expects numeric, logical, or character data).",
-    "Sparse arrays are currently densified (sparse support is planned)."
+    "Sparse arrays are currently densified (sparse support is planned).",
+    "Integer gpuArray input remains resident: unsupported provider kernels use an exact owner-aware download and class-preserving restoration. Integer input preserves its exact class and shape."
   ],
   "examples": [
     {

@@ -1,20 +1,26 @@
 //! MATLAB-compatible `textscan` builtin for formatted text imports.
 
+use runmat_value::{NumericDType, NumericScalar, NumericStorage};
 use std::collections::HashSet;
 use std::io::{Read, Seek, SeekFrom};
 
 use encoding_rs::{Encoding, SHIFT_JIS};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::io::filetext::{helpers::decode_bytes, registry};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -117,6 +123,54 @@ pub const TEXTSCAN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &TEXTSCAN_ERRORS,
 };
 
+const TEXTSCAN_TYPED_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "textscan-typed-integer-control",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "textscan accepts typed-integer file identifiers, repeat counts, and numeric controls as a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:TextscanTypedIntegerControlExtension"),
+    };
+pub const TEXTSCAN_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [TEXTSCAN_TYPED_INTEGER_CONTROL_EXTENSION];
+const TEXTSCAN_INTEGER_FORMAT_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "%d/%i/%u/%x/%b integer conversion specifier",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The format text selects int8/int16/int32/int64 or uint8/uint16/uint32/uint64 through documented decimal, hexadecimal, and binary suffixes; unsuffixed decimal signed/unsigned conversions return int32/uint32, while unsuffixed hexadecimal and binary conversions return uint64.",
+    }];
+const TEXTSCAN_INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "file identifier, repeat count, HeaderLines, or boolean numeric control",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Public forms expose double file identifiers and numeric controls. RunMat mode admits all eight integer classes, validates authoritative scalars structurally, and rejects negative or oversized values without floating conversion.",
+    }];
+pub const TEXTSCAN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "C = textscan(textOrFileID, integer_conversion_format, ___)",
+        inputs: &TEXTSCAN_INTEGER_FORMAT_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Integer fields retain their documented classes and exact values. CollectOutput combines only adjacent numeric columns of the same class.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "C = textscan(typed_integer_file_id, formatSpec, typed_integer_controls...)",
+        inputs: &TEXTSCAN_INTEGER_CONTROL_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Compatibility mode rejects the typed-control extension before gather or file access; RunMat mode preserves the pre-existing exact structural behavior. Automatic residency remains a transparent host fallback.",
+    },
+];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::textscan")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "textscan",
@@ -192,6 +246,8 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::textscan_type),
     descriptor(crate::builtins::io::textscan::TEXTSCAN_DESCRIPTOR),
+    extensions(crate::builtins::io::textscan::TEXTSCAN_EXTENSIONS),
+    integer_capabilities(crate::builtins::io::textscan::TEXTSCAN_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::textscan"
 )]
 async fn textscan_builtin(
@@ -199,6 +255,12 @@ async fn textscan_builtin(
     format_spec: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    if is_typed_integer_value(&input) || rest.iter().any(is_typed_integer_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TEXTSCAN_TYPED_INTEGER_CONTROL_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let input = gather_if_needed_async(&input)
         .await
         .map_err(map_control_flow)?;
@@ -210,6 +272,12 @@ async fn textscan_builtin(
     let (repeat, options) = parse_args(&gathered_rest)?;
     let parsed = parse_input(&input, &format_spec, repeat, &options)?;
     build_output(parsed, &options)
+}
+
+fn is_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
 }
 
 async fn gather_rest(rest: Vec<Value>) -> BuiltinResult<Vec<Value>> {
@@ -563,9 +631,10 @@ struct FormatItem {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum FormatKind {
-    Float,
-    SignedInt,
-    UnsignedInt,
+    Float(NumericDType),
+    SignedInt(NumericDType),
+    UnsignedInt(NumericDType),
+    RadixInt { dtype: NumericDType, radix: u32 },
     String,
     QuotedString,
     Char,
@@ -575,9 +644,10 @@ enum FormatKind {
 impl FormatKind {
     fn output_kind(&self) -> OutputKind {
         match self {
-            FormatKind::Float | FormatKind::SignedInt | FormatKind::UnsignedInt => {
-                OutputKind::Numeric
-            }
+            FormatKind::Float(dtype)
+            | FormatKind::SignedInt(dtype)
+            | FormatKind::UnsignedInt(dtype)
+            | FormatKind::RadixInt { dtype, .. } => OutputKind::Numeric(*dtype),
             FormatKind::String
             | FormatKind::QuotedString
             | FormatKind::Char
@@ -588,7 +658,7 @@ impl FormatKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OutputKind {
-    Numeric,
+    Numeric(NumericDType),
     Text,
 }
 
@@ -659,15 +729,33 @@ fn parse_format_spec(format: &str) -> BuiltinResult<Vec<FormatElement>> {
         let kind = match chars[idx] {
             'f' | 'e' | 'E' | 'g' | 'G' | 'n' => {
                 idx += 1;
-                FormatKind::Float
+                FormatKind::Float(parse_numeric_suffix(
+                    &chars,
+                    &mut idx,
+                    NumericDType::F64,
+                    true,
+                )?)
             }
             'd' | 'i' => {
                 idx += 1;
-                FormatKind::SignedInt
+                FormatKind::SignedInt(parse_numeric_suffix(
+                    &chars,
+                    &mut idx,
+                    NumericDType::I32,
+                    false,
+                )?)
             }
             'u' => {
                 idx += 1;
-                FormatKind::UnsignedInt
+                FormatKind::UnsignedInt(parse_unsigned_suffix(&chars, &mut idx)?)
+            }
+            'x' | 'b' => {
+                let radix = if chars[idx] == 'x' { 16 } else { 2 };
+                idx += 1;
+                FormatKind::RadixInt {
+                    dtype: parse_radix_suffix(&chars, &mut idx)?,
+                    radix,
+                }
             }
             's' => {
                 idx += 1;
@@ -724,45 +812,135 @@ fn parse_format_spec(format: &str) -> BuiltinResult<Vec<FormatElement>> {
     Ok(elements)
 }
 
+fn parse_numeric_suffix(
+    chars: &[char],
+    idx: &mut usize,
+    default: NumericDType,
+    floating: bool,
+) -> BuiltinResult<NumericDType> {
+    let start = *idx;
+    while *idx < chars.len() && chars[*idx].is_ascii_digit() {
+        *idx += 1;
+    }
+    if start == *idx {
+        return Ok(default);
+    }
+    let suffix: String = chars[start..*idx].iter().collect();
+    let dtype = if floating {
+        match suffix.as_str() {
+            "32" => NumericDType::F32,
+            "64" => NumericDType::F64,
+            _ => return Err(invalid_numeric_suffix(&suffix)),
+        }
+    } else {
+        match suffix.as_str() {
+            "8" => NumericDType::I8,
+            "16" => NumericDType::I16,
+            "32" => NumericDType::I32,
+            "64" => NumericDType::I64,
+            _ => return Err(invalid_numeric_suffix(&suffix)),
+        }
+    };
+    Ok(dtype)
+}
+
+fn parse_unsigned_suffix(chars: &[char], idx: &mut usize) -> BuiltinResult<NumericDType> {
+    Ok(
+        match parse_numeric_suffix(chars, idx, NumericDType::I32, false)? {
+            NumericDType::I8 => NumericDType::U8,
+            NumericDType::I16 => NumericDType::U16,
+            NumericDType::I32 => NumericDType::U32,
+            NumericDType::I64 => NumericDType::U64,
+            _ => unreachable!("integer suffix parser returned floating dtype"),
+        },
+    )
+}
+
+fn parse_radix_suffix(chars: &[char], idx: &mut usize) -> BuiltinResult<NumericDType> {
+    let Some(sign) = chars
+        .get(*idx)
+        .copied()
+        .filter(|ch| matches!(ch, 'u' | 's'))
+    else {
+        return Ok(NumericDType::U64);
+    };
+    let suffix_start = *idx;
+    *idx += 1;
+    let digits_start = *idx;
+    while *idx < chars.len() && chars[*idx].is_ascii_digit() {
+        *idx += 1;
+    }
+    if digits_start == *idx {
+        *idx = suffix_start;
+        return Ok(NumericDType::U64);
+    }
+    let width: String = chars[digits_start..*idx].iter().collect();
+    match (sign, width.as_str()) {
+        ('u', "8") => Ok(NumericDType::U8),
+        ('u', "16") => Ok(NumericDType::U16),
+        ('u', "32") => Ok(NumericDType::U32),
+        ('u', "64") => Ok(NumericDType::U64),
+        ('s', "8") => Ok(NumericDType::I8),
+        ('s', "16") => Ok(NumericDType::I16),
+        ('s', "32") => Ok(NumericDType::I32),
+        ('s', "64") => Ok(NumericDType::I64),
+        _ => Err(invalid_numeric_suffix(&format!("{sign}{width}"))),
+    }
+}
+
+fn invalid_numeric_suffix(suffix: &str) -> RuntimeError {
+    textscan_error_with(
+        &TEXTSCAN_ERROR_FORMAT,
+        format!("textscan: unsupported numeric output width '{suffix}'"),
+    )
+}
+
 #[derive(Debug, Clone)]
 enum ColumnData {
-    Numeric(Vec<f64>),
+    Numeric {
+        dtype: NumericDType,
+        values: Vec<NumericScalar>,
+    },
     Text(Vec<String>),
 }
 
 impl ColumnData {
     fn new(kind: OutputKind) -> Self {
         match kind {
-            OutputKind::Numeric => ColumnData::Numeric(Vec::new()),
+            OutputKind::Numeric(dtype) => ColumnData::Numeric {
+                dtype,
+                values: Vec::new(),
+            },
             OutputKind::Text => ColumnData::Text(Vec::new()),
         }
     }
 
     fn kind(&self) -> OutputKind {
         match self {
-            ColumnData::Numeric(_) => OutputKind::Numeric,
+            ColumnData::Numeric { dtype, .. } => OutputKind::Numeric(*dtype),
             ColumnData::Text(_) => OutputKind::Text,
         }
     }
 
     fn len(&self) -> usize {
         match self {
-            ColumnData::Numeric(values) => values.len(),
+            ColumnData::Numeric { values, .. } => values.len(),
             ColumnData::Text(values) => values.len(),
         }
     }
 
     fn truncate(&mut self, len: usize) {
         match self {
-            ColumnData::Numeric(values) => values.truncate(len),
+            ColumnData::Numeric { values, .. } => values.truncate(len),
             ColumnData::Text(values) => values.truncate(len),
         }
     }
 
-    fn push_numeric(&mut self, value: f64) {
-        let ColumnData::Numeric(values) = self else {
+    fn push_numeric(&mut self, value: NumericScalar) {
+        let ColumnData::Numeric { dtype, values } = self else {
             unreachable!("numeric pushed into text column");
         };
+        debug_assert_eq!(*dtype, value.numeric_dtype());
         values.push(value);
     }
 
@@ -911,6 +1089,9 @@ impl<'a> TextScanner<'a> {
 
     fn skip_header_lines(&mut self) {
         for _ in 0..self.options.header_lines {
+            if self.current_char().is_none() {
+                break;
+            }
             while let Some(ch) = self.current_char() {
                 self.pos += ch.len_utf8();
                 if ch == '\n' {
@@ -965,25 +1146,37 @@ impl<'a> TextScanner<'a> {
         item: &FormatItem,
         next_literal: Option<&str>,
     ) -> BuiltinResult<Option<ParsedValue>> {
-        if !matches!(item.kind, FormatKind::Char | FormatKind::CharSet { .. }) {
+        if !matches!(&item.kind, FormatKind::Char | FormatKind::CharSet { .. }) {
             self.skip_separators();
         }
         let parsed = match &item.kind {
-            FormatKind::Float => ParsedValue::Number(self.parse_numeric_field(
+            FormatKind::Float(dtype) => ParsedValue::Number(self.parse_numeric_field(
                 item.width,
                 next_literal,
-                parse_float,
+                *dtype,
+                parse_float_scalar,
             )?),
-            FormatKind::SignedInt => ParsedValue::Number(self.parse_numeric_field(
+            FormatKind::SignedInt(dtype) => ParsedValue::Number(self.parse_numeric_field(
                 item.width,
                 next_literal,
-                |field| parse_signed_int(field).map(|value| value as f64),
+                *dtype,
+                parse_signed_scalar,
             )?),
-            FormatKind::UnsignedInt => ParsedValue::Number(self.parse_numeric_field(
+            FormatKind::UnsignedInt(dtype) => ParsedValue::Number(self.parse_numeric_field(
                 item.width,
                 next_literal,
-                |field| parse_unsigned_int(field).map(|value| value as f64),
+                *dtype,
+                parse_unsigned_scalar,
             )?),
+            FormatKind::RadixInt { dtype, radix } => {
+                let radix = *radix;
+                ParsedValue::Number(self.parse_numeric_field(
+                    item.width,
+                    next_literal,
+                    *dtype,
+                    |field, dtype| parse_radix_scalar(field, dtype, radix),
+                )?)
+            }
             FormatKind::String => {
                 ParsedValue::Text(self.read_field(item.width, next_literal, true)?)
             }
@@ -1006,8 +1199,9 @@ impl<'a> TextScanner<'a> {
         &mut self,
         width: Option<usize>,
         next_literal: Option<&str>,
-        parse: impl FnOnce(&str) -> BuiltinResult<f64>,
-    ) -> BuiltinResult<f64> {
+        dtype: NumericDType,
+        parse: impl FnOnce(&str, NumericDType) -> BuiltinResult<NumericScalar>,
+    ) -> BuiltinResult<NumericScalar> {
         let field = self.read_field(width, next_literal, false)?;
         if self
             .options
@@ -1015,9 +1209,9 @@ impl<'a> TextScanner<'a> {
             .iter()
             .any(|empty| empty == &field)
         {
-            return Ok(f64::NAN);
+            return Ok(empty_numeric_scalar(dtype));
         }
-        parse(&field)
+        parse(&field, dtype)
     }
 
     fn read_field(
@@ -1208,7 +1402,7 @@ impl<'a> TextScanner<'a> {
 
 #[derive(Debug, Clone)]
 enum ParsedValue {
-    Number(f64),
+    Number(NumericScalar),
     Text(String),
 }
 
@@ -1227,22 +1421,142 @@ fn parse_float(token: &str) -> BuiltinResult<f64> {
     }
 }
 
-fn parse_signed_int(token: &str) -> BuiltinResult<i64> {
-    token.trim().parse::<i64>().map_err(|_| {
-        textscan_error_with(
-            &TEXTSCAN_ERROR_PARSE,
-            format!("textscan: cannot parse '{token}' as an integer value"),
-        )
+fn parse_float_scalar(token: &str, dtype: NumericDType) -> BuiltinResult<NumericScalar> {
+    let value = parse_float(token)?;
+    Ok(match dtype {
+        NumericDType::F32 => NumericScalar::F32(value as f32),
+        NumericDType::F64 => NumericScalar::F64(value),
+        _ => unreachable!("float parser requested an integer dtype"),
     })
 }
 
-fn parse_unsigned_int(token: &str) -> BuiltinResult<u64> {
-    token.trim().parse::<u64>().map_err(|_| {
-        textscan_error_with(
-            &TEXTSCAN_ERROR_PARSE,
-            format!("textscan: cannot parse '{token}' as an unsigned integer value"),
-        )
-    })
+fn parse_signed_scalar(token: &str, dtype: NumericDType) -> BuiltinResult<NumericScalar> {
+    let (negative, magnitude) = parse_integer_magnitude(token, 10)?;
+    Ok(signed_scalar_from_magnitude(dtype, negative, magnitude))
+}
+
+fn parse_unsigned_scalar(token: &str, dtype: NumericDType) -> BuiltinResult<NumericScalar> {
+    let (negative, magnitude) = parse_integer_magnitude(token, 10)?;
+    Ok(unsigned_scalar_from_magnitude(dtype, negative, magnitude))
+}
+
+fn parse_radix_scalar(
+    token: &str,
+    dtype: NumericDType,
+    radix: u32,
+) -> BuiltinResult<NumericScalar> {
+    let (negative, magnitude) = parse_integer_magnitude(token, radix)?;
+    Ok(
+        if matches!(
+            dtype,
+            NumericDType::I8 | NumericDType::I16 | NumericDType::I32 | NumericDType::I64
+        ) {
+            signed_scalar_from_magnitude(dtype, negative, magnitude)
+        } else {
+            unsigned_scalar_from_magnitude(dtype, negative, magnitude)
+        },
+    )
+}
+
+fn empty_numeric_scalar(dtype: NumericDType) -> NumericScalar {
+    match dtype {
+        NumericDType::F64 => NumericScalar::F64(f64::NAN),
+        NumericDType::F32 => NumericScalar::F32(f32::NAN),
+        NumericDType::I8 => NumericScalar::I8(0),
+        NumericDType::I16 => NumericScalar::I16(0),
+        NumericDType::I32 => NumericScalar::I32(0),
+        NumericDType::I64 => NumericScalar::I64(0),
+        NumericDType::U8 => NumericScalar::U8(0),
+        NumericDType::U16 => NumericScalar::U16(0),
+        NumericDType::U32 => NumericScalar::U32(0),
+        NumericDType::U64 => NumericScalar::U64(0),
+    }
+}
+
+fn parse_integer_magnitude(token: &str, radix: u32) -> BuiltinResult<(bool, Option<u128>)> {
+    let trimmed = token.trim();
+    let (negative, unsigned) = if let Some(rest) = trimmed.strip_prefix('-') {
+        (true, rest)
+    } else if let Some(rest) = trimmed.strip_prefix('+') {
+        (false, rest)
+    } else {
+        (false, trimmed)
+    };
+    let digits = match radix {
+        16 => unsigned
+            .strip_prefix("0x")
+            .or_else(|| unsigned.strip_prefix("0X"))
+            .unwrap_or(unsigned),
+        2 => unsigned
+            .strip_prefix("0b")
+            .or_else(|| unsigned.strip_prefix("0B"))
+            .unwrap_or(unsigned),
+        _ => unsigned,
+    };
+    if digits.is_empty() {
+        return Err(integer_parse_error(token));
+    }
+    match u128::from_str_radix(digits, radix) {
+        Ok(value) => Ok((negative, Some(value))),
+        Err(error) if matches!(error.kind(), std::num::IntErrorKind::PosOverflow) => {
+            Ok((negative, None))
+        }
+        Err(_) => Err(integer_parse_error(token)),
+    }
+}
+
+fn integer_parse_error(token: &str) -> RuntimeError {
+    textscan_error_with(
+        &TEXTSCAN_ERROR_PARSE,
+        format!("textscan: cannot parse '{token}' as an integer value"),
+    )
+}
+
+fn signed_scalar_from_magnitude(
+    dtype: NumericDType,
+    negative: bool,
+    magnitude: Option<u128>,
+) -> NumericScalar {
+    let signed_value = |maximum: u128| -> i128 {
+        if negative {
+            let minimum_magnitude = maximum + 1;
+            match magnitude {
+                Some(value) if value < minimum_magnitude => -(value as i128),
+                Some(value) if value == minimum_magnitude => -(minimum_magnitude as i128),
+                _ => -(minimum_magnitude as i128),
+            }
+        } else {
+            magnitude.unwrap_or(maximum).min(maximum) as i128
+        }
+    };
+    match dtype {
+        NumericDType::I8 => NumericScalar::I8(signed_value(i8::MAX as u128) as i8),
+        NumericDType::I16 => NumericScalar::I16(signed_value(i16::MAX as u128) as i16),
+        NumericDType::I32 => NumericScalar::I32(signed_value(i32::MAX as u128) as i32),
+        NumericDType::I64 => NumericScalar::I64(signed_value(i64::MAX as u128) as i64),
+        _ => unreachable!("signed conversion requested non-signed dtype"),
+    }
+}
+
+fn unsigned_scalar_from_magnitude(
+    dtype: NumericDType,
+    negative: bool,
+    magnitude: Option<u128>,
+) -> NumericScalar {
+    let unsigned_value = |maximum: u128| {
+        if negative {
+            0
+        } else {
+            magnitude.unwrap_or(maximum).min(maximum)
+        }
+    };
+    match dtype {
+        NumericDType::U8 => NumericScalar::U8(unsigned_value(u8::MAX as u128) as u8),
+        NumericDType::U16 => NumericScalar::U16(unsigned_value(u16::MAX as u128) as u16),
+        NumericDType::U32 => NumericScalar::U32(unsigned_value(u32::MAX as u128) as u32),
+        NumericDType::U64 => NumericScalar::U64(unsigned_value(u64::MAX as u128) as u64),
+        _ => unreachable!("unsigned conversion requested non-unsigned dtype"),
+    }
 }
 
 fn build_output(columns: Vec<ColumnData>, options: &TextscanOptions) -> BuiltinResult<Value> {
@@ -1264,9 +1578,10 @@ fn collect_output(columns: Vec<ColumnData>) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::new();
     let mut idx = 0usize;
     while idx < columns.len() {
-        if columns[idx].kind() == OutputKind::Numeric {
+        if matches!(columns[idx].kind(), OutputKind::Numeric(_)) {
             let start = idx;
-            while idx < columns.len() && columns[idx].kind() == OutputKind::Numeric {
+            let kind = columns[idx].kind();
+            while idx < columns.len() && columns[idx].kind() == kind {
                 idx += 1;
             }
             out.push(numeric_group_to_value(&columns[start..idx])?);
@@ -1280,9 +1595,10 @@ fn collect_output(columns: Vec<ColumnData>) -> BuiltinResult<Vec<Value>> {
 
 fn column_to_value(column: ColumnData) -> BuiltinResult<Value> {
     match column {
-        ColumnData::Numeric(values) => Tensor::new(values.clone(), vec![values.len(), 1])
-            .map(Value::Tensor)
-            .map_err(|err| textscan_error_with(&TEXTSCAN_ERROR_PARSE, format!("textscan: {err}"))),
+        ColumnData::Numeric { dtype, values } => {
+            let rows = values.len();
+            tensor_from_numeric_scalars(dtype, values, vec![rows, 1])
+        }
         ColumnData::Text(values) => cell_string_column(&values),
     }
 }
@@ -1290,11 +1606,19 @@ fn column_to_value(column: ColumnData) -> BuiltinResult<Value> {
 fn numeric_group_to_value(columns: &[ColumnData]) -> BuiltinResult<Value> {
     let rows = columns.first().map(ColumnData::len).unwrap_or(0);
     let cols = columns.len();
+    let Some(OutputKind::Numeric(dtype)) = columns.first().map(ColumnData::kind) else {
+        unreachable!("numeric group has no numeric dtype");
+    };
     let mut data = Vec::with_capacity(rows * cols);
     for column in columns {
-        let ColumnData::Numeric(values) = column else {
+        let ColumnData::Numeric {
+            dtype: column_dtype,
+            values,
+        } = column
+        else {
             unreachable!("numeric group contains text column");
         };
+        debug_assert_eq!(*column_dtype, dtype);
         if values.len() != rows {
             return Err(textscan_error_with(
                 &TEXTSCAN_ERROR_PARSE,
@@ -1303,7 +1627,21 @@ fn numeric_group_to_value(columns: &[ColumnData]) -> BuiltinResult<Value> {
         }
         data.extend_from_slice(values);
     }
-    Tensor::new(data, vec![rows, cols])
+    tensor_from_numeric_scalars(dtype, data, vec![rows, cols])
+}
+
+fn tensor_from_numeric_scalars(
+    dtype: NumericDType,
+    values: Vec<NumericScalar>,
+    shape: Vec<usize>,
+) -> BuiltinResult<Value> {
+    let mut storage = NumericStorage::zeros(dtype, values.len());
+    for (index, value) in values.into_iter().enumerate() {
+        storage.set_value(index, value).map_err(|err| {
+            textscan_error_with(&TEXTSCAN_ERROR_PARSE, format!("textscan: {err}"))
+        })?;
+    }
+    Tensor::from_numeric_storage(storage, shape)
         .map(Value::Tensor)
         .map_err(|err| textscan_error_with(&TEXTSCAN_ERROR_PARSE, format!("textscan: {err}")))
 }
@@ -1462,10 +1800,20 @@ fn bool_like(value: &Value, context: &str) -> BuiltinResult<bool> {
 }
 
 fn nonnegative_usize(value: &Value, context: &str) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer.try_to_usize().ok_or_else(|| {
+            textscan_error_with(
+                &TEXTSCAN_ERROR_ARGUMENT,
+                format!("textscan: {context} must be a nonnegative integer scalar"),
+            )
+        });
+    }
+
     let raw = match value {
         Value::Num(value) => *value,
-        Value::Int(value) => value.to_i64() as f64,
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_value_f64(tensor, 0)
+        }
         _ => {
             return Err(textscan_error_with(
                 &TEXTSCAN_ERROR_ARGUMENT,
@@ -1479,14 +1827,32 @@ fn nonnegative_usize(value: &Value, context: &str) -> BuiltinResult<usize> {
             format!("textscan: {context} must be a nonnegative integer scalar"),
         ));
     }
-    Ok(raw as usize)
+    if raw > usize::MAX.saturating_sub(1) as f64 {
+        return Err(textscan_error_with(
+            &TEXTSCAN_ERROR_ARGUMENT,
+            format!("textscan: {context} is too large"),
+        ));
+    }
+    let parsed = raw.round() as usize;
+    if parsed as f64 != raw || parsed == usize::MAX {
+        return Err(textscan_error_with(
+            &TEXTSCAN_ERROR_ARGUMENT,
+            format!("textscan: {context} is too large"),
+        ));
+    }
+    Ok(parsed)
 }
 
 fn numeric_fid(value: &Value) -> Option<i32> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer.try_to_i32();
+    }
+
     let raw = match value {
         Value::Num(value) => *value,
-        Value::Int(value) => value.to_i64() as f64,
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_value_f64(tensor, 0)
+        }
         _ => return None,
     };
     if raw.is_finite() && raw.fract() == 0.0 && raw >= i32::MIN as f64 && raw <= i32::MAX as f64 {
@@ -1505,6 +1871,7 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_filesystem::OpenOptions;
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
     use std::sync::{Arc, Mutex as StdMutex};
 
     use crate::builtins::io::filetext::registry::RegisteredFile;
@@ -1524,7 +1891,7 @@ mod tests {
         let Value::Tensor(tensor) = output_value(value, col) else {
             panic!("expected tensor");
         };
-        tensor.data
+        tensor.materialize_f64()
     }
 
     fn text_column(value: &Value, col: usize) -> Vec<String> {
@@ -1553,6 +1920,49 @@ mod tests {
         assert!(labels.contains(&"C = textscan(textOrFileID, formatSpec, args...)"));
     }
 
+    #[test]
+    fn textscan_scalar_parsers_read_typed_integer_storage_exactly() {
+        let header = Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1])
+            .expect("typed header lines");
+        assert_eq!(
+            nonnegative_usize(&Value::Tensor(header), "HeaderLines").unwrap(),
+            2
+        );
+
+        let invalid = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
+            .expect("typed invalid count");
+        assert!(nonnegative_usize(&Value::Tensor(invalid), "HeaderLines").is_err());
+        assert_eq!(
+            nonnegative_usize(&Value::Int(IntValue::U64(u64::MAX)), "HeaderLines").ok(),
+            usize::try_from(u64::MAX).ok()
+        );
+        assert!(nonnegative_usize(&Value::Num(1.0e300), "HeaderLines").is_err());
+
+        let fid = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("typed fid");
+        assert_eq!(numeric_fid(&Value::Tensor(fid)), Some(7));
+        assert_eq!(numeric_fid(&Value::Int(IntValue::U32(7))), Some(7));
+        assert_eq!(numeric_fid(&Value::Int(IntValue::U64(u64::MAX))), None);
+
+        let fid_too_large = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("typed fid");
+        assert_eq!(numeric_fid(&Value::Tensor(fid_too_large)), None);
+    }
+
+    #[test]
+    fn textscan_huge_header_lines_stop_at_eof() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let out = block_on(textscan_builtin(
+            Value::from("x"),
+            Value::from("%s"),
+            vec![
+                Value::from("HeaderLines"),
+                Value::Int(IntValue::U64(usize::MAX as u64)),
+            ],
+        ))
+        .expect("textscan");
+        assert!(text_column(&out, 0).is_empty());
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn textscan_reads_mixed_columns_from_text() {
@@ -1566,6 +1976,147 @@ mod tests {
         assert_eq!(
             text_column(&out, 1),
             vec!["alpha".to_string(), "beta".to_string()]
+        );
+    }
+
+    #[test]
+    fn textscan_integer_conversions_preserve_native_classes_and_wide_values() {
+        let out = block_on(textscan_builtin(
+            Value::from("-999 18446744073709551615 1.25\n127 9223372036854775808 -2.5\n"),
+            Value::from("%d8 %u64 %f32"),
+            Vec::new(),
+        ))
+        .expect("textscan");
+        let Value::Tensor(signed) = output_value(&out, 0) else {
+            panic!("expected signed tensor");
+        };
+        assert_eq!(
+            signed.integer_storage(),
+            Some(&IntegerStorage::I8(vec![i8::MIN, i8::MAX]))
+        );
+        let Value::Tensor(unsigned) = output_value(&out, 1) else {
+            panic!("expected unsigned tensor");
+        };
+        assert_eq!(
+            unsigned.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]))
+        );
+        let Value::Tensor(single) = output_value(&out, 2) else {
+            panic!("expected single tensor");
+        };
+        assert_eq!(single.numeric_dtype(), NumericDType::F32);
+        assert_eq!(single.materialize_f64(), vec![1.25, -2.5]);
+    }
+
+    #[test]
+    fn textscan_hex_binary_and_overflow_conversions_preserve_integer_contracts() {
+        let out = block_on(textscan_builtin(
+            Value::from("0xFFFFFFFFFFFFFFFF -0x81 0b1111111111111111 999999999999999999999999999999999999999 -7\n"),
+            Value::from("%x %xs8 %bu16 %d64 %u8"),
+            Vec::new(),
+        ))
+        .expect("textscan");
+
+        let Value::Tensor(hex) = output_value(&out, 0) else {
+            panic!("expected hexadecimal tensor");
+        };
+        assert_eq!(
+            hex.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX]))
+        );
+        let Value::Tensor(signed_hex) = output_value(&out, 1) else {
+            panic!("expected signed hexadecimal tensor");
+        };
+        assert_eq!(
+            signed_hex.integer_storage(),
+            Some(&IntegerStorage::I8(vec![i8::MIN]))
+        );
+        let Value::Tensor(binary) = output_value(&out, 2) else {
+            panic!("expected binary tensor");
+        };
+        assert_eq!(
+            binary.integer_storage(),
+            Some(&IntegerStorage::U16(vec![u16::MAX]))
+        );
+        let Value::Tensor(decimal) = output_value(&out, 3) else {
+            panic!("expected signed decimal tensor");
+        };
+        assert_eq!(
+            decimal.integer_storage(),
+            Some(&IntegerStorage::I64(vec![i64::MAX]))
+        );
+        let Value::Tensor(unsigned) = output_value(&out, 4) else {
+            panic!("expected unsigned decimal tensor");
+        };
+        assert_eq!(
+            unsigned.integer_storage(),
+            Some(&IntegerStorage::U8(vec![0]))
+        );
+    }
+
+    #[test]
+    fn textscan_documented_integer_formats_remain_enabled_in_matlab_mode() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let out = block_on(textscan_builtin(
+            Value::from("9007199254740993 0xFFFFFFFFFFFFFFFF\n"),
+            Value::from("%u64 %x"),
+            Vec::new(),
+        ))
+        .expect("documented integer textscan formats");
+        let Value::Tensor(decimal) = output_value(&out, 0) else {
+            panic!("expected decimal integer tensor");
+        };
+        assert_eq!(
+            decimal.integer_storage(),
+            Some(&IntegerStorage::U64(vec![9_007_199_254_740_993]))
+        );
+        let Value::Tensor(hex) = output_value(&out, 1) else {
+            panic!("expected hexadecimal integer tensor");
+        };
+        assert_eq!(
+            hex.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX]))
+        );
+    }
+
+    #[test]
+    fn textscan_compatibility_gates_typed_controls_before_scanning() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(textscan_builtin(
+            Value::from("1\n"),
+            Value::from("%d"),
+            vec![Value::Int(IntValue::U8(1))],
+        ))
+        .expect_err("typed repeat count must be gated");
+        assert_eq!(
+            error.identifier(),
+            TEXTSCAN_TYPED_INTEGER_CONTROL_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn textscan_collect_output_groups_only_adjacent_same_class_columns() {
+        let out = block_on(textscan_builtin(
+            Value::from("1 2 3\n4 5 6\n"),
+            Value::from("%d16 %d16 %u16"),
+            vec![Value::from("CollectOutput"), Value::Bool(true)],
+        ))
+        .expect("textscan");
+        assert_eq!(output_cell(&out).cols, 2);
+        let Value::Tensor(signed) = output_value(&out, 0) else {
+            panic!("expected collected signed tensor");
+        };
+        assert_eq!(signed.shape, vec![2, 2]);
+        assert_eq!(
+            signed.integer_storage(),
+            Some(&IntegerStorage::I16(vec![1, 4, 2, 5]))
+        );
+        let Value::Tensor(unsigned) = output_value(&out, 1) else {
+            panic!("expected unsigned tensor");
+        };
+        assert_eq!(
+            unsigned.integer_storage(),
+            Some(&IntegerStorage::U16(vec![3, 6]))
         );
     }
 
@@ -1617,7 +2168,7 @@ mod tests {
             panic!("expected collected numeric group");
         };
         assert_eq!(group.shape, vec![1, 2]);
-        assert_eq!(group.data, vec![1.0, 2.0]);
+        assert_eq!(group.materialize_f64(), vec![1.0, 2.0]);
         assert_eq!(text_column(&out, 1), vec!["hello, world".to_string()]);
     }
 
@@ -1682,7 +2233,7 @@ mod tests {
             panic!("expected collected numeric group");
         };
         assert_eq!(group.shape, vec![2, 2]);
-        assert_eq!(group.data, vec![1.0, 3.0, 2.0, 4.0]);
+        assert_eq!(group.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

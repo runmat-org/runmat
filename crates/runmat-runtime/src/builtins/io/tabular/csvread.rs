@@ -8,21 +8,57 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
 };
 use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::fs::expand_user_path;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "csvread";
+
+const CSVREAD_COLON_RANGE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "csvread-colon-range",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "csvread A1 ranges separated by ':' are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CsvreadColonRangeExtension"),
+};
+const CSVREAD_TWO_VECTOR_RANGE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "csvread-two-vector-range",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "csvread two-element numeric ranges are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CsvreadTwoVectorRangeExtension"),
+};
+const CSVREAD_RESIDENT_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "csvread-resident-control-inputs",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "csvread resident filename, offset, or range controls are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CsvreadResidentControlExtension"),
+};
+pub const CSVREAD_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    CSVREAD_COLON_RANGE_EXTENSION,
+    CSVREAD_TWO_VECTOR_RANGE_EXTENSION,
+    CSVREAD_RESIDENT_CONTROL_EXTENSION,
+];
+
+const CSVREAD_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 3] = [
+    BuiltinIntegerInputCapability { name: "row", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "All eight integer classes are documented for the zero-based row control and are validated from authoritative storage." },
+    BuiltinIntegerInputCapability { name: "col", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "All eight integer classes are documented for the zero-based column control and are validated from authoritative storage." },
+    BuiltinIntegerInputCapability { name: "range", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The documented four-element numeric range accepts all eight integer classes and decodes every offset exactly." },
+];
+pub const CSVREAD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "M = csvread(filename, integer_row, integer_col, integer_range?)", inputs: &CSVREAD_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Integer inputs control file selection only. Values are read exactly from authoritative integer storage; the CSV result remains double or complex double." }];
 
 const CSVREAD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "M",
@@ -193,7 +229,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Runs entirely on the host; acceleration providers are not involved.",
+    notes: "File I/O and parsing run on the host and the result remains host-resident. Public host controls require no provider; gated resident controls are gathered through their owning provider before parsing.",
 };
 
 fn csvread_error_with(
@@ -255,9 +291,18 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::tensor_type),
     descriptor(crate::builtins::io::tabular::csvread::CSVREAD_DESCRIPTOR),
+    extensions(crate::builtins::io::tabular::csvread::CSVREAD_EXTENSIONS),
+    integer_capabilities(crate::builtins::io::tabular::csvread::CSVREAD_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::tabular::csvread"
 )]
 async fn csvread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if matches!(path, Value::GpuTensor(_)) || rest.iter().any(|v| matches!(v, Value::GpuTensor(_)))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CSVREAD_RESIDENT_CONTROL_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let gathered_path = gather_if_needed_async(&path)
         .await
         .map_err(map_control_flow)?;
@@ -271,12 +316,22 @@ async fn csvread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<
     };
     let subset = if let Some(range) = options.range {
         let loaded_range = range.relative_to_loaded_rows();
-        apply_range(&rows, max_cols, &loaded_range, 0.0)
+        apply_range(&rows, max_cols, &loaded_range, ParsedNumber::ZERO)
     } else {
-        apply_offsets(&rows, max_cols, start_row, options.start_col, 0.0)
+        apply_offsets(
+            &rows,
+            max_cols,
+            start_row,
+            options.start_col,
+            ParsedNumber::ZERO,
+        )
     };
-    let tensor = rows_to_tensor(subset.rows, subset.row_count, subset.col_count, 0.0)?;
-    Ok(Value::Tensor(tensor))
+    rows_to_value(
+        subset.rows,
+        subset.row_count,
+        subset.col_count,
+        ParsedNumber::ZERO,
+    )
 }
 
 #[derive(Debug, Default)]
@@ -324,22 +379,16 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<CsvReadOptions> {
 }
 
 fn value_to_start_index(value: &Value, name: &str) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer.try_to_usize().ok_or_else(|| {
+            csvread_error_with(
+                &CSVREAD_ERROR_INDEX,
+                format!("csvread: {name} must be a non-negative integer"),
+            )
+        });
+    }
+
     match value {
-        Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < 0 {
-                return Err(csvread_error_with(
-                    &CSVREAD_ERROR_INDEX,
-                    format!("csvread: {name} must be a non-negative integer"),
-                ));
-            }
-            usize::try_from(raw).map_err(|_| {
-                csvread_error_with(
-                    &CSVREAD_ERROR_INDEX,
-                    format!("csvread: {name} is too large"),
-                )
-            })
-        }
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(csvread_error_with(
@@ -360,12 +409,23 @@ fn value_to_start_index(value: &Value, name: &str) -> BuiltinResult<usize> {
                     format!("csvread: {name} must be an integer"),
                 ));
             }
-            usize::try_from(rounded as i64).map_err(|_| {
-                csvread_error_with(
+            if rounded > usize::MAX.saturating_sub(1) as f64 {
+                return Err(csvread_error_with(
                     &CSVREAD_ERROR_INDEX,
                     format!("csvread: {name} is too large"),
-                )
-            })
+                ));
+            }
+            let parsed = rounded as usize;
+            if parsed as f64 != rounded || parsed == usize::MAX {
+                return Err(csvread_error_with(
+                    &CSVREAD_ERROR_INDEX,
+                    format!("csvread: {name} is too large"),
+                ));
+            }
+            Ok(parsed)
+        }
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
+            value_to_start_index(&Value::Num(tensor::tensor_value_f64(t, 0)), name)
         }
         _ => Err(csvread_error_with(
             &CSVREAD_ERROR_INDEX,
@@ -419,7 +479,7 @@ fn normalize_path(raw: &str) -> BuiltinResult<PathBuf> {
 async fn read_csv_rows(
     path: &Path,
     options: &CsvReadOptions,
-) -> BuiltinResult<(Vec<Vec<f64>>, usize, usize)> {
+) -> BuiltinResult<(Vec<Vec<ParsedNumber>>, usize, usize)> {
     let file = File::open_async(path).await.map_err(|err| {
         csvread_error_with_source(
             &CSVREAD_ERROR_IO_OPEN,
@@ -497,13 +557,13 @@ fn parse_csv_row(
     line_index: usize,
     parse_start_col: usize,
     parse_end_col: Option<usize>,
-) -> BuiltinResult<Vec<f64>> {
+) -> BuiltinResult<Vec<ParsedNumber>> {
     let mut values = Vec::new();
     for (col_index, raw_field) in line.split(',').enumerate() {
         if col_index < parse_start_col {
             // Respect csvread(..., row, col) offsets by skipping validation for
             // columns that will be dropped before materializing the output.
-            values.push(0.0);
+            values.push(ParsedNumber::ZERO);
             continue;
         }
         if parse_end_col.is_some_and(|end_col| col_index > end_col) {
@@ -511,7 +571,7 @@ fn parse_csv_row(
         }
         let trimmed = raw_field.trim();
         if trimmed.is_empty() {
-            values.push(0.0);
+            values.push(ParsedNumber::ZERO);
             continue;
         }
         let unwrapped = if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2
@@ -522,10 +582,10 @@ fn parse_csv_row(
         };
         let lowered = unwrapped.to_ascii_lowercase();
         let value = match lowered.as_str() {
-            "nan" => f64::NAN,
-            "inf" | "+inf" => f64::INFINITY,
-            "-inf" => f64::NEG_INFINITY,
-            _ => unwrapped.parse::<f64>().map_err(|_| {
+            "nan" => ParsedNumber::real(f64::NAN),
+            "inf" | "+inf" => ParsedNumber::real(f64::INFINITY),
+            "-inf" => ParsedNumber::real(f64::NEG_INFINITY),
+            _ => parse_csv_number(unwrapped).ok_or_else(|| {
                 csvread_error_with(
                     &CSVREAD_ERROR_NON_NUMERIC_TOKEN,
                     format!(
@@ -540,6 +600,66 @@ fn parse_csv_row(
         values.push(value);
     }
     Ok(values)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ParsedNumber {
+    re: f64,
+    im: f64,
+    complex: bool,
+}
+
+impl ParsedNumber {
+    const ZERO: Self = Self {
+        re: 0.0,
+        im: 0.0,
+        complex: false,
+    };
+    fn real(re: f64) -> Self {
+        Self {
+            re,
+            im: 0.0,
+            complex: false,
+        }
+    }
+}
+
+fn parse_csv_number(text: &str) -> Option<ParsedNumber> {
+    if let Ok(re) = text.parse::<f64>() {
+        return Some(ParsedNumber::real(re));
+    }
+    let body = text.strip_suffix(['i', 'j'])?;
+    let split = body.char_indices().rev().find_map(|(idx, ch)| {
+        if idx == 0 {
+            return None;
+        }
+        if ch != '+' && ch != '-' {
+            return None;
+        }
+        let prior = body[..idx].chars().next_back();
+        (!matches!(prior, Some('e' | 'E'))).then_some(idx)
+    });
+    let (re, imag) = if let Some(idx) = split {
+        (
+            body[..idx].parse::<f64>().ok()?,
+            parse_imaginary(&body[idx..])?,
+        )
+    } else {
+        (0.0, parse_imaginary(body)?)
+    };
+    Some(ParsedNumber {
+        re,
+        im: imag,
+        complex: true,
+    })
+}
+
+fn parse_imaginary(text: &str) -> Option<f64> {
+    match text {
+        "" | "+" => Some(1.0),
+        "-" => Some(-1.0),
+        _ => text.parse::<f64>().ok(),
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -602,7 +722,17 @@ fn parse_range_string(text: &str) -> BuiltinResult<RangeSpec> {
             "csvread: Range string cannot be empty",
         ));
     }
-    let parts: Vec<&str> = trimmed.split(':').collect();
+    let (separator, extension) = if trimmed.contains("..") {
+        ("..", None)
+    } else if trimmed.contains(':') {
+        (":", Some(&CSVREAD_COLON_RANGE_EXTENSION))
+    } else {
+        ("..", None)
+    };
+    if let Some(extension) = extension {
+        crate::compatibility::ensure_builtin_extension_enabled(extension, BUILTIN_NAME)?;
+    }
+    let parts: Vec<&str> = trimmed.split(separator).collect();
     if parts.len() > 2 {
         return Err(csvread_error_with(
             &CSVREAD_ERROR_RANGE,
@@ -643,7 +773,12 @@ fn parse_range_string(text: &str) -> BuiltinResult<RangeSpec> {
 
 fn parse_range_numeric(value: &Value) -> BuiltinResult<RangeSpec> {
     let elements = match value {
-        Value::Tensor(t) => t.data.clone(),
+        Value::Tensor(t) => (0..tensor::tensor_element_len(t))
+            .map(|idx| {
+                t.numeric_value_at(idx)
+                    .expect("index within authoritative numeric storage")
+            })
+            .collect::<Vec<_>>(),
         _ => {
             return Err(csvread_error_with(
                 &CSVREAD_ERROR_RANGE,
@@ -657,9 +792,27 @@ fn parse_range_numeric(value: &Value) -> BuiltinResult<RangeSpec> {
             "csvread: numeric Range must contain exactly 2 or 4 elements",
         ));
     }
+    if elements.len() == 2 {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CSVREAD_TWO_VECTOR_RANGE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let mut indices = Vec::with_capacity(elements.len());
-    for (idx, element) in elements.iter().enumerate() {
-        indices.push(non_negative_index(*element, idx)?);
+    for (idx, element) in elements.into_iter().enumerate() {
+        if let Some(integer) = element.into_int_value() {
+            indices.push(integer.try_to_usize().ok_or_else(|| {
+                csvread_error_with(
+                    &CSVREAD_ERROR_RANGE,
+                    format!(
+                        "csvread: Range index {} must be a representable non-negative integer",
+                        idx + 1
+                    ),
+                )
+            })?);
+        } else {
+            indices.push(non_negative_index(element.materialize_f64(), idx)?);
+        }
     }
     let start_row = indices[0];
     let start_col = indices[1];
@@ -794,17 +947,17 @@ fn column_index_from_letters(letters: &str) -> BuiltinResult<usize> {
 }
 
 struct SubsetResult {
-    rows: Vec<Vec<f64>>,
+    rows: Vec<Vec<ParsedNumber>>,
     row_count: usize,
     col_count: usize,
 }
 
 fn apply_offsets(
-    rows: &[Vec<f64>],
+    rows: &[Vec<ParsedNumber>],
     max_cols: usize,
     start_row: usize,
     start_col: usize,
-    default_fill: f64,
+    default_fill: ParsedNumber,
 ) -> SubsetResult {
     if rows.is_empty() || max_cols == 0 {
         return SubsetResult {
@@ -855,10 +1008,10 @@ fn apply_offsets(
 }
 
 fn apply_range(
-    rows: &[Vec<f64>],
+    rows: &[Vec<ParsedNumber>],
     max_cols: usize,
     range: &RangeSpec,
-    default_fill: f64,
+    default_fill: ParsedNumber,
 ) -> SubsetResult {
     if rows.is_empty() || max_cols == 0 {
         return SubsetResult {
@@ -926,14 +1079,15 @@ fn apply_range(
     }
 }
 
-fn rows_to_tensor(
-    rows: Vec<Vec<f64>>,
+fn rows_to_value(
+    rows: Vec<Vec<ParsedNumber>>,
     row_count: usize,
     col_count: usize,
-    default_fill: f64,
-) -> BuiltinResult<Tensor> {
+    default_fill: ParsedNumber,
+) -> BuiltinResult<Value> {
     if row_count == 0 || col_count == 0 {
         return Tensor::new(Vec::new(), vec![0, 0])
+            .map(Value::Tensor)
             .map_err(|e| csvread_error_with(&CSVREAD_ERROR_TENSOR_BUILD, format!("csvread: {e}")));
     }
     let mut data = vec![default_fill; row_count * col_count];
@@ -943,8 +1097,21 @@ fn rows_to_tensor(
             data[row_idx + col_idx * row_count] = value;
         }
     }
-    Tensor::new(data, vec![row_count, col_count])
+    if data.iter().any(|value| value.complex) {
+        ComplexTensor::new(
+            data.into_iter().map(|value| (value.re, value.im)).collect(),
+            vec![row_count, col_count],
+        )
+        .map(Value::ComplexTensor)
         .map_err(|e| csvread_error_with(&CSVREAD_ERROR_TENSOR_BUILD, format!("csvread: {e}")))
+    } else {
+        Tensor::new(
+            data.into_iter().map(|value| value.re).collect(),
+            vec![row_count, col_count],
+        )
+        .map(Value::Tensor)
+        .map_err(|e| csvread_error_with(&CSVREAD_ERROR_TENSOR_BUILD, format!("csvread: {e}")))
+    }
 }
 
 #[cfg(test)]
@@ -954,7 +1121,7 @@ pub(crate) mod tests {
     use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use runmat_builtins::{CharArray, IntValue, Tensor as BuiltinTensor};
+    use runmat_value::{CharArray, IntValue, IntegerStorage, Tensor as BuiltinTensor};
 
     fn csvread_builtin(path: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         let _provider_lock = runmat_filesystem::provider_override_lock();
@@ -1005,7 +1172,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
-                assert_eq!(t.data, vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1022,7 +1189,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![4.0, 7.0, 5.0, 8.0]);
+                assert_eq!(t.materialize_f64(), vec![4.0, 7.0, 5.0, 8.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1043,7 +1210,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![5.0, 8.0, 6.0, 9.0]);
+                assert_eq!(t.materialize_f64(), vec![5.0, 8.0, 6.0, 9.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1053,6 +1220,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvread_with_string_range() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let path = write_temp_file(&["1,2,3", "4,5,6", "7,8,9"]);
         let args = vec![
             Value::Int(IntValue::I32(0)),
@@ -1064,11 +1232,63 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![5.0, 8.0, 6.0, 9.0]);
+                assert_eq!(t.materialize_f64(), vec![5.0, 8.0, 6.0, 9.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
         fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn csvread_numeric_range_reads_typed_integer_storage_exactly() {
+        let range = BuiltinTensor::new_integer(IntegerStorage::U16(vec![1, 2, 3, 4]), vec![1, 4])
+            .expect("range");
+
+        let parsed = parse_range_numeric(&Value::Tensor(range)).expect("range");
+
+        assert_eq!(parsed.start_row, 1);
+        assert_eq!(parsed.start_col, 2);
+        assert_eq!(parsed.end_row, Some(3));
+        assert_eq!(parsed.end_col, Some(4));
+    }
+
+    #[test]
+    fn csvread_start_offsets_read_typed_integer_storage_exactly() {
+        let row = BuiltinTensor::new_integer(IntegerStorage::U64(vec![7]), vec![1, 1])
+            .expect("row offset");
+        assert_eq!(value_to_start_index(&Value::Tensor(row), "row").unwrap(), 7);
+
+        let negative = BuiltinTensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
+            .expect("negative row offset");
+        assert!(value_to_start_index(&Value::Tensor(negative), "row").is_err());
+
+        assert_eq!(
+            value_to_start_index(&Value::Int(IntValue::U64(u64::MAX)), "row").ok(),
+            usize::try_from(u64::MAX).ok()
+        );
+        assert!(value_to_start_index(&Value::Num(1.0e300), "row").is_err());
+    }
+
+    #[test]
+    fn csvread_start_offsets_read_all_integer_storage_classes_with_poisoned_f64_mirrors() {
+        let storages = [
+            IntegerStorage::I8(vec![7]),
+            IntegerStorage::I16(vec![7]),
+            IntegerStorage::I32(vec![7]),
+            IntegerStorage::I64(vec![7]),
+            IntegerStorage::U8(vec![7]),
+            IntegerStorage::U16(vec![7]),
+            IntegerStorage::U32(vec![7]),
+            IntegerStorage::U64(vec![7]),
+        ];
+
+        for storage in storages {
+            let tensor = BuiltinTensor::new_integer(storage, vec![1, 1]).expect("index");
+            assert_eq!(
+                value_to_start_index(&Value::Tensor(tensor), "row").expect("index"),
+                7
+            );
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1080,7 +1300,10 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 3]);
-                assert_eq!(t.data, vec![1.0, 0.0, 7.0, 0.0, 5.0, 8.0, 3.0, 0.0, 0.0]);
+                assert_eq!(
+                    t.materialize_f64(),
+                    vec![1.0, 0.0, 7.0, 0.0, 5.0, 8.0, 3.0, 0.0, 0.0]
+                );
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1113,7 +1336,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.data, vec![1.0, 2.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1130,7 +1353,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![1.0, 3.0, 2.0, 4.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1148,7 +1371,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                assert_eq!(t.data, vec![21.5, 22.0]);
+                assert_eq!(t.materialize_f64(), vec![21.5, 22.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1175,7 +1398,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                assert_eq!(t.data, vec![21.5, 22.0]);
+                assert_eq!(t.materialize_f64(), vec![21.5, 22.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1185,6 +1408,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvread_a1_range_ignores_bytes_and_text_outside_rectangle() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let path = unique_path("latin1_a1_range").with_extension("csv");
         fs::write(
             &path,
@@ -1201,10 +1425,89 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                assert_eq!(t.data, vec![21.5, 22.0]);
+                assert_eq!(t.materialize_f64(), vec![21.5, 22.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
         fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn csvread_public_dotdot_range_and_complex_tokens() {
+        let path = write_temp_file(&["1+2i,3-4j,5i", "6,7,8"]);
+        let args = vec![Value::Num(0.0), Value::Num(0.0), Value::from("A1..C2")];
+        let Value::ComplexTensor(result) =
+            csvread_builtin(Value::from(path.to_string_lossy().to_string()), args).unwrap()
+        else {
+            panic!("expected complex double result");
+        };
+        assert_eq!(result.shape, vec![2, 3]);
+        assert_eq!(
+            result.materialize_f64(),
+            vec![
+                (1.0, 2.0),
+                (6.0, 0.0),
+                (3.0, -4.0),
+                (7.0, 0.0),
+                (0.0, 5.0),
+                (8.0, 0.0)
+            ]
+        );
+        fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn csvread_four_vector_reads_all_integer_classes_authoritatively() {
+        for storage in [
+            IntegerStorage::I8(vec![0, 0, 1, 1]),
+            IntegerStorage::I16(vec![0, 0, 1, 1]),
+            IntegerStorage::I32(vec![0, 0, 1, 1]),
+            IntegerStorage::I64(vec![0, 0, 1, 1]),
+            IntegerStorage::U8(vec![0, 0, 1, 1]),
+            IntegerStorage::U16(vec![0, 0, 1, 1]),
+            IntegerStorage::U32(vec![0, 0, 1, 1]),
+            IntegerStorage::U64(vec![0, 0, 1, 1]),
+        ] {
+            let tensor = BuiltinTensor::new_integer(storage, vec![1, 4]).unwrap();
+            let range = parse_range_numeric(&Value::Tensor(tensor)).unwrap();
+            assert_eq!((range.start_row, range.start_col), (0, 0));
+            assert_eq!((range.end_row, range.end_col), (Some(1), Some(1)));
+        }
+    }
+
+    #[test]
+    fn csvread_range_extensions_are_independently_gated() {
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        assert_eq!(
+            parse_range_string("A1:B2").unwrap_err().identifier(),
+            CSVREAD_COLON_RANGE_EXTENSION.error_identifier
+        );
+        let two = BuiltinTensor::new(vec![0.0, 0.0], vec![1, 2]).unwrap();
+        assert_eq!(
+            parse_range_numeric(&Value::Tensor(two))
+                .unwrap_err()
+                .identifier(),
+            CSVREAD_TWO_VECTOR_RANGE_EXTENSION.error_identifier
+        );
+        drop(strict);
+    }
+
+    #[test]
+    fn csvread_resident_control_gate_precedes_provider_and_file_access() {
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX - 396,
+            descriptor: Default::default(),
+        });
+        let error = csvread_builtin(Value::from("does-not-exist.csv"), vec![resident]).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            CSVREAD_RESIDENT_CONTROL_EXTENSION.error_identifier
+        );
+        drop(strict);
+        assert_eq!(CSVREAD_EXTENSIONS.len(), 3);
+        assert_eq!(CSVREAD_INTEGER_CAPABILITIES[0].inputs.len(), 3);
     }
 }

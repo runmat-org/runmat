@@ -30,13 +30,15 @@
     "unit": "builtins::math::signal::tripuls::tests",
     "integration": null
   },
-  "description": "`tripuls(T)` returns samples of a unit-width triangular pulse centered at zero. `tripuls(T, W, S)` uses width `W` and skew `S` in `[-1, 1]`.",
+  "description": "`tripuls(T)` returns samples of a unit-width triangular pulse centered at zero. `tripuls(T, W, S)` uses width `W` and skew `S` in `[-1, 1]`. The documented single and double sample-time classes preserve their floating output class. Typed-integer sample times and controls are available in RunMat mode through checked binary64 boundaries.",
   "behaviors": [
     "Operates element-wise on real numeric scalars, vectors, matrices, and N-D tensors; preserves input shape.",
     "The pulse is zero outside `[-W/2, W/2]` and reaches one at `S*W/2`.",
     "The width must be positive and finite.",
     "The skew must be finite and in `[-1, 1]`.",
-    "Complex and text inputs are rejected with a builtin-scoped error."
+    "Complex and text inputs are rejected with a builtin-scoped error.",
+    "Single input produces single output; double input produces double output; typed-integer input is a RunMat extension and produces double output.",
+    "Typed-integer sample times and typed-integer width/skew controls are independently compatibility-gated and must be exactly representable as double."
   ],
   "examples": [
     {

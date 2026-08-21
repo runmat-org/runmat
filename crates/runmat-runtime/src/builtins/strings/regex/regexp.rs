@@ -4,17 +4,19 @@ use std::collections::HashMap;
 
 use regex::RegexBuilder;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
-use runmat_builtins::{CharArray, StringArray, StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, StringArray, StructValue, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::strings::common::contains_numeric_or_resident_text_input;
 use crate::builtins::strings::type_resolvers::unknown_type;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
@@ -193,6 +195,12 @@ pub const REGEXP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &REGEXP_ERRORS,
 };
 
+pub const REGEXP_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "regexp accepts host string, character, and cell text for subjects, expressions, output keys, and options. Numeric match indices are outputs only; numeric, logical, symbolic, and provider-resident inputs reject before gather or provider access.",
+};
+
 fn runtime_error_for(builtin: &'static str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(builtin).build()
 }
@@ -220,6 +228,15 @@ pub async fn evaluate_with(
     pattern: Value,
     rest: &[Value],
 ) -> BuiltinResult<RegexpEvaluation> {
+    if contains_numeric_or_resident_text_input(&subject)
+        || contains_numeric_or_resident_text_input(&pattern)
+        || rest.iter().any(contains_numeric_or_resident_text_input)
+    {
+        return Err(runtime_error_for(
+            builtin,
+            format!("{builtin}: inputs and options must be host text values"),
+        ));
+    }
     let subject = gather_if_needed_async(&subject)
         .await
         .map_err(|err| with_builtin_context(builtin, err))?;
@@ -238,6 +255,7 @@ pub async fn evaluate_with(
     accel = "sink",
     type_resolver(unknown_type),
     descriptor(crate::builtins::strings::regex::regexp::REGEXP_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::regex::regexp::REGEXP_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::regex::regexp"
 )]
 async fn regexp_builtin(
@@ -544,7 +562,7 @@ fn collect_string_array(
 
 async fn collect_cell_array(
     builtin: &'static str,
-    cell: runmat_builtins::CellArray,
+    cell: runmat_value::CellArray,
     _force_cell_output: bool,
 ) -> BuiltinResult<SubjectCollection> {
     let mut entries = Vec::with_capacity(cell.data.len());
@@ -1143,7 +1161,7 @@ pub(crate) mod tests {
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![1.0, 4.0, 6.0, 8.0, 11.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 4.0, 6.0, 8.0, 11.0]);
             }
             Value::Num(_) => panic!("expected tensor"),
             other => panic!("unexpected output {other:?}"),
@@ -1263,7 +1281,7 @@ pub(crate) mod tests {
         match &outputs[0] {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 2]);
-                assert_eq!(t.data, vec![1.0, 6.0, 9.0, 4.0, 7.0, 10.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 6.0, 9.0, 4.0, 7.0, 10.0]);
             }
             other => panic!("expected token extent matrix, got {other:?}"),
         }
@@ -1334,7 +1352,7 @@ pub(crate) mod tests {
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
             Value::Num(n) => assert_eq!(*n, 2.0),
-            Value::Tensor(t) => assert_eq!(t.data, vec![2.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![2.0]),
             other => panic!("unexpected output {other:?}"),
         }
     }
@@ -1351,11 +1369,11 @@ pub(crate) mod tests {
         let outputs = eval.outputs_for_multi().unwrap();
         assert_eq!(outputs.len(), 3);
         match &outputs[0] {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 4.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 4.0]),
             other => panic!("unexpected output {other:?}"),
         }
         match &outputs[1] {
-            Value::Tensor(t) => assert_eq!(t.data, vec![2.0, 5.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![2.0, 5.0]),
             other => panic!("unexpected output {other:?}"),
         }
         match &outputs[2] {
@@ -1380,7 +1398,7 @@ pub(crate) mod tests {
         .unwrap();
         let outputs = eval.outputs_for_single().unwrap();
         match &outputs[0] {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 2.0, 3.0, 4.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]),
             Value::Num(n) => assert_eq!(*n, 1.0),
             other => panic!("unexpected output {other:?}"),
         }
@@ -1452,12 +1470,12 @@ pub(crate) mod tests {
                     Value::Tensor(t) => {
                         assert_eq!(t.shape, vec![3, 2]);
                         // Starts should be 1,6,9 (1-based); ends 4,7,10
-                        assert_eq!(t.data[0], 1.0);
-                        assert_eq!(t.data[1], 6.0);
-                        assert_eq!(t.data[2], 9.0);
-                        assert_eq!(t.data[3], 4.0);
-                        assert_eq!(t.data[4], 7.0);
-                        assert_eq!(t.data[5], 10.0);
+                        assert_eq!(t.materialize_f64()[0], 1.0);
+                        assert_eq!(t.materialize_f64()[1], 6.0);
+                        assert_eq!(t.materialize_f64()[2], 9.0);
+                        assert_eq!(t.materialize_f64()[3], 4.0);
+                        assert_eq!(t.materialize_f64()[4], 7.0);
+                        assert_eq!(t.materialize_f64()[5], 10.0);
                     }
                     other => panic!("unexpected token extent value {other:?}"),
                 }
@@ -1484,7 +1502,7 @@ pub(crate) mod tests {
                 assert_eq!(ca.data.len(), 1);
                 let inner = &ca.data[0];
                 match inner {
-                    Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 4.0]),
+                    Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 4.0]),
                     other => panic!("unexpected inner value {other:?}"),
                 }
             }
@@ -1541,7 +1559,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_cell_array_multi_dim_order() {
-        let cell = runmat_builtins::CellArray::new(
+        let cell = runmat_value::CellArray::new(
             vec![
                 Value::String("r0c0".into()),
                 Value::String("r0c1".into()),
@@ -1637,7 +1655,7 @@ pub(crate) mod tests {
         let outputs = eval.outputs_for_single().unwrap();
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
-            Value::Tensor(t) => assert_eq!(t.data, vec![7.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![7.0]),
             Value::Num(n) => assert_eq!(*n, 7.0),
             Value::Cell(_) => panic!("expected numeric output"),
             other => panic!("unexpected output {other:?}"),

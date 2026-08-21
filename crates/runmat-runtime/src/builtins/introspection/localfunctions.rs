@@ -1,7 +1,8 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamDescriptor, BuiltinSignatureDescriptor, CellArray, Value,
+    BuiltinParamDescriptor, BuiltinSignatureDescriptor,
 };
+use runmat_value::{CellArray, Value};
 
 const LOCALFUNCTIONS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "handles",
@@ -92,7 +93,7 @@ pub fn localfunctions_builtin_registered(args: Vec<Value>) -> crate::BuiltinResu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_hir::SourceId;
+    use runmat_types::SourceId;
     use std::sync::Arc;
 
     #[test]

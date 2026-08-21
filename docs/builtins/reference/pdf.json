@@ -6,21 +6,22 @@
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
-    "precisions": ["f64"],
-    "broadcasting": "evaluation input shape",
-    "notes": "GPU inputs are gathered to host. Fitted-distribution evaluation currently runs on CPU."
+    "precisions": ["f32", "f64"],
+    "broadcasting": "matlab",
+    "notes": "The CPU evaluator preserves single output precision and restores fallback results to the owning provider when its precision can represent the result; explicit gpuArray input fails rather than silently returning a host result when restoration is impossible."
   },
   "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
   "requires_feature": null,
   "tested": {
     "unit": "builtins::stats::summary::fitdist::tests",
-    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+    "integration": "crates/runmat-vm/tests/integer_numeric_transform_semantics.rs"
   },
   "description": "`pdf(pd,x)` evaluates the density or probability mass function for a `ProbabilityDistribution` object returned by `fitdist`. `pdf(distname,x,params...)` evaluates supported named distributions directly.",
   "behaviors": [
     "`pd` must be a fitted distribution object returned by `fitdist`, or `distname` must name a supported distribution.",
     "Supported named distributions are `\"Normal\"`, `\"Exponential\"`, `\"Lognormal\"`, `\"Gamma\"`, `\"Weibull\"`, and `\"Poisson\"` with their standard scalar parameters.",
-    "`x` may be a scalar or numeric array; the output has the same shape as `x`.",
+    "`x` and named-distribution parameters may be scalar or mutually broadcast-compatible numeric arrays; the output has their broadcast shape.",
+    "Typed-integer evaluation points and distribution parameters are independent RunMat extensions and reject values that cannot cross the binary64 probability boundary exactly.",
     "Continuous distributions return probability densities. Poisson returns probability mass values at integer support points and zero outside the support."
   ],
   "examples": [

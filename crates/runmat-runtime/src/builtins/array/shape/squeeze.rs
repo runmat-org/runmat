@@ -10,9 +10,15 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+    ResolveContext, Type,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::squeeze")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -89,6 +95,26 @@ pub const SQUEEZE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &SQUEEZE_ERRORS,
 };
 
+const SQUEEZE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "squeeze is class-agnostic structural array manipulation and preserves every integer element without numeric conversion.",
+    }];
+pub const SQUEEZE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "B = squeeze(integer_A)",
+        inputs: &SQUEEZE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Only shape metadata changes. Host values retain authoritative storage and resident values retain the same provider buffer through reshape metadata.",
+    }];
+
 fn squeeze_shape_options(shape: &[Option<usize>]) -> Vec<Option<usize>> {
     if shape.len() <= 2 {
         return shape.to_vec();
@@ -135,6 +161,7 @@ fn squeeze_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     accel = "shape",
     type_resolver(squeeze_type),
     descriptor(crate::builtins::array::shape::squeeze::SQUEEZE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::array::shape::squeeze::SQUEEZE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::shape::squeeze"
 )]
 async fn squeeze_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -147,8 +174,10 @@ async fn squeeze_value(value: Value) -> crate::BuiltinResult<Value> {
         Value::ComplexTensor(ct) => squeeze_complex_tensor(ct).map(Value::ComplexTensor),
         Value::LogicalArray(logical) => squeeze_logical_array(logical).map(Value::LogicalArray),
         Value::StringArray(strings) => squeeze_string_array(strings).map(Value::StringArray),
+        Value::CharArray(chars) => squeeze_char_array(chars).map(Value::CharArray),
+        Value::Cell(cell) => squeeze_cell_array(cell).map(Value::Cell),
         Value::GpuTensor(handle) => squeeze_gpu(handle).await,
-        Value::String(_) | Value::CharArray(_) | Value::Cell(_) | Value::Struct(_) => Ok(value),
+        Value::String(_) | Value::Struct(_) => Ok(value),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Ok(value),
         other => Err(squeeze_error(format!(
             "squeeze: unsupported input type {}; expected numeric, logical, string, char, cell, or gpu array",
@@ -174,7 +203,7 @@ fn value_kind(value: &Value) -> &'static str {
         Value::String(_) => "string scalar",
         Value::Symbolic(_) => "symbolic scalar",
         Value::SymbolicArray(_) => "symbolic array",
-        Value::Object(_) => "object",
+        Value::ObjectArray(_) | Value::Object(_) => "object",
         Value::HandleObject(_) => "handle object",
         Value::Listener(_) => "listener",
         Value::Struct(_) => "struct",
@@ -186,6 +215,11 @@ fn value_kind(value: &Value) -> &'static str {
         Value::ClassRef(_) => "class reference",
         Value::MException(_) => "exception",
         Value::OutputList(_) => "output list",
+        Value::Future(_) => "future",
+        Value::Task(_) => "task",
+        Value::Pool(_) => "pool",
+        Value::Job(_) => "job",
+        Value::Foreign(_) => "foreign reference",
     }
 }
 
@@ -204,7 +238,8 @@ fn squeeze_complex_tensor(ct: ComplexTensor) -> crate::BuiltinResult<ComplexTens
     if shape == ct.shape {
         return Ok(ct);
     }
-    ComplexTensor::new(ct.data, shape).map_err(|e| squeeze_error(format!("squeeze: {e}")))
+    ComplexTensor::from_complex_storage(ct.into_complex_storage(), shape)
+        .map_err(|e| squeeze_error(format!("squeeze: {e}")))
 }
 
 fn squeeze_logical_array(logical: LogicalArray) -> crate::BuiltinResult<LogicalArray> {
@@ -221,6 +256,26 @@ fn squeeze_string_array(strings: StringArray) -> crate::BuiltinResult<StringArra
         return Ok(strings);
     }
     StringArray::new(strings.data, shape).map_err(|e| squeeze_error(format!("squeeze: {e}")))
+}
+
+fn squeeze_char_array(chars: CharArray) -> crate::BuiltinResult<CharArray> {
+    let shape = squeeze_shape(&chars.shape);
+    if shape == chars.shape {
+        return Ok(chars);
+    }
+    CharArray::from_column_major(chars.to_column_major(), shape)
+        .map_err(|e| squeeze_error(format!("squeeze: {e}")))
+}
+
+fn squeeze_cell_array(
+    cell: runmat_value::CellArray,
+) -> crate::BuiltinResult<runmat_value::CellArray> {
+    let shape = squeeze_shape(&cell.shape);
+    if shape == cell.shape {
+        return Ok(cell);
+    }
+    runmat_value::CellArray::from_column_major(cell.to_column_major(), shape)
+        .map_err(|e| squeeze_error(format!("squeeze: {e}")))
 }
 
 async fn squeeze_gpu(handle: GpuTensorHandle) -> crate::BuiltinResult<Value> {
@@ -265,15 +320,13 @@ fn squeeze_shape(shape: &[usize]) -> Vec<usize> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    #[cfg(feature = "wgpu")]
-    use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
 
     fn squeeze_builtin(value: Value) -> crate::BuiltinResult<Value> {
         block_on(super::squeeze_builtin(value))
     }
     use crate::builtins::common::test_support;
-    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
+    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage, Tensor};
 
     #[test]
     fn squeeze_type_preserves_logical_shape() {
@@ -317,6 +370,35 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn squeeze_preserves_exact_typed_complex_integer_storage() {
+        let complex = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+                IntegerStorage::I64(vec![7, -8]),
+            )
+            .expect("storage"),
+            vec![1, 2, 1],
+        )
+        .expect("complex");
+        let value = squeeze_builtin(Value::ComplexTensor(complex)).expect("squeeze");
+
+        let Value::ComplexTensor(output) = value else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(output.shape, vec![2, 1]);
+        assert_eq!(
+            output
+                .integer_storage()
+                .as_ref()
+                .map(|storage| (&storage.real, &storage.imag)),
+            Some((
+                &IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+                &IntegerStorage::I64(vec![7, -8]),
+            ))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -380,7 +462,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -412,7 +494,7 @@ pub(crate) mod tests {
         )
         .unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload source tensor");
@@ -425,9 +507,13 @@ pub(crate) mod tests {
         };
         assert_eq!(gpu_handle.shape, vec![3, 4]);
 
-        let downloaded = block_on(download_handle_async(provider, &gpu_handle))
-            .expect("download squeezed tensor");
+        let downloaded = test_support::gather(Value::GpuTensor(gpu_handle.clone()))
+            .expect("gather squeezed tensor");
         assert_eq!(downloaded.shape.as_slice(), &[3, 4]);
-        assert_eq!(downloaded.data.as_slice(), tensor.data.as_slice());
+        assert_eq!(
+            downloaded.materialize_f64().as_slice(),
+            tensor.materialize_f64().as_slice()
+        );
+        provider.free(&gpu_handle).expect("free squeezed tensor");
     }
 }

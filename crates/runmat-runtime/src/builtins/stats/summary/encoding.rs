@@ -1,19 +1,231 @@
 //! Dummy-variable and one-hot encoding helpers.
 
+use runmat_value::{NumericDType, NumericScalar, NumericStorage};
 use std::{cmp::Ordering, collections::HashMap};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, LogicalArray, ObjectInstance, ResolveContext, StringArray, Tensor, Type,
-    Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CellArray, CharArray, IntValue, LogicalArray, ObjectInstance, StringArray, Tensor, Value,
+};
 
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const MAX_ONEHOT_CELLS: usize = 50_000_000;
 const MAX_ENCODING_RANK: usize = 32;
+
+const DUMMYVAR_INTEGER_GROUP_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "dummyvar-integer-group",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "dummyvar with typed-integer grouping variables is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:DummyvarIntegerGroupExtension"),
+};
+const DUMMYVAR_GPU_GROUP_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "dummyvar-gpu-group",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "dummyvar with a resident grouping variable is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:DummyvarGpuGroupExtension"),
+};
+const DUMMYVAR_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    DUMMYVAR_INTEGER_GROUP_EXTENSION,
+    DUMMYVAR_GPU_GROUP_EXTENSION,
+];
+
+const ONEHOTENCODE_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "onehotencode-explicit-gpu-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "onehotencode host fallback for explicit gpuArray inputs is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:OnehotencodeExplicitGpuInputExtension"),
+    };
+const ONEHOTENCODE_OUTPUT_TYPE_ALIAS_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "onehotencode-outputtype-alias",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "onehotencode OutputType/Typename name-value aliases are RunMat extensions",
+        error_identifier: Some("RunMat:compatibility:OnehotencodeOutputTypeAliasExtension"),
+    };
+const ONEHOTENCODE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    ONEHOTENCODE_EXPLICIT_GPU_EXTENSION,
+    ONEHOTENCODE_OUTPUT_TYPE_ALIAS_EXTENSION,
+];
+
+const ONEHOTDECODE_BROAD_ENCODED_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "onehotdecode-integer-logical-encoded-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "onehotdecode with integer or logical encoded probability data is a RunMat extension",
+        error_identifier: Some(
+            "RunMat:compatibility:OnehotdecodeIntegerLogicalEncodedInputExtension",
+        ),
+    };
+const ONEHOTDECODE_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "onehotdecode-explicit-gpu-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "onehotdecode host fallback for explicit gpuArray inputs is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:OnehotdecodeExplicitGpuInputExtension"),
+    };
+const ONEHOTDECODE_LOGICAL_CELL_OUTPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "onehotdecode-logical-cell-output",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "onehotdecode logical or cellstr output types are RunMat extensions",
+        error_identifier: Some("RunMat:compatibility:OnehotdecodeLogicalCellOutputExtension"),
+    };
+const ONEHOTDECODE_OUTPUT_TYPE_ALIAS_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "onehotdecode-outputtype-alias",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "onehotdecode OutputType/Typename name-value aliases are RunMat extensions",
+        error_identifier: Some("RunMat:compatibility:OnehotdecodeOutputTypeAliasExtension"),
+    };
+const ONEHOTDECODE_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    ONEHOTDECODE_BROAD_ENCODED_EXTENSION,
+    ONEHOTDECODE_EXPLICIT_GPU_EXTENSION,
+    ONEHOTDECODE_LOGICAL_CELL_OUTPUT_EXTENSION,
+    ONEHOTDECODE_OUTPUT_TYPE_ALIAS_EXTENSION,
+];
+
+const ONEHOTENCODE_INTEGER_LABEL_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A/ClassNames",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Numeric labels and ClassNames accept all eight integer classes and are compared from authoritative native values without binary64 collapse.",
+    }];
+const ONEHOT_FEATURE_DIM_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "featureDim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The positive singleton-dimension selector accepts every integer class and is validated exactly before shape arithmetic.",
+    }];
+const ONEHOTDECODE_INTEGER_CLASSES_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "classes",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Class vectors accept all eight integer classes and retain exact values through selection, categorical rendering, and requested numeric output conversion.",
+    }];
+const ONEHOTDECODE_INTEGER_ENCODED_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "B",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents only single and double probability arrays; RunMat mode retains integer and logical zero/one arrays as a checked extension.",
+    }];
+
+pub const ONEHOTENCODE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = onehotencode(integer_A, featureDim, ClassNames=integer_classes)",
+        inputs: &ONEHOTENCODE_INTEGER_LABEL_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Exact class matching produces zero/one vectors; missing or excluded labels require single or double output because integer and logical classes cannot represent NaN.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = onehotencode(A, integer_featureDim, ...)",
+        inputs: &ONEHOT_FEATURE_DIM_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The exact one-based dimension controls only output shape. Automatic residency gathers transparently; explicit gpuArray fallback is separately gated.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = onehotencode(..., integer_typename)",
+        inputs: &[],
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Every signed and unsigned integer typename constructs same-class zero and one values.",
+    },
+];
+
+pub const ONEHOTDECODE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "A = onehotdecode(B, integer_classes, featureDim, ...)",
+        inputs: &ONEHOTDECODE_INTEGER_CLASSES_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Argmax is computed in the documented floating probability domain, then selects exact integer class labels; numeric typename conversion follows shared assignment casting.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "A = onehotdecode(B, classes, integer_featureDim, ...)",
+        inputs: &ONEHOT_FEATURE_DIM_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The exact dimension identifies the probability-vector axis and does not alter class values.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "A = onehotdecode(B, classes, featureDim, integer_typename)",
+        inputs: &[],
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Every signed and unsigned integer typename returns authoritative native storage; numeric output requires numeric classes.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "A = onehotdecode(integer_B, classes, featureDim, ...)",
+        inputs: &ONEHOTDECODE_INTEGER_ENCODED_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "This checked RunMat-only form admits exact integer zero/one probabilities; compatibility modes reject it before gather or provider access.",
+    },
+];
+const DUMMYVAR_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "group",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target lists single and double numeric grouping variables. RunMat mode additionally admits all eight integer classes as positive level labels; values outside the bounded feasible output domain reject before floating conversion.",
+    }];
+pub const DUMMYVAR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "D = dummyvar(integer_group)",
+        inputs: &DUMMYVAR_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Positive integer labels select columns 1:max(group). Typed labels are validated exactly against sign and the bounded feasible output domain before their now-exact floating representation is used; resident extension inputs gather through their owner and return a host double matrix.",
+    }];
 
 const PARAM_X: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "X",
@@ -261,14 +473,14 @@ struct LabelArray {
 
 #[derive(Clone, Debug, PartialEq)]
 enum Label {
-    Numeric(f64),
+    Numeric(NumericScalar),
     Logical(bool),
     Text(String),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum OutputKind {
-    Double,
+    Numeric(NumericDType),
     Logical,
     String,
     Cell,
@@ -281,12 +493,84 @@ enum OutputKind {
     summary = "Create dummy variables for grouping variables.",
     keywords = "dummyvar,dummy variables,one hot,statistics,categorical",
     type_resolver(tensor_type),
+    extensions(DUMMYVAR_EXTENSIONS),
+    integer_capabilities(DUMMYVAR_INTEGER_CAPABILITIES),
     descriptor(crate::builtins::stats::summary::encoding::dummyvar_meta::DESCRIPTOR),
     builtin_path = "crate::builtins::stats::summary::encoding"
 )]
 async fn dummyvar_builtin(group: Value) -> BuiltinResult<Value> {
+    if value_contains_typed_integer(&group) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DUMMYVAR_INTEGER_GROUP_EXTENSION,
+            "dummyvar",
+        )?;
+    }
+    if crate::value_contains_gpu(&group) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DUMMYVAR_GPU_GROUP_EXTENSION,
+            "dummyvar",
+        )?;
+    }
     let group = gather("dummyvar", group).await?;
+    validate_dummyvar_integer_levels(&group)?;
     dummyvar_compute(group)
+}
+
+fn value_contains_typed_integer(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+        || matches!(value, Value::Cell(cell) if cell.data.iter().any(value_contains_typed_integer))
+}
+
+fn validate_dummyvar_integer_levels(value: &Value) -> BuiltinResult<()> {
+    match value {
+        Value::Int(value) => validate_dummyvar_integer_level(value),
+        Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                for index in 0..storage.len() {
+                    let value = storage.value_at(index).ok_or_else(|| {
+                        internal(
+                            "dummyvar",
+                            "dummyvar: invalid typed-integer grouping storage",
+                        )
+                    })?;
+                    validate_dummyvar_integer_level(&value)?;
+                }
+            }
+            Ok(())
+        }
+        Value::Cell(cell) => {
+            for item in &cell.data {
+                validate_dummyvar_integer_levels(item)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn validate_dummyvar_integer_level(value: &IntValue) -> BuiltinResult<()> {
+    let level = match value {
+        IntValue::I8(value) if *value > 0 => u128::from(*value as u8),
+        IntValue::I16(value) if *value > 0 => u128::from(*value as u16),
+        IntValue::I32(value) if *value > 0 => u128::from(*value as u32),
+        IntValue::I64(value) if *value > 0 => u128::from(*value as u64),
+        IntValue::U8(value) if *value > 0 => u128::from(*value),
+        IntValue::U16(value) if *value > 0 => u128::from(*value),
+        IntValue::U32(value) if *value > 0 => u128::from(*value),
+        IntValue::U64(value) if *value > 0 => u128::from(*value),
+        _ => {
+            return Err(invalid(
+                "dummyvar",
+                "dummyvar: numeric groups must contain positive integer levels or NaN",
+            ))
+        }
+    };
+    if level > MAX_ONEHOT_CELLS as u128 {
+        return Err(invalid("dummyvar", "dummyvar: output is too large"));
+    }
+    Ok(())
 }
 
 #[runtime_builtin(
@@ -295,6 +579,8 @@ async fn dummyvar_builtin(group: Value) -> BuiltinResult<Value> {
     summary = "Encode labels as one-hot vectors.",
     keywords = "onehotencode,one hot,classification,categorical,statistics",
     type_resolver(unknown_type),
+    extensions(ONEHOTENCODE_EXTENSIONS),
+    integer_capabilities(ONEHOTENCODE_INTEGER_CAPABILITIES),
     descriptor(crate::builtins::stats::summary::encoding::onehotencode_meta::DESCRIPTOR),
     builtin_path = "crate::builtins::stats::summary::encoding"
 )]
@@ -303,6 +589,23 @@ async fn onehotencode_builtin(
     feature_dim: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    if onehot_option_alias_requested(&rest, true) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ONEHOTENCODE_OUTPUT_TYPE_ALIAS_EXTENSION,
+            "onehotencode",
+        )?;
+    }
+    if crate::builtins::common::validation::value_contains_explicit_gpu(&input)
+        || crate::builtins::common::validation::value_contains_explicit_gpu(&feature_dim)
+        || rest
+            .iter()
+            .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ONEHOTENCODE_EXPLICIT_GPU_EXTENSION,
+            "onehotencode",
+        )?;
+    }
     let input = gather("onehotencode", input).await?;
     let feature_dim = gather("onehotencode", feature_dim).await?;
     let rest = gather_values("onehotencode", rest).await?;
@@ -317,6 +620,8 @@ async fn onehotencode_builtin(
     summary = "Decode one-hot vectors into class labels.",
     keywords = "onehotdecode,one hot,classification,categorical,statistics",
     type_resolver(unknown_type),
+    extensions(ONEHOTDECODE_EXTENSIONS),
+    integer_capabilities(ONEHOTDECODE_INTEGER_CAPABILITIES),
     descriptor(crate::builtins::stats::summary::encoding::onehotdecode_meta::DESCRIPTOR),
     builtin_path = "crate::builtins::stats::summary::encoding"
 )]
@@ -326,13 +631,87 @@ async fn onehotdecode_builtin(
     feature_dim: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    if onehot_option_alias_requested(&rest, false) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ONEHOTDECODE_OUTPUT_TYPE_ALIAS_EXTENSION,
+            "onehotdecode",
+        )?;
+    }
+    if onehotdecode_requests_broad_output(&rest) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ONEHOTDECODE_LOGICAL_CELL_OUTPUT_EXTENSION,
+            "onehotdecode",
+        )?;
+    }
+    if encoded_value_needs_runmat_extension(&encoded) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ONEHOTDECODE_BROAD_ENCODED_EXTENSION,
+            "onehotdecode",
+        )?;
+    }
+    if crate::builtins::common::validation::value_contains_explicit_gpu(&encoded)
+        || crate::builtins::common::validation::value_contains_explicit_gpu(&classes)
+        || crate::builtins::common::validation::value_contains_explicit_gpu(&feature_dim)
+        || rest
+            .iter()
+            .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ONEHOTDECODE_EXPLICIT_GPU_EXTENSION,
+            "onehotdecode",
+        )?;
+    }
     let encoded = gather("onehotdecode", encoded).await?;
     let classes = gather("onehotdecode", classes).await?;
     let feature_dim = gather("onehotdecode", feature_dim).await?;
     let rest = gather_values("onehotdecode", rest).await?;
     let feature_dim = positive_dim("onehotdecode", &feature_dim)?;
     let options = parse_onehotdecode_options(rest)?;
+    if matches!(options.output, Some(OutputKind::Logical | OutputKind::Cell)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ONEHOTDECODE_LOGICAL_CELL_OUTPUT_EXTENSION,
+            "onehotdecode",
+        )?;
+    }
     onehotdecode_compute(encoded, classes, feature_dim, options)
+}
+
+fn encoded_value_needs_runmat_extension(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Bool(_) | Value::LogicalArray(_) | Value::Int(_)
+    ) || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some() || runmat_accelerate_api::handle_is_logical(handle))
+}
+
+fn onehotdecode_requests_broad_output(rest: &[Value]) -> bool {
+    if rest.len() == 1 {
+        return scalar_text(&rest[0], "onehotdecode output type")
+            .ok()
+            .is_some_and(|text| {
+                matches!(canonical(&text).as_str(), "logical" | "cell" | "cellstr")
+            });
+    }
+    rest.chunks_exact(2).any(|pair| {
+        let Ok(name) = scalar_text(&pair[0], "onehotdecode option name") else {
+            return false;
+        };
+        if !matches!(canonical(&name).as_str(), "outputtype" | "typename") {
+            return false;
+        }
+        scalar_text(&pair[1], "onehotdecode output type")
+            .ok()
+            .is_some_and(|text| matches!(canonical(&text).as_str(), "logical" | "cell" | "cellstr"))
+    })
+}
+
+fn onehot_option_alias_requested(rest: &[Value], allows_positional_prefix: bool) -> bool {
+    let offset = usize::from(allows_positional_prefix && !rest.len().is_multiple_of(2));
+    rest[offset..].chunks_exact(2).any(|pair| {
+        scalar_text(&pair[0], "onehot option name")
+            .ok()
+            .is_some_and(|name| matches!(canonical(&name).as_str(), "outputtype" | "typename"))
+    })
 }
 
 async fn gather(name: &str, value: Value) -> BuiltinResult<Value> {
@@ -481,7 +860,10 @@ fn onehotencode_compute(
         let out_idx = linear_for_coords(&coords, &out_strides);
         values[out_idx] = 1.0;
     }
-    match options.output.unwrap_or(OutputKind::Double) {
+    match options
+        .output
+        .unwrap_or(OutputKind::Numeric(NumericDType::F64))
+    {
         OutputKind::Logical => {
             if has_nan_vector {
                 return Err(invalid(
@@ -499,14 +881,36 @@ fn onehotencode_compute(
             .map(Value::LogicalArray)
             .map_err(|err| internal("onehotencode", format!("onehotencode: {err}")))
         }
-        OutputKind::Double => Tensor::new(values, shape)
-            .map(Value::Tensor)
-            .map_err(|err| internal("onehotencode", format!("onehotencode: {err}"))),
+        OutputKind::Numeric(dtype) => {
+            if has_nan_vector && !matches!(dtype, NumericDType::F64 | NumericDType::F32) {
+                return Err(invalid(
+                    "onehotencode",
+                    "onehotencode: integer output cannot represent missing or excluded labels",
+                ));
+            }
+            onehot_numeric_output(values, shape, dtype)
+        }
         _ => Err(invalid(
             "onehotencode",
-            "onehotencode: OutputType must be double, single, or logical",
+            "onehotencode: OutputType must be a numeric or logical type",
         )),
     }
+}
+
+fn onehot_numeric_output(
+    values: Vec<f64>,
+    shape: Vec<usize>,
+    dtype: NumericDType,
+) -> BuiltinResult<Value> {
+    let mut output =
+        Tensor::from_numeric_storage(NumericStorage::zeros(dtype, values.len()), shape)
+            .map_err(|err| internal("onehotencode", format!("onehotencode: {err}")))?;
+    for (index, value) in values.into_iter().enumerate() {
+        output
+            .set_numeric_assignment_at(index, NumericScalar::F64(value))
+            .map_err(|err| internal("onehotencode", format!("onehotencode: {err}")))?;
+    }
+    Ok(Value::Tensor(output))
 }
 
 #[derive(Default)]
@@ -663,19 +1067,21 @@ fn parse_onehotdecode_options(rest: Vec<Value>) -> BuiltinResult<OnehotDecodeOpt
 fn labels_from_value(name: &str, value: Value) -> BuiltinResult<LabelArray> {
     match value {
         Value::Num(value) => Ok(LabelArray {
-            labels: vec![numeric_label(value)],
+            labels: vec![numeric_label(NumericScalar::F64(value))],
             shape: vec![1, 1],
             kind: LabelKind::Numeric,
             categories: None,
         }),
         Value::Int(value) => Ok(LabelArray {
-            labels: vec![numeric_label(value.to_f64())],
+            labels: vec![numeric_label(NumericScalar::from(value))],
             shape: vec![1, 1],
             kind: LabelKind::Numeric,
             categories: None,
         }),
         Value::Tensor(tensor) => Ok(LabelArray {
-            labels: tensor.data.iter().copied().map(numeric_label).collect(),
+            labels: (0..tensor.len())
+                .map(|index| tensor.numeric_value_at(index).and_then(numeric_label))
+                .collect(),
             shape: normalized_shape(&tensor.shape),
             kind: LabelKind::Numeric,
             categories: None,
@@ -754,11 +1160,12 @@ fn dummyvar_groups(value: Value) -> BuiltinResult<Vec<LabelArray>> {
         {
             let rows = tensor.rows();
             let cols = tensor.cols();
+            let values = tensor::tensor_values_f64_cow(&tensor);
             let mut groups = Vec::with_capacity(cols);
             for col in 0..cols {
                 let mut labels = Vec::with_capacity(rows);
                 for row in 0..rows {
-                    labels.push(numeric_label(tensor.data[row + col * rows]));
+                    labels.push(numeric_label(NumericScalar::F64(values[row + col * rows])));
                 }
                 groups.push(LabelArray {
                     labels,
@@ -797,20 +1204,20 @@ fn numeric_dummyvar_classes(labels: &[Option<Label>], rows: usize) -> BuiltinRes
         let Label::Numeric(value) = label else {
             continue;
         };
-        if *value <= 0.0 || value.fract() != 0.0 || *value > usize::MAX as f64 {
+        let Some(value) = positive_numeric_usize(*value) else {
             return Err(invalid(
                 "dummyvar",
                 "dummyvar: numeric groups must contain positive integer levels or NaN",
             ));
-        }
-        max_level = max_level.max(*value as usize);
+        };
+        max_level = max_level.max(value);
     }
     let row_count = rows.max(1);
     if max_level > MAX_ONEHOT_CELLS / row_count {
         return Err(invalid("dummyvar", "dummyvar: output is too large"));
     }
     Ok((1..=max_level)
-        .map(|value| Label::Numeric(value as f64))
+        .map(|value| Label::Numeric(NumericScalar::F64(value as f64)))
         .collect())
 }
 
@@ -819,9 +1226,10 @@ fn classes_for_labels(labels: &LabelArray) -> Vec<Label> {
         LabelKind::Numeric => {
             let mut classes = dedupe(labels.labels.iter().flatten().cloned());
             classes.sort_by(|left, right| match (left, right) {
-                (Label::Numeric(a), Label::Numeric(b)) => {
-                    a.partial_cmp(b).unwrap_or(Ordering::Equal)
-                }
+                (Label::Numeric(a), Label::Numeric(b)) => a
+                    .materialize_f64()
+                    .partial_cmp(&b.materialize_f64())
+                    .unwrap_or(Ordering::Equal),
                 _ => Ordering::Equal,
             });
             classes
@@ -898,10 +1306,13 @@ struct EncodedArray {
 
 fn encoded_values(value: Value) -> BuiltinResult<EncodedArray> {
     match value {
-        Value::Tensor(tensor) => Ok(EncodedArray {
-            data: tensor.data,
-            shape: normalized_shape(&tensor.shape),
-        }),
+        Value::Tensor(tensor) => {
+            let shape = normalized_shape(&tensor.shape);
+            Ok(EncodedArray {
+                data: tensor::tensor_into_values_f64(tensor),
+                shape,
+            })
+        }
         Value::LogicalArray(array) => Ok(EncodedArray {
             data: array.data.into_iter().map(|value| value as f64).collect(),
             shape: normalized_shape(&array.shape),
@@ -910,6 +1321,22 @@ fn encoded_values(value: Value) -> BuiltinResult<EncodedArray> {
             data: vec![value],
             shape: vec![1, 1],
         }),
+        Value::Int(value) => {
+            let encoded = match value.try_to_u64() {
+                Some(0) => 0.0,
+                Some(1) => 1.0,
+                _ => {
+                    return Err(invalid(
+                        "onehotdecode",
+                        "onehotdecode: encoded integer values must be zero or one",
+                    ))
+                }
+            };
+            Ok(EncodedArray {
+                data: vec![encoded],
+                shape: vec![1, 1],
+            })
+        }
         Value::Bool(value) => Ok(EncodedArray {
             data: vec![if value { 1.0 } else { 0.0 }],
             shape: vec![1, 1],
@@ -972,22 +1399,22 @@ fn labels_to_value(
     category_order: Option<&[Label]>,
 ) -> BuiltinResult<Value> {
     match output {
-        OutputKind::Double => {
-            let mut data = Vec::with_capacity(labels.len());
-            for label in labels {
-                match label {
-                    Label::Numeric(value) => data.push(*value),
-                    _ => {
-                        return Err(invalid(
-                            name,
-                            format!("{name}: numeric output requires numeric classes"),
-                        ))
-                    }
-                }
+        OutputKind::Numeric(dtype) => {
+            let mut output =
+                Tensor::from_numeric_storage(NumericStorage::zeros(dtype, labels.len()), shape)
+                    .map_err(|err| internal(name, format!("{name}: {err}")))?;
+            for (index, label) in labels.iter().enumerate() {
+                let Label::Numeric(value) = label else {
+                    return Err(invalid(
+                        name,
+                        format!("{name}: numeric output requires numeric classes"),
+                    ));
+                };
+                output
+                    .set_numeric_assignment_at(index, *value)
+                    .map_err(|err| internal(name, format!("{name}: {err}")))?;
             }
-            Tensor::new(data, shape)
-                .map(Value::Tensor)
-                .map_err(|err| internal(name, format!("{name}: {err}")))
+            Ok(Value::Tensor(output))
         }
         OutputKind::Logical => {
             let mut data = Vec::with_capacity(labels.len());
@@ -1043,7 +1470,16 @@ fn labels_to_value(
 
 fn parse_output_kind(name: &str, text: &str) -> BuiltinResult<OutputKind> {
     match canonical(text).as_str() {
-        "double" | "single" => Ok(OutputKind::Double),
+        "double" => Ok(OutputKind::Numeric(NumericDType::F64)),
+        "single" => Ok(OutputKind::Numeric(NumericDType::F32)),
+        "int8" => Ok(OutputKind::Numeric(NumericDType::I8)),
+        "int16" => Ok(OutputKind::Numeric(NumericDType::I16)),
+        "int32" => Ok(OutputKind::Numeric(NumericDType::I32)),
+        "int64" => Ok(OutputKind::Numeric(NumericDType::I64)),
+        "uint8" => Ok(OutputKind::Numeric(NumericDType::U8)),
+        "uint16" => Ok(OutputKind::Numeric(NumericDType::U16)),
+        "uint32" => Ok(OutputKind::Numeric(NumericDType::U32)),
+        "uint64" => Ok(OutputKind::Numeric(NumericDType::U64)),
         "logical" => Ok(OutputKind::Logical),
         "string" => Ok(OutputKind::String),
         "cell" | "cellstr" => Ok(OutputKind::Cell),
@@ -1056,9 +1492,35 @@ fn parse_output_kind(name: &str, text: &str) -> BuiltinResult<OutputKind> {
 }
 
 fn positive_dim(name: &str, value: &Value) -> BuiltinResult<usize> {
+    if let Value::Int(value) = value {
+        return value.try_to_usize().filter(|dim| *dim >= 1).ok_or_else(|| {
+            invalid(
+                name,
+                format!("{name}: featureDim must be a positive integer scalar"),
+            )
+        });
+    }
+    if let Value::Tensor(tensor) = value {
+        if tensor::is_scalar_tensor(tensor) {
+            if let Some(storage) = tensor.integer_storage() {
+                return storage
+                    .value_at(0)
+                    .and_then(|value| value.try_to_usize())
+                    .filter(|dim| *dim >= 1)
+                    .ok_or_else(|| {
+                        invalid(
+                            name,
+                            format!("{name}: featureDim must be a positive integer scalar"),
+                        )
+                    });
+            }
+        }
+    }
     let dim = match value {
         Value::Num(value) => *value,
-        Value::Int(value) => value.to_f64(),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_value_f64(tensor, 0)
+        }
         _ => {
             return Err(invalid(
                 name,
@@ -1066,7 +1528,11 @@ fn positive_dim(name: &str, value: &Value) -> BuiltinResult<usize> {
             ))
         }
     };
-    if dim.fract() != 0.0 || dim < 1.0 || dim > usize::MAX as f64 {
+    if dim.fract() != 0.0
+        || dim < 1.0
+        || dim > usize::MAX as f64
+        || (usize::BITS == 64 && dim == usize::MAX as f64)
+    {
         return Err(invalid(
             name,
             format!("{name}: featureDim must be a positive integer scalar"),
@@ -1075,8 +1541,14 @@ fn positive_dim(name: &str, value: &Value) -> BuiltinResult<usize> {
     Ok(dim as usize)
 }
 
-fn numeric_label(value: f64) -> Option<Label> {
-    (!value.is_nan()).then_some(Label::Numeric(if value == 0.0 { 0.0 } else { value }))
+fn numeric_label(value: NumericScalar) -> Option<Label> {
+    match value {
+        NumericScalar::F64(value) if value.is_nan() => None,
+        NumericScalar::F32(value) if value.is_nan() => None,
+        NumericScalar::F64(0.0) => Some(Label::Numeric(NumericScalar::F64(0.0))),
+        NumericScalar::F32(0.0) => Some(Label::Numeric(NumericScalar::F32(0.0))),
+        value => Some(Label::Numeric(value)),
+    }
 }
 
 fn text_label(value: String) -> Option<Label> {
@@ -1085,7 +1557,7 @@ fn text_label(value: String) -> Option<Label> {
 
 fn same_label(left: &Label, right: &Label) -> bool {
     match (left, right) {
-        (Label::Numeric(a), Label::Numeric(b)) => a == b,
+        (Label::Numeric(a), Label::Numeric(b)) => numeric_key(*a) == numeric_key(*b),
         (Label::Logical(a), Label::Logical(b)) => a == b,
         (Label::Text(a), Label::Text(b)) => a == b,
         _ => false,
@@ -1094,11 +1566,67 @@ fn same_label(left: &Label, right: &Label) -> bool {
 
 fn label_key(label: &Label) -> String {
     match label {
-        Label::Numeric(value) if *value == 0.0 => "n:0".to_string(),
-        Label::Numeric(value) => format!("n:{:016x}", value.to_bits()),
+        Label::Numeric(value) => numeric_key(*value),
         Label::Logical(value) => format!("l:{}", u8::from(*value)),
         Label::Text(value) => format!("t:{value}"),
     }
+}
+
+fn numeric_key(value: NumericScalar) -> String {
+    if let Some(value) = value.into_int_value() {
+        return integer_key(value);
+    }
+    let value = match value {
+        NumericScalar::F64(value) => value,
+        NumericScalar::F32(value) => f64::from(value),
+        _ => unreachable!("integer numeric scalar handled above"),
+    };
+    if value == 0.0 {
+        return "n:i:0".to_string();
+    }
+    if value.is_finite() && value.fract() == 0.0 {
+        if value > 0.0 && value < 18_446_744_073_709_551_616.0 {
+            return format!("n:i:{}", value as u64);
+        }
+        if value < 0.0 && value >= i64::MIN as f64 {
+            return format!("n:i:{value:.0}");
+        }
+    }
+    format!("n:f:{:016x}", value.to_bits())
+}
+
+fn integer_key(value: IntValue) -> String {
+    match value {
+        IntValue::I8(value) => format!("n:i:{value}"),
+        IntValue::I16(value) => format!("n:i:{value}"),
+        IntValue::I32(value) => format!("n:i:{value}"),
+        IntValue::I64(value) => format!("n:i:{value}"),
+        IntValue::U8(value) => format!("n:i:{value}"),
+        IntValue::U16(value) => format!("n:i:{value}"),
+        IntValue::U32(value) => format!("n:i:{value}"),
+        IntValue::U64(value) => format!("n:i:{value}"),
+    }
+}
+
+fn positive_numeric_usize(value: NumericScalar) -> Option<usize> {
+    match value {
+        NumericScalar::F64(value) => positive_float_usize(value),
+        NumericScalar::F32(value) => positive_float_usize(f64::from(value)),
+        value => value
+            .into_int_value()?
+            .try_to_usize()
+            .filter(|value| *value > 0),
+    }
+}
+
+fn positive_float_usize(value: f64) -> Option<usize> {
+    if !value.is_finite() || value <= 0.0 || value.fract() != 0.0 {
+        return None;
+    }
+    if value > usize::MAX as f64 || (usize::BITS == 64 && value == usize::MAX as f64) {
+        return None;
+    }
+    Some(value as usize)
 }
 
 fn dedupe<I>(labels: I) -> Vec<Label>
@@ -1118,7 +1646,7 @@ fn text_values(labels: &[Label]) -> Vec<String> {
     labels
         .iter()
         .map(|label| match label {
-            Label::Numeric(value) => format_number(*value),
+            Label::Numeric(value) => numeric_label_text(*value),
             Label::Logical(value) => {
                 if *value {
                     "true".to_string()
@@ -1129,6 +1657,17 @@ fn text_values(labels: &[Label]) -> Vec<String> {
             Label::Text(value) => value.clone(),
         })
         .collect()
+}
+
+fn numeric_label_text(value: NumericScalar) -> String {
+    match value {
+        NumericScalar::F64(value) => format_number(value),
+        NumericScalar::F32(value) => format_number(f64::from(value)),
+        value => value
+            .into_int_value()
+            .map(|value| value.decimal_string())
+            .unwrap_or_default(),
+    }
 }
 
 fn dedupe_text(values: Vec<String>) -> Vec<String> {
@@ -1147,13 +1686,16 @@ fn label_kinds_compatible(left: LabelKind, right: LabelKind) -> bool {
 
 fn is_grouping_container(value: &Value) -> bool {
     match value {
-        Value::Tensor(tensor) => tensor.data.len() > 1,
+        Value::Tensor(tensor) => tensor::tensor_element_len(tensor) > 1,
         Value::LogicalArray(array) => array.data.len() > 1,
         Value::StringArray(array) => array.data.len() > 1,
         Value::CharArray(array) => array.rows > 1,
         Value::Cell(cell) => cell.data.len() > 1,
         Value::Object(object) if object.is_class("categorical") => {
-            matches!(object.properties.get("Codes"), Some(Value::Tensor(tensor)) if tensor.data.len() > 1)
+            matches!(
+                object.properties.get("Codes"),
+                Some(Value::Tensor(tensor)) if tensor::tensor_element_len(tensor) > 1
+            )
         }
         _ => false,
     }
@@ -1256,9 +1798,20 @@ fn linear_for_coords(coords: &[usize], strides: &[usize]) -> usize {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_value::{IntValue, IntegerStorage};
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
+    }
+
+    fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
+        Value::Tensor(tensor)
+    }
+
+    fn mirrorless_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
+        Value::Tensor(tensor)
     }
 
     fn assert_f64_slice_eq_nan(left: &[f64], right: &[f64]) {
@@ -1282,7 +1835,7 @@ mod tests {
         };
         assert_eq!(out.shape, vec![3, 4]);
         assert_f64_slice_eq_nan(
-            &out.data,
+            &out.materialize_f64(),
             &[
                 1.0,
                 0.0,
@@ -1323,7 +1876,7 @@ mod tests {
         };
         assert_eq!(out.shape, vec![3, 4]);
         assert_eq!(
-            out.data,
+            out.materialize_f64(),
             vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0]
         );
     }
@@ -1342,7 +1895,7 @@ mod tests {
             panic!("tensor");
         };
         assert_eq!(out.shape, vec![3, 2]);
-        assert_eq!(out.data, vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
+        assert_eq!(out.materialize_f64(), vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
     }
 
     #[test]
@@ -1353,7 +1906,132 @@ mod tests {
             panic!("tensor");
         };
         assert_eq!(out.shape, vec![3, 2]);
-        assert_eq!(out.data, vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
+        assert_eq!(out.materialize_f64(), vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn dummyvar_reads_typed_integer_labels_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let Value::Tensor(out) = block_on(dummyvar_builtin(int_tensor(
+            IntegerStorage::I16(vec![1, 2, 1, 2, 2, 1]),
+            vec![3, 2],
+        )))
+        .unwrap() else {
+            panic!("tensor");
+        };
+        assert_eq!(out.shape, vec![3, 4]);
+        assert_eq!(
+            out.materialize_f64(),
+            vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0]
+        );
+    }
+
+    #[test]
+    fn dummyvar_supports_all_integer_classes_in_extension_mode() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let storages = [
+            runmat_value::IntegerStorage::I8(vec![1, 2, 1]),
+            runmat_value::IntegerStorage::I16(vec![1, 2, 1]),
+            runmat_value::IntegerStorage::I32(vec![1, 2, 1]),
+            runmat_value::IntegerStorage::I64(vec![1, 2, 1]),
+            runmat_value::IntegerStorage::U8(vec![1, 2, 1]),
+            runmat_value::IntegerStorage::U16(vec![1, 2, 1]),
+            runmat_value::IntegerStorage::U32(vec![1, 2, 1]),
+            runmat_value::IntegerStorage::U64(vec![1, 2, 1]),
+        ];
+        for storage in storages {
+            let Value::Tensor(output) = block_on(dummyvar_builtin(int_tensor(storage, vec![3, 1])))
+                .expect("integer groups")
+            else {
+                panic!("expected double tensor")
+            };
+            assert!(output.integer_storage().is_none());
+            assert_eq!(output.shape, vec![3, 2]);
+            assert_eq!(output.materialize_f64(), vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
+        }
+    }
+
+    #[test]
+    fn dummyvar_rejects_wide_typed_levels_before_floating_conversion() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for storage in [
+            IntegerStorage::I64(vec![(1_i64 << 53) + 1]),
+            IntegerStorage::U64(vec![(1_u64 << 53) + 1]),
+            IntegerStorage::U64(vec![u64::MAX]),
+        ] {
+            let error = block_on(dummyvar_builtin(int_tensor(storage, vec![1, 1])))
+                .expect_err("wide typed labels cannot request an unbounded design matrix");
+            assert!(error.message().contains("output is too large"));
+        }
+
+        let error = block_on(dummyvar_builtin(int_tensor(
+            IntegerStorage::I64(vec![i64::MIN]),
+            vec![1, 1],
+        )))
+        .expect_err("negative typed labels remain invalid");
+        assert!(error.message().contains("positive integer levels"));
+    }
+
+    #[test]
+    fn dummyvar_integer_extension_rejects_before_computation_in_strict_mode() {
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(dummyvar_builtin(int_tensor(
+            runmat_value::IntegerStorage::U8(vec![1, 2]),
+            vec![2, 1],
+        )))
+        .expect_err("integer extension gate");
+        assert_eq!(
+            error.identifier(),
+            DUMMYVAR_INTEGER_GROUP_EXTENSION.error_identifier
+        );
+        drop(strict);
+    }
+
+    #[test]
+    fn dummyvar_gpu_extension_rejects_before_provider_access() {
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![2, 1],
+            device_id: 0,
+            buffer_id: 9_399_001,
+            descriptor: Default::default(),
+        });
+        let error = block_on(dummyvar_builtin(resident)).expect_err("GPU extension gate");
+        assert_eq!(
+            error.identifier(),
+            DUMMYVAR_GPU_GROUP_EXTENSION.error_identifier
+        );
+        drop(strict);
+    }
+
+    #[test]
+    fn dummyvar_rejects_unrepresentable_numeric_level_before_cast() {
+        let err = block_on(dummyvar_builtin(tensor(
+            vec![usize::MAX as f64],
+            vec![1, 1],
+        )))
+        .unwrap_err();
+        assert!(err.message.contains("positive integer levels"));
+    }
+
+    #[test]
+    fn dummyvar_grouping_detection_uses_typed_integer_storage_len() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let first = mirrorless_int_tensor(IntegerStorage::I16(vec![1, 2, 1]), vec![3, 1]);
+        let second = mirrorless_int_tensor(IntegerStorage::I16(vec![2, 2, 1]), vec![3, 1]);
+
+        let Value::Tensor(out) = block_on(dummyvar_builtin(Value::Cell(
+            CellArray::new(vec![first, second], 1, 2).unwrap(),
+        )))
+        .unwrap() else {
+            panic!("tensor");
+        };
+
+        assert_eq!(out.shape, vec![3, 4]);
+        assert_eq!(
+            out.materialize_f64(),
+            vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0]
+        );
     }
 
     #[test]
@@ -1383,7 +2061,7 @@ mod tests {
             panic!("dummy tensor");
         };
         assert_eq!(dummy.shape, vec![2, 3]);
-        assert_eq!(dummy.data, vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
+        assert_eq!(dummy.materialize_f64(), vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
 
         let Value::Tensor(encoded) =
             block_on(onehotencode_builtin(group, Value::Num(2.0), Vec::new())).unwrap()
@@ -1391,7 +2069,10 @@ mod tests {
             panic!("encoded tensor");
         };
         assert_eq!(encoded.shape, vec![2, 3]);
-        assert_eq!(encoded.data, vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
+        assert_eq!(
+            encoded.materialize_f64(),
+            vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0]
+        );
     }
 
     #[test]
@@ -1402,12 +2083,11 @@ mod tests {
             ),
             Value::Num(2.0),
             vec![
+                Value::from("logical"),
                 Value::from("ClassNames"),
                 Value::StringArray(
                     StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap(),
                 ),
-                Value::from("OutputType"),
-                Value::from("logical"),
             ],
         ))
         .unwrap() else {
@@ -1436,7 +2116,7 @@ mod tests {
             panic!("tensor");
         };
         assert_eq!(out.shape, vec![3, 2]);
-        assert_eq!(out.data, vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0]);
+        assert_eq!(out.materialize_f64(), vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0]);
     }
 
     #[test]
@@ -1462,7 +2142,7 @@ mod tests {
         };
         assert_eq!(out.shape, vec![3, 2]);
         assert_f64_slice_eq_nan(
-            &out.data,
+            &out.materialize_f64(),
             &[1.0, f64::NAN, f64::NAN, 0.0, f64::NAN, f64::NAN],
         );
 
@@ -1470,14 +2150,131 @@ mod tests {
             tensor(vec![1.0, 3.0], vec![2, 1]),
             Value::Num(2.0),
             vec![
+                Value::from("logical"),
                 Value::from("ClassNames"),
                 tensor(vec![1.0, 2.0], vec![1, 2]),
-                Value::from("OutputType"),
-                Value::from("logical"),
             ],
         ))
         .unwrap_err();
         assert!(err.message.contains("logical output cannot represent"));
+    }
+
+    #[test]
+    fn onehotencode_reads_typed_integer_labels_and_classes_exactly() {
+        let Value::Tensor(out) = block_on(onehotencode_builtin(
+            int_tensor(IntegerStorage::U16(vec![1, 2, 1]), vec![3, 1]),
+            Value::Num(2.0),
+            vec![
+                Value::from("ClassNames"),
+                int_tensor(IntegerStorage::I16(vec![1, 2]), vec![1, 2]),
+            ],
+        ))
+        .unwrap() else {
+            panic!("tensor");
+        };
+        assert_eq!(out.shape, vec![3, 2]);
+        assert_eq!(out.materialize_f64(), vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn onehotencode_distinguishes_adjacent_wide_integer_labels() {
+        let lower = (1_u64 << 53) + 1;
+        let upper = lower + 1;
+        let Value::Tensor(out) = block_on(onehotencode_builtin(
+            int_tensor(IntegerStorage::U64(vec![upper, lower, upper]), vec![3, 1]),
+            Value::Int(IntValue::U8(2)),
+            vec![
+                Value::from("uint8"),
+                Value::from("ClassNames"),
+                int_tensor(IntegerStorage::U64(vec![lower, upper]), vec![1, 2]),
+            ],
+        ))
+        .expect("wide labels") else {
+            panic!("typed one-hot tensor")
+        };
+        assert_eq!(out.numeric_dtype(), NumericDType::U8);
+        assert_eq!(
+            out.integer_storage(),
+            Some(&IntegerStorage::U8(vec![0, 1, 0, 1, 0, 1]))
+        );
+    }
+
+    #[test]
+    fn onehotencode_constructs_every_requested_native_numeric_class() {
+        let labels =
+            Value::StringArray(StringArray::new(vec!["b".into(), "a".into()], vec![2, 1]).unwrap());
+        let classes =
+            Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap());
+        for (typename, dtype) in [
+            ("double", NumericDType::F64),
+            ("single", NumericDType::F32),
+            ("int8", NumericDType::I8),
+            ("int16", NumericDType::I16),
+            ("int32", NumericDType::I32),
+            ("int64", NumericDType::I64),
+            ("uint8", NumericDType::U8),
+            ("uint16", NumericDType::U16),
+            ("uint32", NumericDType::U32),
+            ("uint64", NumericDType::U64),
+        ] {
+            let Value::Tensor(out) = block_on(onehotencode_builtin(
+                labels.clone(),
+                Value::Num(2.0),
+                vec![
+                    Value::from(typename),
+                    Value::from("ClassNames"),
+                    classes.clone(),
+                ],
+            ))
+            .expect("numeric typename") else {
+                panic!("numeric tensor")
+            };
+            assert_eq!(out.numeric_dtype(), dtype, "{typename}");
+            assert_eq!(out.materialize_f64(), vec![0.0, 1.0, 1.0, 0.0]);
+        }
+    }
+
+    #[test]
+    fn onehotencode_integer_output_rejects_missing_or_excluded_labels() {
+        let error = block_on(onehotencode_builtin(
+            int_tensor(IntegerStorage::I64(vec![1, 3]), vec![2, 1]),
+            Value::Num(2.0),
+            vec![
+                Value::from("uint64"),
+                Value::from("ClassNames"),
+                int_tensor(IntegerStorage::I64(vec![1, 2]), vec![1, 2]),
+            ],
+        ))
+        .expect_err("integer output cannot hold NaN vectors");
+        assert!(error
+            .message()
+            .contains("cannot represent missing or excluded"));
+    }
+
+    #[test]
+    fn onehot_feature_dimension_parses_integer_bounds_exactly() {
+        assert_eq!(
+            positive_dim("onehotencode", &Value::Int(IntValue::U16(2))).unwrap(),
+            2
+        );
+        assert_eq!(
+            positive_dim(
+                "onehotencode",
+                &mirrorless_int_tensor(IntegerStorage::U64(vec![2]), vec![1, 1])
+            )
+            .unwrap(),
+            2
+        );
+
+        for value in [
+            Value::Int(IntValue::I8(-1)),
+            Value::Num(1.5),
+            Value::Num(usize::MAX as f64),
+            Value::Num(usize::MAX as f64 + 1.0),
+            mirrorless_int_tensor(IntegerStorage::U64(vec![0]), vec![1, 1]),
+        ] {
+            assert!(positive_dim("onehotencode", &value).is_err());
+        }
     }
 
     #[test]
@@ -1496,6 +2293,7 @@ mod tests {
 
     #[test]
     fn onehotdecode_round_trips_string_classes() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let encoded =
             Value::LogicalArray(LogicalArray::new(vec![0, 1, 1, 1, 0, 0], vec![3, 2]).unwrap());
         let Value::StringArray(out) = block_on(onehotdecode_builtin(
@@ -1574,6 +2372,132 @@ mod tests {
             other => panic!("categories {other:?}"),
         };
         assert_eq!(categories, vec!["low", "high"]);
+    }
+
+    #[test]
+    fn onehotdecode_reads_typed_integer_encoded_array_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let encoded = int_tensor(IntegerStorage::U8(vec![0, 1, 1, 0]), vec![2, 2]);
+        let Value::StringArray(out) = block_on(onehotdecode_builtin(
+            encoded,
+            Value::StringArray(
+                StringArray::new(vec!["low".into(), "high".into()], vec![1, 2]).unwrap(),
+            ),
+            Value::Num(2.0),
+            vec![Value::from("string")],
+        ))
+        .unwrap() else {
+            panic!("strings");
+        };
+        assert_eq!(out.shape, vec![2, 1]);
+        assert_eq!(out.data, vec!["high", "low"]);
+    }
+
+    #[test]
+    fn onehotdecode_preserves_wide_integer_classes_and_native_output_types() {
+        let lower = (1_u64 << 53) + 1;
+        let upper = lower + 1;
+        let encoded = Value::Tensor(
+            Tensor::from_numeric_storage(NumericStorage::F32(vec![0.0, 1.0, 1.0, 0.0]), vec![2, 2])
+                .unwrap(),
+        );
+        let classes = int_tensor(IntegerStorage::U64(vec![lower, upper]), vec![1, 2]);
+
+        let Value::Tensor(decoded) = block_on(onehotdecode_builtin(
+            encoded.clone(),
+            classes.clone(),
+            Value::Int(IntValue::U8(2)),
+            vec![Value::from("uint64")],
+        ))
+        .expect("wide uint64 output") else {
+            panic!("typed output")
+        };
+        assert_eq!(decoded.numeric_dtype(), NumericDType::U64);
+        assert_eq!(
+            decoded.integer_storage(),
+            Some(&IntegerStorage::U64(vec![upper, lower]))
+        );
+
+        let Value::Object(categorical) = block_on(onehotdecode_builtin(
+            encoded,
+            classes,
+            Value::Num(2.0),
+            Vec::new(),
+        ))
+        .expect("categorical wide labels") else {
+            panic!("categorical output")
+        };
+        assert_eq!(
+            crate::builtins::table::categorical_labels(&Value::Object(categorical)).unwrap(),
+            vec![upper.to_string(), lower.to_string()]
+        );
+    }
+
+    #[test]
+    fn onehot_output_type_name_value_aliases_are_mode_gated() {
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let encode_error = block_on(onehotencode_builtin(
+            int_tensor(IntegerStorage::U8(vec![1, 2]), vec![2, 1]),
+            Value::Num(2.0),
+            vec![
+                Value::from("ClassNames"),
+                int_tensor(IntegerStorage::U8(vec![1, 2]), vec![1, 2]),
+                Value::from("OutputType"),
+                Value::from("uint8"),
+            ],
+        ))
+        .expect_err("onehotencode alias gate");
+        assert_eq!(
+            encode_error.identifier(),
+            ONEHOTENCODE_OUTPUT_TYPE_ALIAS_EXTENSION.error_identifier
+        );
+
+        let decode_error = block_on(onehotdecode_builtin(
+            tensor(vec![1.0, 0.0], vec![2, 1]),
+            int_tensor(IntegerStorage::U8(vec![1, 2]), vec![1, 2]),
+            Value::Num(1.0),
+            vec![Value::from("OutputType"), Value::from("uint8")],
+        ))
+        .expect_err("onehotdecode alias gate");
+        assert_eq!(
+            decode_error.identifier(),
+            ONEHOTDECODE_OUTPUT_TYPE_ALIAS_EXTENSION.error_identifier
+        );
+        drop(strict);
+    }
+
+    #[test]
+    fn onehotdecode_integer_probabilities_are_mode_gated_before_computation() {
+        let encoded = int_tensor(IntegerStorage::U8(vec![0, 1, 1, 0]), vec![2, 2]);
+        let classes = Value::StringArray(
+            StringArray::new(vec!["low".into(), "high".into()], vec![1, 2]).unwrap(),
+        );
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(onehotdecode_builtin(
+            encoded.clone(),
+            classes.clone(),
+            Value::Num(2.0),
+            vec![Value::from("string")],
+        ))
+        .expect_err("strict mode rejects integer probabilities");
+        assert_eq!(
+            error.identifier(),
+            ONEHOTDECODE_BROAD_ENCODED_EXTENSION.error_identifier
+        );
+        drop(strict);
+
+        let extension = crate::compatibility::push_runmat_extensions_enabled(true);
+        let Value::StringArray(decoded) = block_on(onehotdecode_builtin(
+            encoded,
+            classes,
+            Value::Num(2.0),
+            vec![Value::from("string")],
+        ))
+        .expect("RunMat extension") else {
+            panic!("string output")
+        };
+        assert_eq!(decoded.data, vec!["high", "low"]);
+        drop(extension);
     }
 
     #[test]

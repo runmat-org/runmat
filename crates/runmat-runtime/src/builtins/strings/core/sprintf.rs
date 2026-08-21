@@ -3,9 +3,14 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, Value,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, Value};
 
 use crate::builtins::common::format::{
     decode_escape_sequences, extract_format_string, flatten_arguments, format_variadic_with_cursor,
@@ -113,6 +118,26 @@ pub const SPRINTF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &SPRINTF_ERRORS,
 };
 
+const SPRINTF_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A...",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target explicitly lists all eight integer classes. Integer conversions read authoritative values directly, including signed, unsigned, octal, hexadecimal, character-code, width, and precision roles.",
+    }];
+pub const SPRINTF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "txt = sprintf(formatSpec, integer_A...)",
+        inputs: &SPRINTF_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Formatting preserves full-width integer text without an f64 intermediary and consumes array elements in column order. Resident numeric arguments gather authoritatively because formatting executes on the client.",
+    }];
+
 fn sprintf_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     sprintf_error_with_message(error.message, error)
 }
@@ -141,6 +166,7 @@ fn remap_sprintf_flow(err: RuntimeError) -> RuntimeError {
     sink = true,
     type_resolver(string_scalar_type),
     descriptor(crate::builtins::strings::core::sprintf::SPRINTF_DESCRIPTOR),
+    integer_capabilities(crate::builtins::strings::core::sprintf::SPRINTF_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::strings::core::sprintf"
 )]
 async fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -192,7 +218,10 @@ fn char_row_value(text: &str) -> BuiltinResult<Value> {
 pub(crate) mod tests {
     use super::*;
     use crate::{builtins::common::test_support, make_cell};
-    use runmat_builtins::{CharArray, IntValue, ResolveContext, StringArray, Tensor, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{
+        CharArray, IntValue, IntegerComplexStorage, IntegerStorage, StringArray, Tensor,
+    };
 
     fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::sprintf_builtin(format_spec, rest))
@@ -269,7 +298,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -401,6 +430,27 @@ pub(crate) mod tests {
         )
         .expect("sprintf");
         assert_eq!(char_value_to_string(result), "1.5-2i");
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn sprintf_complex_integer_tensor_s_conversion_preserves_exact_storage() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]),
+            IntegerStorage::U64(vec![7, 0]),
+        )
+        .expect("matching complex integer storage");
+        let tensor = runmat_value::ComplexTensor::new_integer(storage, vec![1, 2])
+            .expect("complex integer tensor");
+        let result = sprintf_builtin(
+            Value::String("%s ".to_string()),
+            vec![Value::ComplexTensor(tensor)],
+        )
+        .expect("sprintf");
+        assert_eq!(
+            char_value_to_string(result),
+            format!("{}+7i {} ", u64::MAX, 1_u64 << 63)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

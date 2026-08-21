@@ -1,17 +1,22 @@
 //! MATLAB-compatible `mpower` builtin (matrix power) with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::tensor;
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::elementwise::integer_arithmetic::{try_integer_binary, IntegerBinaryOp};
 use crate::builtins::math::linalg::type_resolvers::matrix_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -82,6 +87,35 @@ pub const MPOWER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &MPOWER_ERRORS,
 };
+
+const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Integer scalar or square-matrix bases retain their native class.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "p",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The exponent must be a real nonnegative integer-valued scalar.",
+    },
+];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "B = mpower(A, p)",
+        inputs: &INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer scalar and matrix powers use same-class saturating multiplication; resident integer matrices gather and re-upload exact storage instead of using floating provider matmul.",
+    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::ops::mpower")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -164,19 +198,23 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "matmul",
     type_resolver(matrix_unary_type),
     descriptor(crate::builtins::math::linalg::ops::mpower::MPOWER_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::linalg::ops::mpower::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::linalg::ops::mpower"
 )]
 async fn mpower_builtin(base: Value, exponent: Value) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::is_typed_complex_integer(&base)
+        || crate::builtins::common::validation::is_typed_complex_integer(&exponent)
+    {
+        return Err(mpower_invalid_input(
+            "complex integer arithmetic is not supported",
+        ));
+    }
     mpower_eval(&base, &exponent).await
 }
 
 pub(crate) async fn mpower_eval(base: &Value, exponent: &Value) -> BuiltinResult<Value> {
     let integer_base = contains_integer(base);
-    let integer_exponent = contains_integer(exponent);
-    if (integer_base || integer_exponent)
-        && scalar_mpower_input(base)
-        && scalar_mpower_input(exponent)
-    {
+    if integer_base && scalar_mpower_input(base) && scalar_mpower_input(exponent) {
         let base_host = crate::dispatcher::gather_if_needed_async(base)
             .await
             .map_err(map_control_flow)?;
@@ -190,13 +228,10 @@ pub(crate) async fn mpower_eval(base: &Value, exponent: &Value) -> BuiltinResult
             return Ok(result);
         }
     }
-    if integer_base || (integer_exponent && !scalar_mpower_input(exponent)) {
-        return Err(mpower_invalid_argument(
-            "mpower: non-scalar integer matrix powers are not supported",
-        ));
-    }
-    if let Some(result) = try_gpu_mpower(base, exponent).await? {
-        return Ok(result);
+    if !integer_base {
+        if let Some(result) = try_gpu_mpower(base, exponent).await? {
+            return Ok(result);
+        }
     }
 
     let base_host = crate::dispatcher::gather_if_needed_async(base)
@@ -210,12 +245,13 @@ pub(crate) async fn mpower_eval(base: &Value, exponent: &Value) -> BuiltinResult
 
     if matches!(base, Value::GpuTensor(_)) {
         if let Value::Tensor(tensor) = result {
-            if let Some(provider) = runmat_accelerate_api::provider() {
-                let view = HostTensorView {
-                    data: &tensor.data,
-                    shape: &tensor.shape,
-                };
-                if let Ok(handle) = provider.upload(&view) {
+            let provider = match base {
+                Value::GpuTensor(handle) => runmat_accelerate_api::provider_for_handle(handle)
+                    .or_else(runmat_accelerate_api::provider),
+                _ => None,
+            };
+            if let Some(provider) = provider {
+                if let Ok(handle) = gpu_helpers::upload_tensor(provider, &tensor) {
                     return Ok(Value::GpuTensor(handle));
                 }
             }
@@ -230,6 +266,7 @@ fn contains_integer(value: &Value) -> bool {
     match value {
         Value::Int(_) => true,
         Value::Tensor(tensor) => tensor.integer_storage().is_some(),
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_type(handle).is_some(),
         _ => false,
     }
 }
@@ -316,11 +353,7 @@ fn gpu_identity_like(
         Ok(handle) => Ok(Some(handle)),
         Err(_) => {
             let eye = crate::builtins::common::matrix::matrix_eye(size);
-            let view = HostTensorView {
-                data: &eye.data,
-                shape: &eye.shape,
-            };
-            match provider.upload(&view) {
+            match gpu_helpers::upload_tensor(provider, &eye) {
                 Ok(handle) => Ok(Some(handle)),
                 Err(_) => Ok(None),
             }
@@ -406,7 +439,11 @@ async fn gpu_binary_exponentiation(
 fn parse_integer_exponent(value: &Value) -> BuiltinResult<Option<i32>> {
     match value {
         Value::Int(i) => {
-            let raw = i.to_i64();
+            let raw = i.try_to_i64().ok_or_else(|| {
+                mpower_invalid_argument(
+                    "mpower: exponent magnitude exceeds supported range (|n| ≤ 2^31−1)",
+                )
+            })?;
             if raw > i32::MAX as i64 || raw < i32::MIN as i64 {
                 return Err(mpower_invalid_argument(
                     "mpower: exponent magnitude exceeds supported range (|n| ≤ 2^31−1)",
@@ -426,7 +463,21 @@ fn parse_integer_exponent(value: &Value) -> BuiltinResult<Option<i32>> {
             Ok(Some(*n as i32))
         }
         Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
-            let scalar = t.data[0];
+            if let Some(storage) = t.integer_storage() {
+                let value = storage.value_at(0).expect("one-element integer storage");
+                let raw = value.try_to_i64().ok_or_else(|| {
+                    mpower_invalid_argument(
+                        "mpower: exponent magnitude exceeds supported range (|n| ≤ 2^31−1)",
+                    )
+                })?;
+                if raw > i32::MAX as i64 || raw < i32::MIN as i64 {
+                    return Err(mpower_invalid_argument(
+                        "mpower: exponent magnitude exceeds supported range (|n| ≤ 2^31−1)",
+                    ));
+                }
+                return Ok(Some(raw as i32));
+            }
+            let scalar = tensor::tensor_value_f64(t, 0);
             if scalar.fract() != 0.0 || !scalar.is_finite() {
                 return Err(mpower_error(&MPOWER_ERROR_INVALID_ARGUMENT));
             }
@@ -461,9 +512,34 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Tensor, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
+    }
+
+    #[test]
+    fn typed_mpower_exponent_parser_rejects_unrepresentable_uint64() {
+        assert_eq!(
+            parse_integer_exponent(&Value::Int(IntValue::I64(-1))).expect("signed exponent"),
+            Some(-1)
+        );
+        let err = parse_integer_exponent(&Value::Int(IntValue::U64(u64::MAX)))
+            .expect_err("unrepresentable typed exponent must not saturate");
+        assert_eq!(err.identifier(), MPOWER_ERROR_INVALID_ARGUMENT.identifier);
+
+        let exponent =
+            Tensor::new_integer(IntegerStorage::I16(vec![2]), vec![1, 1]).expect("typed exponent");
+        assert_eq!(
+            parse_integer_exponent(&Value::Tensor(exponent)).expect("typed tensor exponent"),
+            Some(2)
+        );
+
+        let wide = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("wide typed exponent");
+        let err = parse_integer_exponent(&Value::Tensor(wide))
+            .expect_err("unrepresentable typed tensor exponent must not use f64 mirror");
+        assert_eq!(err.identifier(), MPOWER_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -475,7 +551,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![7.0, 10.0, 15.0, 22.0]);
+                assert_eq!(t.materialize_f64(), vec![7.0, 10.0, 15.0, 22.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -497,13 +573,78 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn non_scalar_integer_mpower_is_rejected_without_floating_fallback() {
-        let matrix = Tensor::new_integer(IntegerStorage::I32(vec![1, 0, 0, 1]), vec![2, 2])
-            .expect("integer matrix");
-        let err = mpower_builtin(Value::Tensor(matrix), Value::Num(2.0))
-            .expect_err("integer matrix power must reject");
-        assert_eq!(err.identifier(), MPOWER_ERROR_INVALID_ARGUMENT.identifier);
-        assert!(err.message().contains("non-scalar integer"));
+    fn matrix_integer_mpower_preserves_every_class() {
+        let cases = [
+            (
+                IntegerStorage::I8(vec![1, 2, 3, 4]),
+                IntegerStorage::I8(vec![7, 10, 15, 22]),
+            ),
+            (
+                IntegerStorage::I16(vec![1, 2, 3, 4]),
+                IntegerStorage::I16(vec![7, 10, 15, 22]),
+            ),
+            (
+                IntegerStorage::I32(vec![1, 2, 3, 4]),
+                IntegerStorage::I32(vec![7, 10, 15, 22]),
+            ),
+            (
+                IntegerStorage::I64(vec![1, 2, 3, 4]),
+                IntegerStorage::I64(vec![7, 10, 15, 22]),
+            ),
+            (
+                IntegerStorage::U8(vec![1, 2, 3, 4]),
+                IntegerStorage::U8(vec![7, 10, 15, 22]),
+            ),
+            (
+                IntegerStorage::U16(vec![1, 2, 3, 4]),
+                IntegerStorage::U16(vec![7, 10, 15, 22]),
+            ),
+            (
+                IntegerStorage::U32(vec![1, 2, 3, 4]),
+                IntegerStorage::U32(vec![7, 10, 15, 22]),
+            ),
+            (
+                IntegerStorage::U64(vec![1, 2, 3, 4]),
+                IntegerStorage::U64(vec![7, 10, 15, 22]),
+            ),
+        ];
+        for (input, expected) in cases {
+            let matrix = Tensor::new_integer(input, vec![2, 2]).expect("integer matrix");
+            let result = mpower_builtin(Value::Tensor(matrix), Value::Num(2.0))
+                .expect("integer matrix power");
+            let Value::Tensor(result) = result else {
+                panic!("expected integer matrix");
+            };
+            assert_eq!(result.integer_storage(), Some(&expected));
+        }
+    }
+
+    #[test]
+    fn matrix_integer_mpower_saturates_in_destination_class() {
+        let matrix = Tensor::new_integer(IntegerStorage::I8(vec![100; 4]), vec![2, 2]).unwrap();
+        let result =
+            mpower_builtin(Value::Tensor(matrix), Value::Num(2.0)).expect("integer matrix power");
+        let Value::Tensor(result) = result else {
+            panic!("expected integer matrix");
+        };
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::I8(vec![i8::MAX; 4]))
+        );
+    }
+
+    #[test]
+    fn matrix_single_mpower_preserves_native_storage() {
+        let matrix = Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let result =
+            mpower_builtin(Value::Tensor(matrix), Value::Num(2.0)).expect("single matrix power");
+        let Value::Tensor(result) = result else {
+            panic!("expected single matrix");
+        };
+        assert_eq!(
+            result.into_numeric_storage().unwrap(),
+            runmat_value::NumericStorage::F32(vec![7.0, 10.0, 15.0, 22.0])
+        );
     }
 
     #[test]
@@ -552,7 +693,7 @@ pub(crate) mod tests {
             mpower_builtin(Value::Tensor(matrix), Value::Int(IntValue::I32(0))).expect("mpower");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![1.0, 0.0, 0.0, 1.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 0.0, 0.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -630,16 +771,29 @@ pub(crate) mod tests {
     fn gpu_matrix_power_roundtrip() {
         test_support::with_test_provider(|provider| {
             let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-            let view = HostTensorView {
-                data: &matrix.data,
-                shape: &matrix.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &matrix).expect("upload");
             let result = mpower_builtin(Value::GpuTensor(handle), Value::Int(IntValue::I32(3)))
                 .expect("gpu mpower");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![37.0, 54.0, 81.0, 118.0]);
+            assert_eq!(gathered.materialize_f64(), vec![37.0, 54.0, 81.0, 118.0]);
+        });
+    }
+
+    #[test]
+    fn gpu_integer_matrix_power_roundtrips_exact_storage() {
+        test_support::with_test_provider(|provider| {
+            let matrix =
+                Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 0, 0, 1]), vec![2, 2])
+                    .unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &matrix).expect("integer upload");
+            let result = mpower_builtin(Value::GpuTensor(handle), Value::Num(1.0))
+                .expect("gpu integer mpower");
+            let gathered = test_support::gather(result).expect("gather");
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U64(vec![u64::MAX, 0, 0, 1]))
+            );
         });
     }
 

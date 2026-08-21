@@ -124,6 +124,29 @@ Common providers:
 
 The provider contract covers reads, writes, metadata, directory listing, deletion, rename, directory creation, and readonly metadata used by MATLAB-compatible I/O builtins.
 
+## Package Cache
+
+Browser sessions use a separate transactional IndexedDB package cache by default. Package state and content payloads commit atomically, concurrent tabs use revision conflicts instead of overwriting one another, and eviction is reported as a recoverable cache miss. Persistent-storage permission is optional and is never required for correctness.
+
+```ts
+import { createIndexedDbPackageCache, initRunMat } from "runmat";
+
+const cache = await createIndexedDbPackageCache({
+  dbName: "my-runmat-packages",
+  requestPersistence: true
+});
+
+const session = await initRunMat({
+  packageCache: { provider: cache.provider }
+});
+
+const status = await session.packageCacheSnapshot();
+session.dispose();
+cache.close();
+```
+
+`ImmutableBrowserPackageMount` provides a read-only projection over a Rust-validated tree manifest. It verifies payload length and SHA-256 on every cache read and reports an evicted object with `code: "PackageCacheMiss"`.
+
 ## Plotting
 
 For a single plot surface, pass a canvas at initialization:

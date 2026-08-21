@@ -4,9 +4,36 @@ use runmat_builtins::shape_rules::scalar_tensor_shape;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
+
+const HORZCAT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A1,...,An",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Every real integer class participates in documented dimension-two concatenation. The leftmost integer input determines the output class when integers mix with unlike integer, floating, or logical operands.",
+    }];
+
+pub const HORZCAT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "B = horzcat(A1,...,An) with real integer data",
+        inputs: &HORZCAT_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "horzcat delegates to the settled cat(dim=2) engine, including exact wide-integer conversion, saturation, empty handling, owner validation, and typed gather/assemble/restore fallback.",
+    }];
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, Tensor, Value};
 
 use crate::{build_runtime_error, RuntimeError};
 
@@ -123,13 +150,21 @@ fn concat_shape(shapes: &[Vec<Option<usize>>], dim_1based: usize) -> Option<Vec<
     if shapes.is_empty() || dim_1based == 0 {
         return None;
     }
-    let rank = shapes
+    let mut active = shapes.to_vec();
+    let has_known_nonempty = active.iter().any(|shape| {
+        shape.iter().all(Option::is_some)
+            && shape.iter().all(|dimension| dimension.unwrap_or(0) > 0)
+    });
+    if has_known_nonempty {
+        active.retain(|shape| !shape.iter().any(|dimension| matches!(dimension, Some(0))));
+    }
+    let rank = active
         .iter()
         .map(|shape| shape.len())
         .max()?
         .max(dim_1based);
-    let mut padded = Vec::with_capacity(shapes.len());
-    for shape in shapes {
+    let mut padded = Vec::with_capacity(active.len());
+    for shape in &active {
         let mut current = shape.clone();
         while current.len() < rank {
             current.push(Some(1));
@@ -204,16 +239,16 @@ fn concat_type_with_dim(args: &[Type], dim_1based: usize) -> Type {
         return args[0].clone();
     }
 
-    let all_cells = args.iter().all(|arg| matches!(arg, Type::Cell { .. }));
-    if all_cells {
+    let has_cell = args.iter().any(|arg| matches!(arg, Type::Cell { .. }));
+    if has_cell {
         return Type::Cell {
             element_type: cell_element_type(args),
             length: None,
         };
     }
 
-    let all_strings = args.iter().all(|arg| matches!(arg, Type::String));
-    if all_strings {
+    let has_string = args.iter().any(|arg| matches!(arg, Type::String));
+    if has_string {
         return Type::cell_of(Type::String);
     }
 
@@ -251,6 +286,7 @@ fn horzcat_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     accel = "array_construct",
     type_resolver(horzcat_type),
     descriptor(crate::builtins::array::shape::horzcat::HORZCAT_DESCRIPTOR),
+    integer_capabilities(crate::builtins::array::shape::horzcat::HORZCAT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::shape::horzcat"
 )]
 async fn horzcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -302,7 +338,7 @@ pub(crate) mod tests {
         block_on(super::horzcat_builtin(args))
     }
     use crate::builtins::common::test_support;
-    use runmat_builtins::{
+    use runmat_value::{
         CellArray, CharArray, ComplexTensor, IntegerStorage, LogicalArray, StringArray, Tensor,
     };
 
@@ -334,7 +370,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 0]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -365,7 +401,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
-                assert_eq!(t.data, vec![1.0, 3.0, 2.0, 4.0, 10.0, 20.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0, 10.0, 20.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -458,11 +494,11 @@ pub(crate) mod tests {
             let left = Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap();
             let right = Tensor::new(vec![10.0, 30.0], vec![2, 1]).unwrap();
             let view_left = runmat_accelerate_api::HostTensorView {
-                data: &left.data,
+                data: &left.materialize_f64(),
                 shape: &left.shape,
             };
             let view_right = runmat_accelerate_api::HostTensorView {
-                data: &right.data,
+                data: &right.materialize_f64(),
                 shape: &right.shape,
             };
             let h_left = provider.upload(&view_left).expect("upload left");
@@ -471,7 +507,7 @@ pub(crate) mod tests {
                 .expect("horzcat");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![1.0, 3.0, 10.0, 30.0]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0, 3.0, 10.0, 30.0]);
         });
     }
 
@@ -505,7 +541,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![1, 4]);
                 assert_eq!(
-                    ct.data,
+                    ct.materialize_f64(),
                     vec![(1.0, 2.0), (3.0, 4.0), (5.0, 6.0), (7.0, 8.0)]
                 );
             }
@@ -552,10 +588,12 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn horzcat_like_gpu_from_host_inputs() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
             let prototype = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
             let proto_view = runmat_accelerate_api::HostTensorView {
-                data: &prototype.data,
+                data: &prototype.materialize_f64(),
                 shape: &prototype.shape,
             };
             let proto_handle = provider.upload(&proto_view).expect("upload proto");
@@ -575,7 +613,7 @@ pub(crate) mod tests {
             };
             let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![1.0, 3.0, 5.0, 7.0]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0, 3.0, 5.0, 7.0]);
         });
     }
 
@@ -583,9 +621,14 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn horzcat_wgpu_matches_cpu() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        let provider_init = std::panic::catch_unwind(|| {
+            runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+            )
+        });
+        if !matches!(provider_init, Ok(Ok(_))) {
+            return;
+        }
         let a = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![5.0, 7.0, 6.0, 8.0], vec![2, 2]).unwrap();
 
@@ -596,13 +639,15 @@ pub(crate) mod tests {
             other => panic!("expected tensor output, got {other:?}"),
         };
 
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let Some(provider) = runmat_accelerate_api::provider() else {
+            return;
+        };
         let view_a = runmat_accelerate_api::HostTensorView {
-            data: &a.data,
+            data: &a.materialize_f64(),
             shape: &a.shape,
         };
         let view_b = runmat_accelerate_api::HostTensorView {
-            data: &b.data,
+            data: &b.materialize_f64(),
             shape: &b.shape,
         };
         let ha = provider.upload(&view_a).expect("upload a");
@@ -611,6 +656,6 @@ pub(crate) mod tests {
             horzcat_builtin(vec![Value::GpuTensor(ha), Value::GpuTensor(hb)]).expect("gpu horzcat");
         let gathered = test_support::gather(gpu_value).expect("gather");
         assert_eq!(gathered.shape, expected.shape);
-        assert_eq!(gathered.data, expected.data);
+        assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }
 }

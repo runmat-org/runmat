@@ -31,6 +31,7 @@
   "behaviors": [
     "`formatSpec` must be text: a character row vector or string scalar. Cell arrays and multi-row character arrays are rejected.",
     "Arguments can be numeric, logical, strings, character arrays, or cell arrays containing supported scalar types. Numeric inputs accept scalar, vector, or matrix shapes; elements are flattened in column-major order.",
+    "All eight integer classes are formatted directly from native storage, including full-width int64 and uint64 values that cannot be represented exactly as double.",
     "Escape sequences such as `\\n`, `\\t`, `\\r`, `\\f`, `\\b`, `\\a`, `\\v`, octal (`\\123`), and hexadecimal (`\\x7F`) are interpreted before formatting so that `sprintf` can build multi-line text easily.",
     "Width and precision may be literal digits or drawn from the input list using `*` or `.*`. Star arguments must be scalar numerics and are consumed in order.",
     "Flags match MATLAB behaviour: `-` left-aligns, `+` forces a sign, space reserves a leading space for positive numbers, `0` enables zero padding, and `#` produces alternate forms for octal, hexadecimal, and binary outputs or preserves the decimal point in fixed-point conversions.",

@@ -7,7 +7,7 @@
     "diagonal sum",
     "gpu"
   ],
-  "summary": "Sum main-diagonal elements of matrix and matrix-like inputs with MATLAB-compatible numeric behavior.",
+  "summary": "Sum the main-diagonal elements of a square matrix.",
   "gpu_support": {
     "elementwise": false,
     "reduction": true,
@@ -16,7 +16,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "Prefers provider diag+sum hooks; otherwise gathers once, computes on the CPU, and re-uploads a 1×1 result so downstream GPU work can continue."
+    "notes": "Prefers the owning provider's diagonal and reduction hooks; otherwise gathers once and restores a class-preserving 1×1 result through that owner."
   },
   "fusion": {
     "elementwise": false,
@@ -30,13 +30,13 @@
     "integration": "builtins::math::linalg::ops::trace::tests::trace_gpu_provider_roundtrip",
     "gpu": "builtins::math::linalg::ops::trace::tests::trace_wgpu_matches_cpu"
   },
-  "description": "`trace(A)` returns the sum of values on the main diagonal of `A` for square or rectangular matrix-like inputs. It follows MATLAB-compatible typing and complex-value behavior across supported containers.",
+  "description": "`trace(A)` returns the sum of the main diagonal of a square full or sparse single- or double-precision matrix.",
   "behaviors": [
-    "Operates on the leading two dimensions. Higher dimensions must be singleton; otherwise an error is raised.",
-    "Works for non-square matrices by summing up to `min(size(A, 1), size(A, 2))`.",
+    "The input must be square and two-dimensional. Rectangular matrices, nonscalar vectors, and arrays with nonsingleton trailing dimensions raise an error.",
     "Scalars (real or complex) return their own value.",
-    "Logical inputs are promoted to double precision (`true → 1.0`, `false → 0.0`).",
-    "Complex inputs retain both real and imaginary parts in the result.",
+    "Single input returns single, double input returns double, and complex floating input retains both its real and imaginary values and floating precision.",
+    "RunMat mode additionally accepts logical, character, and native integer matrices. Integer diagonal values are accumulated exactly and converted to double only when the sum is exactly representable.",
+    "Full and sparse real floating matrices are supported. Complex sparse storage is not yet represented by the runtime.",
     "Empty matrices yield `0`. Empty complex matrices yield `0 + 0i`.",
     "`gpuArray` inputs stay on the device when the provider implements diagonal extraction and sum reductions; otherwise RunMat gathers once, computes on the host, and uploads a 1×1 scalar."
   ],
@@ -47,9 +47,9 @@
       "output": "t = 15"
     },
     {
-      "description": "Computing the trace of a rectangular matrix",
+      "description": "Rejecting a rectangular matrix",
       "input": "B = [4 2; 1 3; 5 6];\nresult = trace(B)",
-      "output": "result = 7"
+      "output": "Error: trace requires a square matrix"
     },
     {
       "description": "Getting the trace of a triangular matrix",
@@ -67,14 +67,14 @@
     },
     {
       "description": "Handling empty matrices safely",
-      "input": "E = zeros(0, 5);\nvalue = trace(E)",
+      "input": "E = zeros(0, 0);\nvalue = trace(E)",
       "output": "value = 0"
     }
   ],
   "faqs": [
     {
       "question": "What happens if my matrix is not square?",
-      "answer": "`trace` sums along the main diagonal up to `min(m, n)`, matching MATLAB behaviour for rectangular matrices."
+      "answer": "It raises `RunMat:trace:InvalidInput`; `trace` requires a square matrix."
     },
     {
       "question": "Does `trace` accept higher-dimensional arrays?",
@@ -82,7 +82,7 @@
     },
     {
       "question": "How are logical inputs handled?",
-      "answer": "Logical values are promoted to double precision (0.0 or 1.0) before summing, mirroring MATLAB semantics."
+      "answer": "Logical matrices are a RunMat-mode extension and return a double sum. MATLAB compatibility modes accept the documented single and double matrix classes."
     },
     {
       "question": "What is returned for empty inputs?",
@@ -98,7 +98,7 @@
     },
     {
       "question": "Is there any precision loss with large matrices?",
-      "answer": "`trace` accumulates in double precision (`f64`), matching MATLAB's default numeric type."
+      "answer": "Single and complex-single inputs retain single precision; double and complex-double inputs retain double precision. RunMat-mode integer inputs use exact wide accumulation and reject a final sum that cannot be represented exactly as double."
     },
     {
       "question": "Does `trace` modify the input matrix?",
@@ -106,7 +106,7 @@
     },
     {
       "question": "How does `trace` interact with sparse matrices?",
-      "answer": "Sparse support is planned; current releases operate on dense arrays. Inputs are treated as dense matrices."
+      "answer": "Real sparse single and double matrices are supported directly. Native sparse integer matrices are available in RunMat mode and use the same exact-sum boundary as dense integer matrices."
     },
     {
       "question": "Can I rely on `trace` inside fused GPU expressions?",
@@ -163,8 +163,8 @@
     "label": "`crates/runmat-runtime/src/builtins/math/linalg/ops/trace.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/ops/trace.rs"
   },
-  "gpu_residency": "You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB).\n\nThe auto-offload planner keeps residency on the GPU when expressions benefit from it. When the active provider exposes both `diag_extract` and `reduce_sum`, `trace` executes entirely on the GPU. If either hook is missing, RunMat performs a single gather, computes the scalar on the CPU, and uploads a 1×1 result back to the device so downstream fused expressions continue to operate on GPU data.\n\nTo preserve backwards compatibility with MathWorks MATLAB—and for situations where you want to explicitly manage residency—you can wrap inputs with `gpuArray`. This mirrors MATLAB while still letting RunMat's planner decide whether the GPU offers an advantage for the surrounding code.",
+  "gpu_residency": "When the input's owning provider implements diagonal extraction and reduction, `trace` remains resident. Otherwise it gathers once, computes on the host, and restores a 1×1 result with the original floating class through that same provider. Automatic residency and explicit `gpuArray` inputs use the same owner-preserving path.",
   "gpu_behavior": [
-    "1. When the input already lives on the GPU and the active provider exposes both `diag_extract` and `reduce_sum`, RunMat extracts the diagonal on device and performs the reduction there, returning a `1×1` gpuArray that stays resident for downstream work. 2. If either hook is missing or the provider declines (unsupported precision, shape, or size), RunMat gathers the matrix exactly once, computes the diagonal sum on the CPU, and uploads the scalar back to the provider so subsequent GPU-friendly code keeps running on device memory. 3. Mixed-residency calls automatically upload host matrices before these steps, matching MATLAB's `gpuArray` behaviour while letting the auto-offload planner decide which tier benefits the most."
+    "1. If the owning provider implements `diag_extract` and `reduce_sum`, the reduction stays resident. 2. Otherwise the matrix gathers once and a class-preserving 1×1 result is restored through that owner. 3. Integer, logical, and character inputs follow their compatibility-mode admission rules before provider work begins."
   ]
 }

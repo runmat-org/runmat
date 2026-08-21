@@ -30,7 +30,8 @@
   "behaviors": [
     "`hgload(filename)` appends `.fig` when the filename has no extension and returns a scalar handle or row vector of handles.",
     "`[h, old] = hgload(filename, property_structure)` applies recognized top-level figure property overrides after import.",
-    "Unrecognized override fields are ignored and omitted from `old`, matching MATLAB's documented top-level override behavior."
+    "Unrecognized override fields are ignored and omitted from `old`, matching MATLAB's documented top-level override behavior.",
+    "Numeric and GPU-resident arguments are rejected without gathering; this file-loading surface has no integer computation contract."
   ],
   "examples": [
     {

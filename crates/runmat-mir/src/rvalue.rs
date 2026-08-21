@@ -62,6 +62,8 @@ pub enum MirRvalue {
         requested_outputs: RequestedOutputCount,
     },
     Spawn(MirOperand),
+    Distributed(crate::parallel::MirDistributedOp),
+    Collective(crate::parallel::MirCollectiveOp),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

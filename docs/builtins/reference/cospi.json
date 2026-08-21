@@ -11,11 +11,14 @@
   ],
   "summary": "Compute cos(X*pi) accurately with exact integer and half-integer results.",
   "gpu_support": {
-    "elementwise": false,
+    "elementwise": true,
     "reduction": false,
-    "precisions": [],
-    "broadcasting": "none",
-    "notes": "gpuArray inputs are gathered to the host so RunMat can preserve exact results at integer and half-integer multiples of pi."
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "elementwise",
+    "notes": "GPU inputs gather to the exact host reference path and the floating result is restored to the owning provider."
   },
   "fusion": {
     "elementwise": false,
@@ -29,14 +32,17 @@
     "unit": "builtins::math::trigonometry::cospi::tests",
     "integration": null
   },
-  "description": "`cospi(X)` computes `cos(X*pi)` without first materializing the approximate floating-point value `X*pi`. Odd half-integers return exactly zero and integers return exactly `+1` or `-1`.",
+  "description": "`cospi(X)` computes `cos(X*pi)` without first materializing the approximate floating-point product. MATLAB documents single and double real or complex arrays; RunMat mode additionally admits typed integers, logicals, and characters through explicit compatibility gates.",
   "behaviors": [
     "Operates element-wise on scalars, vectors, matrices, and N-D tensors.",
-    "Integer and logical inputs are promoted to double precision before evaluation.",
+    "Single real and complex inputs preserve single output; double inputs preserve double output.",
+    "Typed integers are a RunMat-only extension. All eight real integer classes produce double, with exact `+1` or `-1` computed directly from native parity even above `flintmax`.",
+    "Logical and character inputs are separately gated RunMat-only extensions and produce double output.",
     "Returns exactly 0 for odd half-integer inputs and exactly ±1 for integer inputs.",
     "Complex inputs use the analytic extension of `cos(pi*z)` while preserving exact real-axis sine/cosine factors when possible.",
     "Output shape matches the input shape; non-finite real inputs produce `NaN`.",
-    "String inputs are unsupported and raise a builtin-scoped error."
+    "String inputs are unsupported and raise a builtin-scoped error.",
+    "Table, timetable, tall, and distributed container inputs remain general RunMat container/runtime gaps rather than integer-storage gaps."
   ],
   "examples": [
     {
@@ -57,10 +63,14 @@
     },
     {
       "question": "Does `cospi` support gpuArray inputs?",
-      "answer": "Yes. RunMat currently gathers gpuArray inputs and evaluates the exact host implementation; no GPU kernel is launched yet."
+      "answer": "Yes. RunMat gathers gpuArray inputs, evaluates the exact host implementation, and restores the result to the owning provider."
     }
   ],
   "links": [
+    {
+      "label": "MATLAB cospi documentation",
+      "url": "https://www.mathworks.com/help/matlab/ref/double.cospi.html"
+    },
     {
       "label": "sinpi",
       "url": "./sinpi"

@@ -6,16 +6,21 @@ wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 pub mod abi;
 mod diagnostic_path;
 mod error;
+mod executable;
 mod execution;
 mod fusion;
+#[cfg(not(target_arch = "wasm32"))]
+mod generic_native;
 mod profiling;
 mod session;
 mod source_pool;
 mod telemetry;
+pub mod testing;
 mod value_metadata;
 mod workspace;
 
 pub use error::{runtime_error_telemetry_failure_info, RunError};
+pub use executable::*;
 pub use execution::*;
 pub use fusion::*;
 pub use runmat_parser::CompatMode;
@@ -26,7 +31,7 @@ pub use telemetry::{
 };
 pub use value_metadata::{
     approximate_size_bytes, matlab_class_name, numeric_dtype_label, preview_numeric_values,
-    sparse_tensor_memory_bytes, value_shape,
+    sparse_tensor_memory_bytes, value_shape, NumericPreviewValue,
 };
 pub use workspace::*;
 

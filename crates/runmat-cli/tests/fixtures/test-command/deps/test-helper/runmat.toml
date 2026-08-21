@@ -1,0 +1,5 @@
+[package]
+name = "test-helper"
+
+[sources]
+roots = ["src"]

@@ -1,10 +1,3 @@
----
-title: "Memory Management"
-category: "Memory Management"
-section: "11.0"
-last_updated: "June 22, 2026"
----
-
 # Memory Management
 
 `runmat-gc` provides garbage-collected storage for runtime values that need stable identity, reachability through cycles, or finalizer-backed lifetime management. It is used for handle-object targets, listener targets/callbacks, selected struct/object payloads, provider-owned resources that need finalizers, and JIT/runtime bridge values.

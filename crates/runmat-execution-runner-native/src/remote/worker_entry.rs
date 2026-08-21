@@ -1,0 +1,146 @@
+use std::sync::Arc;
+
+use runmat_execution_artifact::encryption::RunKeyMaterial;
+use runmat_execution_runner::WorkerSpec;
+use runmat_execution_transport_native::frame::FrameLimits;
+use runmat_execution_transport_native::overlay::{QuicOverlayListener, WebSocketRelayConnection};
+use runmat_meshing_execution::MeshingStageKernel;
+
+use super::route::{QuicFrameRoute, RelayFrameRoute};
+use super::worker_server::{run_worker_loop, WorkerLoopContext};
+use crate::{NativeExecutionError, NativeExecutionResult};
+
+pub async fn run_remote_worker_quic(
+    listener: QuicOverlayListener,
+    run_identity: impl Into<String>,
+    worker: WorkerSpec,
+    driver_fence: u64,
+    session_id: [u8; 16],
+    run_key: RunKeyMaterial,
+    limits: FrameLimits,
+) -> NativeExecutionResult<()> {
+    run_remote_worker_quic_inner(
+        listener,
+        run_identity.into(),
+        worker,
+        driver_fence,
+        session_id,
+        run_key,
+        limits,
+        None,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn run_remote_meshing_worker_quic(
+    listener: QuicOverlayListener,
+    run_identity: impl Into<String>,
+    worker: WorkerSpec,
+    driver_fence: u64,
+    session_id: [u8; 16],
+    run_key: RunKeyMaterial,
+    limits: FrameLimits,
+    kernel: Arc<dyn MeshingStageKernel>,
+    meshing_limits: crate::NativeMeshingHostLimits,
+) -> NativeExecutionResult<()> {
+    meshing_limits.validate()?;
+    run_remote_worker_quic_inner(
+        listener,
+        run_identity.into(),
+        worker,
+        driver_fence,
+        session_id,
+        run_key,
+        limits,
+        Some(super::worker_execution::RemoteMeshingHost::new(
+            kernel,
+            meshing_limits,
+        )),
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_remote_worker_quic_inner(
+    listener: QuicOverlayListener,
+    run_identity: String,
+    worker: WorkerSpec,
+    driver_fence: u64,
+    session_id: [u8; 16],
+    run_key: RunKeyMaterial,
+    limits: FrameLimits,
+    meshing_host: Option<super::worker_execution::RemoteMeshingHost>,
+) -> NativeExecutionResult<()> {
+    let connection = Arc::new(listener.accept().await.map_err(protocol)?);
+    tokio::task::LocalSet::new()
+        .run_until(run_worker_loop(
+            Arc::new(QuicFrameRoute(connection)),
+            WorkerLoopContext {
+                run_identity,
+                worker,
+                driver_fence,
+                session_id,
+                run_key,
+                limits,
+                bundle_cache: None,
+                meshing_host,
+            },
+        ))
+        .await
+}
+
+pub struct RemoteWorkerRelayRequest<'a> {
+    pub url: &'a str,
+    pub headers: &'a [(String, String)],
+    pub run_identity: String,
+    pub worker: WorkerSpec,
+    pub driver_fence: u64,
+    pub session_id: [u8; 16],
+    pub run_key: RunKeyMaterial,
+    pub limits: FrameLimits,
+}
+
+pub async fn run_remote_worker_relay(
+    request: RemoteWorkerRelayRequest<'_>,
+) -> NativeExecutionResult<()> {
+    run_remote_worker_relay_cached(request, None).await
+}
+
+pub(crate) async fn run_remote_worker_relay_cached(
+    request: RemoteWorkerRelayRequest<'_>,
+    bundle_cache: Option<std::path::PathBuf>,
+) -> NativeExecutionResult<()> {
+    let RemoteWorkerRelayRequest {
+        url,
+        headers,
+        run_identity,
+        worker,
+        driver_fence,
+        session_id,
+        run_key,
+        limits,
+    } = request;
+    let connection = WebSocketRelayConnection::connect(url, headers, limits)
+        .await
+        .map_err(protocol)?;
+    tokio::task::LocalSet::new()
+        .run_until(run_worker_loop(
+            Arc::new(RelayFrameRoute::new(connection)),
+            WorkerLoopContext {
+                run_identity,
+                worker,
+                driver_fence,
+                session_id,
+                run_key,
+                limits,
+                bundle_cache,
+                meshing_host: None,
+            },
+        ))
+        .await
+}
+
+fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {
+    NativeExecutionError::Protocol(error.to_string())
+}

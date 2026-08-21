@@ -3,9 +3,10 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, StringArray, Tensor, Value,
 };
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, StringArray, Tensor, Value};
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
@@ -13,7 +14,9 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::builtins::strings::common::is_missing_string;
+use crate::builtins::strings::common::{
+    contains_numeric_or_resident_text_input, is_missing_string,
+};
 use crate::builtins::strings::type_resolvers::numeric_text_scalar_or_tensor_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -102,6 +105,13 @@ pub const STRLENGTH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &STRLENGTH_ERRORS,
 };
 
+pub const STRLENGTH_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "strlength measures string, character, and cellstr input and returns double character counts. Integer and resident numeric inputs reject before provider access and are never interpreted as character codes.",
+    };
+
 fn strlength_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     strlength_error_with_message(error.message, error)
 }
@@ -129,9 +139,13 @@ fn remap_strlength_flow(err: RuntimeError) -> RuntimeError {
     accel = "sink",
     type_resolver(numeric_text_scalar_or_tensor_type),
     descriptor(crate::builtins::strings::core::strlength::STRLENGTH_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::core::strlength::STRLENGTH_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::core::strlength"
 )]
 async fn strlength_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    if contains_numeric_or_resident_text_input(&value) {
+        return Err(strlength_error(&STRLENGTH_ERROR_INVALID_INPUT));
+    }
     let gathered = gather_if_needed_async(&value)
         .await
         .map_err(remap_strlength_flow)?;
@@ -247,9 +261,9 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 1]);
-                assert_eq!(tensor.data.len(), 2);
-                assert_eq!(tensor.data[0], 5.0);
-                assert!(tensor.data[1].is_nan());
+                assert_eq!(tensor.materialize_f64().len(), 2);
+                assert_eq!(tensor.materialize_f64()[0], 5.0);
+                assert!(tensor.materialize_f64()[1].is_nan());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -264,7 +278,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 1]);
-                assert_eq!(tensor.data, vec![3.0, 5.0]);
+                assert_eq!(tensor.materialize_f64(), vec![3.0, 5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -295,7 +309,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 2]);
-                assert_eq!(tensor.data, vec![3.0, 5.0]);
+                assert_eq!(tensor.materialize_f64(), vec![3.0, 5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -318,10 +332,10 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 3]);
-                assert_eq!(tensor.data.len(), 3);
-                assert_eq!(tensor.data[0], 5.0);
-                assert_eq!(tensor.data[1], 4.0);
-                assert!(tensor.data[2].is_nan());
+                assert_eq!(tensor.materialize_f64().len(), 3);
+                assert_eq!(tensor.materialize_f64()[0], 5.0);
+                assert_eq!(tensor.materialize_f64()[1], 4.0);
+                assert!(tensor.materialize_f64()[2].is_nan());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -339,7 +353,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 2]);
-                assert_eq!(tensor.data, vec![2.0, 1.0, 3.0, 0.0]);
+                assert_eq!(tensor.materialize_f64(), vec![2.0, 1.0, 3.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -354,7 +368,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 1]);
-                assert_eq!(tensor.data, vec![3.0, 5.0]);
+                assert_eq!(tensor.materialize_f64(), vec![3.0, 5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }

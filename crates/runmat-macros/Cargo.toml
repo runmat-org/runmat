@@ -1,6 +1,6 @@
 [package]
 name = "runmat-macros"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../LICENSE.md"
@@ -12,6 +12,7 @@ repository = "https://github.com/runmat-org/runmat"
 proc-macro = true
 
 [dependencies]
+runmat-value = { workspace = true }
 syn = { workspace = true }
 quote = { workspace = true }
 proc-macro2 = { workspace = true }

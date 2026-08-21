@@ -1,8 +1,14 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use super::op_common::map_figure_error;
 use crate::builtins::plotting::properties::parse_text_style_pairs;
@@ -110,6 +116,27 @@ const SGTITLE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
     },
 ];
 
+const SGTITLE_INTEGER_TEXT_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "txt",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "A scalar integer title is formatted directly from its native signed or unsigned value, including full-width uint64, without binary64 conversion.",
+    }];
+const SGTITLE_INTEGER_FONT_SIZE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "FontSize",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "All eight integer classes are documented for FontSize; accepted positive finite values cross the explicit client-renderer scalar boundary.",
+    }];
+pub const SGTITLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor { form: "h = sgtitle(integer_txt)", inputs: &SGTITLE_INTEGER_TEXT_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::ScalarOnly, notes: "The exact decimal spelling becomes the stored text String property; the returned graphics handle remains RunMat's ordinary double handle." },
+    BuiltinIntegerCapabilityDescriptor { form: "h = sgtitle(..., 'FontSize', integer_size)", inputs: &SGTITLE_INTEGER_FONT_SIZE_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "FontSize is a client-side graphics property, not an integer-preserving result; valid practical sizes are exactly representable at the renderer boundary." },
+];
+
 const SGTITLE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.SGTITLE.INVALID_ARGUMENT",
     identifier: Some("RunMat:sgtitle:InvalidArgument"),
@@ -142,6 +169,7 @@ pub const SGTITLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::sgtitle::SGTITLE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::plotting::sgtitle::SGTITLE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::sgtitle"
 )]
 pub fn sgtitle_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
@@ -157,7 +185,7 @@ pub(super) fn sgtitle_impl(builtin: &'static str, args: Vec<Value>) -> crate::Bu
         ));
     }
     let text = super::op_common::value_as_text_string(&rest[0])
-        .or_else(|| format_num_as_title_text(&rest[0]))
+        .or_else(|| super::op_common::format_numeric_text(&rest[0]))
         .ok_or_else(|| {
             plotting_error(
                 builtin,
@@ -193,21 +221,6 @@ fn split_figure_target<'a>(
 
 /// Converts a finite scalar number to a title string, matching MATLAB's behaviour of
 /// accepting numeric values wherever text is expected in annotation builtins.
-fn format_num_as_title_text(value: &Value) -> Option<String> {
-    let n = match value {
-        Value::Num(n) => *n,
-        _ => return None,
-    };
-    if !n.is_finite() {
-        return None;
-    }
-    if n.fract() == 0.0 && n.abs() < 1e15 {
-        Some(format!("{}", n as i64))
-    } else {
-        Some(format!("{n}"))
-    }
-}
-
 fn try_parse_figure_target(value: &Value) -> Option<FigureHandle> {
     let scalar = value_as_f64(value)?;
     if !scalar.is_finite() || scalar <= 0.0 || scalar.fract().abs() > f64::EPSILON {
@@ -226,13 +239,14 @@ mod tests {
         clear_figure, clone_figure, current_figure_handle, figure::figure_builtin,
         reset_hold_state_for_run,
     };
+    use runmat_value::IntValue;
 
     fn figure_children_count(handle: f64) -> usize {
         let children =
             get_builtin(vec![Value::Num(handle), Value::String("Children".into())]).unwrap();
         match children {
             Value::Num(_) => 1,
-            Value::Tensor(t) => t.data.len(),
+            Value::Tensor(t) => t.materialize_f64().len(),
             _ => 0,
         }
     }
@@ -347,6 +361,15 @@ mod tests {
         let fig = clone_figure(current).unwrap();
         let expected = format!("{pi}");
         assert_eq!(fig.sg_title.as_deref(), Some(expected.as_str()));
+    }
+
+    #[test]
+    fn sgtitle_preserves_full_width_integer_title_text() {
+        let _guard = setup();
+        let current = current_figure_handle();
+        sgtitle_builtin(vec![Value::Int(IntValue::U64(9_007_199_254_740_993))]).unwrap();
+        let fig = clone_figure(current).unwrap();
+        assert_eq!(fig.sg_title.as_deref(), Some("9007199254740993"));
     }
 
     #[test]

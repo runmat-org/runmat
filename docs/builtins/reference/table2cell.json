@@ -8,8 +8,8 @@
   "requires_feature": null,
   "tested": {"unit": "builtins::table::tests", "integration": "crates/runmat-vm/tests/tables_timetables.rs"},
   "description": "`table2cell(T)` returns an `height(T)` by `width(T)` cell array of table element values.",
-  "behaviors": ["Scalar numeric, logical, string, char, cell, datetime, and duration variables are supported.", "Multi-column variables are preserved as row slices."],
-  "examples": [{"description": "Table to cells", "input": "C = table2cell(T)", "output": "C = cell array"}],
+  "behaviors": ["Each table variable contributes its contents to the corresponding output cells.", "Integer elements retain their exact class and value, including wide int64 and uint64 values.", "Multi-column variables are preserved as same-row slices in the corresponding cell."],
+  "examples": [{"description": "Converting Table Elements To Cells", "input": "C = table2cell(T)", "output": "C = cell array"}],
   "links": [{"label": "cell2table", "url": "./cell2table"}],
-  "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}
+  "source": {"label": "`crates/runmat-runtime/src/builtins/table/builtins/conversions.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/builtins/conversions.rs"}
 }

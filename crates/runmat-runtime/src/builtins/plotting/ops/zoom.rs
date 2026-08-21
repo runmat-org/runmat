@@ -1,9 +1,13 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    HandleRef, ObjectInstance, StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{HandleRef, ObjectInstance, StructValue, Value};
 
 use super::properties::{resolve_plot_handle, PlotHandle};
 use super::state::{
@@ -20,6 +24,52 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "zoom";
 const ZOOM_CLASS_NAME: &str = "matlab.graphics.interaction.internal.zoom";
+
+const ZOOM_INTEGER_TARGET_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "zoom-integer-target-handle",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "Allow a typed-integer alias for an encoded figure or axes handle",
+    error_identifier: Some("RunMat:compatibility:ZoomIntegerTargetHandleExtension"),
+};
+pub const ZOOM_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ZOOM_INTEGER_TARGET_EXTENSION];
+const ZOOM_INTEGER_FACTOR_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "factor",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented positive numeric zoom factor admits positive integer scalars.",
+    }];
+const ZOOM_INTEGER_TARGET_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "target",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer aliases for RunMat's encoded graphics handles are separately gated.",
+    }];
+pub const ZOOM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "zoom(integer_factor)",
+        inputs: &ZOOM_INTEGER_FACTOR_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The positive finite factor crosses the graphics scaling boundary.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "zoom(integer_target, option_or_factor)",
+        inputs: &ZOOM_INTEGER_TARGET_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Strict mode rejects the encoded-handle alias before graphics state access.",
+    },
+];
 
 const ZOOM_OUTPUT_OBJECT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "z",
@@ -179,9 +229,21 @@ fn ensure_current_zoom_figure() -> FigureHandle {
     suppress_auto_output = true,
     type_resolver(get_type),
     descriptor(crate::builtins::plotting::zoom::ZOOM_DESCRIPTOR),
+    extensions(crate::builtins::plotting::zoom::ZOOM_EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::zoom::ZOOM_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::zoom"
 )]
 pub fn zoom_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args.len() == 2
+        && args
+            .first()
+            .is_some_and(crate::builtins::common::validation::value_has_native_integer_class)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ZOOM_INTEGER_TARGET_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     match args.as_slice() {
         [] => {
             let handle = ensure_current_zoom_figure();
@@ -202,7 +264,9 @@ pub fn zoom_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             }
             let factor = numeric_scalar(single)
                 .ok_or_else(|| invalid("expected an option string or positive zoom factor"))?;
-            if requested_outputs() > 0 {
+            if requested_outputs() > 0
+                && !crate::builtins::common::validation::value_has_native_integer_class(single)
+            {
                 let figure = FigureHandle::from(rounded_handle_id(factor)?);
                 if let Ok(snapshot) = zoom_state_snapshot(figure, None) {
                     return zoom_object_from_snapshot(snapshot);
@@ -683,6 +747,7 @@ mod tests {
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
     };
+    use runmat_value::IntValue;
 
     fn setup_plot_tests() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -839,5 +904,17 @@ mod tests {
         assert!(labels.contains(&"zoom()"));
         assert!(labels.contains(&"status = zoom(factor)"));
         assert!(labels.contains(&"status = zoom(target, option)"));
+    }
+
+    #[test]
+    fn typed_integer_single_argument_is_a_zoom_factor() {
+        let _guard = setup_plot_tests();
+        crate::builtins::plotting::state::set_axis_limits(Some((0.0, 10.0)), Some((0.0, 20.0)));
+        let _outputs = crate::output_count::push_output_count(Some(0));
+        zoom_builtin(vec![Value::Int(IntValue::U8(2))]).expect("integer factor");
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        let meta = fig.axes_metadata(0).unwrap();
+        assert_eq!(meta.x_limits, Some((2.5, 7.5)));
+        assert_eq!(meta.y_limits, Some((5.0, 15.0)));
     }
 }

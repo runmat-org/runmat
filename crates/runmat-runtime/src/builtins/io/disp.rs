@@ -1,12 +1,20 @@
 //! MATLAB-compatible `disp` builtin with GPU-aware formatting semantics.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, StringArray,
-    StructValue, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+#[cfg(test)]
+use runmat_value::set_display_format;
+use runmat_value::{
+    get_display_format, CellArray, CharArray, ComplexTensor, FormatMode, IntValue, IntegerStorage,
+    LogicalArray, StringArray, StructValue, Tensor, Value,
+};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -65,13 +73,6 @@ enum Align {
     Right,
 }
 
-const DISP_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "ans",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Empty matrix placeholder returned by sink invocation.",
-}];
 const DISP_INPUTS_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "X",
     ty: BuiltinParamType::Any,
@@ -82,7 +83,7 @@ const DISP_INPUTS_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
 const DISP_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "disp(X)",
     inputs: &DISP_INPUTS_VALUE,
-    outputs: &DISP_OUTPUT,
+    outputs: &[],
 }];
 const DISP_ERROR_ARG_CONFIG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.DISP.ARG_CONFIG",
@@ -96,13 +97,44 @@ const DISP_ERROR_GATHER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "Input value cannot be gathered onto the host for rendering.",
     message: "disp: failed to gather value for display",
 };
-const DISP_ERRORS: [BuiltinErrorDescriptor; 2] = [DISP_ERROR_ARG_CONFIG, DISP_ERROR_GATHER];
+const DISP_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DISP.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:disp:TooManyOutputs"),
+    when: "An output is requested from disp.",
+    message: "disp does not return output arguments",
+};
+const DISP_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    DISP_ERROR_ARG_CONFIG,
+    DISP_ERROR_GATHER,
+    DISP_ERROR_TOO_MANY_OUTPUTS,
+];
 pub const DISP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &DISP_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &DISP_ERRORS,
 };
+
+const DISP_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Every integer class is formatted from exact authoritative storage, including 64-bit extrema and integer members nested in supported containers.",
+    }];
+
+pub const DISP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "disp(X)",
+        inputs: &DISP_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "disp is a no-output host rendering sink. Resident integer values gather exactly through their provider before decimal formatting; no provider output is created.",
+    }];
 
 fn disp_error(error: &'static BuiltinErrorDescriptor) -> crate::RuntimeError {
     disp_error_with(error, error.message)
@@ -129,9 +161,13 @@ fn disp_error_with(
     suppress_auto_output = true,
     type_resolver(crate::builtins::io::type_resolvers::disp_type),
     descriptor(crate::builtins::io::disp::DISP_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::disp::DISP_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::disp"
 )]
 async fn disp_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 0) {
+        return Err(disp_error(&DISP_ERROR_TOO_MANY_OUTPUTS));
+    }
     if !rest.is_empty() {
         return Err(disp_error(&DISP_ERROR_ARG_CONFIG));
     }
@@ -141,14 +177,52 @@ async fn disp_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         .map_err(|e| disp_error_with(&DISP_ERROR_GATHER, format!("disp: {e}")))?;
     let lines = format_for_disp(&host_value);
 
-    let body = lines.join("\n");
-    record_console_line(ConsoleStream::Stdout, body);
+    if !lines.is_empty() {
+        let body = lines.join("\n");
+        record_console_line(ConsoleStream::Stdout, body);
+    }
 
     Ok(empty_return_value())
 }
 
 pub(crate) fn format_for_disp(value: &Value) -> Vec<String> {
     render_value(value, RenderMode::TopLevel)
+}
+
+pub(crate) fn format_for_display(value: &Value) -> Vec<String> {
+    let rendered = format_for_disp(value);
+    if !rendered.is_empty() {
+        return rendered;
+    }
+    match value {
+        Value::Tensor(tensor) => vec![format_empty_numeric_tensor_for_display(tensor)],
+        Value::ComplexTensor(_) | Value::LogicalArray(_) => vec!["[]".to_string()],
+        Value::CharArray(array) => vec![format!("{}x{} empty char array", array.rows, array.cols)],
+        Value::StringArray(array) => vec![format!(
+            "{} empty string array",
+            dims_to_string(&canonical_dims(&array.shape))
+        )],
+        Value::Cell(cell) => vec![format!(
+            "{} empty cell array",
+            dims_to_string(&canonical_dims(&cell.shape))
+        )],
+        _ => rendered,
+    }
+}
+
+fn format_empty_numeric_tensor_for_display(tensor: &Tensor) -> String {
+    let shape = canonical_dims(&tensor.shape);
+    let dtype = tensor.numeric_dtype();
+    if dtype == runmat_value::NumericDType::F64 && shape == [0, 0] {
+        return "[]".to_string();
+    }
+    let dimensions = shape
+        .iter()
+        .map(usize::to_string)
+        .collect::<Vec<_>>()
+        .join("×");
+    let noun = if shape.len() <= 2 { "matrix" } else { "array" };
+    format!("{dimensions} empty {} {noun}", dtype.class_name())
 }
 
 fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
@@ -214,10 +288,13 @@ fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
                 .map(|line| line.to_string())
                 .collect(),
             RenderMode::Nested => {
-                let nnz = sparse.values.len();
+                let nnz = sparse.nnz();
                 vec![format!(
-                    "<sparse {}x{} nnz={}>",
-                    sparse.rows, sparse.cols, nnz
+                    "<sparse {}x{} {} nnz={}>",
+                    sparse.rows,
+                    sparse.cols,
+                    sparse.class_name(),
+                    nnz
                 )]
             }
         },
@@ -246,11 +323,17 @@ fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
+        | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
         | Value::MException(_)
+        | Value::Future(_)
+        | Value::Task(_)
+        | Value::Pool(_)
+        | Value::Job(_)
+        | Value::Foreign(_)
         | Value::OutputList(_) => {
             vec![value.to_string()]
         }
@@ -260,14 +343,9 @@ fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
 
 fn format_numeric_tensor(tensor: &Tensor) -> Vec<String> {
     let shape = canonical_dims(&tensor.shape);
-    if tensor.data.is_empty() {
-        if shape.len() == 2 && shape[0] == 0 && shape[1] == 0 {
-            return vec!["[]".to_string()];
-        }
-        if shape.contains(&0) {
-            return vec![format!("Empty matrix: {}", dims_to_by_string(&shape))];
-        }
-        return vec!["[]".to_string()];
+    let len = tensor::tensor_element_len(tensor);
+    if len == 0 {
+        return Vec::new();
     }
     if shape.contains(&0) {
         if shape.len() == 2 && shape[0] == 0 && shape[1] == 0 {
@@ -278,7 +356,7 @@ fn format_numeric_tensor(tensor: &Tensor) -> Vec<String> {
     if shape.len() <= 2 {
         let rows = shape[0];
         let cols = shape.get(1).copied().unwrap_or(1);
-        if tensor.data.len() == 1 {
+        if len == 1 {
             return vec![format_tensor_value(tensor, 0)];
         }
         return format_table(
@@ -332,44 +410,34 @@ fn format_numeric_tensor_pages(tensor: &Tensor, dims: &[usize]) -> Vec<String> {
 }
 
 fn format_numeric_tensor_nested(tensor: &Tensor) -> Vec<String> {
-    if tensor.data.is_empty() {
-        return vec!["[]".to_string()];
+    let len = tensor::tensor_element_len(tensor);
+    if len == 0 {
+        return Vec::new();
     }
-    if tensor.data.len() == 1 {
+    if len == 1 {
         return vec![format_tensor_value(tensor, 0)];
     }
     let shape = canonical_dims(&tensor.shape);
-    let class_name = tensor
-        .integer_storage()
-        .map(IntegerStorage::class_name)
-        .unwrap_or("double");
+    let class_name = tensor.numeric_dtype().class_name();
     vec![format!("[{} {class_name}]", dims_to_string(&shape))]
 }
 
 fn format_tensor_value(tensor: &Tensor, index: usize) -> String {
-    tensor
-        .integer_storage()
-        .map(|storage| format_integer_storage_value(storage, index))
-        .unwrap_or_else(|| format_scalar_number(tensor.data[index]))
-}
-
-fn format_integer_storage_value(storage: &IntegerStorage, index: usize) -> String {
-    match storage {
-        IntegerStorage::I8(values) => values[index].to_string(),
-        IntegerStorage::I16(values) => values[index].to_string(),
-        IntegerStorage::I32(values) => values[index].to_string(),
-        IntegerStorage::I64(values) => values[index].to_string(),
-        IntegerStorage::U8(values) => values[index].to_string(),
-        IntegerStorage::U16(values) => values[index].to_string(),
-        IntegerStorage::U32(values) => values[index].to_string(),
-        IntegerStorage::U64(values) => values[index].to_string(),
+    let value = tensor
+        .numeric_value_at(index)
+        .expect("index within authoritative numeric storage");
+    if let Some(value) = value.into_int_value() {
+        format_int(&value)
+    } else {
+        format_scalar_number(value.materialize_f64())
     }
 }
 
 fn format_complex_tensor(tensor: &ComplexTensor) -> Vec<String> {
     let shape = canonical_dims(&tensor.shape);
-    if tensor.data.is_empty() {
-        return vec!["[]".to_string()];
+    let len = tensor::complex_tensor_element_len(tensor);
+    if len == 0 {
+        return Vec::new();
     }
     if shape.contains(&0) {
         if shape.len() == 2 && shape[0] == 0 && shape[1] == 0 {
@@ -380,9 +448,8 @@ fn format_complex_tensor(tensor: &ComplexTensor) -> Vec<String> {
     if shape.len() <= 2 {
         let rows = shape[0];
         let cols = shape.get(1).copied().unwrap_or(1);
-        if tensor.data.len() == 1 {
-            let (re, im) = tensor.data[0];
-            return vec![format!("{}", Value::Complex(re, im))];
+        if len == 1 {
+            return vec![tensor.format_element(0)];
         }
         return format_table(
             rows,
@@ -392,8 +459,7 @@ fn format_complex_tensor(tensor: &ComplexTensor) -> Vec<String> {
             Align::Right,
             |r, c| {
                 let idx = r + c * rows;
-                let (re, im) = tensor.data[idx];
-                format!("{}", Value::Complex(re, im))
+                tensor.format_element(idx)
             },
         );
     }
@@ -422,8 +488,7 @@ fn format_complex_tensor_pages(tensor: &ComplexTensor, dims: &[usize]) -> Vec<St
             Align::Right,
             |r, c| {
                 let idx = linear_index_with_tail(dims, r, c, &current_tail);
-                let (re, im) = tensor.data[idx];
-                format!("{}", Value::Complex(re, im))
+                tensor.format_element(idx)
             },
         );
         lines.extend(table);
@@ -437,20 +502,29 @@ fn format_complex_tensor_pages(tensor: &ComplexTensor, dims: &[usize]) -> Vec<St
 }
 
 fn format_complex_tensor_nested(tensor: &ComplexTensor) -> Vec<String> {
-    if tensor.data.is_empty() {
+    let len = tensor::complex_tensor_element_len(tensor);
+    if len == 0 {
         return vec!["[]".to_string()];
     }
-    if tensor.data.len() == 1 {
-        let (re, im) = tensor.data[0];
-        return vec![format!("{}", Value::Complex(re, im))];
+    if len == 1 {
+        return vec![tensor.format_element(0)];
     }
     let shape = canonical_dims(&tensor.shape);
-    vec![format!("[{} complex double]", dims_to_string(&shape))]
+    let class_name = tensor
+        .integer_storage()
+        .as_ref()
+        .map(|storage| storage.class_name())
+        .unwrap_or("double");
+    vec![format!(
+        "[{} complex {}]",
+        dims_to_string(&shape),
+        class_name
+    )]
 }
 
 fn format_logical_array(logical: &LogicalArray) -> Vec<String> {
     if logical.data.is_empty() {
-        return vec!["[]".to_string()];
+        return Vec::new();
     }
     match tensor::logical_to_tensor(logical) {
         Ok(tensor) => format_numeric_tensor(&tensor),
@@ -476,7 +550,7 @@ fn format_logical_array_nested(logical: &LogicalArray) -> Vec<String> {
 fn format_char_array(array: &CharArray, mode: RenderMode) -> Vec<String> {
     if array.rows == 0 || array.cols == 0 {
         return match mode {
-            RenderMode::TopLevel => vec![String::new()],
+            RenderMode::TopLevel => Vec::new(),
             RenderMode::Nested => vec!["''".to_string()],
         };
     }
@@ -505,12 +579,12 @@ fn format_string_array(array: &StringArray, mode: RenderMode) -> Vec<String> {
         return vec![format!("[{} string]", dims_to_string(&shape))];
     }
 
-    if shape.len() > 2 {
-        return vec![format!("{} string array", dims_to_string(&shape))];
-    }
     let rows = shape[0];
     let cols = shape.get(1).copied().unwrap_or(1);
     if rows == 0 || cols == 0 {
+        return Vec::new();
+    }
+    if shape.len() > 2 {
         return vec![format!("{} string array", dims_to_string(&shape))];
     }
     format_table(rows, cols, 0, 1, Align::Left, |r, c| {
@@ -555,15 +629,12 @@ fn format_struct(struct_value: &StructValue) -> Vec<String> {
 }
 
 fn format_cell(cell: &CellArray) -> Vec<String> {
-    if cell.shape.len() > 2 {
-        return vec![format!(
-            "{} cell",
-            dims_to_string(&canonical_dims(&cell.shape))
-        )];
-    }
     let rows = cell.rows;
     let cols = cell.cols;
     if rows == 0 || cols == 0 {
+        return Vec::new();
+    }
+    if cell.shape.len() > 2 {
         return vec![format!(
             "{} cell",
             dims_to_string(&canonical_dims(&cell.shape))
@@ -584,9 +655,10 @@ fn summarize_for_cell(value: &Value) -> String {
         Value::Bool(flag) => format!("[{}]", if *flag { 1 } else { 0 }),
         Value::Complex(re, im) => format!("[{}]", Value::Complex(*re, *im)),
         Value::Tensor(tensor) => {
-            if tensor.data.is_empty() {
+            let len = tensor::tensor_element_len(tensor);
+            if len == 0 {
                 "[]".to_string()
-            } else if tensor.data.len() == 1 {
+            } else if len == 1 {
                 format!("[{}]", format_tensor_value(tensor, 0))
             } else {
                 let class_name = tensor
@@ -600,19 +672,26 @@ fn summarize_for_cell(value: &Value) -> String {
             }
         }
         Value::SparseTensor(sparse) => format!(
-            "[{} sparse double]",
-            dims_to_string(&[sparse.rows, sparse.cols])
+            "[{} sparse {}]",
+            dims_to_string(&[sparse.rows, sparse.cols]),
+            sparse.class_name()
         ),
         Value::ComplexTensor(tensor) => {
-            if tensor.data.is_empty() {
+            let len = tensor::complex_tensor_element_len(tensor);
+            if len == 0 {
                 "[]".to_string()
-            } else if tensor.data.len() == 1 {
-                let (re, im) = tensor.data[0];
-                format!("[{}]", Value::Complex(re, im))
+            } else if len == 1 {
+                format!("[{}]", tensor.format_element(0))
             } else {
+                let class_name = tensor
+                    .integer_storage()
+                    .as_ref()
+                    .map(|storage| storage.class_name())
+                    .unwrap_or("double");
                 format!(
-                    "[{} complex double]",
-                    dims_to_string(&canonical_dims(&tensor.shape))
+                    "[{} complex {}]",
+                    dims_to_string(&canonical_dims(&tensor.shape)),
+                    class_name
                 )
             }
         }
@@ -664,11 +743,17 @@ fn summarize_for_cell(value: &Value) -> String {
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
+        | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
         | Value::MException(_)
+        | Value::Future(_)
+        | Value::Task(_)
+        | Value::Pool(_)
+        | Value::Job(_)
+        | Value::Foreign(_)
         | Value::OutputList(_) => value.to_string(),
         Value::GpuTensor(_) => "gpuArray".to_string(),
     }
@@ -725,6 +810,18 @@ where
 }
 
 fn format_int(value: &IntValue) -> String {
+    if get_display_format() == FormatMode::Hex {
+        return match value {
+            IntValue::I8(value) => format!("{:02x}", *value as u8),
+            IntValue::I16(value) => format!("{:04x}", *value as u16),
+            IntValue::I32(value) => format!("{:08x}", *value as u32),
+            IntValue::I64(value) => format!("{:016x}", *value as u64),
+            IntValue::U8(value) => format!("{value:02x}"),
+            IntValue::U16(value) => format!("{value:04x}"),
+            IntValue::U32(value) => format!("{value:08x}"),
+            IntValue::U64(value) => format!("{value:016x}"),
+        };
+    }
     match value {
         IntValue::I8(v) => v.to_string(),
         IntValue::I16(v) => v.to_string(),
@@ -834,7 +931,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::make_cell;
-    use runmat_builtins::{ComplexTensor, IntValue, StringArray, SymbolicExpr, Tensor};
+    use runmat_value::{ComplexTensor, IntValue, StringArray, SymbolicExpr, Tensor};
 
     #[test]
     fn disp_descriptor_signatures_cover_core_forms() {
@@ -844,6 +941,31 @@ pub(crate) mod tests {
             .map(|sig| sig.label)
             .collect();
         assert!(labels.contains(&"disp(X)"));
+        assert!(DISP_DESCRIPTOR.signatures[0].outputs.is_empty());
+    }
+
+    #[test]
+    fn disp_rejects_outputs_and_prints_nothing_for_empty_builtin_values() {
+        let _outputs = crate::output_count::push_output_count(Some(1));
+        let err =
+            futures::executor::block_on(disp_builtin(Value::Num(1.0), Vec::new())).unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:disp:TooManyOutputs"));
+        drop(_outputs);
+        crate::console::reset_thread_buffer();
+        futures::executor::block_on(disp_builtin(
+            Value::Tensor(Tensor::zeros(vec![0, 0])),
+            Vec::new(),
+        ))
+        .unwrap();
+        assert!(crate::console::take_thread_buffer().is_empty());
+        for value in [
+            Value::ComplexTensor(ComplexTensor::new(Vec::new(), vec![0, 0]).unwrap()),
+            Value::StringArray(StringArray::new(Vec::new(), vec![0, 1, 2]).unwrap()),
+        ] {
+            crate::console::reset_thread_buffer();
+            futures::executor::block_on(disp_builtin(value, Vec::new())).unwrap();
+            assert!(crate::console::take_thread_buffer().is_empty());
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -979,6 +1101,56 @@ pub(crate) mod tests {
         assert_eq!(lines, vec![u64::MAX.to_string()]);
     }
 
+    #[test]
+    fn every_integer_scalar_class_formats_exactly() {
+        for (value, expected) in [
+            (IntValue::I8(i8::MIN), i8::MIN.to_string()),
+            (IntValue::I16(i16::MIN), i16::MIN.to_string()),
+            (IntValue::I32(i32::MIN), i32::MIN.to_string()),
+            (IntValue::I64(i64::MIN), i64::MIN.to_string()),
+            (IntValue::U8(u8::MAX), u8::MAX.to_string()),
+            (IntValue::U16(u16::MAX), u16::MAX.to_string()),
+            (IntValue::U32(u32::MAX), u32::MAX.to_string()),
+            (IntValue::U64(u64::MAX), u64::MAX.to_string()),
+        ] {
+            assert_eq!(format_for_disp(&Value::Int(value)), vec![expected]);
+        }
+    }
+
+    #[test]
+    fn integer_hex_format_uses_each_class_bit_width() {
+        set_display_format(FormatMode::Hex);
+        for (value, expected) in [
+            (IntValue::I8(-1), "ff"),
+            (IntValue::I16(-1), "ffff"),
+            (IntValue::I32(-1), "ffffffff"),
+            (IntValue::I64(-1), "ffffffffffffffff"),
+            (IntValue::U8(1), "01"),
+            (IntValue::U16(1), "0001"),
+            (IntValue::U32(1), "00000001"),
+            (IntValue::U64(1), "0000000000000001"),
+        ] {
+            assert_eq!(format_for_disp(&Value::Int(value)), vec![expected]);
+        }
+        set_display_format(FormatMode::Short);
+    }
+
+    #[test]
+    fn integer_short_and_long_formats_remain_exact_decimal() {
+        for mode in [FormatMode::Short, FormatMode::Long] {
+            set_display_format(mode);
+            assert_eq!(
+                format_for_disp(&Value::Int(IntValue::U64(u64::MAX))),
+                vec![u64::MAX.to_string()]
+            );
+            assert_eq!(
+                format_for_disp(&Value::Int(IntValue::I64(i64::MIN))),
+                vec![i64::MIN.to_string()]
+            );
+        }
+        set_display_format(FormatMode::Short);
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn integer_tensor_display_uses_exact_backing_storage() {
@@ -1004,13 +1176,111 @@ pub(crate) mod tests {
         assert_eq!(lines, vec!["    values: [1x2 int16]".to_string()]);
     }
 
+    #[test]
+    fn implicit_numeric_empty_summary_preserves_class_and_shape() {
+        let integer = Tensor::new_integer(IntegerStorage::I16(Vec::new()), vec![0, 5])
+            .expect("integer empty");
+        assert_eq!(
+            format_for_display(&Value::Tensor(integer)),
+            vec!["0×5 empty int16 matrix"]
+        );
+
+        let single = Tensor::from_f32(Vec::new(), vec![0, 0, 6]).expect("single empty");
+        assert_eq!(
+            format_for_display(&Value::Tensor(single)),
+            vec!["0×0×6 empty single array"]
+        );
+
+        assert_eq!(
+            format_for_display(&Value::Tensor(Tensor::zeros(vec![0, 0]))),
+            vec!["[]"]
+        );
+    }
+
+    #[test]
+    fn explicit_disp_of_numeric_empty_remains_silent() {
+        let integer =
+            Tensor::new_integer(IntegerStorage::U8(Vec::new()), vec![0, 5]).expect("integer empty");
+        assert!(format_for_disp(&Value::Tensor(integer)).is_empty());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn native_single_tensor_nested_summary_preserves_class() {
+        let tensor = Tensor::from_numeric_storage(
+            runmat_value::NumericStorage::F32(vec![1.0, 2.0]),
+            vec![1, 2],
+        )
+        .expect("single tensor");
+        let mut fields = StructValue::new();
+        fields.insert("values", Value::Tensor(tensor));
+
+        let lines = render_value(&Value::Struct(fields), RenderMode::TopLevel);
+
+        assert_eq!(lines, vec!["    values: [1x2 single]".to_string()]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn integer_sparse_cell_summary_preserves_class() {
+        let sparse = runmat_value::SparseTensor::new_integer(
+            2,
+            2,
+            vec![0, 1, 2],
+            vec![0, 1],
+            IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
+        )
+        .expect("integer sparse");
+        let cell = make_cell(vec![Value::SparseTensor(sparse.clone())], 1, 1).expect("cell");
+
+        assert_eq!(
+            format_for_disp(&cell),
+            vec!["    [2x2 sparse uint64]".to_string()]
+        );
+
+        let mut fields = StructValue::new();
+        fields.insert("values", Value::SparseTensor(sparse));
+        assert_eq!(
+            format_for_disp(&Value::Struct(fields)),
+            vec!["    values: <sparse 2x2 uint64 nnz=2>".to_string()]
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn typed_complex_integer_display_uses_exact_components_and_class() {
+        let storage = runmat_value::IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]),
+            IntegerStorage::U64(vec![7, 0]),
+        )
+        .expect("matching components");
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).expect("typed complex");
+        assert_eq!(
+            format_for_disp(&Value::ComplexTensor(tensor.clone())),
+            vec![format!("{}+7i  {}", u64::MAX, 1_u64 << 63)]
+        );
+
+        let mut fields = StructValue::new();
+        fields.insert("values", Value::ComplexTensor(tensor.clone()));
+        assert_eq!(
+            render_value(&Value::Struct(fields), RenderMode::TopLevel),
+            vec!["    values: [1x2 complex uint64]".to_string()]
+        );
+
+        let cell = make_cell(vec![Value::ComplexTensor(tensor)], 1, 1).expect("cell");
+        assert_eq!(
+            format_for_disp(&cell),
+            vec!["    [1x2 complex uint64]".to_string()]
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn disp_accepts_gpu_tensor() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1024,20 +1294,28 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
-    fn disp_gathers_wgpu_tensor() {
+    fn disp_gathers_wgpu_integer_tensor_exactly() {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         )
         .expect("register wgpu provider");
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
-        let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("tensor");
-        let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
-            shape: &tensor.shape,
-        };
-        let handle = provider.upload(&view).expect("upload");
+        let values = [(1_u64 << 53) + 1, u64::MAX];
+        let handle = provider
+            .upload_integer(&runmat_accelerate_api::HostIntegerTensorView {
+                data: runmat_accelerate_api::HostIntegerDataView::U64(&values),
+                shape: &[1, 2],
+            })
+            .expect("upload integer");
+        crate::console::reset_thread_buffer();
         futures::executor::block_on(disp_builtin(Value::GpuTensor(handle), Vec::new()))
             .expect("disp");
+        let text = crate::console::take_thread_buffer()
+            .into_iter()
+            .map(|entry| entry.text)
+            .collect::<String>();
+        assert!(text.contains("9007199254740993"));
+        assert!(text.contains("18446744073709551615"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

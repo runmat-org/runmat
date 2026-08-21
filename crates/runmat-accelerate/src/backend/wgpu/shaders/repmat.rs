@@ -133,3 +133,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     Output.data[global_index] = Input.data[(src_index * factor) + lane];
 }
 "#;
+
+// Exact integer gpuArrays are represented as u32 words, with two words for
+// i64 and u64. The index arithmetic is identical to the float kernel and the
+// storage factor carries the word-lane count, so this is a pure bit copy.
+pub fn repmat_shader_u32() -> String {
+    REPMAT_SHADER_F32.replace("array<f32>", "array<u32>")
+}

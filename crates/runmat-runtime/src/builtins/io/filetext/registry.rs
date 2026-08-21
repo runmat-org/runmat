@@ -33,6 +33,7 @@ struct Entry {
     machinefmt: String,
     encoding: String,
     resource: Resource,
+    eof_encountered: bool,
 }
 
 impl Entry {
@@ -53,6 +54,7 @@ impl Entry {
             machinefmt: "native".to_string(),
             encoding: "UTF-8".to_string(),
             resource: Resource::Standard,
+            eof_encountered: false,
         }
     }
 
@@ -104,6 +106,7 @@ impl RegisteredFile {
             machinefmt: self.machinefmt,
             encoding: self.encoding,
             resource: Resource::File(self.handle),
+            eof_encountered: false,
         }
     }
 }
@@ -163,6 +166,29 @@ pub(crate) fn shared_handle(fid: i32) -> Option<SharedFileHandle> {
         .entries
         .get(&fid)
         .and_then(|entry| entry.file_handle())
+}
+
+pub(crate) fn eof_encountered(fid: i32) -> Option<bool> {
+    let guard = REGISTRY.lock().expect("file registry poisoned");
+    guard.entries.get(&fid).map(|entry| entry.eof_encountered)
+}
+
+pub(crate) fn mark_eof_encountered(fid: i32) -> bool {
+    let mut guard = REGISTRY.lock().expect("file registry poisoned");
+    let Some(entry) = guard.entries.get_mut(&fid) else {
+        return false;
+    };
+    entry.eof_encountered = true;
+    true
+}
+
+pub(crate) fn clear_eof_encountered(fid: i32) -> bool {
+    let mut guard = REGISTRY.lock().expect("file registry poisoned");
+    let Some(entry) = guard.entries.get_mut(&fid) else {
+        return false;
+    };
+    entry.eof_encountered = false;
+    true
 }
 
 #[cfg(test)]

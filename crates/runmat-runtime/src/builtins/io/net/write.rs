@@ -1,11 +1,16 @@
 //! MATLAB-compatible `write` builtin for TCP/IP clients in RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::NumericDType;
+use runmat_value::{IntValue, StructValue, Value};
 use std::io::{self, Write};
 use std::net::TcpStream;
 
@@ -61,7 +66,7 @@ const WRITE_INPUTS_CLIENT_DATA_DATATYPE: [BuiltinParamDescriptor; 3] = [
         name: "datatype",
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
-        default: Some("\"uint8\""),
+        default: Some("class(data)"),
         description: "Data type label (for example \"uint8\", \"double\", \"char\", \"string\").",
     },
 ];
@@ -143,6 +148,112 @@ pub const WRITE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &WRITE_ERRORS,
 };
 
+const WRITE_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "write-explicit-gpu-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "write with explicit gpuArray data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:WriteExplicitGpuDataExtension"),
+};
+const WRITE_NONVECTOR_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "write-nonvector-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "write with matrix or multidimensional numeric data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:WriteNonvectorDataExtension"),
+};
+const WRITE_SPARSE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "write-sparse-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "write with sparse numeric data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:WriteSparseDataExtension"),
+};
+const WRITE_LOGICAL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "write-logical-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "write with logical data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:WriteLogicalDataExtension"),
+};
+pub const WRITE_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    WRITE_EXPLICIT_GPU_EXTENSION,
+    WRITE_NONVECTOR_EXTENSION,
+    WRITE_SPARSE_EXTENSION,
+    WRITE_LOGICAL_EXTENSION,
+];
+
+const WRITE_INTEGER_VECTOR_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "data",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The public datatype table explicitly lists all eight integer classes for real row or column vectors. Without a datatype override, the native input datatype selects the wire representation.",
+    }];
+const WRITE_INTEGER_NONVECTOR_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "matrix or multidimensional data",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat can serialize nonvector integer arrays in column-major order, but the public interactive contract documents row or column vectors.",
+    }];
+const WRITE_INTEGER_SPARSE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "sparse data",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Sparse payloads are a RunMat-only host convenience and are densified from authoritative integer CSC storage before byte encoding.",
+    }];
+const WRITE_INTEGER_GPU_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "explicit gpuArray data",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The public page lists GPU code generation rather than interactive gpuArray input. RunMat gates explicit device intent before gather while leaving automatic residency transparent.",
+    }];
+pub const WRITE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "write(client, integer_vector, datatype?)",
+        inputs: &WRITE_INTEGER_VECTOR_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Same-class writes emit exact native bytes with client byte order. An explicit integer datatype performs one exact saturating cast; single/double overrides are deliberate floating wire boundaries.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "write(client, integer_matrix, datatype?)",
+        inputs: &WRITE_INTEGER_NONVECTOR_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat mode traverses nonvector payloads in column-major storage order after the independent shape gate.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "write(client, sparse_integer_data, datatype?)",
+        inputs: &WRITE_INTEGER_SPARSE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat mode expands sparse integer storage exactly before the selected wire cast; the sparse extension gate precedes socket access.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "write(client, explicit_gpu_integer_data, datatype?)",
+        inputs: &WRITE_INTEGER_GPU_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Explicit gpuArray data is available only in RunMat mode and gathers through its owner before host socket encoding.",
+    },
+];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::write")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "write",
@@ -156,7 +267,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Socket writes always execute on the host CPU; GPU providers are never consulted.",
+    notes: "Socket writes execute on the host CPU. Resident payloads gather through their owning provider before byte encoding; no provider compute kernel is launched.",
 };
 
 fn write_error_with_message(
@@ -215,6 +326,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "write,tcpclient,networking",
     type_resolver(crate::builtins::io::type_resolvers::write_type),
     descriptor(crate::builtins::io::net::write::WRITE_DESCRIPTOR),
+    extensions(crate::builtins::io::net::write::WRITE_EXTENSIONS),
+    integer_capabilities(crate::builtins::io::net::write::WRITE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::net::write"
 )]
 async fn write_builtin(
@@ -222,6 +335,7 @@ async fn write_builtin(
     data: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
+    ensure_write_extensions(&data)?;
     let client = gather_if_needed_async(&client)
         .await
         .map_err(|flow| map_write_flow(flow, &WRITE_ERROR_INVALID_CLIENT))?;
@@ -280,7 +394,10 @@ async fn write_builtin(
         ));
     }
 
-    let payload = prepare_payload(&data, datatype, byte_order)?;
+    let payload = match datatype {
+        Some(datatype) => prepare_payload(&data, datatype, byte_order)?,
+        None => prepare_default_payload(&data, byte_order)?,
+    };
     if payload.bytes.is_empty() {
         return Ok(Value::Num(0.0));
     }
@@ -301,6 +418,46 @@ async fn write_builtin(
     }
 }
 
+fn ensure_write_extensions(data: &Value) -> BuiltinResult<()> {
+    if crate::builtins::common::validation::value_contains_explicit_gpu(data) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &WRITE_EXPLICIT_GPU_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if matches!(data, Value::SparseTensor(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &WRITE_SPARSE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if matches!(data, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(data, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &WRITE_LOGICAL_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    let is_nonvector = match data {
+        Value::Tensor(tensor) => !is_vector_shape(&tensor.shape),
+        Value::SparseTensor(tensor) => !is_vector_shape(&[tensor.rows, tensor.cols]),
+        Value::GpuTensor(handle) => !is_vector_shape(&handle.shape),
+        _ => false,
+    };
+    if is_nonvector {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &WRITE_NONVECTOR_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
+}
+
+fn is_vector_shape(shape: &[usize]) -> bool {
+    shape.len() <= 2 && shape.iter().filter(|extent| **extent > 1).count() <= 1
+}
+
 #[derive(Clone, Copy)]
 enum DataType {
     UInt8,
@@ -318,10 +475,6 @@ enum DataType {
 }
 
 impl DataType {
-    fn default() -> Self {
-        DataType::UInt8
-    }
-
     fn element_size(self) -> usize {
         match self {
             DataType::UInt8 | DataType::Int8 | DataType::Char | DataType::String => 1,
@@ -343,14 +496,89 @@ struct Payload {
     elements: usize,
 }
 
-fn parse_arguments(args: &[Value]) -> BuiltinResult<DataType> {
+#[derive(Clone, Debug)]
+enum WriteElement {
+    Floating(f64),
+    Integer(IntValue),
+}
+
+impl WriteElement {
+    fn as_f64(&self) -> f64 {
+        match self {
+            Self::Floating(value) => *value,
+            Self::Integer(value) => value.to_f64(),
+        }
+    }
+}
+
+fn parse_arguments(args: &[Value]) -> BuiltinResult<Option<DataType>> {
     match args.len() {
-        0 => Ok(DataType::default()),
-        1 => parse_datatype(&args[0]),
+        0 => Ok(None),
+        1 => parse_datatype(&args[0]).map(Some),
         _ => Err(write_flow(
             &WRITE_ERROR_INVALID_INPUT,
             "write: expected at most one datatype argument",
         )),
+    }
+}
+
+fn prepare_default_payload(data: &Value, order: ByteOrder) -> BuiltinResult<Payload> {
+    prepare_payload(data, default_datatype(data)?, order)
+}
+
+fn default_datatype(data: &Value) -> BuiltinResult<DataType> {
+    let dtype = match data {
+        Value::Num(_) => DataType::Double,
+        Value::Int(value) => datatype_for_int(value),
+        Value::Tensor(tensor) => datatype_for_numeric_dtype(tensor.numeric_dtype()),
+        Value::SparseTensor(tensor) if tensor.is_logical() => DataType::UInt8,
+        Value::SparseTensor(tensor) => {
+            let Some(dtype) = tensor.numeric_dtype() else {
+                return Err(write_flow(
+                    &WRITE_ERROR_INVALID_DATA,
+                    "write: unsupported sparse input type",
+                ));
+            };
+            datatype_for_numeric_dtype(dtype)
+        }
+        Value::Bool(_) | Value::LogicalArray(_) => DataType::UInt8,
+        Value::CharArray(_) => DataType::Char,
+        Value::String(_) | Value::StringArray(_) => DataType::String,
+        _ => {
+            return Err(write_flow(
+                &WRITE_ERROR_INVALID_DATA,
+                "write: unsupported input type",
+            ))
+        }
+    };
+    Ok(dtype)
+}
+
+fn datatype_for_int(value: &IntValue) -> DataType {
+    match value {
+        IntValue::I8(_) => DataType::Int8,
+        IntValue::I16(_) => DataType::Int16,
+        IntValue::I32(_) => DataType::Int32,
+        IntValue::I64(_) => DataType::Int64,
+        IntValue::U8(_) => DataType::UInt8,
+        IntValue::U16(_) => DataType::UInt16,
+        IntValue::U32(_) => DataType::UInt32,
+        IntValue::U64(_) => DataType::UInt64,
+    }
+}
+
+fn datatype_for_numeric_dtype(dtype: NumericDType) -> DataType {
+    match dtype {
+        NumericDType::F64 => DataType::Double,
+        NumericDType::F32 => DataType::Single,
+        NumericDType::I8 => DataType::Int8,
+        NumericDType::I16 => DataType::Int16,
+        NumericDType::I32 => DataType::Int32,
+        NumericDType::I64 => DataType::Int64,
+        NumericDType::U8 => DataType::UInt8,
+        NumericDType::U16 => DataType::UInt16,
+        NumericDType::U32 => DataType::UInt32,
+        NumericDType::U64 => DataType::UInt64,
     }
 }
 
@@ -397,18 +625,49 @@ fn prepare_payload(data: &Value, datatype: DataType, order: ByteOrder) -> Builti
 fn numeric_payload(data: &Value, datatype: DataType, order: ByteOrder) -> BuiltinResult<Payload> {
     let values = flatten_numeric(data)?;
     let mut bytes = Vec::with_capacity(values.len() * datatype.element_size());
-    for value in values.iter().copied() {
+    for value in &values {
+        let floating = value.as_f64();
         match datatype {
-            DataType::UInt8 => bytes.push(cast_to_u8(value)),
-            DataType::Int8 => bytes.push(cast_to_i8(value) as u8),
-            DataType::UInt16 => extend_u16(&mut bytes, cast_to_u16(value), order),
-            DataType::Int16 => extend_i16(&mut bytes, cast_to_i16(value), order),
-            DataType::UInt32 => extend_u32(&mut bytes, cast_to_u32(value), order),
-            DataType::Int32 => extend_i32(&mut bytes, cast_to_i32(value), order),
-            DataType::UInt64 => extend_u64(&mut bytes, cast_to_u64(value), order),
-            DataType::Int64 => extend_i64(&mut bytes, cast_to_i64(value), order),
-            DataType::Single => extend_f32(&mut bytes, cast_to_f32(value), order),
-            DataType::Double => extend_f64(&mut bytes, value, order),
+            DataType::UInt8 => bytes.push(
+                integer_unsigned(value, u8::MAX as u64)
+                    .map_or_else(|| cast_to_u8(floating), |v| v as u8),
+            ),
+            DataType::Int8 => bytes.push(
+                integer_signed(value, i8::MIN as i64, i8::MAX as i64)
+                    .map_or_else(|| cast_to_i8(floating), |v| v as i8) as u8,
+            ),
+            DataType::UInt16 => {
+                let encoded = integer_unsigned(value, u16::MAX as u64)
+                    .map_or_else(|| cast_to_u16(floating), |v| v as u16);
+                extend_u16(&mut bytes, encoded, order)
+            }
+            DataType::Int16 => {
+                let encoded = integer_signed(value, i16::MIN as i64, i16::MAX as i64)
+                    .map_or_else(|| cast_to_i16(floating), |v| v as i16);
+                extend_i16(&mut bytes, encoded, order)
+            }
+            DataType::UInt32 => {
+                let encoded = integer_unsigned(value, u32::MAX as u64)
+                    .map_or_else(|| cast_to_u32(floating), |v| v as u32);
+                extend_u32(&mut bytes, encoded, order)
+            }
+            DataType::Int32 => {
+                let encoded = integer_signed(value, i32::MIN as i64, i32::MAX as i64)
+                    .map_or_else(|| cast_to_i32(floating), |v| v as i32);
+                extend_i32(&mut bytes, encoded, order)
+            }
+            DataType::UInt64 => {
+                let encoded =
+                    integer_unsigned(value, u64::MAX).unwrap_or_else(|| cast_to_u64(floating));
+                extend_u64(&mut bytes, encoded, order)
+            }
+            DataType::Int64 => {
+                let encoded = integer_signed(value, i64::MIN, i64::MAX)
+                    .unwrap_or_else(|| cast_to_i64(floating));
+                extend_i64(&mut bytes, encoded, order)
+            }
+            DataType::Single => extend_f32(&mut bytes, cast_to_f32(floating), order),
+            DataType::Double => extend_f64(&mut bytes, floating, order),
             DataType::Char | DataType::String => unreachable!(),
         }
     }
@@ -431,9 +690,20 @@ fn char_payload(data: &Value) -> BuiltinResult<Payload> {
             }
             sa.data[0].as_bytes().to_vec()
         }
-        Value::Tensor(t) => t.data.iter().map(|&v| cast_to_u8(v)).collect::<Vec<u8>>(),
+        Value::Tensor(_) => flatten_numeric(data)?
+            .iter()
+            .map(|value| {
+                let floating = value.as_f64();
+                integer_unsigned(value, u8::MAX as u64)
+                    .map_or_else(|| cast_to_u8(floating), |v| v as u8)
+            })
+            .collect(),
         Value::Num(n) => vec![cast_to_u8(*n)],
-        Value::Int(iv) => vec![cast_to_u8(iv.to_f64())],
+        Value::Int(iv) => vec![
+            integer_unsigned(&WriteElement::Integer(iv.clone()), u8::MAX as u64)
+                .expect("integer conversion is always available for integer input")
+                as u8,
+        ],
         Value::Bool(b) => vec![if *b { 1 } else { 0 }],
         Value::LogicalArray(la) => la
             .data
@@ -491,9 +761,19 @@ fn string_payload(data: &Value) -> BuiltinResult<Payload> {
     }
 }
 
-fn flatten_numeric(value: &Value) -> BuiltinResult<Vec<f64>> {
+fn flatten_numeric(value: &Value) -> BuiltinResult<Vec<WriteElement>> {
     match value {
-        Value::Tensor(t) => Ok(t.data.clone()),
+        Value::Tensor(t) => Ok((0..t.len())
+            .map(|index| {
+                let value = t
+                    .numeric_value_at(index)
+                    .expect("index within authoritative numeric storage");
+                value.into_int_value().map_or_else(
+                    || WriteElement::Floating(value.materialize_f64()),
+                    WriteElement::Integer,
+                )
+            })
+            .collect()),
         Value::SparseTensor(s) => {
             let total_elements = s.rows.checked_mul(s.cols).ok_or_else(|| {
                 write_error_with_message(
@@ -507,24 +787,48 @@ fn flatten_numeric(value: &Value) -> BuiltinResult<Vec<f64>> {
                     &WRITE_ERROR_INTERNAL,
                 ));
             }
-            s.to_dense().map(|dense| dense.data).map_err(|err| {
+            if s.is_logical() {
+                let dense = s.to_dense_logical().map_err(|err| {
+                    write_error_with_message(format!("write: {err}"), &WRITE_ERROR_INTERNAL)
+                })?;
+                return Ok(dense
+                    .data
+                    .into_iter()
+                    .map(|value| WriteElement::Floating(f64::from(value)))
+                    .collect());
+            }
+            let dense = s.to_dense().map_err(|err| {
                 write_error_with_message(format!("write: {err}"), &WRITE_ERROR_INTERNAL)
-            })
+            })?;
+            Ok((0..dense.len())
+                .map(|index| {
+                    let value = dense
+                        .numeric_value_at(index)
+                        .expect("index within authoritative numeric storage");
+                    value.into_int_value().map_or_else(
+                        || WriteElement::Floating(value.materialize_f64()),
+                        WriteElement::Integer,
+                    )
+                })
+                .collect())
         }
-        Value::Num(n) => Ok(vec![*n]),
-        Value::Int(iv) => Ok(vec![iv.to_f64()]),
-        Value::Bool(b) => Ok(vec![if *b { 1.0 } else { 0.0 }]),
+        Value::Num(n) => Ok(vec![WriteElement::Floating(*n)]),
+        Value::Int(iv) => Ok(vec![WriteElement::Integer(iv.clone())]),
+        Value::Bool(b) => Ok(vec![WriteElement::Floating(if *b { 1.0 } else { 0.0 })]),
         Value::LogicalArray(la) => Ok(la
             .data
             .iter()
-            .map(|&b| if b != 0 { 1.0 } else { 0.0 })
+            .map(|&b| WriteElement::Floating(if b != 0 { 1.0 } else { 0.0 }))
             .collect()),
         Value::CharArray(ca) => Ok(ca
             .data
             .iter()
-            .map(|&ch| (ch as u32 & 0xFF) as f64)
+            .map(|&ch| WriteElement::Floating((ch as u32 & 0xFF) as f64))
             .collect()),
-        Value::String(text) => Ok(text.chars().map(|ch| (ch as u32) as f64).collect()),
+        Value::String(text) => Ok(text
+            .chars()
+            .map(|ch| WriteElement::Floating((ch as u32) as f64))
+            .collect()),
         Value::StringArray(sa) => {
             if sa.data.len() != 1 {
                 return Err(write_flow(
@@ -532,7 +836,10 @@ fn flatten_numeric(value: &Value) -> BuiltinResult<Vec<f64>> {
                     "write: string array input must be scalar",
                 ));
             }
-            Ok(sa.data[0].chars().map(|ch| (ch as u32) as f64).collect())
+            Ok(sa.data[0]
+                .chars()
+                .map(|ch| WriteElement::Floating((ch as u32) as f64))
+                .collect())
         }
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(write_flow(
             &WRITE_ERROR_INVALID_DATA,
@@ -544,6 +851,7 @@ fn flatten_numeric(value: &Value) -> BuiltinResult<Vec<f64>> {
         )),
         Value::Cell(_)
         | Value::Struct(_)
+        | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
@@ -554,6 +862,11 @@ fn flatten_numeric(value: &Value) -> BuiltinResult<Vec<f64>> {
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
+        | Value::Future(_)
+        | Value::Task(_)
+        | Value::Pool(_)
+        | Value::Job(_)
+        | Value::Foreign(_)
         | Value::OutputList(_) => Err(write_flow(
             &WRITE_ERROR_INVALID_DATA,
             "write: unsupported input type",
@@ -563,6 +876,28 @@ fn flatten_numeric(value: &Value) -> BuiltinResult<Vec<f64>> {
             "write: GPU tensor should have been gathered before encoding",
         )),
     }
+}
+
+fn integer_raw(value: &WriteElement) -> Option<i128> {
+    match value {
+        WriteElement::Integer(IntValue::I8(v)) => Some(*v as i128),
+        WriteElement::Integer(IntValue::I16(v)) => Some(*v as i128),
+        WriteElement::Integer(IntValue::I32(v)) => Some(*v as i128),
+        WriteElement::Integer(IntValue::I64(v)) => Some(*v as i128),
+        WriteElement::Integer(IntValue::U8(v)) => Some(*v as i128),
+        WriteElement::Integer(IntValue::U16(v)) => Some(*v as i128),
+        WriteElement::Integer(IntValue::U32(v)) => Some(*v as i128),
+        WriteElement::Integer(IntValue::U64(v)) => Some(*v as i128),
+        WriteElement::Floating(_) => None,
+    }
+}
+
+fn integer_unsigned(value: &WriteElement, max: u64) -> Option<u64> {
+    integer_raw(value).map(|raw| raw.clamp(0, max as i128) as u64)
+}
+
+fn integer_signed(value: &WriteElement, min: i64, max: i64) -> Option<i64> {
+    integer_raw(value).map(|raw| raw.clamp(min as i128, max as i128) as i64)
 }
 
 fn cast_to_u8(value: f64) -> u8 {
@@ -808,8 +1143,12 @@ fn extract_client_id(struct_value: &StructValue) -> BuiltinResult<u64> {
             )
         })?;
     match id_value {
-        Value::Int(IntValue::U64(id)) => Ok(*id),
-        Value::Int(iv) => Ok(iv.to_i64() as u64),
+        Value::Int(iv) => iv.try_to_u64().ok_or_else(|| {
+            write_flow(
+                &WRITE_ERROR_INVALID_CLIENT,
+                "write: tcpclient struct has invalid handle field",
+            )
+        }),
         _ => Err(write_flow(
             &WRITE_ERROR_INVALID_CLIENT,
             "write: tcpclient struct has invalid handle field",
@@ -864,7 +1203,7 @@ pub(crate) mod tests {
     use crate::builtins::io::net::accept::{
         configure_stream, insert_client, remove_client_for_test,
     };
-    use runmat_builtins::{CharArray, IntValue, StructValue, Tensor};
+    use runmat_value::{CharArray, IntValue, IntegerStorage, SparseTensor, StructValue, Tensor};
     use std::io::Read;
     use std::net::{TcpListener, TcpStream};
     use std::sync::{Arc, Barrier};
@@ -897,6 +1236,17 @@ pub(crate) mod tests {
         assert_eq!(err.identifier(), Some(expected));
     }
 
+    #[test]
+    fn typed_negative_client_handle_is_rejected() {
+        let mut client = StructValue::new();
+        client.fields.insert(
+            CLIENT_HANDLE_FIELD.to_string(),
+            Value::Int(IntValue::I8(-1)),
+        );
+        let err = extract_client_id(&client).unwrap_err();
+        assert_error_identifier(err, WRITE_ERROR_INVALID_CLIENT.identifier.unwrap());
+    }
+
     fn run_write(client: Value, data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(write_builtin(client, data, rest))
     }
@@ -915,7 +1265,7 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn write_default_uint8_sends_bytes() {
+    fn write_default_preserves_double_datatype() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
         let port = listener.local_addr().unwrap().port();
         let handle = thread::spawn(move || {
@@ -935,7 +1285,11 @@ pub(crate) mod tests {
         }
         remove_client_for_test(client_id(&client));
         let received = handle.join().expect("join");
-        assert_eq!(received, vec![1, 2, 3, 4]);
+        let expected = [1.0_f64, 2.0, 3.0, 4.0]
+            .into_iter()
+            .flat_map(f64::to_le_bytes)
+            .collect::<Vec<_>>();
+        assert_eq!(received, expected);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -971,6 +1325,148 @@ pub(crate) mod tests {
         extend_f64(&mut expected, 2.5, ByteOrder::Big);
         extend_f64(&mut expected, 3.5, ByteOrder::Big);
         assert_eq!(received.to_vec(), expected);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn write_uint64_payload_reads_typed_integer_storage_exactly() {
+        let wide = (1_u64 << 53) + 1;
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![wide, u64::MAX]), vec![1, 2])
+            .expect("typed integer tensor");
+
+        let payload =
+            prepare_payload(&Value::Tensor(tensor), DataType::UInt64, ByteOrder::Little).unwrap();
+        let mut expected = Vec::new();
+        extend_u64(&mut expected, wide, ByteOrder::Little);
+        extend_u64(&mut expected, u64::MAX, ByteOrder::Little);
+        assert_eq!(payload.elements, 2);
+        assert_eq!(payload.bytes, expected);
+    }
+
+    #[test]
+    fn write_default_payload_preserves_uint64_datatype_exactly() {
+        let wide = (1_u64 << 53) + 1;
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![wide, u64::MAX]), vec![1, 2])
+            .expect("typed integer tensor");
+
+        let payload = prepare_default_payload(&Value::Tensor(tensor), ByteOrder::Big).unwrap();
+        let expected = [wide, u64::MAX]
+            .into_iter()
+            .flat_map(u64::to_be_bytes)
+            .collect::<Vec<_>>();
+        assert_eq!(payload.elements, 2);
+        assert_eq!(payload.bytes, expected);
+    }
+
+    #[test]
+    fn write_extensions_are_gated_before_client_access() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let data = Value::Tensor(Tensor::new(vec![1.0; 4], vec![2, 2]).unwrap());
+        let error = run_write(Value::Num(0.0), data, Vec::new())
+            .expect_err("strict mode rejects nonvector data before client access");
+        assert_eq!(
+            error.identifier(),
+            WRITE_NONVECTOR_EXTENSION.error_identifier
+        );
+
+        let sparse =
+            SparseTensor::new_integer(2, 1, vec![0, 1], vec![0], IntegerStorage::U8(vec![1]))
+                .unwrap();
+        let error = run_write(Value::Num(0.0), Value::SparseTensor(sparse), Vec::new())
+            .expect_err("strict mode rejects sparse data before client access");
+        assert_eq!(error.identifier(), WRITE_SPARSE_EXTENSION.error_identifier);
+
+        let error = run_write(Value::Num(0.0), Value::Bool(true), Vec::new())
+            .expect_err("strict mode rejects logical data before client access");
+        assert_eq!(error.identifier(), WRITE_LOGICAL_EXTENSION.error_identifier);
+
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX - 469,
+            descriptor: Default::default(),
+        };
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let error = run_write(Value::Num(0.0), Value::GpuTensor(handle), Vec::new())
+            .expect_err("strict mode rejects explicit GPU data before provider access");
+        assert_eq!(
+            error.identifier(),
+            WRITE_EXPLICIT_GPU_EXTENSION.error_identifier
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn write_sparse_integer_payload_uses_exact_storage() {
+        let wide = (1_u64 << 53) + 1;
+        let sparse = SparseTensor::new_integer(
+            2,
+            2,
+            vec![0, 1, 2],
+            vec![1, 0],
+            IntegerStorage::U64(vec![wide, u64::MAX]),
+        )
+        .expect("typed sparse tensor");
+
+        let payload = prepare_payload(
+            &Value::SparseTensor(sparse),
+            DataType::UInt64,
+            ByteOrder::Little,
+        )
+        .expect("sparse uint64 payload");
+        let mut expected = Vec::new();
+        extend_u64(&mut expected, 0, ByteOrder::Little);
+        extend_u64(&mut expected, wide, ByteOrder::Little);
+        extend_u64(&mut expected, u64::MAX, ByteOrder::Little);
+        extend_u64(&mut expected, 0, ByteOrder::Little);
+        assert_eq!(payload.elements, 4);
+        assert_eq!(payload.bytes, expected);
+
+        let signed = SparseTensor::new_integer(
+            2,
+            1,
+            vec![0, 2],
+            vec![0, 1],
+            IntegerStorage::I16(vec![-7, 42]),
+        )
+        .expect("signed sparse tensor");
+        let payload = prepare_payload(
+            &Value::SparseTensor(signed),
+            DataType::Int16,
+            ByteOrder::Little,
+        )
+        .expect("sparse int16 payload");
+        assert_eq!(
+            payload.bytes,
+            [-7_i16, 42]
+                .into_iter()
+                .flat_map(i16::to_le_bytes)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn write_integer_payload_narrowing_uses_exact_integer_bounds() {
+        let value = Value::Int(IntValue::U64((1_u64 << 53) + 1));
+        let payload = prepare_payload(&value, DataType::UInt32, ByteOrder::Big).unwrap();
+        assert_eq!(payload.bytes, u32::MAX.to_be_bytes());
+
+        let value = Value::Int(IntValue::I64(i64::MIN + 1));
+        let payload = prepare_payload(&value, DataType::Int16, ByteOrder::Little).unwrap();
+        assert_eq!(payload.bytes, i16::MIN.to_le_bytes());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn write_char_payload_reads_typed_integer_storage_exactly() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U16(vec![82, 77]), vec![1, 2]).expect("chars");
+
+        let payload = prepare_payload(&Value::Tensor(tensor), DataType::Char, ByteOrder::Little)
+            .expect("char payload");
+        assert_eq!(payload.elements, 2);
+        assert_eq!(payload.bytes, b"RM");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

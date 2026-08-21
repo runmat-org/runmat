@@ -9,13 +9,13 @@
     "https",
     "api"
   ],
-  "summary": "Read web content over HTTP/HTTPS and decode responses with MATLAB-compatible behavior.",
+  "summary": "Read and decode content from a web service.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "webread always gathers gpuArray inputs and executes on the CPU."
+    "notes": "HTTP execution is host-side. Automatically resident values gather transparently; explicit gpuArray input requires RunMat mode."
   },
   "fusion": {
     "elementwise": false,
@@ -36,14 +36,16 @@
       "builtins::io::http::webread::tests::webread_queryparameters_option_struct"
     ]
   },
-  "description": "`webread` issues HTTP/HTTPS requests and returns decoded response content (text, JSON, or bytes) using MATLAB-compatible `weboptions` and query-parameter workflows.",
+  "description": "`webread` issues an HTTP or HTTPS GET request and decodes the response according to its content type and options.",
   "behaviors": [
     "Accepts URLs supplied as character vectors or string scalars; the URL must be absolute.",
-    "Optional `weboptions`-style fields (either through a struct argument or name-value pairs) control content decoding (`ContentType`), request timeout (`Timeout`), headers (`HeaderFields`), and authentication (`Username`/`Password`). The builtin currently supports the default `GET` request method; use `webwrite` for POST/PUT uploads.",
-    "Additional name-value pairs that do not match an option are appended to the query string using percent-encoding. A leading struct or cell array argument can also supply query parameters.",
+    "Query names are text. Query values may be text, numeric, or logical scalars or vectors; native integer values are formatted from exact storage without conversion to double. Vector values use comma-separated formatting in the current implementation.",
+    "A final options structure controls response decoding (`ContentType`), timeout (`Timeout`), headers (`HeaderFields`), and authentication (`Username` and `Password`). The default timeout is 5 seconds, and an integer timeout is read exactly.",
+    "RunMat also accepts a leading structure or cell array of query parameters and recognizes option-like direct name-value pairs. These conveniences do not replace the portable query-pair plus final-options form.",
     "`ContentType 'auto'` (default) inspects the `Content-Type` response header to choose between JSON, text, or binary decoding. Explicit `ContentType 'json'`, `'text'`, or `'binary'` override the detection logic.",
     "JSON responses are parsed with the same rules as `jsondecode`, producing doubles, logicals, strings, structs, and cell arrays that match MATLAB semantics.",
-    "Text responses preserve the server-provided character encoding (UTF-8 with automatic decoding of exotic charsets exposed in the HTTP headers). Binary payloads return `1×N` double arrays whose entries store byte values in the range 0–255.",
+    "Text responses use the response character encoding when supported. Binary payloads return an exact `1×N uint8` row vector.",
+    "Image, audio, table, XML DOM, raw-response, and custom `ContentReader` result forms are not yet implemented.",
     "HTTP errors (non-2xx status codes), timeouts, TLS failures, and parsing problems raise descriptive MATLAB-style errors."
   ],
   "examples": [
@@ -76,7 +78,7 @@
     },
     {
       "question": "How do I control request timeouts?",
-      "answer": "Supply `\"Timeout\", seconds` as a name-value pair or in an options struct. The default timeout is 60 seconds. Timeouts raise `webread: request to <url> timed out`."
+      "answer": "Set `Timeout` in a final options structure. The default is 5 seconds; a positive scalar up to 2147.483647 seconds or `Inf` is accepted."
     },
     {
       "question": "What headers can I set?",
@@ -96,7 +98,7 @@
     },
     {
       "question": "How are binary responses represented?",
-      "answer": "Binary payloads return `1×N` double arrays whose elements are byte values. Convert them to the desired integer type (for example `uint8`) before further processing."
+      "answer": "Binary payloads return an exact `1×N uint8` row vector."
     },
     {
       "question": "What happens when the server returns an error status?",
@@ -108,7 +110,7 @@
     },
     {
       "question": "Can I pass query parameters as GPU arrays?",
-      "answer": "Yes. Inputs wrapped in `gpuArray` are gathered before assembling the query string."
+      "answer": "Automatically resident query values gather transparently. Explicit gpuArray query values are supported only in RunMat mode and are rejected before provider access in MATLAB-compatible mode."
     }
   ],
   "links": [
@@ -133,8 +135,8 @@
     "label": "`crates/runmat-runtime/src/builtins/io/http/webread.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/http/webread.rs"
   },
-  "gpu_residency": "No. `webread` gathers any GPU-resident values before contacting the network and produces host results. Keeping inputs on the GPU offers no benefit because HTTP/TLS stacks operate on the CPU.",
+  "gpu_residency": "HTTP and TLS execute on the host and results are host-resident. Automatically resident values gather transparently; explicit gpuArray input requires RunMat mode.",
   "gpu_behavior": [
-    "`webread` runs entirely on the CPU. Any `gpuArray` inputs (for example, query parameter values) are gathered to host memory before building the HTTP request. Results are produced on the host, and fusion graphs terminate at this builtin via `ResidencyPolicy::GatherImmediately`."
+    "The request path terminates fusion and gathers automatically resident values through their owning provider. Explicit gpuArray input crosses the `webread-explicit-gpu-input` extension gate before any gather."
   ]
 }

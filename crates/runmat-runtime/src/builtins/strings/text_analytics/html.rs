@@ -3,17 +3,77 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, ObjectInstance, ResolveContext, StringArray, StructValue, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, ObjectInstance, StringArray, StructValue, Value};
 
 use crate::builtins::strings::core::compat::{scalar_text, text_items};
 use crate::{build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult};
 
 const HTML_TREE_CLASS: &str = "htmlTree";
 const MISSING: &str = "<missing>";
+
+const EXTRACT_HTML_CHAR_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "extracthtmltext-char-matrix",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "extractHTMLText row-wise character-matrix input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ExtractHTMLTextCharMatrixExtension"),
+};
+const EXTRACT_HTML_BROAD_CELL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "extracthtmltext-broad-cell",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "extractHTMLText with string-valued or mixed htmlTree/text cells is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ExtractHTMLTextBroadCellExtension"),
+};
+const HTML_TREE_CELL_OBJECT_ARRAY_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "htmltree-cell-object-array",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "htmlTree nonscalar input currently returns a shape-preserving cell array of scalar htmlTree objects because RunMat does not yet have a native object-array container",
+        error_identifier: Some("RunMat:compatibility:HtmlTreeCellObjectArrayExtension"),
+    };
+const HTML_TREE_BROAD_CELL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "htmltree-broad-cell-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "htmlTree accepts string-valued cells only as a RunMat extension; the public cell form is a cell array of character vectors",
+    error_identifier: Some("RunMat:compatibility:HtmlTreeBroadCellExtension"),
+};
+const HTML_TREE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    HTML_TREE_CELL_OBJECT_ARRAY_EXTENSION,
+    HTML_TREE_BROAD_CELL_EXTENSION,
+];
+const EXTRACT_HTML_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    EXTRACT_HTML_CHAR_MATRIX_EXTENSION,
+    EXTRACT_HTML_BROAD_CELL_EXTENSION,
+];
+pub const EXTRACT_HTML_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "extractHTMLText accepts host text or htmlTree input and textual ExtractionMethod values only. All eight integer classes, logical and complex values, and resident numeric handles reject without numeric-to-text conversion or provider access.",
+    };
+pub const FIND_ELEMENT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "findElement accepts a scalar htmlTree object and a textual CSS selector. All eight integer classes, logical and complex values, and resident numeric handles reject without numeric-to-object conversion or provider access.",
+    };
+pub const GET_ATTRIBUTE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "htmlTree.getAttribute accepts host htmlTree objects and a host text attribute name only. All eight integer classes and provider-resident numeric values reject without implicit conversion, gather, or provider access.",
+    };
+pub const HTML_TREE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "htmlTree accepts host string arrays, character vectors, and cell arrays of character vectors. All eight integer classes, logical and complex values, and resident numeric handles reject before parsing, conversion, gather, or provider access.",
+};
 
 const OUT_TREE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "tree",
@@ -187,6 +247,8 @@ fn html_error(fn_name: &str, message: impl Into<String>) -> crate::RuntimeError 
     summary = "Parse HTML code into a lightweight htmlTree object.",
     keywords = "htmlTree,HTML,text analytics,DOM",
     accel = "metadata",
+    extensions(HTML_TREE_EXTENSIONS),
+    integer_audit(crate::builtins::strings::text_analytics::html::HTML_TREE_INTEGER_AUDIT),
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::html::HTML_TREE_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::text_analytics::html"
@@ -198,6 +260,7 @@ async fn html_tree_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             "htmlTree: expected exactly one input",
         ));
     }
+    preflight_html_tree_input(&args[0])?;
     let value = gather_if_needed_async(&args[0]).await.map_err(|err| {
         html_error(
             "htmlTree",
@@ -207,19 +270,128 @@ async fn html_tree_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     html_tree_value(value)
 }
 
+fn preflight_html_tree_input(value: &Value) -> BuiltinResult<()> {
+    if numeric_or_resident(value) || contains_numeric_or_resident(value) {
+        return Err(html_error(
+            "htmlTree",
+            "htmlTree: expected a string array, character vector, or cell array of character vectors",
+        ));
+    }
+    if let Value::Cell(cell) = value {
+        if cell
+            .data
+            .iter()
+            .any(|value| !matches!(value, Value::CharArray(array) if array.rows <= 1))
+        {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &HTML_TREE_BROAD_CELL_EXTENSION,
+                "htmlTree",
+            )?;
+        }
+    }
+    let nonscalar = match value {
+        Value::StringArray(array) => array.data.len() != 1,
+        Value::CharArray(array) => array.rows > 1,
+        Value::Cell(cell) => cell.data.len() != 1,
+        _ => false,
+    };
+    if nonscalar {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &HTML_TREE_CELL_OBJECT_ARRAY_EXTENSION,
+            "htmlTree",
+        )?;
+    }
+    Ok(())
+}
+
 #[runtime_builtin(
     name = "extractHTMLText",
     category = "strings/text_analytics",
     summary = "Extract visible text from HTML code or htmlTree objects.",
     keywords = "extractHTMLText,HTML,text analytics,parse",
     accel = "sink",
+    extensions(EXTRACT_HTML_EXTENSIONS),
+    integer_audit(crate::builtins::strings::text_analytics::html::EXTRACT_HTML_INTEGER_AUDIT),
     type_resolver(string_type),
     descriptor(crate::builtins::strings::text_analytics::html::EXTRACT_HTML_TEXT_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::text_analytics::html"
 )]
 async fn extract_html_text_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    preflight_extract_html_args(&args)?;
     let (source, method) = parse_extract_args(args).await?;
     extract_html_text_value(source, method)
+}
+
+fn preflight_extract_html_args(args: &[Value]) -> BuiltinResult<()> {
+    if let Some(source) = args.first() {
+        if numeric_or_resident(source) || contains_numeric_or_resident(source) {
+            return Err(html_error(
+                "extractHTMLText",
+                "extractHTMLText: expected HTML text or htmlTree input",
+            ));
+        }
+        if matches!(source, Value::CharArray(array) if array.rows > 1) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &EXTRACT_HTML_CHAR_MATRIX_EXTENSION,
+                "extractHTMLText",
+            )?;
+        }
+        if html_cell_is_broad(source) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &EXTRACT_HTML_BROAD_CELL_EXTENSION,
+                "extractHTMLText",
+            )?;
+        }
+    }
+    for value in args.iter().skip(1) {
+        if numeric_or_resident(value) || contains_numeric_or_resident(value) {
+            return Err(html_error(
+                "extractHTMLText",
+                "extractHTMLText: option names and values must be text scalars",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn numeric_or_resident(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Num(_)
+            | Value::Int(_)
+            | Value::Bool(_)
+            | Value::Tensor(_)
+            | Value::SparseTensor(_)
+            | Value::LogicalArray(_)
+            | Value::Complex(_, _)
+            | Value::ComplexTensor(_)
+            | Value::Symbolic(_)
+            | Value::GpuTensor(_)
+    )
+}
+
+fn contains_numeric_or_resident(value: &Value) -> bool {
+    match value {
+        Value::Cell(cell) => cell
+            .data
+            .iter()
+            .any(|value| numeric_or_resident(value) || contains_numeric_or_resident(value)),
+        _ => false,
+    }
+}
+
+fn html_cell_is_broad(value: &Value) -> bool {
+    let Value::Cell(cell) = value else {
+        return false;
+    };
+    let contains_tree = cell.data.iter().any(is_html_tree_value);
+    if contains_tree {
+        cell.data.iter().any(|value| !is_html_tree_value(value))
+    } else {
+        cell.data
+            .iter()
+            .any(|value| !matches!(value, Value::CharArray(array) if array.rows <= 1))
+    }
 }
 
 #[runtime_builtin(
@@ -228,6 +400,7 @@ async fn extract_html_text_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     summary = "Find elements in an htmlTree using common CSS selectors.",
     keywords = "findElement,htmlTree,HTML,CSS selector,text analytics",
     accel = "metadata",
+    integer_audit(crate::builtins::strings::text_analytics::html::FIND_ELEMENT_INTEGER_AUDIT),
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::html::FIND_ELEMENT_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::text_analytics::html"
@@ -237,6 +410,15 @@ async fn find_element_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         return Err(html_error(
             "findElement",
             "findElement: expected htmlTree and selector",
+        ));
+    }
+    if args
+        .iter()
+        .any(|value| numeric_or_resident(value) || contains_numeric_or_resident(value))
+    {
+        return Err(html_error(
+            "findElement",
+            "findElement: expected htmlTree and textual CSS selector",
         ));
     }
     let tree = gather_if_needed_async(&args[0]).await.map_err(|err| {
@@ -261,6 +443,7 @@ async fn find_element_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     summary = "Read an HTML attribute from htmlTree root nodes.",
     keywords = "getAttribute,htmlTree,HTML,attribute,text analytics",
     accel = "metadata",
+    integer_audit(crate::builtins::strings::text_analytics::html::GET_ATTRIBUTE_INTEGER_AUDIT),
     type_resolver(string_type),
     descriptor(crate::builtins::strings::text_analytics::html::GET_ATTRIBUTE_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::text_analytics::html"
@@ -272,20 +455,34 @@ async fn get_attribute_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             "getAttribute: expected htmlTree and attribute name",
         ));
     }
-    let tree = gather_if_needed_async(&args[0]).await.map_err(|err| {
-        html_error(
+    if args
+        .iter()
+        .any(|value| numeric_or_resident(value) || contains_numeric_or_resident(value))
+    {
+        return Err(html_error(
             "getAttribute",
-            format!("getAttribute: failed to gather tree: {err}"),
-        )
-    })?;
-    let attr = gather_if_needed_async(&args[1]).await.map_err(|err| {
-        html_error(
+            "getAttribute: expected htmlTree and textual attribute name",
+        ));
+    }
+    let attr = attribute_name_text(&args[1])?;
+    get_attribute_value(args[0].clone(), &attr)
+}
+
+fn attribute_name_text(value: &Value) -> BuiltinResult<String> {
+    if let Value::Cell(cell) = value {
+        if cell.data.len() == 1 {
+            if let Value::CharArray(array) = &cell.data[0] {
+                if array.rows <= 1 {
+                    return scalar_text(&cell.data[0], "getAttribute");
+                }
+            }
+        }
+        return Err(html_error(
             "getAttribute",
-            format!("getAttribute: failed to gather attribute name: {err}"),
-        )
-    })?;
-    let attr = scalar_text(&attr, "getAttribute")?;
-    get_attribute_value(tree, &attr)
+            "getAttribute: attribute name cell must contain one character vector",
+        ));
+    }
+    scalar_text(value, "getAttribute")
 }
 
 async fn parse_extract_args(args: Vec<Value>) -> BuiltinResult<(Value, ExtractionMethod)> {
@@ -2012,6 +2209,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn extraction_accepts_cell_array_of_text() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let cell = CellArray::new(
             vec![
                 Value::String("<p>first</p>".to_string()),
@@ -2058,6 +2256,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn html_tree_preserves_array_shape_as_cell_of_objects() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let input = StringArray::new(
             vec!["<p>one</p>".to_string(), "<p>two</p>".to_string()],
             vec![1, 2],
@@ -2072,6 +2271,51 @@ mod tests {
         assert!(cell.data.iter().all(
             |value| matches!(value, Value::Object(object) if object.is_class(HTML_TREE_CLASS))
         ));
+    }
+
+    #[test]
+    fn html_tree_rejects_numeric_and_resident_inputs_before_gather() {
+        let numeric = futures::executor::block_on(html_tree_builtin(vec![Value::Num(1.0)]))
+            .expect_err("numeric input must reject");
+        assert_eq!(numeric.identifier(), Some("RunMat:html:InvalidInput"));
+
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 9_419_001,
+            descriptor: Default::default(),
+        });
+        let resident = futures::executor::block_on(html_tree_builtin(vec![resident]))
+            .expect_err("resident input must reject before provider access");
+        assert_eq!(resident.identifier(), Some("RunMat:html:InvalidInput"));
+        assert_eq!(
+            HTML_TREE_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+    }
+
+    #[test]
+    fn html_tree_truthfully_gates_runmat_cell_container_and_broad_cell_forms() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let input = StringArray::new(
+            vec!["<p>one</p>".to_string(), "<p>two</p>".to_string()],
+            vec![1, 2],
+        )
+        .unwrap();
+        let array = futures::executor::block_on(html_tree_builtin(vec![Value::StringArray(input)]))
+            .expect_err("cell object-array representation is gated");
+        assert_eq!(
+            array.identifier(),
+            Some("RunMat:compatibility:HtmlTreeCellObjectArrayExtension")
+        );
+
+        let broad = Value::Cell(CellArray::new(vec![Value::from("<p>x</p>")], 1, 1).unwrap());
+        let broad = futures::executor::block_on(html_tree_builtin(vec![broad]))
+            .expect_err("string-valued cell is gated");
+        assert_eq!(
+            broad.identifier(),
+            Some("RunMat:compatibility:HtmlTreeBroadCellExtension")
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2217,6 +2461,25 @@ mod tests {
         assert_eq!(string_value(out), MISSING);
     }
 
+    #[test]
+    fn get_attribute_accepts_scalar_cell_character_attribute_name() {
+        let tree = futures::executor::block_on(html_tree_builtin(vec![Value::String(
+            "<a href='/home'>Home</a>".to_string(),
+        )]))
+        .expect("tree");
+        let attr = Value::Cell(
+            CellArray::new(
+                vec![Value::CharArray(runmat_value::CharArray::new_row("href"))],
+                1,
+                1,
+            )
+            .expect("scalar cell attribute"),
+        );
+        let out = futures::executor::block_on(get_attribute_builtin(vec![tree, attr]))
+            .expect("attribute");
+        assert_eq!(string_value(out), "/home");
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn find_element_handles_quoted_attribute_selectors_and_empty_results() {
@@ -2342,6 +2605,99 @@ mod tests {
         assert!(err.to_string().contains("repeated combinators"));
     }
 
+    #[test]
+    fn find_element_integer_audit_rejects_numeric_inputs_before_provider_access() {
+        assert_eq!(
+            FIND_ELEMENT_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        for value in [
+            Value::Int(runmat_value::IntValue::I8(1)),
+            Value::Int(runmat_value::IntValue::I16(1)),
+            Value::Int(runmat_value::IntValue::I32(1)),
+            Value::Int(runmat_value::IntValue::I64(1)),
+            Value::Int(runmat_value::IntValue::U8(1)),
+            Value::Int(runmat_value::IntValue::U16(1)),
+            Value::Int(runmat_value::IntValue::U32(1)),
+            Value::Int(runmat_value::IntValue::U64(1)),
+        ] {
+            let error = futures::executor::block_on(find_element_builtin(vec![
+                value,
+                Value::String("p".into()),
+            ]))
+            .expect_err("integer tree input");
+            assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
+        }
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+            descriptor: Default::default(),
+        });
+        let error = futures::executor::block_on(find_element_builtin(vec![
+            resident,
+            Value::String("p".into()),
+        ]))
+        .expect_err("resident tree input");
+        assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn get_attribute_integer_audit_rejects_all_numeric_roles_before_provider_access() {
+        assert_eq!(
+            GET_ATTRIBUTE_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        for value in [
+            Value::Int(runmat_value::IntValue::I8(1)),
+            Value::Int(runmat_value::IntValue::I16(1)),
+            Value::Int(runmat_value::IntValue::I32(1)),
+            Value::Int(runmat_value::IntValue::I64(1)),
+            Value::Int(runmat_value::IntValue::U8(1)),
+            Value::Int(runmat_value::IntValue::U16(1)),
+            Value::Int(runmat_value::IntValue::U32(1)),
+            Value::Int(runmat_value::IntValue::U64(1)),
+        ] {
+            let error = futures::executor::block_on(get_attribute_builtin(vec![
+                value.clone(),
+                Value::String("href".into()),
+            ]))
+            .expect_err("integer tree input");
+            assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
+            let tree = futures::executor::block_on(html_tree_builtin(vec![Value::String(
+                "<a href='x'>x</a>".into(),
+            )]))
+            .expect("tree");
+            let error = futures::executor::block_on(get_attribute_builtin(vec![tree, value]))
+                .expect_err("integer attribute input");
+            assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
+        }
+
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+            descriptor: Default::default(),
+        });
+        let error = futures::executor::block_on(get_attribute_builtin(vec![
+            resident,
+            Value::String("href".into()),
+        ]))
+        .expect_err("resident tree input");
+        assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn get_attribute_remains_scoped_to_html_tree_objects() {
+        let object = ObjectInstance::new("OtherClass".to_string());
+        let error = futures::executor::block_on(get_attribute_builtin(vec![
+            Value::Object(object),
+            Value::String("href".into()),
+        ]))
+        .expect_err("non-html object");
+        assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn invalid_extraction_method_errors() {
@@ -2352,5 +2708,64 @@ mod tests {
         ]))
         .expect_err("invalid method");
         assert!(err.to_string().contains("ExtractionMethod"));
+    }
+
+    #[test]
+    fn extract_html_text_integer_audit_is_not_applicable() {
+        assert_eq!(
+            EXTRACT_HTML_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        assert!(EXTRACT_HTML_INTEGER_AUDIT
+            .notes
+            .contains("All eight integer"));
+    }
+
+    #[test]
+    fn extract_html_text_rejects_integer_and_resident_numeric_input_before_gather() {
+        for value in [
+            Value::Int(runmat_value::IntValue::I8(1)),
+            Value::Int(runmat_value::IntValue::I16(1)),
+            Value::Int(runmat_value::IntValue::I32(1)),
+            Value::Int(runmat_value::IntValue::I64(1)),
+            Value::Int(runmat_value::IntValue::U8(1)),
+            Value::Int(runmat_value::IntValue::U16(1)),
+            Value::Int(runmat_value::IntValue::U32(1)),
+            Value::Int(runmat_value::IntValue::U64(1)),
+        ] {
+            let error = futures::executor::block_on(extract_html_text_builtin(vec![value]))
+                .expect_err("integer HTML input");
+            assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
+        }
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+            descriptor: Default::default(),
+        });
+        let error = futures::executor::block_on(extract_html_text_builtin(vec![resident]))
+            .expect_err("resident HTML input");
+        assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn extract_html_text_strict_mode_gates_broad_text_containers() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let matrix =
+            Value::CharArray(runmat_value::CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap());
+        let error = futures::executor::block_on(extract_html_text_builtin(vec![matrix]))
+            .expect_err("strict char matrix gate");
+        assert_eq!(
+            error.identifier(),
+            EXTRACT_HTML_CHAR_MATRIX_EXTENSION.error_identifier
+        );
+        let broad_cell =
+            Value::Cell(CellArray::new(vec![Value::String("<p>x</p>".into())], 1, 1).unwrap());
+        let error = futures::executor::block_on(extract_html_text_builtin(vec![broad_cell]))
+            .expect_err("strict broad cell gate");
+        assert_eq!(
+            error.identifier(),
+            EXTRACT_HTML_BROAD_CELL_EXTENSION.error_identifier
+        );
     }
 }

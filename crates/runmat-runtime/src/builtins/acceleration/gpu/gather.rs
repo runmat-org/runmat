@@ -1,16 +1,17 @@
 //! MATLAB-compatible `gather` builtin with provider-aware semantics.
 
-use crate::builtins::acceleration::gpu::type_resolvers::gather_type;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::{build_runtime_error, make_cell, RuntimeError};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+use crate::{build_runtime_error, RuntimeError};
+use runmat_builtins::catalog::definitions::{
+    GATHER_CONTAINER_EXTENSION, GATHER_ERROR_NOT_ENOUGH_INPUTS, GATHER_ERROR_OUTPUT_COUNT_MISMATCH,
+    GATHER_ERROR_TOO_MANY_OUTPUTS,
 };
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::acceleration::gpu::gather")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -18,14 +19,14 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Custom("gather"),
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::None,
-    provider_hooks: &[ProviderHook::Custom("download")],
+    provider_hooks: &[ProviderHook::Custom("download_numeric")],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::GatherImmediately,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Downloads gpuArray handles via the provider's `download` hook and clears residency metadata; host inputs pass through unchanged.",
+    notes: "Downloads gpuArray handles through the provider's native numeric contract without mutating the source handle; host inputs pass through unchanged.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::acceleration::gpu::gather")]
@@ -36,106 +37,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: None,
     emits_nan: false,
-    notes: "Acts as a residency sink for fusion planning; always materialises host data and clears gpuArray residency tracking.",
+    notes: "Acts as a fusion output sink and materialises a host copy without clearing source gpuArray residency.",
 };
 
 const BUILTIN_NAME: &str = "gather";
-
-const GATHER_OUTPUT_SINGLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Host-resident value gathered from input.",
-}];
-
-const GATHER_OUTPUT_VARIADIC: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Host-resident outputs matching each gathered input.",
-}];
-
-const GATHER_INPUT_SINGLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input value to gather from GPU to host.",
-}];
-
-const GATHER_INPUT_VARIADIC: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X1",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First input value to gather.",
-    },
-    BuiltinParamDescriptor {
-        name: "Xn",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Additional input values to gather.",
-    },
-];
-
-const GATHER_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "X = gather(X)",
-        inputs: &GATHER_INPUT_SINGLE,
-        outputs: &GATHER_OUTPUT_SINGLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[X1, X2, ...] = gather(X1, X2, ...)",
-        inputs: &GATHER_INPUT_VARIADIC,
-        outputs: &GATHER_OUTPUT_VARIADIC,
-    },
-];
-
-const GATHER_ERROR_NOT_ENOUGH_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GATHER.NOT_ENOUGH_INPUTS",
-    identifier: Some("RunMat:gather:NotEnoughInputs"),
-    when: "No input arguments were provided.",
-    message: "gather: not enough input arguments",
-};
-
-const GATHER_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GATHER.TOO_MANY_OUTPUTS",
-    identifier: Some("RunMat:gather:TooManyOutputs"),
-    when: "Requested outputs exceed one for single-input gather.",
-    message: "gather: too many output arguments",
-};
-
-const GATHER_ERROR_OUTPUT_COUNT_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GATHER.OUTPUT_COUNT_MISMATCH",
-    identifier: Some("RunMat:gather:OutputCountMismatch"),
-    when: "Requested output count does not match number of input arguments.",
-    message: "gather: number of outputs must match number of inputs",
-};
-
-const GATHER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GATHER.INTERNAL",
-    identifier: Some("RunMat:gather:InternalError"),
-    when: "Internal output container construction failed.",
-    message: "gather: internal error",
-};
-
-const GATHER_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    GATHER_ERROR_NOT_ENOUGH_INPUTS,
-    GATHER_ERROR_TOO_MANY_OUTPUTS,
-    GATHER_ERROR_OUTPUT_COUNT_MISMATCH,
-    GATHER_ERROR_INTERNAL,
-];
-
-pub const GATHER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &GATHER_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &GATHER_ERRORS,
-};
 
 fn gather_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     gather_error_with_message(error.message, error)
@@ -154,12 +59,7 @@ fn gather_error_with_message(
 
 #[runtime_builtin(
     name = "gather",
-    category = "acceleration/gpu",
-    summary = "Gather gpuArray data back to host memory.",
-    keywords = "gather,gpuArray,accelerate,download",
-    accel = "sink",
-    type_resolver(gather_type),
-    descriptor(crate::builtins::acceleration::gpu::gather::GATHER_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::acceleration::gpu::gather"
 )]
 async fn gather_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -183,10 +83,7 @@ async fn gather_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if len == 1 {
         Ok(eval.into_first())
     } else {
-        let outputs = eval.into_outputs();
-        make_cell(outputs, 1, len).map_err(|err| {
-            gather_error_with_message(format!("gather: {err}"), &GATHER_ERROR_INTERNAL).into()
-        })
+        Ok(Value::OutputList(eval.into_outputs()))
     }
 }
 
@@ -242,6 +139,12 @@ pub async fn evaluate(args: &[Value]) -> crate::BuiltinResult<GatherResult> {
 }
 
 async fn gather_argument(value: &Value) -> crate::BuiltinResult<Value> {
+    if !matches!(value, Value::GpuTensor(_)) && crate::dispatcher::value_contains_gpu(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &GATHER_CONTAINER_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     crate::dispatcher::gather_if_needed_async(value).await
 }
 
@@ -251,7 +154,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{CellArray, ResolveContext, StructValue, Tensor, Type};
+    use runmat_value::{CellArray, StructValue, Tensor};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -267,18 +170,25 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let result = block_on(gather_builtin(vec![Value::GpuTensor(handle)])).expect("gather");
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let result =
+                block_on(gather_builtin(vec![Value::GpuTensor(handle.clone())])).expect("gather");
             match result {
                 Value::Tensor(host) => {
                     assert_eq!(host.shape, tensor.shape);
-                    assert_eq!(host.data, tensor.data);
+                    assert_eq!(host.materialize_f64(), tensor.materialize_f64());
                 }
                 other => panic!("expected tensor result, got {other:?}"),
             }
+            assert!(runmat_accelerate_api::handle_is_explicit(&handle));
+            block_on(gather_builtin(vec![Value::GpuTensor(handle.clone())]))
+                .expect("source handle remains gatherable");
+            provider.free(&handle).ok();
         });
     }
 
@@ -289,7 +199,7 @@ pub(crate) mod tests {
             let data = vec![0.0, 1.0, 1.0, 0.0];
             let tensor = Tensor::new(data.clone(), vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -308,10 +218,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gather_recurses_into_cells() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![7.0, 8.0], vec![2, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -325,7 +236,7 @@ pub(crate) mod tests {
             match first {
                 Value::Tensor(t) => {
                     assert_eq!(t.shape, vec![2, 1]);
-                    assert_eq!(t.data, tensor.data);
+                    assert_eq!(t.materialize_f64(), tensor.materialize_f64());
                 }
                 other => panic!("expected tensor in cell, got {other:?}"),
             }
@@ -337,10 +248,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gather_recurses_into_structs() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![3.5, -1.25], vec![2, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -356,7 +268,7 @@ pub(crate) mod tests {
                 panic!("missing tensor field");
             };
             assert_eq!(host.shape, vec![2, 1]);
-            assert_eq!(host.data, tensor.data);
+            assert_eq!(host.materialize_f64(), tensor.materialize_f64());
             let Some(Value::String(label)) = gathered.fields.get("label") else {
                 panic!("missing label");
             };
@@ -366,16 +278,36 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn gather_returns_cell_for_multiple_inputs() {
+    fn gather_returns_output_list_for_multiple_inputs() {
         let result = block_on(gather_builtin(vec![Value::Num(1.0), Value::from("two")]))
-            .expect("gather cell");
-        let Value::Cell(cell) = result else {
-            panic!("expected cell for multiple inputs");
+            .expect("gather outputs");
+        let Value::OutputList(outputs) = result else {
+            panic!("expected output list for multiple inputs");
         };
-        assert_eq!(cell.rows, 1);
-        assert_eq!(cell.cols, 2);
-        assert_eq!(cell.get(0, 0).unwrap(), Value::Num(1.0));
-        assert_eq!(cell.get(0, 1).unwrap(), Value::from("two"));
+        assert_eq!(outputs, vec![Value::Num(1.0), Value::from("two")]);
+    }
+
+    #[test]
+    fn gather_recursive_container_form_is_gated() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+            let values = tensor.materialize_f64();
+            let handle = provider
+                .upload(&HostTensorView {
+                    data: &values,
+                    shape: &tensor.shape,
+                })
+                .expect("upload");
+            let cell = CellArray::new(vec![Value::GpuTensor(handle.clone())], 1, 1).expect("cell");
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(gather_builtin(vec![Value::Cell(cell)]))
+                .expect_err("recursive gather is an extension");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:GatherRecursiveContainerExtension")
+            );
+            provider.free(&handle).ok();
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -401,14 +333,6 @@ pub(crate) mod tests {
         assert_eq!(err.identifier(), GATHER_ERROR_NOT_ENOUGH_INPUTS.identifier);
     }
 
-    #[test]
-    fn gather_type_resolves_multiple_outputs_to_cell() {
-        assert_eq!(
-            gather_type(&[Type::Num, Type::String], &ResolveContext::new(Vec::new())),
-            Type::cell()
-        );
-    }
-
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
@@ -421,7 +345,7 @@ pub(crate) mod tests {
             Ok(provider) => {
                 let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
                 let view = HostTensorView {
-                    data: &tensor.data,
+                    data: &tensor.materialize_f64(),
                     shape: &tensor.shape,
                 };
                 let handle = provider.upload(&view).expect("upload");
@@ -432,7 +356,7 @@ pub(crate) mod tests {
                 match outputs.into_iter().next().unwrap() {
                     Value::Tensor(host) => {
                         assert_eq!(host.shape, tensor.shape);
-                        assert_eq!(host.data, tensor.data);
+                        assert_eq!(host.materialize_f64(), tensor.materialize_f64());
                     }
                     other => panic!("expected tensor value, got {other:?}"),
                 }

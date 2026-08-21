@@ -1,10 +1,3 @@
----
-title: "Projects"
-category: "Getting Started"
-section: "1.4"
-last_updated: "May 30, 2026"
----
-
 # Projects
 
 A RunMat project is a folder of MATLAB-syntax code anchored by a `runmat.toml` or `runmat.json` manifest. The manifest tells RunMat where the source lives, which other projects it depends on, and which workflows can be run by name. RunMat discovers it by walking up from the source file or working directory, so the same project resolves consistently across the CLI, Desktop, and the LSP.
@@ -115,6 +108,70 @@ roots = ["src"]
 ```
 
 The dependency alias participates in project symbol discovery. A source file from the dependency can be resolved by its own qualified name, by its package-qualified name, or through the root dependency alias when imports or function handles need that form.
+
+## Git Dependencies And Locking
+
+Git dependencies use a credential-free HTTPS or SSH repository URL, one selector, and an optional repository subdirectory:
+
+```toml
+[dependencies]
+tools = { git = "https://github.com/acme/shared-tools.git", tag = "v1.4.0", subdir = "runmat", version = "^1.4" }
+```
+
+Use exactly one of `rev`, `tag`, or `branch`. RunMat resolves a mutable tag or branch to an exact commit and verified tree digest, records that immutable identity in `runmat.lock`, and reuses it until `runmat package update` is requested explicitly. Path dependencies inside a Git package are resolved as exact subdirectory trees from the same commit, so monorepo layouts remain immutable and checkout-independent.
+
+Normal `run`, REPL, `check`, benchmark, bytecode, and package commands share one resolver and one frozen graph. `--locked` requires the existing lock to match the current manifest, selected target/groups/features, path contents, and immutable dependencies. `--offline` permits only already cached content. `--frozen` combines locked and offline behavior and prohibits network access, selector updates, and lockfile mutation.
+
+```bash
+runmat package resolve
+runmat package fetch
+runmat package update
+runmat package tree
+runmat package why tools
+runmat --locked check src/main.m
+runmat --offline run src/main.m
+runmat --frozen run src/main.m
+```
+
+Git credentials come from the host credential provider and are never written to the manifest, lockfile, cache identity, or diagnostics. Native RunMat stores normalized shared Git object databases separately from verified content-addressed snapshots. Browser RunMat uses the authenticated Server Git snapshot gateway, validates the returned inventory in portable Rust, publishes the same canonical blobs/tree to IndexedDB transactionally, and mounts the verified tree read-only through the configured virtual filesystem.
+
+## RunMat Server Project Dependencies
+
+A project hosted by RunMat Server can be used directly as an immutable package source:
+
+```toml
+[dependencies]
+tools = { project = "proj_0123456789abcdef0123456789abcdef", service = "https://api.runmat.com", snapshot = "stable", version = "^1.4" }
+```
+
+`service` is a credential-free HTTPS origin; when omitted, RunMat uses the active configured Server origin. `snapshot` accepts either a mutable tag such as `stable` (and defaults to `main`) or an exact `snap_...` ID. Resolution and explicit update may resolve a tag. RunMat then records the exact Server origin, project ID, snapshot ID, and canonical tree digest in `runmat.lock`; normal locked execution requests that exact identity and never live-mounts the remote project. Server identity is part of source identity, so equal project or snapshot strings from different Servers cannot alias.
+
+Native, browser, and WASM clients validate the Server inventory with the same portable tree algorithm and publish it transactionally into the shared immutable cache described below. Authentication is sent only to the explicitly configured matching Server origin. An acquisition denied by current permissions, a deleted snapshot, corrupt content, or an interrupted transfer cannot publish a cache entry. Previously authorized plaintext already copied into the local cache remains usable by exact locked identity during offline execution after later permission loss or remote deletion: revoking Server access cannot revoke bytes already delivered to a client. Mutable tags still require online resolution and cannot be used to bypass a frozen or locked graph.
+
+## Shared Package Cache
+
+Inspect and collect the shared package cache with:
+
+```bash
+runmat package cache status
+runmat package cache status --json
+runmat package cache gc
+runmat package cache gc --target-bytes 1073741824
+runmat package cache prune
+```
+
+GC and prune never delete objects protected by a pin or active lease. Native sessions and browser project resolvers acquire renewable graph leases, release them on clean disposal, and rely on expiry after a process, tab, or worker disappears. Cache writes publish metadata and payloads together through revision compare-and-swap; interrupted staging is discarded, incomplete dependency closures are not exposed, digest mismatches become explicit corruption records, and cache eviction is reported as a recoverable miss. Native processes coordinate immutable materialization and physical-tree collection with narrow process locks. Browser tabs and workers use IndexedDB transactions and retry stale revisions rather than overwriting newer state.
+
+The native cache location follows the platform cache directory. `RUNMAT_PACKAGE_CACHE_DIR` can select an explicit cache root for hermetic CI or embedding; do not place credentials in that path or variable.
+
+`runmat package vendor` copies the resolved dependency closure into a project-local `vendor` directory by default and atomically records `runmat-vendor.json` at the workspace root with the exact graph, source identities, and project-relative copy locations:
+
+```bash
+runmat package vendor
+runmat package vendor --output third_party/runmat
+```
+
+Frozen execution requires this verified vendor manifest for every live path dependency. RunMat resolves those dependencies from their vendored copies, preserves their locked source identities, and rejects a stale graph, missing copy, source mismatch, or content/manifest tampering. Immutable Git and RunMat Server project dependencies may instead replay from their exact cached snapshots; `--frozen` still performs no network or lockfile mutation.
 
 ## Complete Project Example
 

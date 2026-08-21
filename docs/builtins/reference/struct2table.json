@@ -8,7 +8,7 @@
   "requires_feature": null,
   "tested": {"unit": "builtins::table::tests", "integration": "crates/runmat-vm/tests/tables_timetables.rs"},
   "description": "`struct2table(S)` converts struct fields into table variables. Scalar structs become variable columns, while struct arrays become row-oriented tables.",
-  "behaviors": ["Field insertion order becomes variable order.", "`\"VariableNames\"` and `\"RowNames\"` may be supplied as name-value options.", "`\"AsArray\"` keeps scalar struct field values as array-valued table entries."],
+  "behaviors": ["Field insertion order becomes variable order.", "Compatible field values from a struct array become homogeneous table variables. Same-class integer fields retain their exact class and values; incompatible fields remain cell variables.", "`\"VariableNames\"` and `\"RowNames\"` may be supplied as name-value options.", "`\"AsArray\"` keeps scalar struct field values as array-valued table entries and accepts logical or numeric scalar values exactly equal to zero or one."],
   "examples": [{"description": "Convert struct variables", "input": "T = struct2table(S)", "output": "T = table object"}, {"description": "Preserve scalar struct arrays as entries", "input": "T = struct2table(S, 'AsArray', true)", "output": "T = table object"}],
   "links": [{"label": "table2struct", "url": "./table2struct"}, {"label": "table", "url": "./table"}],
   "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}

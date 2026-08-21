@@ -33,11 +33,13 @@
   "description": "`pinv(A)` computes pseudoinverses from singular-value decompositions using MATLAB-compatible default tolerance rules, with optional explicit tolerance overrides.",
   "behaviors": [
     "Supports scalars, vectors, and higher-dimensional inputs that behave like matrices (trailing singleton dimensions are allowed; other higher ranks must be reshaped first).",
-    "Logical and integer inputs are promoted to `double` before the SVD, matching MATLAB semantics.",
+    "Public MATLAB matrix classes are single and double. RunMat mode separately admits logical matrices and all eight real integer classes through named extensions; integer data must be exactly representable as binary64, the result is double, and wider values reject instead of rounding.",
     "Optional second argument `pinv(A, tol)` treats values in `tol` as the user-specified cutoff for singular values. Entries ≤ `tol` contribute zeros in the diagonal of `Σ⁺`.",
     "Complex matrices are handled in full complex arithmetic via `A = U * Σ * Vᴴ`.",
     "Empty matrices return the appropriately sized zero matrix (`size(pinv(A)) == fliplr(size(A))`).",
-    "The result always has size `n × m` if the input is `m × n`."
+    "The result always has size `n × m` if the input is `m × n`.",
+    "A typed-integer tolerance is a separate RunMat extension because the public scalar tolerance does not enumerate integer classes. It must be exactly representable as binary64 before threshold computation; logical tolerance is independently gated.",
+    "Resident integer input bypasses floating provider pseudoinverse kernels, gathers through its exact owner, and restores the double result to that owner when supported."
   ],
   "examples": [
     {

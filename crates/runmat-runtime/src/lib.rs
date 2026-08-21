@@ -11,26 +11,51 @@
 )]
 #![cfg_attr(target_arch = "wasm32", allow(dead_code))]
 
-use runmat_builtins::{BuiltinErrorDescriptor, Value};
+use runmat_types::MemberAccess;
+
+use runmat_builtins::{
+    catalog::definitions::{
+        FEVAL_AT_PREFIXED_TEXT_EXTENSION, FEVAL_ERROR_FUNCTION_VALUE_UNSUPPORTED,
+        FEVAL_ERROR_HANDLE_NAME_INVALID, FEVAL_ERROR_HANDLE_SHAPE_INVALID,
+        FEVAL_ERROR_SEMANTIC_UNAVAILABLE, FEVAL_OBJECT_RECEIVER_EXTENSION,
+    },
+    BuiltinErrorDescriptor,
+};
+use runmat_value::Value;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
 pub mod analysis;
+pub mod builtin;
 pub mod dispatcher;
 pub mod geometry;
 pub mod operations;
 
 pub mod callsite;
+pub mod class_registry;
+pub mod compatibility;
+pub mod condition;
 pub mod console;
+pub mod context;
+pub mod coverage;
 pub mod data;
+pub mod execution;
+pub mod indexing;
 pub mod interaction;
 pub mod interrupt;
+pub mod iteration;
+pub mod native;
+pub mod numeric_region;
+pub mod object;
 pub mod output_context;
 pub mod output_count;
 pub mod source_context;
+pub mod testing;
+pub mod value_fact;
 
 pub mod builtins;
+pub mod call;
 pub mod comparison;
 pub mod plotting_hooks;
 pub mod replay;
@@ -52,21 +77,21 @@ pub const OBJECT_SUBSASGN_METHOD: &str = "subsasgn";
 pub(crate) const IDENT_UNDEFINED_FUNCTION: &str = "RunMat:UndefinedFunction";
 pub(crate) const HANDLE_VALID_FLAG_PROPERTY: &str = "__runmat_handle_valid__";
 
-fn object_handle_flag_valid(obj: &runmat_builtins::ObjectInstance) -> bool {
+fn object_handle_flag_valid(obj: &runmat_value::ObjectInstance) -> bool {
     !matches!(
         obj.properties.get(HANDLE_VALID_FLAG_PROPERTY),
         Some(Value::Bool(false))
     )
 }
 
-pub(crate) fn is_handle_valid(handle: &runmat_builtins::HandleRef) -> bool {
+pub(crate) fn is_handle_valid(handle: &runmat_value::HandleRef) -> bool {
     if !handle.valid {
         return false;
     }
     is_handle_target_valid(handle)
 }
 
-pub(crate) fn is_handle_target_valid(handle: &runmat_builtins::HandleRef) -> bool {
+pub(crate) fn is_handle_target_valid(handle: &runmat_value::HandleRef) -> bool {
     runmat_gc::gc_with_value(&handle.target, |target| match target {
         Value::Object(obj) => object_handle_flag_valid(obj),
         _ => false,
@@ -74,7 +99,7 @@ pub(crate) fn is_handle_target_valid(handle: &runmat_builtins::HandleRef) -> boo
     .unwrap_or(false)
 }
 
-pub(crate) fn set_handle_valid(handle: &runmat_builtins::HandleRef, valid: bool) -> bool {
+pub(crate) fn set_handle_valid(handle: &runmat_value::HandleRef, valid: bool) -> bool {
     runmat_gc::gc_with_value_mut(&handle.target, |target| match target {
         Value::Object(obj) => {
             obj.properties
@@ -103,21 +128,33 @@ thread_local! {
         const { std::cell::RefCell::new(Vec::new()) };
 }
 
-struct ConstructorReceiverPollGuard;
+struct ConstructorReceiverPollGuard {
+    context: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
+}
 
 impl Drop for ConstructorReceiverPollGuard {
     fn drop(&mut self) {
-        CONSTRUCTOR_RECEIVER_STACK.with(|stack| {
-            stack.borrow_mut().pop();
-        });
+        if let Some(context) = &self.context {
+            context.constructor_receivers.borrow_mut().pop();
+        } else {
+            CONSTRUCTOR_RECEIVER_STACK.with(|stack| {
+                stack.borrow_mut().pop();
+            });
+        }
     }
 }
 
 fn push_constructor_receiver_for_poll(receiver: Value) -> ConstructorReceiverPollGuard {
-    CONSTRUCTOR_RECEIVER_STACK.with(|stack| {
-        stack.borrow_mut().push(receiver);
-    });
-    ConstructorReceiverPollGuard
+    let context =
+        crate::context::legacy::active().map(|context| std::rc::Rc::clone(context.state()));
+    if let Some(context) = &context {
+        context.constructor_receivers.borrow_mut().push(receiver);
+    } else {
+        CONSTRUCTOR_RECEIVER_STACK.with(|stack| {
+            stack.borrow_mut().push(receiver);
+        });
+    }
+    ConstructorReceiverPollGuard { context }
 }
 
 pub(crate) struct ConstructorReceiverFuture<Fut> {
@@ -156,22 +193,25 @@ fn constructor_receiver_class_name(receiver: &Value) -> Option<&str> {
 }
 
 fn active_constructor_receiver_for(class_name: &str) -> Option<Value> {
-    CONSTRUCTOR_RECEIVER_STACK.with(|stack| {
+    let find = |stack: &[Value]| {
         stack
-            .borrow()
             .iter()
             .rev()
             .find(|receiver| {
                 constructor_receiver_class_name(receiver).is_some_and(|receiver_class| {
                     receiver_class == class_name
-                        || runmat_builtins::is_class_or_subclass(receiver_class, class_name)
+                        || crate::class_registry::is_class_or_subclass(receiver_class, class_name)
                 })
             })
             .cloned()
-    })
+    };
+    if let Some(context) = crate::context::legacy::active() {
+        return find(&context.state().constructor_receivers.borrow());
+    }
+    CONSTRUCTOR_RECEIVER_STACK.with(|stack| find(&stack.borrow()))
 }
 
-fn undefined_callable_error(identity: &runmat_hir::CallableIdentity) -> RuntimeError {
+fn undefined_callable_error(identity: &runmat_types::CallableIdentity) -> RuntimeError {
     let detail = format!("Undefined function for callable identity {identity:?}");
     build_runtime_error(detail)
         .with_identifier(IDENT_UNDEFINED_FUNCTION)
@@ -187,8 +227,8 @@ fn build_shape_checked_cell(
     rows: usize,
     cols: usize,
     context: &str,
-) -> Result<runmat_builtins::CellArray, RuntimeError> {
-    runmat_builtins::CellArray::new(values, rows, cols).map_err(|err| {
+) -> Result<runmat_value::CellArray, RuntimeError> {
+    runmat_value::CellArray::new(values, rows, cols).map_err(|err| {
         build_runtime_error(format!("{context}: {err}"))
             .with_identifier("RunMat:ShapeMismatch")
             .build()
@@ -241,16 +281,16 @@ pub(crate) fn object_receiver_class_name(receiver: &Value) -> Option<String> {
     }
 }
 
-fn class_member_identity(class_name: &str, member: &str) -> runmat_hir::CallableIdentity {
-    runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
-        runmat_hir::SymbolName(class_name.to_string()),
-        runmat_hir::SymbolName(member.to_string()),
+fn class_member_identity(class_name: &str, member: &str) -> runmat_types::CallableIdentity {
+    runmat_types::CallableIdentity::ExternalName(runmat_types::QualifiedName(vec![
+        runmat_types::SymbolName(class_name.to_string()),
+        runmat_types::SymbolName(member.to_string()),
     ]))
 }
 
-pub(crate) fn qualified_name_segments(name: &str) -> Vec<runmat_hir::SymbolName> {
+pub(crate) fn qualified_name_segments(name: &str) -> Vec<runmat_types::SymbolName> {
     name.split('.')
-        .map(|segment| runmat_hir::SymbolName(segment.to_string()))
+        .map(|segment| runmat_types::SymbolName(segment.to_string()))
         .collect()
 }
 
@@ -262,31 +302,31 @@ pub(crate) fn is_well_formed_qualified_name(name: &str) -> bool {
 pub(crate) fn callable_identity_for_handle_name(
     name: &str,
 ) -> (
-    runmat_hir::CallableIdentity,
-    runmat_hir::CallableFallbackPolicy,
+    runmat_types::CallableIdentity,
+    runmat_types::CallableFallbackPolicy,
 ) {
     if is_well_formed_qualified_name(name) {
         let segments = qualified_name_segments(name);
         (
-            runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(segments)),
-            runmat_hir::CallableFallbackPolicy::ExternalBoundary,
+            runmat_types::CallableIdentity::ExternalName(runmat_types::QualifiedName(segments)),
+            runmat_types::CallableFallbackPolicy::ExternalBoundary,
         )
     } else {
         (
-            runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name.to_string())),
-            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+            runmat_types::CallableIdentity::DynamicName(runmat_types::SymbolName(name.to_string())),
+            runmat_types::CallableFallbackPolicy::RuntimeNameResolution,
         )
     }
 }
 
-pub(crate) fn external_callable_identity_for_name(name: &str) -> runmat_hir::CallableIdentity {
+pub(crate) fn external_callable_identity_for_name(name: &str) -> runmat_types::CallableIdentity {
     if !is_well_formed_qualified_name(name) {
-        runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
-            runmat_hir::SymbolName(name.to_string()),
+        runmat_types::CallableIdentity::ExternalName(runmat_types::QualifiedName(vec![
+            runmat_types::SymbolName(name.to_string()),
         ]))
     } else {
         let segments = qualified_name_segments(name);
-        runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(segments))
+        runmat_types::CallableIdentity::ExternalName(runmat_types::QualifiedName(segments))
     }
 }
 
@@ -298,7 +338,7 @@ pub(crate) async fn dispatch_object_external_member(
 ) -> BuiltinResult<Value> {
     dispatch_callable_with_policy(
         class_member_identity(&class_name, member),
-        runmat_hir::CallableFallbackPolicy::ExternalBoundary,
+        runmat_types::CallableFallbackPolicy::ExternalBoundary,
         args,
         requested_outputs,
     )
@@ -314,8 +354,8 @@ async fn dispatch_named_with_requested_outputs(
 }
 
 pub(crate) async fn dispatch_callable_with_policy(
-    identity: runmat_hir::CallableIdentity,
-    fallback_policy: runmat_hir::CallableFallbackPolicy,
+    identity: runmat_types::CallableIdentity,
+    fallback_policy: runmat_types::CallableFallbackPolicy,
     args: Vec<Value>,
     requested_outputs: usize,
 ) -> BuiltinResult<Value> {
@@ -347,7 +387,7 @@ pub async fn call_feval_async_with_outputs(
 
 pub use runtime_error::{
     build_runtime_error, replay_error, replay_error_with_source, CallFrame, ErrorContext,
-    ReplayErrorKind, RuntimeError, RuntimeErrorBuilder,
+    GpuGatherRetry, ReplayErrorKind, RuntimeError, RuntimeErrorBuilder,
 };
 
 pub mod debug_context;
@@ -403,7 +443,7 @@ pub use blas::*;
 pub use lapack::*;
 
 pub fn make_cell_with_shape(values: Vec<Value>, shape: Vec<usize>) -> Result<Value, String> {
-    let ca = runmat_builtins::CellArray::new_with_shape(values, shape)
+    let ca = runmat_value::CellArray::new_with_shape(values, shape)
         .map_err(|e| format!("Cell creation error: {e}"))?;
     Ok(Value::Cell(ca))
 }
@@ -417,10 +457,11 @@ fn to_string_scalar(v: &Value) -> Result<String, String> {
     Ok(s)
 }
 
-fn to_string_array(v: &Value) -> Result<runmat_builtins::StringArray, String> {
+fn to_string_array(v: &Value) -> Result<runmat_value::StringArray, String> {
     match v {
-        Value::String(s) => runmat_builtins::StringArray::new(vec![s.clone()], vec![1, 1])
-            .map_err(|e| e.to_string()),
+        Value::String(s) => {
+            runmat_value::StringArray::new(vec![s.clone()], vec![1, 1]).map_err(|e| e.to_string())
+        }
         Value::StringArray(sa) => Ok(sa.clone()),
         Value::CharArray(ca) => {
             // Convert each row to a string; treat as column vector
@@ -432,7 +473,7 @@ fn to_string_array(v: &Value) -> Result<runmat_builtins::StringArray, String> {
                 }
                 out.push(s);
             }
-            runmat_builtins::StringArray::new(out, vec![ca.rows, 1]).map_err(|e| e.to_string())
+            runmat_value::StringArray::new(out, vec![ca.rows, 1]).map_err(|e| e.to_string())
         }
         other => Err(format!("cannot convert to string array: {other:?}")),
     }
@@ -445,7 +486,7 @@ pub(crate) async fn strjoin_rowwise(a: Value, delim: Value) -> crate::BuiltinRes
     let cols = *sa.shape.get(1).unwrap_or(&1);
     if rows == 0 || cols == 0 {
         return Ok(Value::StringArray(
-            runmat_builtins::StringArray::new(Vec::new(), vec![0, 0]).unwrap(),
+            runmat_value::StringArray::new(Vec::new(), vec![0, 0]).unwrap(),
         ));
     }
     let mut out: Vec<String> = Vec::with_capacity(rows);
@@ -460,25 +501,39 @@ pub(crate) async fn strjoin_rowwise(a: Value, delim: Value) -> crate::BuiltinRes
         out.push(s);
     }
     Ok(Value::StringArray(
-        runmat_builtins::StringArray::new(out, vec![rows, 1])
-            .map_err(|e| format!("strjoin: {e}"))?,
+        runmat_value::StringArray::new(out, vec![rows, 1]).map_err(|e| format!("strjoin: {e}"))?,
     ))
 }
 
 pub(crate) async fn deal_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    if let Some(out_count) = crate::output_count::current_output_count() {
-        if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
-        }
-        if out_count > 1 {
-            return Ok(crate::output_count::output_list_with_padding(
-                out_count, rest,
-            ));
-        }
+    let out_count = crate::output_count::current_output_count().unwrap_or(1);
+    let valid_count = rest.len() == 1 || rest.len() == out_count;
+    if !valid_count {
+        return Err(build_runtime_error(
+            "deal: the number of outputs must match the number of inputs unless there is exactly one input",
+        )
+        .with_builtin("deal")
+        .with_identifier("RunMat:deal:InputOutputCountMismatch")
+        .build());
     }
-    // Return cell row vector of inputs for expansion
-    let cols = rest.len();
-    make_cell(rest, 1, cols).map_err(Into::into)
+    if rest.iter().any(crate::value_contains_gpu) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &crate::builtins::common::deal::DEAL_RESIDENT_INPUT_EXTENSION,
+            "deal",
+        )?;
+    }
+    if out_count == 0 {
+        return Ok(Value::OutputList(Vec::new()));
+    }
+    if rest.len() == 1 {
+        let value = rest.into_iter().next().expect("one deal input");
+        return if out_count == 1 {
+            Ok(value)
+        } else {
+            Ok(Value::OutputList(vec![value; out_count]))
+        };
+    }
+    Ok(Value::OutputList(rest))
 }
 
 // Object/handle utilities used by interpreter lowering for OOP/func handles
@@ -498,8 +553,11 @@ pub(crate) async fn rethrow_builtin(e: Value) -> crate::BuiltinResult<Value> {
 pub(crate) async fn new_handle_object_builtin(class_name: String) -> crate::BuiltinResult<Value> {
     // Create an underlying object instance and wrap it in a handle
     let obj = create_class_object(class_name.clone()).await?;
+    if matches!(obj, Value::HandleObject(_)) {
+        return Ok(obj);
+    }
     let gc = runmat_gc::gc_allocate(obj).map_err(|e| format!("gc: {e}"))?;
-    Ok(Value::HandleObject(runmat_builtins::HandleRef {
+    Ok(Value::HandleObject(runmat_value::HandleRef {
         class_name,
         target: gc,
         valid: true,
@@ -517,10 +575,21 @@ pub(crate) async fn isvalid_builtin(v: Value) -> crate::BuiltinResult<Value> {
 use std::cell::RefCell;
 
 #[derive(Default)]
-struct EventRegistry {
+pub(crate) struct EventRegistry {
     next_id: u64,
-    listeners: std::collections::HashMap<(usize, String), Vec<runmat_builtins::Listener>>,
+    listeners: std::collections::HashMap<(usize, String), Vec<runmat_value::Listener>>,
     listener_roots: std::collections::HashMap<u64, ListenerRoots>,
+}
+
+impl std::fmt::Debug for EventRegistry {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("EventRegistry")
+            .field("next_id", &self.next_id)
+            .field("listener_groups", &self.listeners.len())
+            .field("listener_roots", &self.listener_roots.len())
+            .finish()
+    }
 }
 
 struct ListenerRoots {
@@ -532,16 +601,29 @@ thread_local! {
     static EVENT_REGISTRY: RefCell<EventRegistry> = RefCell::new(EventRegistry::default());
 }
 
+fn with_event_registry<R>(operation: impl FnOnce(&EventRegistry) -> R) -> R {
+    if let Some(context) = crate::context::legacy::active() {
+        return operation(&context.state().events.borrow());
+    }
+    EVENT_REGISTRY.with(|registry| operation(&registry.borrow()))
+}
+
+fn with_event_registry_mut<R>(operation: impl FnOnce(&mut EventRegistry) -> R) -> R {
+    if let Some(context) = crate::context::legacy::active() {
+        return operation(&mut context.state().events.borrow_mut());
+    }
+    EVENT_REGISTRY.with(|registry| operation(&mut registry.borrow_mut()))
+}
+
 #[cfg(test)]
 fn reset_event_registry_for_test() {
-    EVENT_REGISTRY.with(|registry| {
-        *registry.borrow_mut() = EventRegistry::default();
+    with_event_registry_mut(|registry| {
+        *registry = EventRegistry::default();
     });
 }
 
 pub(crate) fn invalidate_listener_registration(listener_id: u64) {
-    EVENT_REGISTRY.with(|registry| {
-        let mut registry = registry.borrow_mut();
+    with_event_registry_mut(|registry| {
         for listeners in registry.listeners.values_mut() {
             for listener in listeners.iter_mut() {
                 if listener.id == listener_id {
@@ -668,8 +750,7 @@ pub(crate) async fn addlistener_builtin(
             )
         }
     };
-    let id = EVENT_REGISTRY.with(|registry| {
-        let mut registry = registry.borrow_mut();
+    let id = with_event_registry_mut(|registry| {
         registry.next_id += 1;
         registry.next_id
     });
@@ -685,7 +766,7 @@ pub(crate) async fn addlistener_builtin(
     };
     let callback = canonicalize_listener_callback(callback);
     let callback_root = runmat_gc::gc_allocate_rooted(callback).map_err(|e| format!("gc: {e}"))?;
-    let listener = runmat_builtins::Listener {
+    let listener = runmat_value::Listener {
         id,
         target: target_root.handle(),
         target_class_name,
@@ -694,8 +775,7 @@ pub(crate) async fn addlistener_builtin(
         enabled: true,
         valid: true,
     };
-    EVENT_REGISTRY.with(|registry| {
-        let mut registry = registry.borrow_mut();
+    with_event_registry_mut(|registry| {
         registry
             .listeners
             .entry((key_ptr, event_name))
@@ -744,9 +824,8 @@ pub(crate) async fn notify_builtin(
             )
         }
     };
-    let mut to_call: Vec<runmat_builtins::Listener> = Vec::new();
-    EVENT_REGISTRY.with(|registry| {
-        let registry = registry.borrow();
+    let mut to_call: Vec<runmat_value::Listener> = Vec::new();
+    with_event_registry(|registry| {
         if let Some(list) = registry.listeners.get(&(key_ptr, event_name.clone())) {
             for l in list {
                 if l.valid && l.enabled {
@@ -828,7 +907,7 @@ pub(crate) async fn make_anon_builtin(params: String, body: String) -> crate::Bu
 }
 
 pub async fn create_class_object(class_name: String) -> crate::BuiltinResult<Value> {
-    if runmat_builtins::is_class_abstract(&class_name) {
+    if crate::class_registry::is_class_abstract(&class_name) {
         return Err(build_runtime_error(format!(
             "Cannot instantiate abstract class '{}'.",
             class_name
@@ -836,9 +915,9 @@ pub async fn create_class_object(class_name: String) -> crate::BuiltinResult<Val
         .with_identifier("RunMat:AbstractMethodMissing")
         .build());
     }
-    if let Some(def) = runmat_builtins::get_class(&class_name) {
+    if let Some(def) = crate::class_registry::get_class(&class_name) {
         // Collect class hierarchy from root to leaf for default initialization
-        let mut chain: Vec<runmat_builtins::ClassDef> = Vec::new();
+        let mut chain: Vec<crate::class_registry::RuntimeClass> = Vec::new();
         let mut is_handle_class = false;
         let mut visited = std::collections::HashSet::new();
         // Walk up to root
@@ -851,7 +930,7 @@ pub async fn create_class_object(class_name: String) -> crate::BuiltinResult<Val
             if !visited.insert(name.clone()) {
                 break;
             }
-            if let Some(cd) = runmat_builtins::get_class(&name) {
+            if let Some(cd) = crate::class_registry::get_class(&name) {
                 if cd
                     .parent
                     .as_ref()
@@ -867,11 +946,10 @@ pub async fn create_class_object(class_name: String) -> crate::BuiltinResult<Val
         }
         // Reverse to root-first
         chain.reverse();
-        let mut obj = runmat_builtins::ObjectInstance::new(def.name.clone());
+        let mut obj = runmat_value::ObjectInstance::new(def.name.clone());
         // Apply defaults from root to leaf (leaf overrides effectively by later assignment)
-        let empty_default = || {
-            Value::Tensor(runmat_builtins::Tensor::new(vec![], vec![0, 0]).expect("empty tensor"))
-        };
+        let empty_default =
+            || Value::Tensor(runmat_value::Tensor::new(vec![], vec![0, 0]).expect("empty tensor"));
         for cd in chain {
             for (k, p) in cd.properties.iter() {
                 if !p.is_static {
@@ -884,7 +962,7 @@ pub async fn create_class_object(class_name: String) -> crate::BuiltinResult<Val
         }
         if is_handle_class {
             let gc = runmat_gc::gc_allocate(Value::Object(obj)).map_err(|e| format!("gc: {e}"))?;
-            Ok(Value::HandleObject(runmat_builtins::HandleRef {
+            Ok(Value::HandleObject(runmat_value::HandleRef {
                 class_name: def.name.clone(),
                 target: gc,
                 valid: true,
@@ -893,9 +971,7 @@ pub async fn create_class_object(class_name: String) -> crate::BuiltinResult<Val
             Ok(Value::Object(obj))
         }
     } else {
-        Ok(Value::Object(runmat_builtins::ObjectInstance::new(
-            class_name,
-        )))
+        Ok(Value::Object(runmat_value::ObjectInstance::new(class_name)))
     }
 }
 
@@ -915,8 +991,8 @@ pub async fn call_super_constructor(
             .next()
             .filter(|name| !name.trim().is_empty())
             .unwrap_or(super_class_name.as_str());
-        let ctor_lookup = runmat_builtins::lookup_method(&super_class_name, ctor_name)
-            .or_else(|| runmat_builtins::lookup_method(&super_class_name, &super_class_name));
+        let ctor_lookup = crate::class_registry::lookup_method(&super_class_name, ctor_name)
+            .or_else(|| crate::class_registry::lookup_method(&super_class_name, &super_class_name));
         let Some((ctor, _owner)) = ctor_lookup else {
             return Ok::<Option<Value>, RuntimeError>(None);
         };
@@ -936,7 +1012,7 @@ pub async fn call_super_constructor(
         return Ok(receiver);
     };
     fn merge_parent_props_into_object(
-        receiver_obj: &mut runmat_builtins::ObjectInstance,
+        receiver_obj: &mut runmat_value::ObjectInstance,
         ctor_result: Value,
         owner: Option<&runmat_gc::GcHandle>,
     ) -> Result<(), RuntimeError> {
@@ -1039,7 +1115,8 @@ pub async fn call_super_method(
     method_name: String,
     args: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    let Some((method, owner)) = runmat_builtins::lookup_method(&super_class_name, &method_name)
+    let Some((method, owner)) =
+        crate::class_registry::lookup_method(&super_class_name, &method_name)
     else {
         return Err(build_runtime_error(format!(
             "Undefined superclass method '{}@{}'",
@@ -1057,11 +1134,11 @@ pub async fn call_super_method(
         .build());
     }
     let access_allowed = match method.access {
-        runmat_builtins::Access::Public => true,
-        runmat_builtins::Access::Protected => {
-            runmat_builtins::is_class_or_subclass(&class_name, &owner)
+        runmat_types::MemberAccess::Public => true,
+        runmat_types::MemberAccess::Protected => {
+            crate::class_registry::is_class_or_subclass(&class_name, &owner)
         }
-        runmat_builtins::Access::Private => class_name == owner,
+        runmat_types::MemberAccess::Private => class_name == owner,
     };
     if !access_allowed {
         return Err(build_runtime_error(format!(
@@ -1091,82 +1168,81 @@ pub(crate) async fn classref_builtin(class_name: String) -> crate::BuiltinResult
 }
 
 pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
-    use runmat_builtins::*;
     let mut props = std::collections::HashMap::new();
     props.insert(
         "x".to_string(),
-        PropertyDef {
+        crate::class_registry::RuntimeProperty {
             name: "x".to_string(),
             is_static: false,
             is_constant: false,
             is_dependent: false,
-            get_access: Access::Public,
-            set_access: Access::Public,
+            get_access: MemberAccess::Public,
+            set_access: MemberAccess::Public,
             default_value: Some(Value::Num(0.0)),
         },
     );
     props.insert(
         "y".to_string(),
-        PropertyDef {
+        crate::class_registry::RuntimeProperty {
             name: "y".to_string(),
             is_static: false,
             is_constant: false,
             is_dependent: false,
-            get_access: Access::Public,
-            set_access: Access::Public,
+            get_access: MemberAccess::Public,
+            set_access: MemberAccess::Public,
             default_value: Some(Value::Num(0.0)),
         },
     );
     props.insert(
         "staticValue".to_string(),
-        PropertyDef {
+        crate::class_registry::RuntimeProperty {
             name: "staticValue".to_string(),
             is_static: true,
             is_constant: false,
             is_dependent: false,
-            get_access: Access::Public,
-            set_access: Access::Public,
+            get_access: MemberAccess::Public,
+            set_access: MemberAccess::Public,
             default_value: Some(Value::Num(42.0)),
         },
     );
     props.insert(
         "secret".to_string(),
-        PropertyDef {
+        crate::class_registry::RuntimeProperty {
             name: "secret".to_string(),
             is_static: false,
             is_constant: false,
             is_dependent: false,
-            get_access: Access::Private,
-            set_access: Access::Private,
+            get_access: MemberAccess::Private,
+            set_access: MemberAccess::Private,
             default_value: Some(Value::Num(99.0)),
         },
     );
     let mut methods = std::collections::HashMap::new();
     methods.insert(
         "move".to_string(),
-        MethodDef {
+        crate::class_registry::RuntimeMethod {
             name: "move".to_string(),
             is_static: false,
             is_abstract: false,
             is_sealed: false,
-            access: Access::Public,
+            access: MemberAccess::Public,
             function_name: "Point.move".to_string(),
             implicit_class_argument: None,
         },
     );
     methods.insert(
         "origin".to_string(),
-        MethodDef {
+        crate::class_registry::RuntimeMethod {
             name: "origin".to_string(),
             is_static: true,
             is_abstract: false,
             is_sealed: false,
-            access: Access::Public,
+            access: MemberAccess::Public,
             function_name: "Point.origin".to_string(),
             implicit_class_argument: None,
         },
     );
-    runmat_builtins::register_class(ClassDef {
+    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
         name: "Point".to_string(),
         parent: None,
         properties: props,
@@ -1177,30 +1253,30 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
     let mut ns_props = std::collections::HashMap::new();
     ns_props.insert(
         "x".to_string(),
-        PropertyDef {
+        crate::class_registry::RuntimeProperty {
             name: "x".to_string(),
             is_static: false,
             is_constant: false,
             is_dependent: false,
-            get_access: Access::Public,
-            set_access: Access::Public,
+            get_access: MemberAccess::Public,
+            set_access: MemberAccess::Public,
             default_value: Some(Value::Num(1.0)),
         },
     );
     ns_props.insert(
         "y".to_string(),
-        PropertyDef {
+        crate::class_registry::RuntimeProperty {
             name: "y".to_string(),
             is_static: false,
             is_constant: false,
             is_dependent: false,
-            get_access: Access::Public,
-            set_access: Access::Public,
+            get_access: MemberAccess::Public,
+            set_access: MemberAccess::Public,
             default_value: Some(Value::Num(2.0)),
         },
     );
     let ns_methods = std::collections::HashMap::new();
-    runmat_builtins::register_class(ClassDef {
+    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
         name: "pkg.PointNS".to_string(),
         parent: None,
         properties: ns_props,
@@ -1212,17 +1288,17 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
     let mut shape_methods = std::collections::HashMap::new();
     shape_methods.insert(
         "area".to_string(),
-        MethodDef {
+        crate::class_registry::RuntimeMethod {
             name: "area".to_string(),
             is_static: false,
             is_abstract: false,
             is_sealed: false,
-            access: Access::Public,
+            access: MemberAccess::Public,
             function_name: "Shape.area".to_string(),
             implicit_class_argument: None,
         },
     );
-    runmat_builtins::register_class(ClassDef {
+    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
         name: "Shape".to_string(),
         parent: None,
         properties: shape_props,
@@ -1232,30 +1308,30 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
     let mut circle_props = std::collections::HashMap::new();
     circle_props.insert(
         "r".to_string(),
-        PropertyDef {
+        crate::class_registry::RuntimeProperty {
             name: "r".to_string(),
             is_static: false,
             is_constant: false,
             is_dependent: false,
-            get_access: Access::Public,
-            set_access: Access::Public,
+            get_access: MemberAccess::Public,
+            set_access: MemberAccess::Public,
             default_value: Some(Value::Num(0.0)),
         },
     );
     let mut circle_methods = std::collections::HashMap::new();
     circle_methods.insert(
         "area".to_string(),
-        MethodDef {
+        crate::class_registry::RuntimeMethod {
             name: "area".to_string(),
             is_static: false,
             is_abstract: false,
             is_sealed: false,
-            access: Access::Public,
+            access: MemberAccess::Public,
             function_name: "Circle.area".to_string(),
             implicit_class_argument: None,
         },
     );
-    runmat_builtins::register_class(ClassDef {
+    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
         name: "Circle".to_string(),
         parent: Some("Shape".to_string()),
         properties: circle_props,
@@ -1267,17 +1343,17 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
     let mut ctor_methods = std::collections::HashMap::new();
     ctor_methods.insert(
         "Ctor".to_string(),
-        MethodDef {
+        crate::class_registry::RuntimeMethod {
             name: "Ctor".to_string(),
             is_static: true,
             is_abstract: false,
             is_sealed: false,
-            access: Access::Public,
+            access: MemberAccess::Public,
             function_name: "Ctor.Ctor".to_string(),
             implicit_class_argument: None,
         },
     );
-    runmat_builtins::register_class(ClassDef {
+    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
         name: "Ctor".to_string(),
         parent: None,
         properties: ctor_props,
@@ -1289,24 +1365,24 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
     let mut overidx_methods = std::collections::HashMap::new();
     overidx_methods.insert(
         OBJECT_SUBSREF_METHOD.to_string(),
-        MethodDef {
+        crate::class_registry::RuntimeMethod {
             name: OBJECT_SUBSREF_METHOD.to_string(),
             is_static: false,
             is_abstract: false,
             is_sealed: false,
-            access: Access::Public,
+            access: MemberAccess::Public,
             function_name: format!("OverIdx.{OBJECT_SUBSREF_METHOD}"),
             implicit_class_argument: None,
         },
     );
     overidx_methods.insert(
         OBJECT_SUBSASGN_METHOD.to_string(),
-        MethodDef {
+        crate::class_registry::RuntimeMethod {
             name: OBJECT_SUBSASGN_METHOD.to_string(),
             is_static: false,
             is_abstract: false,
             is_sealed: false,
-            access: Access::Public,
+            access: MemberAccess::Public,
             function_name: format!("OverIdx.{OBJECT_SUBSASGN_METHOD}"),
             implicit_class_argument: None,
         },
@@ -1314,14 +1390,14 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
     overidx_methods.insert(
         crate::builtins::introspection::object_indexing::NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD
             .to_string(),
-        MethodDef {
+        crate::class_registry::RuntimeMethod {
             name:
                 crate::builtins::introspection::object_indexing::NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD
                     .to_string(),
             is_static: false,
             is_abstract: false,
             is_sealed: false,
-            access: Access::Public,
+            access: MemberAccess::Public,
             function_name: format!(
                 "OverIdx.{}",
                 crate::builtins::introspection::object_indexing::NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD
@@ -1341,12 +1417,12 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
     ] {
         overidx_methods.insert(
             name.to_string(),
-            MethodDef {
+            crate::class_registry::RuntimeMethod {
                 name: name.to_string(),
                 is_static,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: format!("OverIdx.{name}"),
                 implicit_class_argument: None,
             },
@@ -1358,18 +1434,18 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
     ] {
         overidx_methods.insert(
             name.to_string(),
-            MethodDef {
+            crate::class_registry::RuntimeMethod {
                 name: name.to_string(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: format!("OverIdx.{name}"),
                 implicit_class_argument: None,
             },
         );
     }
-    runmat_builtins::register_class(ClassDef {
+    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
         name: "OverIdx".to_string(),
         parent: None,
         properties: overidx_props,
@@ -1377,7 +1453,7 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
     });
 
     // Class without indexing protocol methods, used by negative subsref/subsasgn contracts.
-    runmat_builtins::register_class(ClassDef {
+    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
         name: "NoIdx".to_string(),
         parent: None,
         properties: std::collections::HashMap::new(),
@@ -1391,50 +1467,6 @@ pub async fn test_register_classes() {
     let _ = register_test_classes_builtin().await;
 }
 
-// Example method implementation: Point.move(obj, dx, dy) -> updated obj
-const FEVAL_ERROR_HANDLE_NAME_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FEVAL.HANDLE_NAME_INVALID",
-    identifier: Some("RunMat:FevalHandleNameInvalid"),
-    when: "A function or method handle name is empty.",
-    message: "feval: function handle name must not be empty",
-};
-
-const FEVAL_ERROR_HANDLE_STRING_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FEVAL.HANDLE_STRING_INVALID",
-    identifier: Some("RunMat:FevalHandleStringInvalid"),
-    when: "Text handle input does not start with '@'.",
-    message: "feval: expected function handle string starting with '@'",
-};
-
-const FEVAL_ERROR_HANDLE_SHAPE_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FEVAL.HANDLE_SHAPE_INVALID",
-    identifier: Some("RunMat:FevalHandleShapeInvalid"),
-    when: "Text handle input has invalid char/string array shape.",
-    message: "feval: function handle text input must be scalar row text",
-};
-
-const FEVAL_ERROR_SEMANTIC_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FEVAL.SEMANTIC_UNAVAILABLE",
-    identifier: Some("RunMat:SemanticFunctionUnavailable"),
-    when: "Semantic function identity cannot be invoked in current runtime state.",
-    message: "feval: semantic function handle is unavailable",
-};
-
-const FEVAL_ERROR_FUNCTION_VALUE_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FEVAL.FUNCTION_VALUE_UNSUPPORTED",
-    identifier: Some("RunMat:FevalFunctionValueUnsupported"),
-    when: "The first argument is not a supported callable value.",
-    message: "feval: unsupported function value",
-};
-
-pub(crate) const FEVAL_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    FEVAL_ERROR_HANDLE_NAME_INVALID,
-    FEVAL_ERROR_HANDLE_STRING_INVALID,
-    FEVAL_ERROR_HANDLE_SHAPE_INVALID,
-    FEVAL_ERROR_SEMANTIC_UNAVAILABLE,
-    FEVAL_ERROR_FUNCTION_VALUE_UNSUPPORTED,
-];
-
 pub(crate) async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     fn normalize_feval_handle_name(name: &str) -> Option<String> {
         let trimmed = name.trim();
@@ -1442,8 +1474,8 @@ pub(crate) async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinR
     }
 
     async fn call_by_identity(
-        identity: runmat_hir::CallableIdentity,
-        fallback_policy: runmat_hir::CallableFallbackPolicy,
+        identity: runmat_types::CallableIdentity,
+        fallback_policy: runmat_types::CallableFallbackPolicy,
         args: &[Value],
         requested_outputs: usize,
     ) -> crate::BuiltinResult<Value> {
@@ -1462,34 +1494,57 @@ pub(crate) async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinR
         call_by_identity(identity, fallback_policy, args, requested_outputs).await
     }
 
+    fn text_target_name(text: &str) -> Option<&str> {
+        let trimmed = text.trim();
+        let name = trimmed.strip_prefix('@').unwrap_or(trimmed).trim();
+        (!name.is_empty()).then_some(name)
+    }
+
+    fn is_at_prefixed_text_target(value: &Value) -> bool {
+        match value {
+            Value::String(text) => text.trim().starts_with('@'),
+            Value::CharArray(chars) if chars.rows == 1 => chars
+                .data
+                .iter()
+                .collect::<String>()
+                .trim()
+                .starts_with('@'),
+            Value::StringArray(strings) if strings.data.len() == 1 => {
+                strings.data[0].trim().starts_with('@')
+            }
+            _ => false,
+        }
+    }
+
+    if is_at_prefixed_text_target(&f) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FEVAL_AT_PREFIXED_TEXT_EXTENSION,
+            "feval",
+        )?;
+    }
+    if matches!(&f, Value::Object(_) | Value::HandleObject(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FEVAL_OBJECT_RECEIVER_EXTENSION,
+            "feval",
+        )?;
+    }
+
     let requested_outputs = crate::output_count::current_output_count().unwrap_or(1);
 
     match f {
-        // Function handle strings like "@sin"
         Value::String(s) => {
-            if let Some(name) = s.strip_prefix('@') {
-                call_by_name(name, &rest, requested_outputs).await
-            } else {
-                Err(runtime_descriptor_error_with_detail(
-                    "feval",
-                    &FEVAL_ERROR_HANDLE_STRING_INVALID,
-                    format!("got {s}"),
-                ))
-            }
+            let name = text_target_name(&s).ok_or_else(|| {
+                runtime_descriptor_error("feval", &FEVAL_ERROR_HANDLE_NAME_INVALID)
+            })?;
+            call_by_name(name, &rest, requested_outputs).await
         }
-        // Also accept character row vector handles like '@max'
         Value::CharArray(ca) => {
             if ca.rows == 1 {
                 let s: String = ca.data.iter().collect();
-                if let Some(name) = s.strip_prefix('@') {
-                    call_by_name(name, &rest, requested_outputs).await
-                } else {
-                    Err(runtime_descriptor_error_with_detail(
-                        "feval",
-                        &FEVAL_ERROR_HANDLE_STRING_INVALID,
-                        format!("got {s}"),
-                    ))
-                }
+                let name = text_target_name(&s).ok_or_else(|| {
+                    runtime_descriptor_error("feval", &FEVAL_ERROR_HANDLE_NAME_INVALID)
+                })?;
+                call_by_name(name, &rest, requested_outputs).await
             } else {
                 Err(runtime_descriptor_error_with_detail(
                     "feval",
@@ -1501,15 +1556,10 @@ pub(crate) async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinR
         Value::StringArray(sa) => {
             if sa.data.len() == 1 {
                 let s = &sa.data[0];
-                if let Some(name) = s.strip_prefix('@') {
-                    call_by_name(name, &rest, requested_outputs).await
-                } else {
-                    Err(runtime_descriptor_error_with_detail(
-                        "feval",
-                        &FEVAL_ERROR_HANDLE_STRING_INVALID,
-                        format!("got {s}"),
-                    ))
-                }
+                let name = text_target_name(s).ok_or_else(|| {
+                    runtime_descriptor_error("feval", &FEVAL_ERROR_HANDLE_NAME_INVALID)
+                })?;
+                call_by_name(name, &rest, requested_outputs).await
             } else {
                 Err(runtime_descriptor_error_with_detail(
                     "feval",
@@ -1529,8 +1579,8 @@ pub(crate) async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinR
                 ));
             }
             dispatch_callable_with_policy(
-                runmat_hir::CallableIdentity::Method(runmat_hir::MethodId(method_name)),
-                runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+                runmat_types::CallableIdentity::Method(runmat_types::MethodId(method_name)),
+                runmat_types::CallableFallbackPolicy::RuntimeNameResolution,
                 rest,
                 requested_outputs,
             )
@@ -1645,7 +1695,7 @@ mod tests {
     use super::*;
     use crate::builtins::introspection::test_methods::*;
     use futures::executor::block_on;
-    use runmat_builtins::{register_class, Access, ClassDef, HandleRef, PropertyDef};
+    use runmat_value::{HandleRef, IntegerStorage, Tensor};
     use std::collections::HashMap;
     use std::sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
@@ -1714,10 +1764,12 @@ mod tests {
         ];
 
         for (name, label) in cases {
-            let builtin = runmat_builtins::builtin_function_by_name(name)
-                .unwrap_or_else(|| panic!("builtin {name} not registered"));
-            let descriptor = builtin
-                .descriptor
+            let descriptor = runmat_builtins::builtin_catalog_entry_by_name(name)
+                .map(|entry| entry.descriptor)
+                .or_else(|| {
+                    runmat_builtins::builtin_function_by_name(name)
+                        .and_then(|builtin| builtin.descriptor)
+                })
                 .unwrap_or_else(|| panic!("descriptor missing for {name}"));
             assert!(
                 descriptor.signatures.iter().any(|sig| sig.label == label),
@@ -1748,7 +1800,7 @@ mod tests {
                 Box::pin(async { Ok(Value::Num(7.0)) })
             },
         )));
-        let closure = Value::Closure(runmat_builtins::Closure {
+        let closure = Value::Closure(runmat_value::Closure {
             function_name: "function_target".to_string(),
             bound_function: Some(42),
             captures: Vec::new(),
@@ -1781,7 +1833,7 @@ mod tests {
 
     #[test]
     fn feval_semantic_function_handle_errors_when_semantic_invoker_unavailable() {
-        let _guard = crate::user_functions::install_semantic_function_invoker(None);
+        let _guard = crate::user_functions::clear_semantic_function_invoker();
         let handle = Value::BoundFunctionHandle {
             name: "function_target".to_string(),
             function: 9043,
@@ -1870,7 +1922,7 @@ mod tests {
             }),
         ));
 
-        let closure = Value::Closure(runmat_builtins::Closure {
+        let closure = Value::Closure(runmat_value::Closure {
             function_name: "resolved_target".to_string(),
             bound_function: None,
             captures: vec![Value::Num(9.0)],
@@ -1887,9 +1939,9 @@ mod tests {
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "sin").then_some(245)
             })));
-        let _invoker_guard = crate::user_functions::install_semantic_function_invoker(None);
+        let _invoker_guard = crate::user_functions::clear_semantic_function_invoker();
 
-        let closure = Value::Closure(runmat_builtins::Closure {
+        let closure = Value::Closure(runmat_value::Closure {
             function_name: "sin".to_string(),
             bound_function: None,
             captures: Vec::new(),
@@ -1939,28 +1991,68 @@ mod tests {
     }
 
     #[test]
-    fn feval_rejects_string_without_at_with_identifier() {
-        let err = block_on(feval_builtin(
+    fn feval_accepts_documented_plain_string_function_name() {
+        let value = block_on(feval_builtin(
             Value::String("sin".to_string()),
             vec![Value::Num(0.0)],
         ))
-        .expect_err("feval string handle without @ should fail");
-        assert_eq!(err.identifier(), Some("RunMat:FevalHandleStringInvalid"));
+        .expect("plain string function name should resolve");
+        assert_eq!(value, Value::Num(0.0));
     }
 
     #[test]
-    fn feval_rejects_char_handle_without_at_with_identifier() {
-        let err = block_on(feval_builtin(
-            Value::CharArray(runmat_builtins::CharArray::new_row("sin")),
+    fn feval_accepts_documented_plain_char_function_name() {
+        let value = block_on(feval_builtin(
+            Value::CharArray(runmat_value::CharArray::new_row("sin")),
             vec![Value::Num(0.0)],
         ))
-        .expect_err("feval char handle without @ should fail");
-        assert_eq!(err.identifier(), Some("RunMat:FevalHandleStringInvalid"));
+        .expect("plain character-vector function name should resolve");
+        assert_eq!(value, Value::Num(0.0));
+    }
+
+    #[test]
+    fn feval_forwards_all_integer_classes_without_conversion() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "integer_identity").then_some(654_321)
+            })));
+        let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
+            Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 654_321);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args.len(), 1);
+                let output = args[0].clone();
+                Box::pin(async move { Ok(output) })
+            }),
+        ));
+
+        let storages = [
+            IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+            IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+            IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![0, u8::MAX]),
+            IntegerStorage::U16(vec![0, u16::MAX]),
+            IntegerStorage::U32(vec![0, u32::MAX]),
+            IntegerStorage::U64(vec![0, u64::MAX]),
+        ];
+
+        for storage in storages {
+            let input = Value::Tensor(
+                Tensor::new_integer(storage, vec![1, 2]).expect("integer forwarding input"),
+            );
+            let output = block_on(feval_builtin(
+                Value::CharArray(runmat_value::CharArray::new_row("integer_identity")),
+                vec![input.clone()],
+            ))
+            .expect("integer argument should be forwarded unchanged");
+            assert_eq!(output, input);
+        }
     }
 
     #[test]
     fn feval_rejects_non_row_char_handle_with_identifier() {
-        let chars = runmat_builtins::CharArray::new(vec!['@', 's'], 2, 1)
+        let chars = runmat_value::CharArray::new(vec!['@', 's'], 2, 1)
             .expect("char array construction should succeed");
         let err = block_on(feval_builtin(
             Value::CharArray(chars),
@@ -1972,12 +2064,27 @@ mod tests {
 
     #[test]
     fn feval_rejects_empty_at_string_handle_with_identifier() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let err = block_on(feval_builtin(
             Value::String("@".to_string()),
             vec![Value::Num(0.0)],
         ))
         .expect_err("feval empty @string handle should fail");
         assert_eq!(err.identifier(), Some("RunMat:FevalHandleNameInvalid"));
+    }
+
+    #[test]
+    fn feval_strict_mode_rejects_at_prefixed_text_before_dispatch() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let err = block_on(feval_builtin(
+            Value::String("@sin".to_string()),
+            vec![Value::Num(0.0)],
+        ))
+        .expect_err("@-prefixed text target should require RunMat mode");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:compatibility:FevalAtPrefixedTextTargetExtension")
+        );
     }
 
     #[test]
@@ -1992,6 +2099,7 @@ mod tests {
 
     #[test]
     fn feval_trims_text_handle_name_for_resolution() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "resolved_target").then_some(9876)
@@ -2085,7 +2193,7 @@ mod tests {
 
     #[test]
     fn str2func_rejects_non_row_char_name_with_identifier() {
-        let chars = runmat_builtins::CharArray::new(vec!['a', 'b'], 2, 1)
+        let chars = runmat_value::CharArray::new(vec!['a', 'b'], 2, 1)
             .expect("char array construction should succeed");
         let err = crate::builtins::introspection::function_handle_text::dispatch_str2func(
             Value::CharArray(chars),
@@ -2108,7 +2216,7 @@ mod tests {
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
         let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(
             Value::StringArray(
-                runmat_builtins::StringArray::new(vec!["@missing_target".to_string()], vec![1, 1])
+                runmat_value::StringArray::new(vec!["@missing_target".to_string()], vec![1, 1])
                     .expect("string array construction should succeed"),
             ),
         )
@@ -2120,7 +2228,7 @@ mod tests {
     fn str2func_rejects_nonscalar_string_array_name_with_identifier() {
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
         let value = Value::StringArray(
-            runmat_builtins::StringArray::new(vec!["@a".to_string(), "@b".to_string()], vec![1, 2])
+            runmat_value::StringArray::new(vec!["@a".to_string(), "@b".to_string()], vec![1, 2])
                 .expect("string array construction should succeed"),
         );
         let err = crate::builtins::introspection::function_handle_text::dispatch_str2func(value)
@@ -2136,7 +2244,7 @@ mod tests {
             })));
         let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(
             Value::StringArray(
-                runmat_builtins::StringArray::new(vec!["@resolved_target".to_string()], vec![1, 1])
+                runmat_value::StringArray::new(vec!["@resolved_target".to_string()], vec![1, 1])
                     .expect("string array construction should succeed"),
             ),
         )
@@ -2155,7 +2263,7 @@ mod tests {
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
         let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(
             Value::StringArray(
-                runmat_builtins::StringArray::new(vec!["Point.origin".to_string()], vec![1, 1])
+                runmat_value::StringArray::new(vec!["Point.origin".to_string()], vec![1, 1])
                     .expect("string array construction should succeed"),
             ),
         )
@@ -2171,7 +2279,7 @@ mod tests {
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
         let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(
             Value::StringArray(
-                runmat_builtins::StringArray::new(vec!["Point..origin".to_string()], vec![1, 1])
+                runmat_value::StringArray::new(vec!["Point..origin".to_string()], vec![1, 1])
                     .expect("string array construction should succeed"),
             ),
         )
@@ -2184,7 +2292,7 @@ mod tests {
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
         let err = crate::builtins::introspection::function_handle_text::dispatch_str2func(
             Value::StringArray(
-                runmat_builtins::StringArray::new(vec!["   ".to_string()], vec![1, 1])
+                runmat_value::StringArray::new(vec!["   ".to_string()], vec![1, 1])
                     .expect("string array construction should succeed"),
             ),
         )
@@ -2200,7 +2308,7 @@ mod tests {
             })));
         let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(
             Value::StringArray(
-                runmat_builtins::StringArray::new(
+                runmat_value::StringArray::new(
                     vec!["@pkg.resolved_target".to_string()],
                     vec![1, 1],
                 )
@@ -2219,6 +2327,7 @@ mod tests {
 
     #[test]
     fn getmethod_classref_returns_typed_external_function_handle() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
         let value = crate::builtins::introspection::getmethod::dispatch_getmethod(
             Value::ClassRef("Point".to_string()),
@@ -2233,6 +2342,7 @@ mod tests {
 
     #[test]
     fn getmethod_rejects_empty_method_name() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let err = crate::builtins::introspection::getmethod::dispatch_getmethod(
             Value::ClassRef("Point".to_string()),
             "   ".to_string(),
@@ -2243,6 +2353,7 @@ mod tests {
 
     #[test]
     fn getmethod_rejects_unsupported_receiver_with_identifier() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let err = crate::builtins::introspection::getmethod::dispatch_getmethod(
             Value::Num(1.0),
             "origin".to_string(),
@@ -2262,37 +2373,37 @@ mod tests {
         let mut props_a = HashMap::new();
         props_a.insert(
             "fromA".to_string(),
-            PropertyDef {
+            crate::class_registry::RuntimeProperty {
                 name: "fromA".to_string(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
-                get_access: Access::Public,
-                set_access: Access::Public,
+                get_access: MemberAccess::Public,
+                set_access: MemberAccess::Public,
                 default_value: Some(Value::Num(1.0)),
             },
         );
         let mut props_b = HashMap::new();
         props_b.insert(
             "fromB".to_string(),
-            PropertyDef {
+            crate::class_registry::RuntimeProperty {
                 name: "fromB".to_string(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
-                get_access: Access::Public,
-                set_access: Access::Public,
+                get_access: MemberAccess::Public,
+                set_access: MemberAccess::Public,
                 default_value: Some(Value::Num(2.0)),
             },
         );
 
-        register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: class_a.clone(),
             parent: Some(class_b.clone()),
             properties: props_a,
             methods: HashMap::new(),
         });
-        register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: class_b,
             parent: Some(class_a.clone()),
             properties: props_b,
@@ -2312,8 +2423,8 @@ mod tests {
     #[test]
     fn create_class_object_abstract_class_reports_stable_identifier() {
         let class_name = unique_class_name("runtime_ctor_abstract");
-        runmat_builtins::register_class_with_modifiers(
-            ClassDef {
+        crate::class_registry::register_class_with_modifiers(
+            crate::class_registry::RuntimeClass {
                 name: class_name.clone(),
                 parent: None,
                 properties: HashMap::new(),
@@ -2334,20 +2445,20 @@ mod tests {
         let (identity, fallback_policy) = callable_identity_for_handle_name("pkg..remote_inc");
         assert!(matches!(
             identity,
-            runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name))
+            runmat_types::CallableIdentity::DynamicName(runmat_types::SymbolName(name))
                 if name == "pkg..remote_inc"
         ));
         assert_eq!(
             fallback_policy,
-            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution
+            runmat_types::CallableFallbackPolicy::RuntimeNameResolution
         );
     }
 
     #[test]
     fn unresolved_callable_without_display_name_reports_typed_identity() {
         let err = block_on(dispatch_callable_with_policy(
-            runmat_hir::CallableIdentity::AnonymousFunction(runmat_hir::FunctionId(77)),
-            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+            runmat_types::CallableIdentity::AnonymousFunction(runmat_types::FunctionId(77)),
+            runmat_types::CallableFallbackPolicy::RuntimeNameResolution,
             vec![],
             1,
         ))
@@ -2362,12 +2473,12 @@ mod tests {
     #[test]
     fn unresolved_malformed_external_callable_reports_typed_identity() {
         let err = block_on(dispatch_callable_with_policy(
-            runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
-                runmat_hir::SymbolName("pkg".to_string()),
-                runmat_hir::SymbolName("".to_string()),
-                runmat_hir::SymbolName("remote".to_string()),
+            runmat_types::CallableIdentity::ExternalName(runmat_types::QualifiedName(vec![
+                runmat_types::SymbolName("pkg".to_string()),
+                runmat_types::SymbolName("".to_string()),
+                runmat_types::SymbolName("remote".to_string()),
             ])),
-            runmat_hir::CallableFallbackPolicy::ExternalBoundary,
+            runmat_types::CallableFallbackPolicy::ExternalBoundary,
             vec![],
             1,
         ))
@@ -2383,10 +2494,10 @@ mod tests {
     #[test]
     fn unresolved_method_callable_reports_typed_identity() {
         let err = block_on(dispatch_callable_with_policy(
-            runmat_hir::CallableIdentity::Method(runmat_hir::MethodId(
+            runmat_types::CallableIdentity::Method(runmat_types::MethodId(
                 "missing_method".to_string(),
             )),
-            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+            runmat_types::CallableFallbackPolicy::RuntimeNameResolution,
             vec![],
             1,
         ))
@@ -2406,6 +2517,7 @@ mod tests {
 
     #[test]
     fn feval_qualified_at_handle_errors_as_unresolved_external() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
         let err = block_on(feval_builtin(
             Value::String("@missing.external".to_string()),
@@ -2447,7 +2559,7 @@ mod tests {
         );
         assert_eq!(
             crate::builtins::introspection::function_handle_text::dispatch_func2str(
-                Value::Closure(runmat_builtins::Closure {
+                Value::Closure(runmat_value::Closure {
                     function_name: "captured_fn".to_string(),
                     bound_function: None,
                     captures: Vec::new(),
@@ -2474,10 +2586,10 @@ mod tests {
         ));
 
         let request = crate::user_functions::CallableRequest::resolved(
-            runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(
+            runmat_types::CallableIdentity::DynamicName(runmat_types::SymbolName(
                 "resolved_target".to_string(),
             )),
-            runmat_hir::CallableFallbackPolicy::None,
+            runmat_types::CallableFallbackPolicy::None,
             vec![Value::Num(4.0)],
             1,
         );
@@ -2502,10 +2614,10 @@ mod tests {
         ));
 
         let request = crate::user_functions::CallableRequest::resolved(
-            runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(
+            runmat_types::CallableIdentity::DynamicName(runmat_types::SymbolName(
                 "resolved_target".to_string(),
             )),
-            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+            runmat_types::CallableFallbackPolicy::RuntimeNameResolution,
             vec![Value::Num(4.0)],
             1,
         );
@@ -2532,10 +2644,10 @@ mod tests {
         ));
 
         let request = crate::user_functions::CallableRequest::resolved(
-            runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(
+            runmat_types::CallableIdentity::DynamicName(runmat_types::SymbolName(
                 "resolved_target".to_string(),
             )),
-            runmat_hir::CallableFallbackPolicy::ObjectDispatch,
+            runmat_types::CallableFallbackPolicy::ObjectDispatch,
             vec![Value::Num(4.0)],
             1,
         );
@@ -2560,10 +2672,10 @@ mod tests {
         ));
 
         let request = crate::user_functions::CallableRequest::resolved(
-            runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
-                runmat_hir::SymbolName("resolved_target".to_string()),
+            runmat_types::CallableIdentity::ExternalName(runmat_types::QualifiedName(vec![
+                runmat_types::SymbolName("resolved_target".to_string()),
             ])),
-            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+            runmat_types::CallableFallbackPolicy::RuntimeNameResolution,
             vec![Value::Num(4.0)],
             1,
         );
@@ -2588,11 +2700,11 @@ mod tests {
         ));
 
         let request = crate::user_functions::CallableRequest::resolved(
-            runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
-                runmat_hir::SymbolName("pkg".to_string()),
-                runmat_hir::SymbolName("resolved_target".to_string()),
+            runmat_types::CallableIdentity::ExternalName(runmat_types::QualifiedName(vec![
+                runmat_types::SymbolName("pkg".to_string()),
+                runmat_types::SymbolName("resolved_target".to_string()),
             ])),
-            runmat_hir::CallableFallbackPolicy::ExternalBoundary,
+            runmat_types::CallableFallbackPolicy::ExternalBoundary,
             vec![Value::Num(4.0)],
             1,
         );
@@ -2619,10 +2731,10 @@ mod tests {
         ));
 
         let request = crate::user_functions::CallableRequest::resolved(
-            runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
-                runmat_hir::SymbolName("pkg..resolved_target".to_string()),
+            runmat_types::CallableIdentity::ExternalName(runmat_types::QualifiedName(vec![
+                runmat_types::SymbolName("pkg..resolved_target".to_string()),
             ])),
-            runmat_hir::CallableFallbackPolicy::ExternalBoundary,
+            runmat_types::CallableFallbackPolicy::ExternalBoundary,
             vec![Value::Num(4.0)],
             1,
         );
@@ -2647,10 +2759,10 @@ mod tests {
         ));
 
         let request = crate::user_functions::CallableRequest::resolved(
-            runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(
+            runmat_types::CallableIdentity::DynamicName(runmat_types::SymbolName(
                 "resolved_target".to_string(),
             )),
-            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+            runmat_types::CallableFallbackPolicy::RuntimeNameResolution,
             vec![Value::Num(4.0)],
             1,
         );
@@ -2677,10 +2789,10 @@ mod tests {
         ));
 
         let request = crate::user_functions::CallableRequest::resolved(
-            runmat_hir::CallableIdentity::Method(runmat_hir::MethodId(
+            runmat_types::CallableIdentity::Method(runmat_types::MethodId(
                 "resolved_target".to_string(),
             )),
-            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+            runmat_types::CallableFallbackPolicy::RuntimeNameResolution,
             vec![Value::Num(4.0)],
             1,
         );
@@ -2707,17 +2819,17 @@ mod tests {
         ));
 
         let request = crate::user_functions::CallableRequest::resolved(
-            runmat_hir::CallableIdentity::Imported(runmat_hir::DefPath {
-                package: runmat_hir::PackageName("Point".to_string()),
-                module: runmat_hir::QualifiedName(vec![
-                    runmat_hir::SymbolName("Point".to_string()),
-                    runmat_hir::SymbolName("origin".to_string()),
+            runmat_types::CallableIdentity::Imported(runmat_types::DefPath {
+                package: runmat_types::PackageName("Point".to_string()),
+                module: runmat_types::QualifiedName(vec![
+                    runmat_types::SymbolName("Point".to_string()),
+                    runmat_types::SymbolName("origin".to_string()),
                 ]),
-                item: vec![runmat_hir::DefPathSegment::Function(
-                    runmat_hir::SymbolName("origin".to_string()),
+                item: vec![runmat_types::DefPathSegment::Function(
+                    runmat_types::SymbolName("origin".to_string()),
                 )],
             }),
-            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+            runmat_types::CallableFallbackPolicy::RuntimeNameResolution,
             vec![Value::Num(4.0)],
             1,
         );
@@ -2748,17 +2860,17 @@ mod tests {
         ));
 
         let request = crate::user_functions::CallableRequest::resolved(
-            runmat_hir::CallableIdentity::Imported(runmat_hir::DefPath {
-                package: runmat_hir::PackageName("Point".to_string()),
-                module: runmat_hir::QualifiedName(vec![
-                    runmat_hir::SymbolName("Point".to_string()),
-                    runmat_hir::SymbolName("origin".to_string()),
+            runmat_types::CallableIdentity::Imported(runmat_types::DefPath {
+                package: runmat_types::PackageName("Point".to_string()),
+                module: runmat_types::QualifiedName(vec![
+                    runmat_types::SymbolName("Point".to_string()),
+                    runmat_types::SymbolName("origin".to_string()),
                 ]),
-                item: vec![runmat_hir::DefPathSegment::Function(
-                    runmat_hir::SymbolName("other".to_string()),
+                item: vec![runmat_types::DefPathSegment::Function(
+                    runmat_types::SymbolName("other".to_string()),
                 )],
             }),
-            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+            runmat_types::CallableFallbackPolicy::RuntimeNameResolution,
             vec![Value::Num(4.0)],
             1,
         );
@@ -2777,8 +2889,8 @@ mod tests {
 
     #[test]
     fn call_method_fallback_preserves_requested_outputs() {
-        let _output_guard = crate::output_count::push_output_count(Some(2));
-        let base = Value::Object(runmat_builtins::ObjectInstance::new(
+        let _output_guard = crate::output_count::push_output_count(Some(3));
+        let base = Value::Object(runmat_value::ObjectInstance::new(
             "NoSuchMethodClass".to_string(),
         ));
         let result = block_on(
@@ -2791,9 +2903,10 @@ mod tests {
         .expect("call_method fallback should succeed");
         match result {
             Value::OutputList(values) => {
-                assert!(values.len() >= 2);
+                assert_eq!(values.len(), 3);
                 assert_eq!(values[0], base);
                 assert_eq!(values[1], Value::Num(9.0));
+                assert_eq!(values[2], Value::Num(10.0));
             }
             other => {
                 panic!("expected output list from multi-output call_method fallback, got {other:?}")
@@ -2803,8 +2916,8 @@ mod tests {
 
     #[test]
     fn call_method_trims_method_name_for_resolution() {
-        let _output_guard = crate::output_count::push_output_count(Some(2));
-        let base = Value::Object(runmat_builtins::ObjectInstance::new(
+        let _output_guard = crate::output_count::push_output_count(Some(3));
+        let base = Value::Object(runmat_value::ObjectInstance::new(
             "NoSuchMethodClass".to_string(),
         ));
         let result = block_on(
@@ -2817,9 +2930,10 @@ mod tests {
         .expect("call_method fallback should succeed after method-name trimming");
         match result {
             Value::OutputList(values) => {
-                assert!(values.len() >= 2);
+                assert_eq!(values.len(), 3);
                 assert_eq!(values[0], base);
                 assert_eq!(values[1], Value::Num(9.0));
+                assert_eq!(values[2], Value::Num(10.0));
             }
             other => {
                 panic!("expected output list from trimmed-name call_method fallback, got {other:?}")
@@ -2829,11 +2943,11 @@ mod tests {
 
     #[test]
     fn feval_call_method_closure_fast_path_preserves_requested_outputs() {
-        let _output_guard = crate::output_count::push_output_count(Some(2));
-        let base = Value::Object(runmat_builtins::ObjectInstance::new(
+        let _output_guard = crate::output_count::push_output_count(Some(3));
+        let base = Value::Object(runmat_value::ObjectInstance::new(
             "NoSuchMethodClass".to_string(),
         ));
-        let closure = Value::Closure(runmat_builtins::Closure {
+        let closure = Value::Closure(runmat_value::Closure {
             function_name: CALL_METHOD_BUILTIN_NAME.to_string(),
             bound_function: None,
             captures: vec![
@@ -2846,9 +2960,10 @@ mod tests {
             .expect("feval call_method closure should succeed");
         match result {
             Value::OutputList(values) => {
-                assert!(values.len() >= 2);
+                assert_eq!(values.len(), 3);
                 assert_eq!(values[0], base);
                 assert_eq!(values[1], Value::Num(9.0));
+                assert_eq!(values[2], Value::Num(10.0));
             }
             other => {
                 panic!(
@@ -2860,11 +2975,11 @@ mod tests {
 
     #[test]
     fn feval_call_method_closure_fast_path_trims_method_name_for_resolution() {
-        let _output_guard = crate::output_count::push_output_count(Some(2));
-        let base = Value::Object(runmat_builtins::ObjectInstance::new(
+        let _output_guard = crate::output_count::push_output_count(Some(3));
+        let base = Value::Object(runmat_value::ObjectInstance::new(
             "NoSuchMethodClass".to_string(),
         ));
-        let closure = Value::Closure(runmat_builtins::Closure {
+        let closure = Value::Closure(runmat_value::Closure {
             function_name: CALL_METHOD_BUILTIN_NAME.to_string(),
             bound_function: None,
             captures: vec![
@@ -2877,9 +2992,10 @@ mod tests {
             .expect("feval call_method closure should succeed after method-name trimming");
         match result {
             Value::OutputList(values) => {
-                assert!(values.len() >= 2);
+                assert_eq!(values.len(), 3);
                 assert_eq!(values[0], base);
                 assert_eq!(values[1], Value::Num(9.0));
+                assert_eq!(values[2], Value::Num(10.0));
             }
             other => {
                 panic!(
@@ -2891,11 +3007,11 @@ mod tests {
 
     #[test]
     fn feval_call_method_closure_rejects_nontext_method_capture_with_identifier() {
-        let closure = Value::Closure(runmat_builtins::Closure {
+        let closure = Value::Closure(runmat_value::Closure {
             function_name: CALL_METHOD_BUILTIN_NAME.to_string(),
             bound_function: None,
             captures: vec![
-                Value::Object(runmat_builtins::ObjectInstance::new("Point".to_string())),
+                Value::Object(runmat_value::ObjectInstance::new("Point".to_string())),
                 Value::Num(1.0),
             ],
         });
@@ -2921,7 +3037,7 @@ mod tests {
     fn call_method_rejects_empty_method_name_with_identifier() {
         let err = block_on(
             crate::builtins::introspection::call_method::dispatch_call_method(
-                Value::Object(runmat_builtins::ObjectInstance::new("Point".to_string())),
+                Value::Object(runmat_value::ObjectInstance::new("Point".to_string())),
                 "  ".to_string(),
                 Vec::new(),
             ),
@@ -2961,11 +3077,11 @@ mod tests {
     fn subsref_missing_protocol_errors_with_identifier() {
         let err = block_on(
             crate::builtins::introspection::object_indexing::dispatch_subsref(
-                Value::Object(runmat_builtins::ObjectInstance::new(
+                Value::Object(runmat_value::ObjectInstance::new(
                     "NoSubsrefProtocolClass".to_string(),
                 )),
                 OBJECT_INDEX_PAREN.to_string(),
-                Value::Cell(runmat_builtins::CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap()),
+                Value::Cell(runmat_value::CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap()),
             ),
         )
         .expect_err("missing subsref protocol should fail");
@@ -2976,11 +3092,11 @@ mod tests {
     fn subsasgn_missing_protocol_errors_with_identifier() {
         let err = block_on(
             crate::builtins::introspection::object_indexing::dispatch_subsasgn(
-                Value::Object(runmat_builtins::ObjectInstance::new(
+                Value::Object(runmat_value::ObjectInstance::new(
                     "NoSubsasgnProtocolClass".to_string(),
                 )),
                 OBJECT_INDEX_PAREN.to_string(),
-                Value::Cell(runmat_builtins::CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap()),
+                Value::Cell(runmat_value::CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap()),
                 Value::Num(3.0),
             ),
         )
@@ -3026,7 +3142,7 @@ mod tests {
     #[test]
     fn overidx_subsref_unsupported_payload_errors_with_identifier() {
         let err = block_on(overidx_subsref(
-            Value::Object(runmat_builtins::ObjectInstance::new("OverIdx".to_string())),
+            Value::Object(runmat_value::ObjectInstance::new("OverIdx".to_string())),
             OBJECT_INDEX_PAREN.to_string(),
             Value::Num(1.0),
         ))
@@ -3040,7 +3156,7 @@ mod tests {
     #[test]
     fn overidx_subsasgn_unsupported_payload_errors_with_identifier() {
         let err = block_on(overidx_subsasgn(
-            Value::Object(runmat_builtins::ObjectInstance::new("OverIdx".to_string())),
+            Value::Object(runmat_value::ObjectInstance::new("OverIdx".to_string())),
             OBJECT_INDEX_PAREN.to_string(),
             Value::Num(1.0),
             Value::Num(2.0),
@@ -3054,14 +3170,31 @@ mod tests {
 
     #[test]
     fn feval_object_receiver_routes_to_subsref_identifier() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let err = block_on(feval_builtin(
-            Value::Object(runmat_builtins::ObjectInstance::new(
+            Value::Object(runmat_value::ObjectInstance::new(
                 "NoSubsrefProtocolClass".to_string(),
             )),
             vec![Value::Num(1.0)],
         ))
         .expect_err("feval(object, ...) should route through subsref dispatch");
         assert_eq!(err.identifier(), Some("RunMat:MissingSubsref"));
+    }
+
+    #[test]
+    fn feval_strict_mode_rejects_object_receiver_before_subsref_dispatch() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let err = block_on(feval_builtin(
+            Value::Object(runmat_value::ObjectInstance::new(
+                "NoSubsrefProtocolClass".to_string(),
+            )),
+            vec![Value::Num(1.0)],
+        ))
+        .expect_err("object receiver should require RunMat mode");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:compatibility:FevalObjectReceiverExtension")
+        );
     }
 
     #[test]
@@ -3082,20 +3215,20 @@ mod tests {
     }
 
     #[test]
-    fn feval_accepts_scalar_string_array_handle() {
+    fn feval_accepts_scalar_string_array_function_name() {
         let handle =
-            runmat_builtins::StringArray::new(vec!["@sin".to_string()], vec![1, 1]).expect("sa");
+            runmat_value::StringArray::new(vec!["sin".to_string()], vec![1, 1]).expect("sa");
         let result = block_on(feval_builtin(
             Value::StringArray(handle),
             vec![Value::Num(0.0)],
         ))
-        .expect("string-array handle feval should succeed");
+        .expect("scalar string-array function name should succeed");
         assert_eq!(result, Value::Num(0.0));
     }
 
     #[test]
     fn feval_rejects_nonscalar_string_array_handle_with_identifier() {
-        let handle = runmat_builtins::StringArray::new(
+        let handle = runmat_value::StringArray::new(
             vec!["@sin".to_string(), "@cos".to_string()],
             vec![1, 2],
         )
@@ -3121,23 +3254,25 @@ mod tests {
 
     #[test]
     fn addlistener_rejects_non_object_target_with_identifier() {
-        let err = block_on(addlistener_builtin(
-            Value::Num(1.0),
-            "Changed".to_string(),
-            Value::FunctionHandle("sin".to_string()),
-        ))
-        .expect_err("addlistener should reject non-object target");
-        assert_eq!(err.identifier(), Some("RunMat:AddListenerTargetInvalid"));
+        for target in [Value::Num(1.0), Value::Int(runmat_value::IntValue::U64(1))] {
+            let err = block_on(addlistener_builtin(
+                target,
+                "Changed".to_string(),
+                Value::FunctionHandle("sin".to_string()),
+            ))
+            .expect_err("addlistener should reject non-object target");
+            assert_eq!(err.identifier(), Some("RunMat:AddListenerTargetInvalid"));
+        }
     }
 
     #[test]
     fn addlistener_rejects_invalid_handle_target_with_identifier() {
         listener_gc_test(|| {
-            let target = runmat_builtins::HandleRef {
+            let target = runmat_value::HandleRef {
                 class_name: "EventTarget".to_string(),
-                target: runmat_gc::gc_allocate(Value::Object(
-                    runmat_builtins::ObjectInstance::new("EventTarget".to_string()),
-                ))
+                target: runmat_gc::gc_allocate(Value::Object(runmat_value::ObjectInstance::new(
+                    "EventTarget".to_string(),
+                )))
                 .expect("allocate target"),
                 valid: true,
             };
@@ -3309,7 +3444,7 @@ mod tests {
             let listener = block_on(addlistener_builtin(
                 target,
                 "Changed".to_string(),
-                Value::CharArray(runmat_builtins::CharArray::new_row("@event_callback")),
+                Value::CharArray(runmat_value::CharArray::new_row("@event_callback")),
             ))
             .expect("listener registered");
             let Value::Listener(listener) = listener else {
@@ -3334,7 +3469,7 @@ mod tests {
             let target = block_on(new_handle_object_builtin("EventTarget".to_string()))
                 .expect("handle target");
             let callback =
-                runmat_builtins::StringArray::new(vec!["@event_callback".to_string()], vec![1, 1])
+                runmat_value::StringArray::new(vec!["@event_callback".to_string()], vec![1, 1])
                     .expect("string array");
             let listener = block_on(addlistener_builtin(
                 target,
@@ -3363,7 +3498,7 @@ mod tests {
                 })));
             let target = block_on(new_handle_object_builtin("EventTarget".to_string()))
                 .expect("handle target");
-            let callback = Value::Closure(runmat_builtins::Closure {
+            let callback = Value::Closure(runmat_value::Closure {
                 function_name: "event_callback".to_string(),
                 bound_function: None,
                 captures: vec![Value::Num(9.0)],
@@ -3376,7 +3511,7 @@ mod tests {
             let callback = runmat_gc::gc_clone_value(&listener.callback).expect("callback value");
             assert!(matches!(
                 &callback,
-                Value::Closure(runmat_builtins::Closure {
+                Value::Closure(runmat_value::Closure {
                     function_name,
                     bound_function: Some(65),
                     captures,
@@ -3428,7 +3563,7 @@ mod tests {
             block_on(addlistener_builtin(
                 target.clone(),
                 "Changed".to_string(),
-                Value::CharArray(runmat_builtins::CharArray::new_row(
+                Value::CharArray(runmat_value::CharArray::new_row(
                     "@definitely_missing_callback",
                 )),
             ))
@@ -3445,7 +3580,7 @@ mod tests {
             let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
             let target = block_on(new_handle_object_builtin("EventTarget".to_string()))
                 .expect("handle target");
-            let callback = runmat_builtins::StringArray::new(
+            let callback = runmat_value::StringArray::new(
                 vec!["@definitely_missing_callback".to_string()],
                 vec![1, 1],
             )
@@ -3509,8 +3644,8 @@ mod tests {
 
     #[test]
     fn feval_semantic_closure_errors_when_semantic_invoker_unavailable() {
-        let _guard = crate::user_functions::install_semantic_function_invoker(None);
-        let closure = Value::Closure(runmat_builtins::Closure {
+        let _guard = crate::user_functions::clear_semantic_function_invoker();
+        let closure = Value::Closure(runmat_value::Closure {
             function_name: "function_target".to_string(),
             bound_function: Some(9044),
             captures: vec![Value::Num(1.0)],

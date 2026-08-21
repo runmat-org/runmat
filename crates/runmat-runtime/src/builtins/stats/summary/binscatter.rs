@@ -3,12 +3,16 @@
 use std::cmp::Ordering;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ObjectInstance, Tensor, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode, SurfacePlot};
+use runmat_value::{IntValue, NumericScalar, ObjectInstance, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::builtins::plotting::op_common::{apply_axes_target, split_leading_axes_handle};
@@ -159,10 +163,160 @@ pub const BINSCATTER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "binscatter-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "binscatter with resident GPU-array inputs is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:BinscatterGpuInputExtension"),
+};
+
+pub const BINSCATTER_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [GPU_INPUT_EXTENSION];
+
+const INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "x",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Documented real vector X data accepts every built-in integer class and remains authoritative through vector validation and chart state.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Documented real vector Y data accepts every built-in integer class and remains authoritative through vector validation and chart state.",
+    },
+];
+
+const INTEGER_BIN_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "N/NumBins",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Documented scalar or two-element bin counts accept every built-in integer class and are parsed exactly into bounded host dimensions.",
+    }];
+
+const INTEGER_LIMIT_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "XLimits",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Documented two-element X limits accept every built-in integer class and are validated exactly before the floating bin-edge and graphics boundary.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "YLimits",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Documented two-element Y limits accept every built-in integer class and are validated exactly before the floating bin-edge and graphics boundary.",
+    },
+];
+
+const INTEGER_SELECTOR_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "xvar",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "A documented positive numeric scalar can select the X table variable; typed integers are parsed exactly as one-based structural indices.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "yvar",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "A documented positive numeric scalar can select the Y table variable; typed integers are parsed exactly as one-based structural indices.",
+    },
+];
+
+const INTEGER_TOGGLE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "ShowEmptyBins",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented numeric zero-or-one toggle accepts every scalar integer class and is parsed exactly.",
+    }];
+
+const INTEGER_ALPHA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "FaceAlpha",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented numeric scalar transparency control admits integer zero or one and crosses once into host graphics state.",
+    }];
+
+pub const BINSCATTER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 6] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = binscatter(integer_x, integer_y, ...)",
+        inputs: &INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Exact integer XData/YData class, shape, and values are retained in the opaque chart state; exact rational bin membership and relative normalization precede floating bin-edge and client-graphics construction. Resident input is a separately gated RunMat extension.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = binscatter(x, y, integer_N)",
+        inputs: &INTEGER_BIN_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Scalar N expands to both dimensions; a two-element vector selects each dimension; every count must be in 1..=250.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = binscatter(..., XLimits/YLimits, integer_limits)",
+        inputs: &INTEGER_LIMIT_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Same-axis integer data and limits use exact i128 rational bin membership across the full built-in integer range, with relative normalization only for floating bin-edge rendering.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = binscatter(tbl, integer_xvar, integer_yvar, ...)",
+        inputs: &INTEGER_SELECTOR_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Positive scalar integer selectors resolve table variables without floating conversion; the selected data retains its own documented class.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = binscatter(..., \"ShowEmptyBins\", integer_toggle)",
+        inputs: &INTEGER_TOGGLE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Only exact zero and one are accepted; chart state exposes the resulting logical property.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = binscatter(..., \"FaceAlpha\", integer_alpha)",
+        inputs: &INTEGER_ALPHA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Integer transparency is necessarily zero or one under the documented inclusive unit interval and enters one host f64 graphics boundary.",
+    },
+];
+
 #[derive(Clone, Debug)]
 struct ParsedInputs {
-    x_data: Vec<f64>,
-    y_data: Vec<f64>,
+    x_data: Tensor,
+    y_data: Tensor,
     rest: Vec<Value>,
 }
 
@@ -172,8 +326,8 @@ struct BinscatterOptions {
     face_alpha: f64,
     display_name: Option<String>,
     num_bins: Option<[usize; 2]>,
-    x_limits: Option<(f64, f64)>,
-    y_limits: Option<(f64, f64)>,
+    x_limits: Option<Tensor>,
+    y_limits: Option<Tensor>,
 }
 
 pub(crate) struct BinscatterChart {
@@ -220,9 +374,19 @@ fn map_plot_error(err: RuntimeError) -> RuntimeError {
     suppress_auto_output = true,
     type_resolver(binscatter_type),
     descriptor(crate::builtins::stats::summary::binscatter::BINSCATTER_DESCRIPTOR),
+    extensions(crate::builtins::stats::summary::binscatter::BINSCATTER_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::stats::summary::binscatter::BINSCATTER_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::stats::summary::binscatter"
 )]
 pub(crate) async fn binscatter_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
+    if args
+        .iter()
+        .any(|value| matches!(value, Value::GpuTensor(_)))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(&GPU_INPUT_EXTENSION, NAME)?;
+    }
     let (axes_target, args) = split_leading_axes_handle(args, NAME).map_err(map_plot_error)?;
     apply_axes_target(axes_target, NAME).map_err(map_plot_error)?;
 
@@ -233,16 +397,16 @@ pub(crate) async fn binscatter_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
         num_bins
     } else {
         [
-            auto_bin_count(&inputs.x_data, options.x_limits, AUTO_NUM_BINS_CAP)?,
-            auto_bin_count(&inputs.y_data, options.y_limits, AUTO_NUM_BINS_CAP)?,
+            auto_bin_count(&inputs.x_data, options.x_limits.as_ref(), AUTO_NUM_BINS_CAP)?,
+            auto_bin_count(&inputs.y_data, options.y_limits.as_ref(), AUTO_NUM_BINS_CAP)?,
         ]
     };
     let chart = build_binscatter_chart(
         &inputs.x_data,
         &inputs.y_data,
         [x_bins, y_bins],
-        options.x_limits,
-        options.y_limits,
+        options.x_limits.as_ref(),
+        options.y_limits.as_ref(),
         options.show_empty_bins,
         options.face_alpha,
         options.display_name.as_deref(),
@@ -305,7 +469,7 @@ fn table_variable_numeric_data(
     object: &ObjectInstance,
     selector: &Value,
     context: &str,
-) -> BuiltinResult<Vec<f64>> {
+) -> BuiltinResult<Tensor> {
     let names = crate::builtins::table::table_variable_names_from_object(object)
         .map_err(|err| invalid(err.message))?;
     let name = table_variable_name(selector, &names, context)?;
@@ -342,10 +506,19 @@ fn table_variable_name(selector: &Value, names: &[String], context: &str) -> Bui
 }
 
 fn numeric_selector_index(selector: &Value) -> BuiltinResult<Option<usize>> {
+    if let Some(value) = integer_scalar(selector) {
+        let Some(index) = value.try_to_usize().and_then(|value| value.checked_sub(1)) else {
+            return Err(invalid(
+                "binscatter: table variable index must be a positive integer",
+            ));
+        };
+        return Ok(Some(index));
+    }
     let raw = match selector {
         Value::Num(value) => Some(*value),
-        Value::Int(value) => Some(value.to_f64()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Some(tensor.data[0]),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Some(tensor::tensor_value_f64(tensor, 0))
+        }
         _ => None,
     };
     let Some(value) = raw else {
@@ -356,16 +529,31 @@ fn numeric_selector_index(selector: &Value) -> BuiltinResult<Option<usize>> {
             "binscatter: table variable index must be a positive integer",
         ));
     }
+    if value > usize::MAX as f64 || (usize::BITS == 64 && value == usize::MAX as f64) {
+        return Err(invalid(
+            "binscatter: table variable index exceeds platform limits",
+        ));
+    }
     Ok(Some(value as usize - 1))
 }
 
-fn numeric_data_from_value(value: Value, context: &str) -> BuiltinResult<Vec<f64>> {
+fn numeric_data_from_value(value: Value, context: &str) -> BuiltinResult<Tensor> {
     let tensor = tensor::value_into_tensor_for(NAME, value)
         .map_err(|_| invalid(format!("binscatter: {context} must be numeric")))?;
-    Ok(tensor.data)
+    ensure_vector_tensor(&tensor, context)?;
+    Ok(tensor)
 }
 
-fn ensure_compatible_lengths(x_data: &[f64], y_data: &[f64]) -> BuiltinResult<()> {
+fn ensure_vector_tensor(tensor: &Tensor, context: &str) -> BuiltinResult<()> {
+    if tensor.shape.iter().filter(|&&dim| dim > 1).count() > 1 {
+        return Err(invalid(format!(
+            "binscatter: {context} must be a real numeric vector"
+        )));
+    }
+    Ok(())
+}
+
+fn ensure_compatible_lengths(x_data: &Tensor, y_data: &Tensor) -> BuiltinResult<()> {
     if x_data.len() != y_data.len() {
         return Err(invalid(
             "binscatter: x and y must contain the same number of elements",
@@ -451,6 +639,21 @@ fn is_option_name(value: &Value) -> bool {
 }
 
 pub(crate) fn parse_num_bins(value: &Value) -> BuiltinResult<[usize; 2]> {
+    if let Some(values) = integer_values(value) {
+        let bins = match values.as_slice() {
+            [n] => [positive_bin_count_integer(n, "NumBins")?; 2],
+            [nx, ny] => [
+                positive_bin_count_integer(nx, "NumBins")?,
+                positive_bin_count_integer(ny, "NumBins")?,
+            ],
+            _ => {
+                return Err(invalid(
+                    "binscatter: NumBins must be a scalar or two-element vector",
+                ))
+            }
+        };
+        return Ok(bins);
+    }
     let values = numeric_vector(value, "NumBins")?;
     let bins = match values.as_slice() {
         [n] => [positive_bin_count(*n, "NumBins")?; 2],
@@ -467,20 +670,37 @@ pub(crate) fn parse_num_bins(value: &Value) -> BuiltinResult<[usize; 2]> {
     Ok(bins)
 }
 
-pub(crate) fn parse_limits(value: &Value, name: &str) -> BuiltinResult<(f64, f64)> {
-    let values = numeric_vector(value, name)?;
-    if values.len() != 2 {
+pub(crate) fn parse_limits(value: &Value, name: &str) -> BuiltinResult<Tensor> {
+    let tensor = tensor::value_to_tensor(value)
+        .map_err(|_| invalid(format!("binscatter: {name} must be numeric")))?;
+    ensure_vector_tensor(&tensor, name)?;
+    if tensor.len() != 2 {
         return Err(invalid(format!(
             "binscatter: {name} must be a two-element vector"
         )));
     }
-    validate_limits(values[0], values[1], name)
+    let lo = tensor
+        .numeric_value_at(0)
+        .ok_or_else(|| invalid(format!("binscatter: {name} is empty")))?;
+    let hi = tensor
+        .numeric_value_at(1)
+        .ok_or_else(|| invalid(format!("binscatter: {name} is empty")))?;
+    if let (Some(lo), Some(hi)) = (integer_i128(lo), integer_i128(hi)) {
+        if hi <= lo {
+            return Err(invalid(format!(
+                "binscatter: {name} must contain finite increasing limits"
+            )));
+        }
+    } else {
+        validate_limits(lo.materialize_f64(), hi.materialize_f64(), name)?;
+    }
+    Ok(tensor)
 }
 
 fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
     let tensor = tensor::value_to_tensor(value)
         .map_err(|_| invalid(format!("binscatter: {name} must be numeric")))?;
-    Ok(tensor.data)
+    Ok(tensor_values_f64(&tensor))
 }
 
 fn positive_bin_count(value: f64, name: &str) -> BuiltinResult<usize> {
@@ -489,7 +709,31 @@ fn positive_bin_count(value: f64, name: &str) -> BuiltinResult<usize> {
             "binscatter: {name} entries must be positive integers"
         )));
     }
+    if value > MAX_NUM_BINS as f64 {
+        return Err(invalid(format!(
+            "binscatter: {name} entries must be no greater than {MAX_NUM_BINS}"
+        )));
+    }
     let count = value as usize;
+    if count > MAX_NUM_BINS {
+        return Err(invalid(format!(
+            "binscatter: {name} entries must be no greater than {MAX_NUM_BINS}"
+        )));
+    }
+    Ok(count)
+}
+
+fn positive_bin_count_integer(value: &IntValue, name: &str) -> BuiltinResult<usize> {
+    let Some(count) = value.try_to_usize() else {
+        return Err(invalid(format!(
+            "binscatter: {name} entries must be positive integers"
+        )));
+    };
+    if count == 0 {
+        return Err(invalid(format!(
+            "binscatter: {name} entries must be positive integers"
+        )));
+    }
     if count > MAX_NUM_BINS {
         return Err(invalid(format!(
             "binscatter: {name} entries must be no greater than {MAX_NUM_BINS}"
@@ -508,10 +752,12 @@ fn validate_limits(lo: f64, hi: f64, name: &str) -> BuiltinResult<(f64, f64)> {
 }
 
 pub(crate) fn option_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
+    if let Some(value) = integer_scalar(value) {
+        return integer_bool(&value, name);
+    }
     match value {
         Value::Bool(value) => Ok(*value),
         Value::Num(value) => numeric_bool(*value, name),
-        Value::Int(value) => numeric_bool(value.to_f64(), name),
         _ => {
             if let Some(text) = tensor::value_to_string(value) {
                 match text.trim().to_ascii_lowercase().as_str() {
@@ -536,14 +782,151 @@ fn numeric_bool(value: f64, name: &str) -> BuiltinResult<bool> {
     }
 }
 
+fn integer_bool(value: &IntValue, name: &str) -> BuiltinResult<bool> {
+    match value.try_to_usize() {
+        Some(0) => Ok(false),
+        Some(1) => Ok(true),
+        _ => Err(invalid(format!("binscatter: {name} must be 0 or 1"))),
+    }
+}
+
 fn option_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
+    if let Some(value) = integer_scalar(value) {
+        return Ok(value.to_f64());
+    }
     match value {
         Value::Num(value) => Ok(*value),
-        Value::Int(value) => Ok(value.to_f64()),
         Value::Bool(value) => Ok(if *value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Ok(tensor::tensor_value_f64(tensor, 0))
+        }
         _ => Err(invalid(format!("binscatter: {name} must be a scalar"))),
     }
+}
+
+fn integer_scalar(value: &Value) -> Option<IntValue> {
+    match value {
+        Value::Int(value) => Some(value.clone()),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0)),
+        _ => None,
+    }
+}
+
+fn integer_values(value: &Value) -> Option<Vec<IntValue>> {
+    match value {
+        Value::Int(value) => Some(vec![value.clone()]),
+        Value::Tensor(tensor) => tensor
+            .integer_storage()
+            .map(|storage| storage.exact_values()),
+        _ => None,
+    }
+}
+
+fn tensor_values_f64(tensor: &Tensor) -> Vec<f64> {
+    tensor::tensor_values_f64(tensor)
+}
+
+fn integer_i128(value: NumericScalar) -> Option<i128> {
+    match value {
+        NumericScalar::I8(value) => Some(i128::from(value)),
+        NumericScalar::I16(value) => Some(i128::from(value)),
+        NumericScalar::I32(value) => Some(i128::from(value)),
+        NumericScalar::I64(value) => Some(i128::from(value)),
+        NumericScalar::U8(value) => Some(i128::from(value)),
+        NumericScalar::U16(value) => Some(i128::from(value)),
+        NumericScalar::U32(value) => Some(i128::from(value)),
+        NumericScalar::U64(value) => Some(i128::from(value)),
+        NumericScalar::F64(_) | NumericScalar::F32(_) => None,
+    }
+}
+
+struct AxisProjection {
+    values: Vec<f64>,
+    limits: Option<(f64, f64)>,
+    output_origin: f64,
+    exact_values: Option<Vec<i128>>,
+    exact_bin_limits: Option<(i128, i128)>,
+}
+
+fn project_axis(
+    data: &Tensor,
+    explicit: Option<&Tensor>,
+    name: &str,
+) -> BuiltinResult<AxisProjection> {
+    if data.integer_storage().is_some()
+        && explicit.is_none_or(|limits| limits.integer_storage().is_some())
+    {
+        let values = (0..data.len())
+            .map(|index| {
+                data.numeric_value_at(index)
+                    .and_then(integer_i128)
+                    .expect("integer tensor values remain exact")
+            })
+            .collect::<Vec<_>>();
+        let exact_limits = explicit.map(|limits| {
+            (
+                integer_i128(
+                    limits
+                        .numeric_value_at(0)
+                        .expect("validated two-element limits"),
+                )
+                .expect("integer limits remain exact"),
+                integer_i128(
+                    limits
+                        .numeric_value_at(1)
+                        .expect("validated two-element limits"),
+                )
+                .expect("integer limits remain exact"),
+            )
+        });
+        let origin = exact_limits
+            .map(|limits| limits.0)
+            .or_else(|| values.iter().copied().min())
+            .unwrap_or(0);
+        let projected_limits =
+            exact_limits.map(|(lo, hi)| ((lo - origin) as f64, (hi - origin) as f64));
+        let exact_bin_limits = exact_limits.or_else(|| {
+            let lo = values.iter().copied().min()?;
+            let hi = values.iter().copied().max()?;
+            (lo < hi).then_some((lo, hi))
+        });
+        return Ok(AxisProjection {
+            values: values
+                .iter()
+                .copied()
+                .map(|value| (value - origin) as f64)
+                .collect(),
+            limits: projected_limits,
+            output_origin: origin as f64,
+            exact_values: Some(values),
+            exact_bin_limits,
+        });
+    }
+
+    let limits = explicit
+        .map(|limits| {
+            validate_limits(
+                limits
+                    .numeric_value_at(0)
+                    .expect("validated two-element limits")
+                    .materialize_f64(),
+                limits
+                    .numeric_value_at(1)
+                    .expect("validated two-element limits")
+                    .materialize_f64(),
+                name,
+            )
+        })
+        .transpose()?;
+    Ok(AxisProjection {
+        values: tensor_values_f64(data),
+        limits,
+        output_origin: 0.0,
+        exact_values: None,
+        exact_bin_limits: None,
+    })
 }
 
 pub(crate) fn validate_face_alpha(value: f64) -> BuiltinResult<()> {
@@ -556,11 +939,11 @@ pub(crate) fn validate_face_alpha(value: f64) -> BuiltinResult<()> {
 }
 
 pub(crate) fn build_binscatter_chart(
-    x_data: &[f64],
-    y_data: &[f64],
+    x_data: &Tensor,
+    y_data: &Tensor,
     num_bins: [usize; 2],
-    x_limits: Option<(f64, f64)>,
-    y_limits: Option<(f64, f64)>,
+    x_limits: Option<&Tensor>,
+    y_limits: Option<&Tensor>,
     show_empty_bins: bool,
     face_alpha: f64,
     display_name: Option<&str>,
@@ -570,28 +953,53 @@ pub(crate) fn build_binscatter_chart(
     validate_bin_counts(num_bins)?;
     validate_face_alpha(face_alpha)?;
 
-    let x_limits = derive_axis_limits(x_data, x_limits, "XLimits")?;
-    let y_limits = derive_axis_limits(y_data, y_limits, "YLimits")?;
+    let x_projection = project_axis(x_data, x_limits, "XLimits")?;
+    let y_projection = project_axis(y_data, y_limits, "YLimits")?;
+    let x_limits = derive_axis_limits(&x_projection.values, x_projection.limits, "XLimits")?;
+    let y_limits = derive_axis_limits(&y_projection.values, y_projection.limits, "YLimits")?;
     let x_edges = linspace(x_limits.0, x_limits.1, num_bins[0] + 1);
     let y_edges = linspace(y_limits.0, y_limits.1, num_bins[1] + 1);
     let cell_count = num_bins[0]
         .checked_mul(num_bins[1])
         .ok_or_else(|| invalid("binscatter: NumBins product is too large"))?;
     let mut counts = vec![0.0; cell_count];
-    for (&x, &y) in x_data.iter().zip(y_data.iter()) {
+    for (index, (&x, &y)) in x_projection
+        .values
+        .iter()
+        .zip(y_projection.values.iter())
+        .enumerate()
+    {
         if !x.is_finite() || !y.is_finite() {
             continue;
         }
-        if let (Some(ix), Some(iy)) = (find_bin_index(x, &x_edges), find_bin_index(y, &y_edges)) {
+        let ix = if x_projection.exact_bin_limits.is_some() {
+            exact_projected_bin_index(&x_projection, index, num_bins[0])
+        } else {
+            find_bin_index(x, &x_edges)
+        };
+        let iy = if y_projection.exact_bin_limits.is_some() {
+            exact_projected_bin_index(&y_projection, index, num_bins[1])
+        } else {
+            find_bin_index(y, &y_edges)
+        };
+        if let (Some(ix), Some(iy)) = (ix, iy) {
             counts[ix + iy * num_bins[0]] += 1.0;
         }
     }
     let values = Tensor::new(counts.clone(), vec![num_bins[0], num_bins[1]])
         .map_err(|err| internal(format!("binscatter: {err}")))?;
+    let output_x_edges = x_edges
+        .iter()
+        .map(|edge| edge + x_projection.output_origin)
+        .collect::<Vec<_>>();
+    let output_y_edges = y_edges
+        .iter()
+        .map(|edge| edge + y_projection.output_origin)
+        .collect::<Vec<_>>();
     let surface = build_surface_from_counts(
         &counts,
-        &x_edges,
-        &y_edges,
+        &output_x_edges,
+        &output_y_edges,
         num_bins,
         show_empty_bins,
         face_alpha,
@@ -600,19 +1008,39 @@ pub(crate) fn build_binscatter_chart(
     )?;
     Ok(BinscatterChart {
         values,
-        x_bin_edges: x_edges,
-        y_bin_edges: y_edges,
+        x_bin_edges: output_x_edges,
+        y_bin_edges: output_y_edges,
         surface,
     })
 }
 
+fn exact_projected_bin_index(
+    projection: &AxisProjection,
+    index: usize,
+    bins: usize,
+) -> Option<usize> {
+    let value = *projection.exact_values.as_ref()?.get(index)?;
+    let (lo, hi) = projection.exact_bin_limits?;
+    if value < lo || value > hi {
+        return None;
+    }
+    if value == hi {
+        return Some(bins - 1);
+    }
+    let offset = value - lo;
+    let span = hi - lo;
+    usize::try_from(offset * bins as i128 / span).ok()
+}
+
 pub(crate) fn auto_bin_count(
-    data: &[f64],
-    limits: Option<(f64, f64)>,
+    data: &Tensor,
+    limits: Option<&Tensor>,
     cap: usize,
 ) -> BuiltinResult<usize> {
-    let limits = derive_axis_limits(data, limits, "Limits")?;
-    let filtered = data
+    let projection = project_axis(data, limits, "Limits")?;
+    let limits = derive_axis_limits(&projection.values, projection.limits, "Limits")?;
+    let filtered = projection
+        .values
         .iter()
         .copied()
         .filter(|value| value.is_finite() && *value >= limits.0 && *value <= limits.1)
@@ -838,9 +1266,308 @@ mod tests {
     };
     use crate::builtins::table::table_from_columns;
     use runmat_plot::plots::figure::PlotElement;
+    use runmat_value::IntegerStorage;
 
     fn vec_tensor(values: &[f64]) -> Value {
         Value::Tensor(Tensor::new(values.to_vec(), vec![values.len(), 1]).unwrap())
+    }
+
+    fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
+        Value::Tensor(tensor)
+    }
+
+    fn first_unrepresentable_usize_double() -> f64 {
+        if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        }
+    }
+
+    #[test]
+    fn binscatter_parses_typed_integer_options_exactly() {
+        assert_eq!(
+            parse_num_bins(&int_tensor(IntegerStorage::U16(vec![12, 8]), vec![1, 2])).unwrap(),
+            [12, 8]
+        );
+        assert_eq!(
+            parse_num_bins(&Value::Int(IntValue::U8(9))).unwrap(),
+            [9, 9]
+        );
+        assert_eq!(
+            numeric_selector_index(&int_tensor(IntegerStorage::I32(vec![2]), vec![1, 1])).unwrap(),
+            Some(1)
+        );
+        assert!(option_bool(
+            &int_tensor(IntegerStorage::U8(vec![1]), vec![1, 1]),
+            "ShowEmptyBins"
+        )
+        .unwrap());
+        assert_eq!(
+            option_scalar(
+                &int_tensor(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1]),
+                "FaceAlpha",
+            )
+            .unwrap(),
+            IntValue::U64(9_007_199_254_740_993).to_f64()
+        );
+    }
+
+    #[test]
+    fn binscatter_structural_integer_parsers_ignore_all_typed_mirrors() {
+        let storages = [
+            IntegerStorage::I8(vec![4]),
+            IntegerStorage::I16(vec![4]),
+            IntegerStorage::I32(vec![4]),
+            IntegerStorage::I64(vec![4]),
+            IntegerStorage::U8(vec![4]),
+            IntegerStorage::U16(vec![4]),
+            IntegerStorage::U32(vec![4]),
+            IntegerStorage::U64(vec![4]),
+        ];
+
+        for storage in storages {
+            let value = int_tensor(storage, vec![1, 1]);
+            assert_eq!(parse_num_bins(&value).unwrap(), [4, 4]);
+            assert_eq!(numeric_selector_index(&value).unwrap(), Some(3));
+        }
+    }
+
+    #[test]
+    fn binscatter_preserves_every_documented_integer_data_class() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let storages = [
+            IntegerStorage::I8(vec![0, 1]),
+            IntegerStorage::I16(vec![0, 1]),
+            IntegerStorage::I32(vec![0, 1]),
+            IntegerStorage::I64(vec![0, 1]),
+            IntegerStorage::U8(vec![0, 1]),
+            IntegerStorage::U16(vec![0, 1]),
+            IntegerStorage::U32(vec![0, 1]),
+            IntegerStorage::U64(vec![0, 1]),
+        ];
+
+        for storage in storages {
+            let _ = clear_figure(None);
+            let expected = storage.clone();
+            let x = int_tensor(storage.clone(), vec![2, 1]);
+            let y = int_tensor(storage, vec![2, 1]);
+            let handle = futures::executor::block_on(binscatter_builtin(vec![
+                x,
+                y,
+                int_tensor(IntegerStorage::U8(vec![2]), vec![1, 1]),
+            ]))
+            .expect("documented integer data");
+            let resolved = crate::builtins::plotting::properties::resolve_plot_handle(
+                &Value::Num(handle),
+                NAME,
+            )
+            .unwrap();
+            for property in ["XData", "YData"] {
+                let Value::Tensor(data) = crate::builtins::plotting::properties::get_properties(
+                    resolved.clone(),
+                    Some(property),
+                    NAME,
+                )
+                .unwrap() else {
+                    panic!("expected typed {property}");
+                };
+                assert_eq!(data.integer_storage(), Some(&expected));
+                assert_eq!(data.shape, vec![2, 1]);
+            }
+        }
+    }
+
+    #[test]
+    fn binscatter_wide_integer_binning_uses_exact_relative_coordinates() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        let base = 9_007_199_254_740_992_u64;
+        let x = IntegerStorage::U64(vec![base + 1, base + 2]);
+        let x_limits = IntegerStorage::U64(vec![base + 1, base + 3]);
+        let handle = futures::executor::block_on(binscatter_builtin(vec![
+            int_tensor(x.clone(), vec![2, 1]),
+            int_tensor(IntegerStorage::U64(vec![0, 1]), vec![2, 1]),
+            int_tensor(IntegerStorage::U8(vec![2, 2]), vec![1, 2]),
+            Value::String("XLimits".into()),
+            int_tensor(x_limits.clone(), vec![1, 2]),
+            Value::String("YLimits".into()),
+            int_tensor(IntegerStorage::U8(vec![0, 2]), vec![1, 2]),
+        ]))
+        .expect("wide integer binscatter");
+        let resolved =
+            crate::builtins::plotting::properties::resolve_plot_handle(&Value::Num(handle), NAME)
+                .unwrap();
+        let Value::Tensor(values) = crate::builtins::plotting::properties::get_properties(
+            resolved.clone(),
+            Some("Values"),
+            NAME,
+        )
+        .unwrap() else {
+            panic!("expected Values tensor");
+        };
+        assert_eq!(values.materialize_f64(), vec![1.0, 0.0, 0.0, 1.0]);
+        let Value::Tensor(x_data) = crate::builtins::plotting::properties::get_properties(
+            resolved.clone(),
+            Some("XData"),
+            NAME,
+        )
+        .unwrap() else {
+            panic!("expected XData tensor");
+        };
+        assert_eq!(x_data.integer_storage(), Some(&x));
+        let Value::Tensor(limits) =
+            crate::builtins::plotting::properties::get_properties(resolved, Some("XLimits"), NAME)
+                .unwrap()
+        else {
+            panic!("expected XLimits tensor");
+        };
+        assert_eq!(limits.integer_storage(), Some(&x_limits));
+
+        let spanning_x = Tensor::new_integer(
+            IntegerStorage::U64(vec![(1_u64 << 63) - 1, 1_u64 << 63]),
+            vec![2, 1],
+        )
+        .unwrap();
+        let spanning_limits =
+            Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![1, 2]).unwrap();
+        let y = Tensor::new_integer(IntegerStorage::U8(vec![0, 1]), vec![2, 1]).unwrap();
+        let y_limits = Tensor::new_integer(IntegerStorage::U8(vec![0, 2]), vec![1, 2]).unwrap();
+        let chart = build_binscatter_chart(
+            &spanning_x,
+            &y,
+            [2, 2],
+            Some(&spanning_limits),
+            Some(&y_limits),
+            false,
+            1.0,
+            None,
+            None,
+        )
+        .expect("full uint64 span");
+        assert_eq!(chart.values.materialize_f64(), vec![1.0, 0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn binscatter_rejects_matrix_data_and_gates_resident_input_before_gather() {
+        let matrix = Value::Tensor(Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap());
+        let err = numeric_data_from_value(matrix, "x").unwrap_err();
+        assert!(err.message().contains("vector"), "{}", err.message());
+
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![2, 1],
+            device_id: 0,
+            buffer_id: 9_369_001,
+            descriptor: Default::default(),
+        });
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let err = futures::executor::block_on(binscatter_builtin(vec![
+            resident,
+            vec_tensor(&[0.0, 1.0]),
+        ]))
+        .expect_err("MATLAB mode rejects resident input before provider access");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:compatibility:BinscatterGpuInputExtension")
+        );
+    }
+
+    #[test]
+    fn binscatter_runmat_gpu_gather_preserves_every_integer_class() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let storages = [
+                IntegerStorage::I8(vec![0, 1]),
+                IntegerStorage::I16(vec![0, 1]),
+                IntegerStorage::I32(vec![0, 1]),
+                IntegerStorage::I64(vec![0, 1]),
+                IntegerStorage::U8(vec![0, 1]),
+                IntegerStorage::U16(vec![0, 1]),
+                IntegerStorage::U32(vec![0, 1]),
+                IntegerStorage::U64(vec![0, 1]),
+            ];
+            for storage in storages {
+                let _ = clear_figure(None);
+                let source = Tensor::new_integer(storage.clone(), vec![2, 1]).unwrap();
+                let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &source)
+                    .expect("typed integer upload");
+                let result = {
+                    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+                    futures::executor::block_on(binscatter_builtin(vec![
+                        Value::GpuTensor(handle.clone()),
+                        vec_tensor(&[0.0, 1.0]),
+                        Value::Num(2.0),
+                    ]))
+                    .expect("RunMat resident gather")
+                };
+                let resolved = crate::builtins::plotting::properties::resolve_plot_handle(
+                    &Value::Num(result),
+                    NAME,
+                )
+                .unwrap();
+                let Value::Tensor(x_data) = crate::builtins::plotting::properties::get_properties(
+                    resolved,
+                    Some("XData"),
+                    NAME,
+                )
+                .unwrap() else {
+                    panic!("expected gathered XData");
+                };
+                assert_eq!(x_data.integer_storage(), Some(&storage));
+                let _ = provider.free(&handle);
+            }
+        });
+    }
+
+    #[test]
+    fn binscatter_rejects_invalid_typed_integer_options() {
+        let err =
+            parse_num_bins(&int_tensor(IntegerStorage::I16(vec![-1]), vec![1, 1])).unwrap_err();
+        assert!(
+            err.message().contains("positive integers"),
+            "{}",
+            err.message()
+        );
+
+        let err =
+            parse_num_bins(&int_tensor(IntegerStorage::U16(vec![251]), vec![1, 1])).unwrap_err();
+        assert!(
+            err.message().contains("no greater than 250"),
+            "{}",
+            err.message()
+        );
+
+        let err = option_bool(
+            &int_tensor(IntegerStorage::U8(vec![2]), vec![1, 1]),
+            "ShowEmptyBins",
+        )
+        .unwrap_err();
+        assert!(err.message().contains("0 or 1"), "{}", err.message());
+    }
+
+    #[test]
+    fn binscatter_rejects_unrepresentable_double_indices_before_casting() {
+        let err =
+            numeric_selector_index(&Value::Num(first_unrepresentable_usize_double())).unwrap_err();
+        assert!(
+            err.message().contains("platform limits"),
+            "{}",
+            err.message()
+        );
+
+        let err = parse_num_bins(&vec_tensor(&[first_unrepresentable_usize_double()])).unwrap_err();
+        assert!(
+            err.message().contains("no greater than 250"),
+            "{}",
+            err.message()
+        );
     }
 
     #[test]
@@ -867,7 +1594,7 @@ mod tests {
             panic!("expected Values tensor");
         };
         assert_eq!(values.shape, vec![2, 2]);
-        assert_eq!(values.data, vec![2.0, 0.0, 0.0, 2.0]);
+        assert_eq!(values.materialize_f64(), vec![2.0, 0.0, 0.0, 2.0]);
 
         let figure = clone_figure(current_figure_handle()).unwrap();
         let plot = figure.plots().next().unwrap();
@@ -950,6 +1677,6 @@ mod tests {
         let Value::Tensor(values) = props else {
             panic!("expected Values tensor");
         };
-        assert_eq!(values.data, vec![2.0, 0.0, 0.0, 2.0]);
+        assert_eq!(values.materialize_f64(), vec![2.0, 0.0, 0.0, 2.0]);
     }
 }

@@ -2,11 +2,15 @@
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
@@ -18,7 +22,7 @@ use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor
 use crate::builtins::math::symbolic::symbolic_function;
 use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-use runmat_builtins::SymbolicFunction;
+use runmat_value::SymbolicFunction;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::sin")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -38,6 +42,56 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 const BUILTIN_NAME: &str = "sin";
+
+pub const SIN_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "sin-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "sin with typed-integer input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SinIntegerInputExtension"),
+};
+pub const SIN_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "sin-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "sin with logical input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SinLogicalInputExtension"),
+};
+pub const SIN_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "sin-character-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "sin with character input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SinCharacterInputExtension"),
+};
+pub const SIN_LIKE_OUTPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "sin-like-output",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "sin with a like output prototype is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SinLikeOutputExtension"),
+};
+pub const SIN_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    SIN_INTEGER_INPUT_EXTENSION,
+    SIN_LOGICAL_INPUT_EXTENSION,
+    SIN_CHARACTER_INPUT_EXTENSION,
+    SIN_LIKE_OUTPUT_EXTENSION,
+];
+const SIN_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight real integer classes are admitted only when exactly representable at the binary64 transcendental boundary.",
+    }];
+pub const SIN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = sin(integer_X)",
+        inputs: &SIN_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "RunMat mode validates authoritative integer storage before conversion; automatic residency may gather and explicit output residency follows the existing provider policy.",
+    }];
 
 const SIN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
@@ -195,10 +249,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::trigonometry::sin::SIN_DESCRIPTOR),
+    extensions(SIN_EXTENSIONS),
+    integer_capabilities(SIN_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::trigonometry::sin"
 )]
 async fn sin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let output = parse_output_template(&rest)?;
+    ensure_sin_extensions(&value, &rest).await?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, "sin")?;
     if let Some(symbolic) = symbolic_function(&value, SymbolicFunction::Sin) {
         return apply_output_template(symbolic, &output).await;
     }
@@ -216,6 +274,37 @@ async fn sin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         other => sin_real(other)?,
     };
     apply_output_template(base, &output).await
+}
+
+async fn ensure_sin_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        value,
+        &SIN_INTEGER_INPUT_EXTENSION,
+        BUILTIN_NAME,
+        "X",
+    )
+    .await?;
+    if matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SIN_LOGICAL_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if matches!(value, Value::CharArray(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SIN_CHARACTER_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if !rest.is_empty() {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SIN_LIKE_OUTPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
 }
 
 async fn sin_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
@@ -249,14 +338,17 @@ fn sin_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn sin_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let data = tensor.data.iter().map(|&v| v.sin()).collect::<Vec<_>>();
+    let data = tensor::tensor_values_f64_cow(&tensor)
+        .iter()
+        .map(|&v| v.sin())
+        .collect::<Vec<_>>();
     Tensor::new(data, tensor.shape.clone())
         .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))
 }
 
 fn sin_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let mapped = ct
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| (sin_complex_re(re, im), sin_complex_im(re, im)))
         .collect::<Vec<_>>();
@@ -359,8 +451,9 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
         Value::Tensor(tensor) => {
+            let data = tensor::tensor_values_f64_cow(&tensor);
             let view = HostTensorView {
-                data: &tensor.data,
+                data: data.as_ref(),
                 shape: &tensor.shape,
             };
             let handle = provider
@@ -438,7 +531,8 @@ async fn convert_to_gpu_complex(value: Value) -> BuiltinResult<Value> {
         }
         Value::Num(n) => convert_to_gpu_complex(Value::Complex(n, 0.0)).await,
         Value::Tensor(tensor) => {
-            let data = tensor.data.iter().map(|&re| (re, 0.0)).collect::<Vec<_>>();
+            let values = tensor::tensor_values_f64_cow(&tensor);
+            let data = values.iter().map(|&re| (re, 0.0)).collect::<Vec<_>>();
             let complex = ComplexTensor::new(data, tensor.shape.clone())
                 .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
             convert_to_gpu_complex(Value::ComplexTensor(complex)).await
@@ -473,7 +567,8 @@ async fn convert_to_host_complex(value: Value) -> BuiltinResult<Value> {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
         Value::Tensor(tensor) => {
-            let data = tensor.data.iter().map(|&re| (re, 0.0)).collect::<Vec<_>>();
+            let values = tensor::tensor_values_f64_cow(&tensor);
+            let data = values.iter().map(|&re| (re, 0.0)).collect::<Vec<_>>();
             let complex = ComplexTensor::new(data, tensor.shape.clone())
                 .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
             Ok(complex_tensor_into_value(complex))
@@ -503,7 +598,8 @@ pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, ResolveContext, Tensor, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, Tensor};
 
     use crate::builtins::common::{gpu_helpers, test_support};
 
@@ -568,8 +664,8 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                assert!((t.data[0] - 0.0).abs() < 1e-12);
-                assert!((t.data[1] - 0.0).abs() < 1e-12);
+                assert!((t.materialize_f64()[0] - 0.0).abs() < 1e-12);
+                assert!((t.materialize_f64()[1] - 0.0).abs() < 1e-12);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -577,7 +673,50 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn sin_reads_typed_integer_tensor_storage_exactly() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let tensor =
+            Tensor::new_integer(runmat_value::IntegerStorage::I16(vec![0, 1, 2]), vec![3, 1])
+                .expect("integer tensor");
+
+        let result = block_on(sin_builtin(Value::Tensor(tensor), Vec::new())).expect("sin");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![3, 1]);
+                let expected = [0.0, 1.0f64.sin(), 2.0f64.sin()];
+                for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
+                    assert!((actual - expected).abs() < 1e-12);
+                }
+                assert!(out.integer_storage().is_none());
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sin_host_complex_conversion_reads_typed_integer_storage_exactly() {
+        let tensor = Tensor::new_integer(
+            runmat_value::IntegerStorage::I64(vec![-3, 0, 5]),
+            vec![3, 1],
+        )
+        .expect("integer tensor");
+
+        let result =
+            block_on(convert_to_host_complex(Value::Tensor(tensor))).expect("complex conversion");
+        let Value::ComplexTensor(out) = result else {
+            panic!("expected complex tensor result");
+        };
+        assert_eq!(out.shape, vec![3, 1]);
+        assert_eq!(
+            out.materialize_f64(),
+            vec![(-3.0, 0.0), (0.0, 0.0), (5.0, 0.0)]
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn sin_int_value_promotes() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let value = Value::Int(IntValue::I32(1));
         let result = block_on(sin_builtin(value, Vec::new())).expect("sin");
         match result {
@@ -602,6 +741,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_char_array_roundtrip() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let chars = CharArray::new("abc".chars().collect(), 1, 3).unwrap();
         let result = block_on(sin_builtin(Value::CharArray(chars), Vec::new())).expect("sin");
         match result {
@@ -609,7 +749,7 @@ pub(crate) mod tests {
                 assert_eq!(t.shape, vec![1, 3]);
                 for (idx, ch) in ['a', 'b', 'c'].into_iter().enumerate() {
                     let expected = (ch as u32 as f64).sin();
-                    assert!((t.data[idx] - expected).abs() < 1e-12);
+                    assert!((t.materialize_f64()[idx] - expected).abs() < 1e-12);
                 }
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -622,15 +762,15 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = block_on(sin_builtin(Value::GpuTensor(handle), Vec::new())).expect("sin");
             let gathered = test_support::gather(result).expect("gather");
-            let expected: Vec<f64> = tensor.data.iter().map(|&v| v.sin()).collect();
+            let expected: Vec<f64> = tensor.materialize_f64().iter().map(|&v| v.sin()).collect();
             assert_eq!(gathered.shape, vec![4, 1]);
-            assert_eq!(gathered.data, expected);
+            assert_eq!(gathered.materialize_f64(), expected);
         });
     }
 
@@ -647,6 +787,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_like_complex_prototype_returns_complex() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let result = block_on(sin_builtin(
             Value::Num(1.0),
             vec![Value::from("like"), Value::Complex(0.0, 1.0)],
@@ -664,6 +805,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_like_gpu_prototype() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap();
             let proto_view = HostTensorView {
@@ -679,9 +821,10 @@ pub(crate) mod tests {
             match result {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-                    let expected: Vec<f64> = tensor.data.iter().map(|&v| v.sin()).collect();
+                    let expected: Vec<f64> =
+                        tensor.materialize_f64().iter().map(|&v| v.sin()).collect();
                     assert_eq!(gathered.shape, vec![4, 1]);
-                    assert_eq!(gathered.data, expected);
+                    assert_eq!(gathered.materialize_f64(), expected);
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
             }
@@ -711,15 +854,16 @@ pub(crate) mod tests {
                 other => panic!("expected complex output, got {other:?}"),
             };
             assert_eq!(out.shape, vec![1, 2]);
-            for (idx, &(re, im)) in input.data.iter().enumerate() {
-                assert!((out.data[idx].0 - sin_complex_re(re, im)).abs() < 1e-12);
-                assert!((out.data[idx].1 - sin_complex_im(re, im)).abs() < 1e-12);
+            for (idx, &(re, im)) in input.materialize_f64().iter().enumerate() {
+                assert!((out.materialize_f64()[idx].0 - sin_complex_re(re, im)).abs() < 1e-12);
+                assert!((out.materialize_f64()[idx].1 - sin_complex_im(re, im)).abs() < 1e-12);
             }
         });
     }
 
     #[test]
     fn sin_like_complex_gpu_prototype_uploads_complex_result() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let input = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
             let proto_tensor = ComplexTensor::new(vec![(0.0, 1.0)], vec![1, 1]).unwrap();
@@ -743,19 +887,20 @@ pub(crate) mod tests {
                 panic!("expected gathered complex tensor, got {gathered:?}");
             };
             assert_eq!(out.shape, vec![2, 1]);
-            for (idx, &re) in input.data.iter().enumerate() {
-                assert!((out.data[idx].0 - re.sin()).abs() < 1e-12);
-                assert!(out.data[idx].1.abs() < 1e-12);
+            for (idx, &re) in input.materialize_f64().iter().enumerate() {
+                assert!((out.materialize_f64()[idx].0 - re.sin()).abs() < 1e-12);
+                assert!(out.materialize_f64()[idx].1.abs() < 1e-12);
             }
         });
     }
 
     #[test]
     fn sin_like_complex_gpu_prototype_converts_resident_real_gpu_result() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let input = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
             let input_view = HostTensorView {
-                data: &input.data,
+                data: &input.materialize_f64(),
                 shape: &input.shape,
             };
             let input_handle = provider.upload(&input_view).expect("upload input");
@@ -780,9 +925,9 @@ pub(crate) mod tests {
                 panic!("expected gathered complex tensor, got {gathered:?}");
             };
             assert_eq!(out.shape, vec![2, 1]);
-            for (idx, &re) in input.data.iter().enumerate() {
-                assert!((out.data[idx].0 - re.sin()).abs() < 1e-12);
-                assert!(out.data[idx].1.abs() < 1e-12);
+            for (idx, &re) in input.materialize_f64().iter().enumerate() {
+                assert!((out.materialize_f64()[idx].0 - re.sin()).abs() < 1e-12);
+                assert!(out.materialize_f64()[idx].1.abs() < 1e-12);
             }
         });
     }
@@ -790,10 +935,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_like_host_with_gpu_input_gathers() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -804,9 +950,10 @@ pub(crate) mod tests {
             .expect("sin");
             match result {
                 Value::Tensor(t) => {
-                    let expected: Vec<f64> = tensor.data.iter().map(|&v| v.sin()).collect();
+                    let expected: Vec<f64> =
+                        tensor.materialize_f64().iter().map(|&v| v.sin()).collect();
                     assert_eq!(t.shape, vec![2, 1]);
-                    assert_eq!(t.data, expected);
+                    assert_eq!(t.materialize_f64(), expected);
                 }
                 Value::GpuTensor(_) => panic!("expected host result"),
                 Value::Num(_) => panic!("expected vector output"),
@@ -830,6 +977,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_like_keyword_case_insensitive() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
         let result = block_on(sin_builtin(
             Value::Tensor(tensor.clone()),
@@ -838,9 +986,10 @@ pub(crate) mod tests {
         .expect("sin");
         match result {
             Value::Tensor(out) => {
-                let expected: Vec<f64> = tensor.data.iter().map(|&v| v.sin()).collect();
+                let expected: Vec<f64> =
+                    tensor.materialize_f64().iter().map(|&v| v.sin()).collect();
                 assert_eq!(out.shape, vec![2, 1]);
-                assert_eq!(out.data, expected);
+                assert_eq!(out.materialize_f64(), expected);
             }
             other => panic!("unexpected result {other:?}"),
         }
@@ -849,6 +998,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_like_char_array_keyword() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let keyword = CharArray::new_row("like");
         let result = block_on(sin_builtin(
             Value::Num(0.0),
@@ -871,7 +1021,7 @@ pub(crate) mod tests {
         let t = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap();
         let cpu = sin_real(Value::Tensor(t.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &t.data,
+            data: &t.materialize_f64(),
             shape: &t.shape,
         };
         let h = runmat_accelerate_api::provider()
@@ -887,7 +1037,7 @@ pub(crate) mod tests {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
                 };
-                for (a, b) in gt.data.iter().zip(ct.data.iter()) {
+                for (a, b) in gt.materialize_f64().iter().zip(ct.materialize_f64().iter()) {
                     assert!((a - b).abs() < tol, "|{} - {}| >= {}", a, b, tol);
                 }
             }

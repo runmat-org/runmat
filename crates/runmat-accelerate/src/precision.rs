@@ -1,12 +1,12 @@
 use once_cell::sync::{Lazy, OnceCell};
 use runmat_accelerate_api::{AccelProvider, ProviderPrecision};
-use runmat_builtins::{NumericDType, Tensor, Value};
+use runmat_value::{NumericDType, Tensor, Value};
 use std::env;
 
 /// Return the logical numeric dtype associated with the provided value, if any.
 pub fn value_numeric_dtype(value: &Value) -> Option<NumericDType> {
     match value {
-        Value::Tensor(t) => Some(t.dtype),
+        Value::Tensor(t) => Some(t.numeric_dtype()),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => Some(NumericDType::F64),
         Value::LogicalArray(_) | Value::CharArray(_) => Some(NumericDType::F64),
         Value::GpuTensor(_) => None, // already resident; assume provider handled dtype
@@ -16,7 +16,7 @@ pub fn value_numeric_dtype(value: &Value) -> Option<NumericDType> {
 
 /// Return the logical dtype represented by a tensor.
 pub fn tensor_numeric_dtype(tensor: &Tensor) -> NumericDType {
-    tensor.dtype
+    tensor.numeric_dtype()
 }
 
 fn parse_bool(s: &str) -> Option<bool> {
@@ -41,7 +41,14 @@ pub fn provider_supports_dtype(provider: &dyn AccelProvider, dtype: NumericDType
     match dtype {
         NumericDType::F32 => true,
         NumericDType::F64 => provider.precision() == ProviderPrecision::F64,
-        NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => false,
+        NumericDType::I8
+        | NumericDType::I16
+        | NumericDType::I32
+        | NumericDType::I64
+        | NumericDType::U8
+        | NumericDType::U16
+        | NumericDType::U32
+        | NumericDType::U64 => false,
     }
 }
 
@@ -70,7 +77,14 @@ pub fn ensure_provider_supports_dtype(
                     .to_string()
             }
             NumericDType::F32 => "active provider does not support f32 kernels".to_string(),
-            NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => {
+            NumericDType::I8
+            | NumericDType::I16
+            | NumericDType::I32
+            | NumericDType::I64
+            | NumericDType::U8
+            | NumericDType::U16
+            | NumericDType::U32
+            | NumericDType::U64 => {
                 format!(
                     "active provider does not support {} kernels",
                     dtype.class_name()

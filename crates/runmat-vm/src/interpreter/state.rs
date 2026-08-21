@@ -5,12 +5,32 @@ use log::debug;
 use runmat_accelerate::graph::AccelGraph;
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::{prepare_fusion_plan, FusionPlanRef};
-use runmat_builtins::Value;
+use runmat_value::Value;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug)]
 pub enum InterpreterOutcome {
     Completed(Vec<Value>),
+}
+
+/// Exact VM-owned state materialized from a native empty-stack MIR boundary.
+#[derive(Clone, Debug, PartialEq)]
+pub struct InterpreterResumeState {
+    pub pc: usize,
+    pub vars: Vec<Option<Value>>,
+    pub supplied_inputs: usize,
+    pub requested_outputs: usize,
+    pub missing_input_slots: HashSet<usize>,
+    pub global_aliases: HashMap<usize, String>,
+    pub persistent_aliases: HashMap<usize, String>,
+    pub side_effect_epoch: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ActiveTryHandler {
+    pub scope: usize,
+    pub catch_pc: usize,
+    pub catch_var: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -20,8 +40,8 @@ pub struct InterpreterState {
     pub vars: Vec<Value>,
     pub pc: usize,
     pub context: ExecutionContext,
-    pub try_stack: Vec<(usize, Option<usize>)>,
-    pub last_exception: Option<runmat_builtins::MException>,
+    pub try_stack: Vec<ActiveTryHandler>,
+    pub last_exception: Option<runmat_value::MException>,
     pub imports: Vec<(Vec<String>, bool)>,
     pub global_aliases: HashMap<usize, String>,
     pub persistent_aliases: HashMap<usize, String>,
@@ -41,6 +61,24 @@ impl InterpreterState {
         initial_vars: &mut [Value],
         current_function_name: Option<&str>,
         call_counts: Vec<(usize, usize)>,
+    ) -> Self {
+        Self::new_in_context(
+            bytecode,
+            initial_vars,
+            current_function_name,
+            call_counts,
+            runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+                runmat_runtime::execution::RuntimeExecutionService::new(),
+            )),
+        )
+    }
+
+    pub fn new_in_context(
+        bytecode: Bytecode,
+        initial_vars: &mut [Value],
+        current_function_name: Option<&str>,
+        call_counts: Vec<(usize, usize)>,
+        runtime: runmat_runtime::context::RuntimeContext,
     ) -> Self {
         let initial_assigned_var_count = initial_vars.len();
         let mut vars = initial_vars.to_vec();
@@ -81,8 +119,7 @@ impl InterpreterState {
                 call_stack: Vec::new(),
                 locals: Vec::new(),
                 instruction_pointer: 0,
-                spawned_task_ids: std::collections::HashSet::new(),
-                next_spawn_task_id: 0,
+                runtime,
             },
             try_stack: Vec::new(),
             last_exception: None,

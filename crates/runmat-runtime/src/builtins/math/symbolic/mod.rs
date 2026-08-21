@@ -1,3 +1,5 @@
+use num_bigint::BigInt;
+use runmat_value::{IntValue, NumericScalar};
 pub(crate) mod digits;
 pub(crate) mod int;
 pub(crate) mod limit;
@@ -6,13 +8,13 @@ pub(crate) mod sym;
 pub(crate) mod syms;
 pub(crate) mod vpa;
 
-use runmat_builtins::{
-    symbolic::{is_valid_symbolic_identifier, SymbolicFunction},
-    SymbolicArray, SymbolicExpr, Tensor, Value,
-};
+use runmat_types::symbolic::is_valid_symbolic_identifier;
+use runmat_value::SymbolicFunction;
+use runmat_value::{SymbolicArray, SymbolicExpr, Tensor, Value};
 
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::shape::is_scalar_shape;
+use crate::builtins::common::tensor as tensor_utils;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum SymbolicBinaryOp {
@@ -118,7 +120,7 @@ impl SymbolicOperand {
             }))),
             Value::Tensor(tensor) => Some(Self {
                 data: tensor
-                    .data
+                    .materialize_f64()
                     .iter()
                     .copied()
                     .map(SymbolicExpr::constant)
@@ -179,13 +181,33 @@ pub(crate) fn value_to_symbolic_scalar(value: &Value) -> Option<SymbolicExpr> {
     match value {
         Value::Symbolic(expr) => Some(expr.clone()),
         Value::Num(value) => Some(SymbolicExpr::constant(*value)),
-        Value::Int(value) => Some(SymbolicExpr::constant(value.to_f64())),
+        Value::Int(value) => symbolic_integer(value),
         Value::Bool(value) => Some(SymbolicExpr::constant(if *value { 1.0 } else { 0.0 })),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
-            Some(SymbolicExpr::constant(tensor.data[0]))
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            match tensor.numeric_value_at(0)? {
+                NumericScalar::F64(value) => Some(SymbolicExpr::constant(value)),
+                NumericScalar::F32(value) => Some(SymbolicExpr::constant(value as f64)),
+                value => value
+                    .into_int_value()
+                    .and_then(|value| symbolic_integer(&value)),
+            }
         }
         _ => None,
     }
+}
+
+fn symbolic_integer(value: &IntValue) -> Option<SymbolicExpr> {
+    let numerator = match value {
+        IntValue::I8(value) => BigInt::from(*value),
+        IntValue::I16(value) => BigInt::from(*value),
+        IntValue::I32(value) => BigInt::from(*value),
+        IntValue::I64(value) => BigInt::from(*value),
+        IntValue::U8(value) => BigInt::from(*value),
+        IntValue::U16(value) => BigInt::from(*value),
+        IntValue::U32(value) => BigInt::from(*value),
+        IntValue::U64(value) => BigInt::from(*value),
+    };
+    SymbolicExpr::rational(numerator, BigInt::from(1_u8))
 }
 
 pub(crate) fn symbolic_expr_to_value(expr: SymbolicExpr) -> Value {
@@ -215,4 +237,33 @@ pub(crate) fn text_scalar(value: &Value) -> Option<String> {
 
 pub(crate) fn is_valid_identifier(name: &str) -> bool {
     is_valid_symbolic_identifier(name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_value::IntegerStorage;
+
+    #[test]
+    fn symbolic_scalar_reads_typed_integer_tensor_storage_exactly() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U16(vec![257]), vec![1, 1]).expect("tensor");
+
+        let expr =
+            value_to_symbolic_scalar(&Value::Tensor(tensor)).expect("symbolic scalar conversion");
+        assert_eq!(expr.constant_value(), Some(257.0));
+    }
+
+    #[test]
+    fn symbolic_scalars_preserve_wide_integer_values() {
+        let scalar = value_to_symbolic_scalar(&Value::Int(IntValue::U64(u64::MAX)))
+            .expect("symbolic integer scalar");
+        assert_eq!(scalar.to_string(), u64::MAX.to_string());
+
+        let tensor = Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN]), vec![1, 1])
+            .expect("integer tensor");
+        let tensor_value =
+            value_to_symbolic_scalar(&Value::Tensor(tensor)).expect("symbolic integer tensor");
+        assert_eq!(tensor_value.to_string(), i64::MIN.to_string());
+    }
 }

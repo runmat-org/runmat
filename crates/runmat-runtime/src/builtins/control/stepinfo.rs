@@ -1,15 +1,22 @@
 //! Step-response metrics for SISO transfer-function models and sampled responses.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{StructValue, Tensor, Value};
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
+use crate::builtins::common::{
+    spec::{
+        BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
+        ReductionNaN, ResidencyPolicy, ShapeRequirements,
+    },
+    tensor,
 };
 use crate::builtins::control::tf_model::{control_error, scalar_f64, scalar_text, EPS};
 use crate::builtins::control::type_resolvers::stepinfo_type;
@@ -112,6 +119,77 @@ pub const STEPINFO_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &STEPINFO_ERRORS,
 };
 
+const STEPINFO_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "stepinfo-integer-sampled-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "stepinfo with native typed-integer sampled response data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:StepinfoIntegerSampledDataExtension"),
+};
+const STEPINFO_INTEGER_THRESHOLD_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "stepinfo-integer-threshold",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "stepinfo with a native typed-integer threshold option is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:StepinfoIntegerThresholdExtension"),
+    };
+pub const STEPINFO_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    STEPINFO_INTEGER_DATA_EXTENSION,
+    STEPINFO_INTEGER_THRESHOLD_EXTENSION,
+];
+const STEPINFO_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 3] = [
+    BuiltinIntegerInputCapability {
+        name: "y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Public documentation describes numeric response data without a per-storage-class table. RunMat gates typed response samples and proves exact binary64 conversion before computing metrics.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "t",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed time samples are a conservative extension and must be finite, ordered, shape-compatible, and exactly representable in binary64.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "yfinal",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed steady-state values are a conservative extension and cross the same checked binary64 metric boundary.",
+    },
+];
+const STEPINFO_INTEGER_THRESHOLD_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "SettlingTimeThreshold",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target describes threshold values but does not enumerate typed integer storage. RunMat gates typed values and validates the option-specific floating range.",
+    }];
+pub const STEPINFO_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "info = stepinfo(integer_y, integer_t, integer_yfinal?)",
+        inputs: &STEPINFO_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Every typed positional role is independently admitted and checked before gathering. Metrics are returned as double-valued structure fields because step-response analysis is a floating computation domain.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "info = stepinfo(..., thresholdName, integer_threshold)",
+        inputs: &STEPINFO_INTEGER_THRESHOLD_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed thresholds are separately mode-gated and exactly converted before range validation; automatic residency remains transparent after admission.",
+    },
+];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::stepinfo")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "stepinfo",
@@ -146,9 +224,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "stepinfo,step response,rise time,settling time,overshoot,control system",
     type_resolver(stepinfo_type),
     descriptor(crate::builtins::control::stepinfo::STEPINFO_DESCRIPTOR),
+    extensions(crate::builtins::control::stepinfo::STEPINFO_EXTENSIONS),
+    integer_capabilities(crate::builtins::control::stepinfo::STEPINFO_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::control::stepinfo"
 )]
 async fn stepinfo_builtin(input: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_stepinfo_integer_boundaries(&input, &rest).await?;
     let gathered_input = crate::dispatcher::gather_if_needed_async(&input).await?;
     if matches!(gathered_input, Value::Object(_)) {
         if !rest.is_empty() && !is_name_value_start(&rest[0]) {
@@ -180,6 +261,58 @@ async fn stepinfo_builtin(input: Value, rest: Vec<Value>) -> BuiltinResult<Value
     let (t, y_final, option_start) = parse_sampled_response_tail(&y, &rest).await?;
     let threshold = parse_options(&rest, option_start)?;
     metrics_to_struct(compute_metrics(&y, &t, y_final, threshold)?)
+}
+
+async fn ensure_stepinfo_integer_boundaries(input: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    if !matches!(input, Value::Object(_)) {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            input,
+            &STEPINFO_INTEGER_DATA_EXTENSION,
+            BUILTIN_NAME,
+            "response",
+        )
+        .await?;
+    }
+    let mut option_start = 0usize;
+    if rest
+        .first()
+        .is_some_and(|value| !is_name_value_start(value))
+    {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            &rest[0],
+            &STEPINFO_INTEGER_DATA_EXTENSION,
+            BUILTIN_NAME,
+            "time",
+        )
+        .await?;
+        option_start = 1;
+        if rest.get(1).is_some_and(|value| !is_name_value_start(value)) {
+            crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+                &rest[1],
+                &STEPINFO_INTEGER_DATA_EXTENSION,
+                BUILTIN_NAME,
+                "steady-state",
+            )
+            .await?;
+            option_start = 2;
+        }
+    }
+    for pair in rest[option_start..].chunks(2) {
+        if pair.len() == 2
+            && scalar_text(&pair[0], "option name", BUILTIN_NAME)?
+                .trim()
+                .eq_ignore_ascii_case("SettlingTimeThreshold")
+        {
+            crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+                &pair[1],
+                &STEPINFO_INTEGER_THRESHOLD_EXTENSION,
+                BUILTIN_NAME,
+                "threshold",
+            )
+            .await?;
+        }
+    }
+    Ok(())
 }
 
 async fn parse_sampled_response_tail(
@@ -250,7 +383,7 @@ async fn numeric_vector(value: Value, label: &str) -> BuiltinResult<Vec<f64>> {
     match gathered {
         Value::Tensor(tensor) => {
             ensure_vector_shape(&tensor, label)?;
-            finite_vector(tensor.data, label)
+            finite_vector(tensor::tensor_values_f64(&tensor), label)
         }
         Value::Num(n) => finite_vector(vec![n], label),
         Value::Int(i) => finite_vector(vec![i.to_f64()], label),
@@ -485,6 +618,7 @@ fn stepinfo_error(message: impl Into<String>) -> RuntimeError {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_value::IntegerStorage;
 
     #[test]
     fn sampled_response_reports_basic_metrics() {
@@ -499,6 +633,72 @@ mod tests {
             matches!(info.fields.get("RiseTime"), Some(Value::Num(v)) if (*v - 1.8).abs() < 1.0e-12)
         );
         assert!(matches!(info.fields.get("Overshoot"), Some(Value::Num(v)) if v.abs() < 1.0e-12));
+    }
+
+    #[test]
+    fn stepinfo_accepts_typed_integer_sampled_response_vectors() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let y = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 1, 1]), vec![1, 4]).unwrap(),
+        );
+        let t = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 2, 3]), vec![1, 4]).unwrap(),
+        );
+        let Value::Struct(info) =
+            block_on(stepinfo_builtin(y, vec![t, Value::Num(1.0)])).expect("stepinfo")
+        else {
+            panic!("expected struct");
+        };
+        assert!(
+            matches!(info.fields.get("SteadyStateValue"), Some(Value::Num(v)) if (*v - 1.0).abs() < 1.0e-12)
+        );
+        assert!(matches!(info.fields.get("Overshoot"), Some(Value::Num(v)) if v.abs() < 1.0e-12));
+    }
+
+    #[test]
+    fn stepinfo_typed_sampled_data_is_mode_gated() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let y = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U16(vec![0, 1]), vec![1, 2]).unwrap(),
+        );
+        let error = block_on(stepinfo_builtin(y, Vec::new()))
+            .expect_err("MATLAB-compatible mode must reject typed sampled data");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:StepinfoIntegerSampledDataExtension")
+        );
+    }
+
+    #[test]
+    fn stepinfo_typed_threshold_is_independently_mode_gated() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let y = Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap());
+        let threshold =
+            Value::Tensor(Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).unwrap());
+        let error = block_on(stepinfo_builtin(
+            y,
+            vec![Value::from("SettlingTimeThreshold"), threshold],
+        ))
+        .expect_err("MATLAB-compatible mode must reject a typed threshold");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:StepinfoIntegerThresholdExtension")
+        );
+    }
+
+    #[test]
+    fn stepinfo_rejects_wide_integer_samples_before_binary64_rounding() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let y = Value::Tensor(
+            Tensor::new_integer(
+                IntegerStorage::U64(vec![0, 9_007_199_254_740_993]),
+                vec![1, 2],
+            )
+            .unwrap(),
+        );
+        let error = block_on(stepinfo_builtin(y, Vec::new()))
+            .expect_err("inexact binary64 conversion must fail");
+        assert!(error.message().contains("exactly representable"));
     }
 
     #[test]

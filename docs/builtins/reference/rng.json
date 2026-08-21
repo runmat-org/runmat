@@ -8,7 +8,7 @@
     "shuffle",
     "random state"
   ],
-  "summary": "Configure, query, and restore the global pseudorandom number generator state with MATLAB-compatible forms.",
+  "summary": "Configure, query, and restore RunMat's global pseudorandom number generator through MATLAB-shaped forms.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -27,14 +27,14 @@
     "unit": "builtins::stats::random::rng::tests",
     "integration": null
   },
-  "description": "`rng` queries or reconfigures the global pseudorandom number generator used by `rand`, `randn`, `randi`, and `randperm`. It supports MATLAB-compatible default, seeded, shuffled, and state-restore workflows.",
+  "description": "`rng` queries or reconfigures the global pseudorandom number generator used by `rand`, `randn`, `randi`, and `randperm`. The call shapes and integer seed domain follow the compatibility target's surface, while RunMat's current LCG sequence and compact state representation are not MATLAB stream/state equivalents.",
   "behaviors": [
     "`rng()` returns a structure describing the current generator (fields `Type`, `Seed`, and `State`).",
-    "`rng(seed)` switches to the default generator with the supplied non-negative integer seed. Passing `0` reproduces MATLAB's `rng('default')`.",
-    "`rng('default')` restores the default generator and seed (`twister`, seed `0`).",
+    "`rng(seed)` reads a non-negative integer seed below `2^32` from scalar double or any of the eight native integer classes. Seeds at or above `2^32` are an independently gated RunMat extension.",
+    "`rng('default')` restores RunMat's default LCG state and user seed `0`; this is reproducible inside RunMat but does not claim MATLAB Twister sequence equivalence.",
     "`rng('shuffle')` seeds the generator with entropy derived from the current time.",
-    "`rng(seed, 'twister')` explicitly names the generator. RunMat currently supports `twister`, matching MATLAB's default stream.",
-    "`rng(S)` restores a state structure previously returned by `rng`.\n\nWhenever an acceleration provider is active, RunMat also pushes the new seed to the provider so GPU-resident random calls remain in sync with CPU sampling. Providers that lack `set_rng_state` simply fall back to their existing behaviour, which is documented below."
+    "`rng(seed, 'twister')` is accepted as the public generator spelling, but the current RunMat engine remains an LCG and does not yet reproduce MATLAB Twister sequences.",
+    "`rng(S)` restores a state structure previously returned by RunMat's `rng`. Independently constructed native-integer Seed or State fields are a gated RunMat extension. Whenever an acceleration provider is active, RunMat pushes its compact state token to the provider when supported; this coordinates RunMat streams but does not establish MATLAB CPU/GPU sequence equivalence."
   ],
   "examples": [
     {
@@ -66,11 +66,11 @@
   "faqs": [
     {
       "question": "What generators does RunMat support?",
-      "answer": "RunMat currently exposes MATLAB's default `'twister'` stream. Additional generators (`'philox'`, `'combRecursive'`, etc.) will surface as the underlying engines land."
+      "answer": "RunMat currently uses its own deterministic LCG while accepting the public `'twister'` spelling at the API boundary. Exact Twister sequence/state compatibility and additional generators remain future engine work."
     },
     {
       "question": "What numeric range is valid for seeds?",
-      "answer": "Any finite, non-negative integer representable exactly in double precision (`0 <= seed <= 2^53`) is accepted. Values outside this range produce an error."
+      "answer": "MATLAB-compatible mode accepts non-negative integer seeds below `2^32`. RunMat mode extends the domain through `u64`; typed values remain exact, and snapshot Seed fields use native `uint64` when binary64 would round."
     },
     {
       "question": "How can I force a specific seed for `rng('shuffle')` in tests?",
@@ -78,11 +78,11 @@
     },
     {
       "question": "Does `rng` affect GPU random numbers?",
-      "answer": "Yes—if the active acceleration provider implements `set_rng_state`. The bundled in-process reference provider and the WGPU backend both honour this hook."
+      "answer": "RunMat forwards its compact state token when the active provider implements `set_rng_state`. This coordinates RunMat host/provider state, but it does not claim MATLAB CPU/GPU random-sequence identity."
     },
     {
       "question": "How do I restore a saved state structure?",
-      "answer": "Pass the structure back to `rng`: `s = rng; ...; rng(s);` resumes where the original state left off, matching MATLAB behaviour."
+      "answer": "Pass a structure returned by the same RunMat build back to `rng`: `s = rng; ...; rng(s);` resumes that RunMat stream. The compact structure is not a MATLAB Twister state interchange format."
     },
     {
       "question": "What is stored in the `State` field?",
@@ -123,5 +123,5 @@
     "label": "`crates/runmat-runtime/src/builtins/stats/random/rng.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/random/rng.rs"
   },
-  "gpu_residency": "RunMat pushes the configured seed to the active acceleration provider whenever `rng` changes the host generator. Providers that expose `set_rng_state` (`runmat-accelerate`'s in-process and WGPU backends) therefore produce the same sequences as CPU `rand`/`randn` when seeded via `rng`. If a provider omits this hook, RunMat logs a debug message and continues with the provider's internal seed stream; in that case GPU draws may differ from CPU draws even after calling `rng`. You do not need to call `gpuArray` explicitly for residency purposes—RunMat keeps GPU streams in sync automatically whenever the provider supports RNG state injection."
+  "gpu_residency": "RunMat pushes its compact state token to the active acceleration provider whenever `rng` changes the host generator. A provider that implements `set_rng_state` can coordinate its RunMat stream with that token; providers without the hook retain their own stream. This mechanism is independent of automatic tensor residency and does not claim MATLAB CPU/GPU sequence equivalence."
 }

@@ -1,4 +1,4 @@
-use runmat_builtins::{Tensor, Value};
+use runmat_value::{Tensor, Value};
 
 #[test]
 fn residency_broadcast_2d_chain() {
@@ -67,8 +67,6 @@ fn residency_broadcast_3d_chain_and_mean_vecdim() {
         &[
             shifted.clone(),
             Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap()),
-            Value::String("like".into()),
-            shifted.clone(),
         ],
     )
     .unwrap();

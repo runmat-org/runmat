@@ -3,9 +3,9 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -15,6 +15,11 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::real")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -54,6 +59,26 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "real";
+
+const REAL_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "X",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "The public numeric-array contract includes all built-in integer classes; real returns their real components elementwise and supports gpuArray input.",
+}];
+
+pub const REAL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = real(integer_X)",
+        inputs: &REAL_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Real integer input is an exact same-class identity and paired complex-integer input projects its same-class real component without arithmetic. RunMat preserves class, shape, owner, and residency.",
+    }];
 
 const REAL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
@@ -114,6 +139,7 @@ fn builtin_error_with_detail(
     accel = "unary",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::elementwise::real::REAL_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::elementwise::real::REAL_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::elementwise::real"
 )]
 async fn real_builtin(value: Value) -> BuiltinResult<Value> {
@@ -142,20 +168,30 @@ async fn real_builtin(value: Value) -> BuiltinResult<Value> {
 }
 
 async fn real_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+        builtin_error_with_detail(&REAL_ERROR_INTERNAL, "GPU provider unavailable for input")
+    })?;
+    let kernel_compatible = runmat_accelerate_api::handle_integer_type(&handle).is_none()
+        && runmat_accelerate_api::handle_precision(&handle) == Some(provider.precision());
+    if kernel_compatible {
         if let Ok(out) = provider.unary_real(&handle).await {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
-        .await
+    let input_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+    let gathered_result =
+        gpu_helpers::download_value_preserving_residency_async(provider, &handle).await;
+    gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
+    let gathered = gathered_result
         .map_err(|err| builtin_error_with_detail(&REAL_ERROR_INTERNAL, err.to_string()))?;
-    match gathered {
+    let host = match gathered {
         Value::Complex(re, _) => Ok(Value::Num(re)),
         Value::ComplexTensor(ct) => real_complex_tensor(ct),
         Value::Tensor(tensor) => Ok(tensor::tensor_into_value(real_tensor(tensor)?)),
         other => real_real(other),
-    }
+    }?;
+    gpu_helpers::restore_class_preserving_value(&handle, host, BUILTIN_NAME)
+        .map_err(|err| builtin_error_with_detail(&REAL_ERROR_INTERNAL, err.to_string()))
 }
 
 fn real_real(value: Value) -> BuiltinResult<Value> {
@@ -169,8 +205,17 @@ fn real_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 }
 
 fn real_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let data = ct.data.iter().map(|&(re, _)| re).collect::<Vec<_>>();
-    let tensor = Tensor::new(data, ct.shape.clone())
+    let shape = ct.shape.clone();
+    let storage = match ct.into_complex_storage() {
+        ComplexStorage::F64(values) => {
+            NumericStorage::F64(values.into_iter().map(|(real, _)| real).collect())
+        }
+        ComplexStorage::F32(values) => {
+            NumericStorage::F32(values.into_iter().map(|(real, _)| real).collect())
+        }
+        ComplexStorage::Integer(storage) => NumericStorage::from_integer_storage(storage.real),
+    };
+    let tensor = Tensor::from_numeric_storage(storage, shape)
         .map_err(|e| builtin_error_with_detail(&REAL_ERROR_INTERNAL, e))?;
     Ok(tensor::tensor_into_value(tensor))
 }
@@ -191,7 +236,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, LogicalArray};
 
     fn real_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::real_builtin(value))
@@ -256,12 +302,9 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn real_int_promotes_to_double() {
+    fn real_int_scalar_preserves_integer_class() {
         let result = real_builtin(Value::Int(IntValue::I32(7))).expect("real");
-        match result {
-            Value::Num(n) => assert!((n - 7.0).abs() < 1e-12),
-            other => panic!("expected scalar result, got {other:?}"),
-        }
+        assert_eq!(result, Value::Int(IntValue::I32(7)));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -273,11 +316,84 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                assert!((t.data[0] - 1.0).abs() < 1e-12);
-                assert!((t.data[1] + 3.0).abs() < 1e-12);
+                assert!((t.materialize_f64()[0] - 1.0).abs() < 1e-12);
+                assert!((t.materialize_f64()[1] + 3.0).abs() < 1e-12);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn real_complex_single_preserves_native_class_shape_and_empty_storage() {
+        let complex = ComplexTensor::from_f32(vec![(1.25, 2.5), (-3.0, 4.0)], vec![2, 1]).unwrap();
+        let Value::Tensor(output) = real_builtin(Value::ComplexTensor(complex)).expect("real")
+        else {
+            panic!("expected single real tensor");
+        };
+        assert_eq!(output.shape, vec![2, 1]);
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![1.25, -3.0])
+        );
+
+        let empty = ComplexTensor::from_f32(Vec::new(), vec![0, 4]).unwrap();
+        let Value::Tensor(output) = real_builtin(Value::ComplexTensor(empty)).expect("real") else {
+            panic!("expected empty single real tensor");
+        };
+        assert_eq!(output.shape, vec![0, 4]);
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(Vec::new())
+        );
+    }
+
+    #[test]
+    fn real_integer_complex_tensor_preserves_uint64_values() {
+        let complex = ComplexTensor::new_integer(
+            runmat_value::IntegerComplexStorage::new(
+                runmat_value::IntegerStorage::U64(vec![9_223_372_036_854_775_809, u64::MAX]),
+                runmat_value::IntegerStorage::U64(vec![2, 3]),
+            )
+            .unwrap(),
+            vec![1, 2],
+        )
+        .unwrap();
+        let result = real_builtin(Value::ComplexTensor(complex)).expect("real");
+        let Value::Tensor(tensor) = result else {
+            panic!("expected typed real tensor");
+        };
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&runmat_value::IntegerStorage::U64(vec![
+                9_223_372_036_854_775_809,
+                u64::MAX,
+            ]))
+        );
+    }
+
+    #[test]
+    fn real_integer_complex_tensor_reads_component_storage_exactly() {
+        let complex = ComplexTensor::new_integer(
+            runmat_value::IntegerComplexStorage::new(
+                runmat_value::IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+                runmat_value::IntegerStorage::I64(vec![7, -8]),
+            )
+            .unwrap(),
+            vec![2, 1],
+        )
+        .unwrap();
+
+        let result = real_builtin(Value::ComplexTensor(complex)).expect("real");
+        let Value::Tensor(tensor) = result else {
+            panic!("expected typed real tensor");
+        };
+        assert_eq!(tensor.shape, vec![2, 1]);
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&runmat_value::IntegerStorage::I64(
+                vec![i64::MIN, i64::MAX,]
+            ))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -288,7 +404,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![0.0, 1.0, 1.0, 0.0]);
+                assert_eq!(t.materialize_f64(), vec![0.0, 1.0, 1.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -302,7 +418,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.data, vec![65.0, 90.0]);
+                assert_eq!(t.materialize_f64(), vec![65.0, 90.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -323,14 +439,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, -2.0, 3.5, -4.25], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = real_builtin(Value::GpuTensor(handle)).expect("real");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![4, 1]);
-            assert_eq!(gathered.data, tensor.data);
+            assert_eq!(gathered.materialize_f64(), tensor.materialize_f64());
         });
     }
 
@@ -350,7 +466,35 @@ pub(crate) mod tests {
             );
             let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
             assert_eq!(gathered.shape, vec![2, 1]);
-            assert_eq!(gathered.data, vec![1.0, -3.0]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0, -3.0]);
+        });
+    }
+
+    #[test]
+    fn real_resident_wide_integer_identity_preserves_class_and_owner() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new_integer(
+                runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+                vec![1, 2],
+            )
+            .unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &input).expect("integer upload");
+            let Value::GpuTensor(output) = real_builtin(Value::GpuTensor(handle)).expect("real")
+            else {
+                panic!("documented gpuArray path must remain resident");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&output),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            let gathered = test_support::gather(Value::GpuTensor(output)).expect("gather output");
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&runmat_value::IntegerStorage::U64(vec![
+                    9_007_199_254_740_993,
+                    u64::MAX,
+                ]))
+            );
         });
     }
 
@@ -358,13 +502,17 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn real_wgpu_matches_cpu_identity() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        )
+        .is_err()
+        {
+            return;
+        }
         let tensor = Tensor::new(vec![0.0, 1.0, -2.5, 4.0], vec![4, 1]).unwrap();
         let cpu = real_real(Value::Tensor(tensor.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let h = runmat_accelerate_api::provider()
@@ -383,7 +531,11 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        for (a, b) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (a, b) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((a - b).abs() < tol, "|{} - {}| >= {}", a, b, tol);
         }
     }
@@ -391,9 +543,13 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     #[test]
     fn real_wgpu_complex_matches_cpu() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        )
+        .is_err()
+        {
+            return;
+        }
         let provider = runmat_accelerate_api::provider().unwrap();
         let complex = ComplexTensor::new(vec![(1.0, 2.0), (-3.0, 4.5)], vec![2, 1]).unwrap();
         let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
@@ -406,6 +562,6 @@ pub(crate) mod tests {
             runmat_accelerate_api::GpuTensorStorage::Real
         );
         let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
-        assert_eq!(gathered.data, vec![1.0, -3.0]);
+        assert_eq!(gathered.materialize_f64(), vec![1.0, -3.0]);
     }
 }

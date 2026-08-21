@@ -19,13 +19,85 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use nalgebra::{DMatrix, DVector};
 use num_complex::Complex64;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, Tensor, Value};
 
 const BUILTIN_NAME: &str = "svd";
+
+pub const SVD_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "svd-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "Allow exactly representable typed-integer matrices in svd",
+    error_identifier: Some("RunMat:compatibility:SvdIntegerInputExtension"),
+};
+pub const SVD_INTEGER_OPTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "svd-integer-option",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "Allow a typed-integer zero economy selector in svd",
+    error_identifier: Some("RunMat:compatibility:SvdIntegerOptionExtension"),
+};
+pub const SVD_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "svd-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "Allow logical matrices in svd",
+    error_identifier: Some("RunMat:compatibility:SvdLogicalInputExtension"),
+};
+pub const SVD_LOGICAL_OPTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "svd-logical-option",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "Allow a logical economy selector in svd",
+    error_identifier: Some("RunMat:compatibility:SvdLogicalOptionExtension"),
+};
+pub const SVD_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    SVD_INTEGER_INPUT_EXTENSION,
+    SVD_INTEGER_OPTION_EXTENSION,
+    SVD_LOGICAL_INPUT_EXTENSION,
+    SVD_LOGICAL_OPTION_EXTENSION,
+];
+const SVD_INTEGER_MATRIX: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The public dense matrix classes are single and double; RunMat mode admits real integer matrices only after an exact binary64-boundary check.",
+    }];
+const SVD_INTEGER_OPTION: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "economy selector",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+    notes: "RunMat mode accepts a typed integer scalar only when its exact value is zero.",
+}];
+pub const SVD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[U, S, V] = svd(integer_A, options...)",
+        inputs: &SVD_INTEGER_MATRIX,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The gated matrix crosses one checked binary64 SVD boundary. Values not exactly representable as double reject before factorization or provider dispatch; outputs are double and follow the requested full/economy/vector form.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "S = svd(A, integer_zero)",
+        inputs: &SVD_INTEGER_OPTION,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The exact gated zero selects economy size without floating conversion; nonzero or nonscalar integer options reject.",
+    },
+];
 
 const SVD_OUTPUT_S: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "S",
@@ -283,6 +355,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     type_resolver(svd_type),
     descriptor(crate::builtins::math::linalg::factor::svd::SVD_DESCRIPTOR),
+    extensions(crate::builtins::math::linalg::factor::svd::SVD_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::linalg::factor::svd::SVD_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::linalg::factor::svd"
 )]
 async fn svd_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -358,7 +432,42 @@ enum SigmaFormat {
 }
 
 pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<SvdEval> {
+    if crate::builtins::common::validation::value_has_native_integer_class(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SVD_INTEGER_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if crate::builtins::common::validation::value_has_logical_class(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SVD_LOGICAL_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    for option in args {
+        if crate::builtins::common::validation::value_has_native_integer_class(option) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &SVD_INTEGER_OPTION_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
+        if crate::builtins::common::validation::value_has_logical_class(option) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &SVD_LOGICAL_OPTION_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
+    }
     let options = parse_options(args)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
+    if crate::builtins::common::validation::value_has_native_integer_class(&value)
+        && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(&value)
+            .await?
+    {
+        return Err(svd_invalid_input(
+            "svd: integer input must be exactly representable as double",
+        ));
+    }
     evaluate_value(value, options).await
 }
 
@@ -425,7 +534,8 @@ fn tensor_to_matrix(tensor: &Tensor) -> BuiltinResult<DMatrix<f64>> {
     }
     let rows = tensor.rows();
     let cols = tensor.cols();
-    Ok(DMatrix::from_column_slice(rows, cols, &tensor.data))
+    let values = tensor::tensor_values_f64_cow(tensor);
+    Ok(DMatrix::from_column_slice(rows, cols, &values))
 }
 
 fn complex_tensor_to_matrix(tensor: &ComplexTensor) -> BuiltinResult<DMatrix<Complex64>> {
@@ -434,8 +544,8 @@ fn complex_tensor_to_matrix(tensor: &ComplexTensor) -> BuiltinResult<DMatrix<Com
     }
     let rows = tensor.rows;
     let cols = tensor.cols;
-    let mut data = Vec::with_capacity(tensor.data.len());
-    for &(re, im) in &tensor.data {
+    let mut data = Vec::with_capacity(tensor.materialize_f64().len());
+    for &(re, im) in &tensor.materialize_f64() {
         data.push(Complex64::new(re, im));
     }
     Ok(DMatrix::from_column_slice(rows, cols, &data))
@@ -851,7 +961,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{LogicalArray, ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntegerStorage, LogicalArray};
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
     }
@@ -906,9 +1017,27 @@ pub(crate) mod tests {
         assert!(codes.contains(&"RM.SVD.INTERNAL"));
     }
 
+    #[test]
+    fn svd_matrix_conversion_reads_typed_integer_storage_exactly() {
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3, 4, 5, 6]), vec![3, 2])
+            .expect("typed integer tensor");
+
+        let matrix = tensor_to_matrix(&tensor).expect("matrix");
+        assert_eq!(matrix.nrows(), 3);
+        assert_eq!(matrix.ncols(), 2);
+        assert_eq!(matrix[(0, 0)], 1.0);
+        assert_eq!(matrix[(1, 0)], 2.0);
+        assert_eq!(matrix[(2, 0)], 3.0);
+        assert_eq!(matrix[(0, 1)], 4.0);
+        assert_eq!(matrix[(1, 1)], 5.0);
+        assert_eq!(matrix[(2, 1)], 6.0);
+    }
+
     fn dmatrix_from_value(value: Value) -> DMatrix<f64> {
         match value {
-            Value::Tensor(t) => DMatrix::from_column_slice(t.rows(), t.cols(), &t.data),
+            Value::Tensor(t) => {
+                DMatrix::from_column_slice(t.rows(), t.cols(), &t.materialize_f64())
+            }
             Value::Num(n) => DMatrix::from_element(1, 1, n),
             other => panic!("expected real tensor, got {other:?}"),
         }
@@ -925,7 +1054,7 @@ pub(crate) mod tests {
         match value {
             Value::ComplexTensor(ct) => {
                 let data: Vec<Complex64> = ct
-                    .data
+                    .materialize_f64()
                     .iter()
                     .map(|(re, im)| Complex64::new(*re, *im))
                     .collect();
@@ -933,7 +1062,7 @@ pub(crate) mod tests {
             }
             Value::Tensor(t) => {
                 let data: Vec<Complex64> = t
-                    .data
+                    .materialize_f64()
                     .iter()
                     .copied()
                     .map(|v| Complex64::new(v, 0.0))
@@ -975,7 +1104,8 @@ pub(crate) mod tests {
         let v = dmatrix_from_value(eval.v());
 
         let recon = &u * &s * v.transpose();
-        let original = DMatrix::from_column_slice(matrix.rows(), matrix.cols(), &matrix.data);
+        let original =
+            DMatrix::from_column_slice(matrix.rows(), matrix.cols(), &matrix.materialize_f64());
         matrix_close(&recon, &original, 1e-10);
     }
 
@@ -1021,7 +1151,7 @@ pub(crate) mod tests {
 
         let recon = &u * s_complex * v.adjoint();
         let original_data: Vec<Complex64> = complex
-            .data
+            .materialize_f64()
             .iter()
             .map(|(re, im)| Complex64::new(*re, *im))
             .collect();
@@ -1061,7 +1191,7 @@ pub(crate) mod tests {
         match eval.sigma() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert!(t.data[0] >= t.data[1]);
+                assert!(t.materialize_f64()[0] >= t.materialize_f64()[1]);
             }
             other => panic!("expected sigma matrix, got {other:?}"),
         }
@@ -1111,6 +1241,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn svd_logical_input_matches_numeric() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let logical = LogicalArray::new(vec![1, 0, 1, 1], vec![2, 2]).expect("logical");
         let logical_eval =
             evaluate(Value::LogicalArray(logical.clone()), &[]).expect("logical svd");
@@ -1120,9 +1251,66 @@ pub(crate) mod tests {
         let logical_s = tensor_from_value(logical_eval.singular_values());
         let numeric_s = tensor_from_value(numeric_eval.singular_values());
         assert_eq!(logical_s.shape, numeric_s.shape);
-        for (a, b) in logical_s.data.iter().zip(numeric_s.data.iter()) {
+        for (a, b) in logical_s
+            .materialize_f64()
+            .iter()
+            .zip(numeric_s.materialize_f64().iter())
+        {
             assert!((a - b).abs() < 1e-12, "{a} vs {b}");
         }
+    }
+
+    #[test]
+    fn svd_typed_integer_input_is_gated_and_exactly_checked() {
+        let matrix = || {
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::I16(vec![1, 0, 0, 2]), vec![2, 2])
+                    .expect("integer matrix"),
+            )
+        };
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = evaluate(matrix(), &[]).expect_err("strict mode rejects integer input");
+        assert_eq!(
+            error.identifier(),
+            SVD_INTEGER_INPUT_EXTENSION.error_identifier
+        );
+        drop(strict);
+
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let eval = evaluate(matrix(), &[]).expect("exact integer input");
+        assert_eq!(
+            tensor_from_value(eval.singular_values()).materialize_f64(),
+            vec![2.0, 1.0]
+        );
+        let inexact = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                .expect("wide integer matrix"),
+        );
+        let error = evaluate(inexact, &[]).expect_err("inexact binary64 boundary rejects");
+        assert!(error.message().contains("exactly representable as double"));
+    }
+
+    #[test]
+    fn svd_typed_integer_zero_option_is_explicitly_gated() {
+        let matrix = Tensor::new(vec![1.0, 0.0, 0.0, 2.0], vec![2, 2]).expect("matrix");
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = evaluate(
+            Value::Tensor(matrix.clone()),
+            &[Value::Int(runmat_value::IntValue::U8(0))],
+        )
+        .expect_err("strict mode rejects typed integer option");
+        assert_eq!(
+            error.identifier(),
+            SVD_INTEGER_OPTION_EXTENSION.error_identifier
+        );
+        drop(strict);
+
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        evaluate(
+            Value::Tensor(matrix),
+            &[Value::Int(runmat_value::IntValue::U8(0))],
+        )
+        .expect("extension mode accepts exact integer zero");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1179,7 +1367,7 @@ pub(crate) mod tests {
         match eval.sigma() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                assert!(t.data[0] >= t.data[1]);
+                assert!(t.materialize_f64()[0] >= t.materialize_f64()[1]);
             }
             Value::Num(n) => assert!(n >= 0.0),
             other => panic!("expected vector singular values, got {other:?}"),
@@ -1192,7 +1380,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).expect("tensor");
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1221,7 +1409,7 @@ pub(crate) mod tests {
         let host_v = dmatrix_from_value(host_eval.v());
 
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = runmat_accelerate_api::provider().expect("provider");
@@ -1241,10 +1429,15 @@ pub(crate) mod tests {
     fn svd_vector_matches_host_norm() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).expect("tensor");
         let s = svd_builtin(Value::Tensor(tensor.clone()), Vec::new()).expect("svd");
-        let expected = tensor.data.iter().map(|v| v * v).sum::<f64>().sqrt();
+        let expected = tensor
+            .materialize_f64()
+            .iter()
+            .map(|v| v * v)
+            .sum::<f64>()
+            .sqrt();
         match s {
             Value::Num(n) => assert!((n - expected).abs() < 1e-10),
-            Value::Tensor(t) => assert!((t.data[0] - expected).abs() < 1e-10),
+            Value::Tensor(t) => assert!((t.materialize_f64()[0] - expected).abs() < 1e-10),
             other => panic!("unexpected output {other:?}"),
         }
     }

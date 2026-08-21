@@ -1,8 +1,8 @@
 use anyhow::Result;
 use log::{error, info};
-use runmat_builtins::Value;
 use runmat_gc::{gc_allocate, gc_collect_major, gc_collect_minor, gc_get_config, gc_stats};
 use runmat_time::Instant;
+use runmat_value::Value;
 
 use crate::cli::GcCommand;
 use crate::presentation;

@@ -5,10 +5,10 @@ use std::path::{Path, PathBuf};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
 };
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::fs::path_to_string;
 use crate::builtins::common::path_search::{
@@ -388,8 +388,8 @@ mod tests {
     use crate::builtins::io::mat::save::encode_workspace_to_mat_bytes;
     use crate::workspace::WorkspaceResolver;
     use futures::executor::block_on;
-    use runmat_builtins::Tensor;
     use runmat_thread_local::runmat_thread_local;
+    use runmat_value::Tensor;
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};

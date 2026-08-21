@@ -21,7 +21,7 @@ fn global_across_functions() {
     let vars = execute_source(program).unwrap();
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 42.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 42.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -39,8 +39,8 @@ fn persistent_across_calls() {
     // Expect to see both 1 and 2 somewhere in the variable array
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 1.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 1.0).abs() < 1e-9)));
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 2.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 2.0).abs() < 1e-9)));
 }

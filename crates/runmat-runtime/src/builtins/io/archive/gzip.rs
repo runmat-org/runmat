@@ -10,11 +10,11 @@ use flate2::Compression;
 use glob::glob;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CellArray, CharArray,
-    Value,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, Value};
 use url::Url;
 
 use crate::builtins::common::fs::{expand_user_path, path_to_string};
@@ -394,7 +394,7 @@ mod tests {
         let b = dir.join("b.txt");
         std::fs::write(&a, "a").unwrap();
         std::fs::write(&b, "b").unwrap();
-        let inputs = runmat_builtins::StringArray::new(
+        let inputs = runmat_value::StringArray::new(
             vec![path_to_string(&a), path_to_string(&b)],
             vec![2, 1],
         )

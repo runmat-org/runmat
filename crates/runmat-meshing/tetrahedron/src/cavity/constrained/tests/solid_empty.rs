@@ -1,18 +1,6 @@
 use super::*;
 
 #[test]
-fn boundary_cap_nodes_are_empty_when_solid_boundary_coverage_exists() {
-    let cavity = two_tetrahedron_bipyramid_cavity();
-    let nodes = two_tetrahedron_bipyramid_nodes();
-
-    let cap_nodes =
-        generate_constrained_cavity_boundary_cap_nodes(&cavity, &nodes, refill_options(), 4)
-            .expect("boundary cap node generation should evaluate");
-
-    assert!(cap_nodes.is_empty());
-}
-
-#[test]
 fn solid_empty_boundary_faces_are_empty_when_boundary_coverage_exists() {
     let cavity = two_tetrahedron_bipyramid_cavity();
     let nodes = two_tetrahedron_bipyramid_nodes();

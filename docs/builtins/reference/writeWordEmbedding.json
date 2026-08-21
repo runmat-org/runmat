@@ -27,14 +27,15 @@
     "unit": "builtins::strings::text_analytics::embeddings::tests",
     "integration": null
   },
-  "description": "`writeWordEmbedding(emb, filename)` writes a RunMat `wordEmbedding` compatibility object to a UTF-8 text file in word2vec text format.",
+  "description": "`writeWordEmbedding(emb, filename)` writes a `wordEmbedding` object to a UTF-8 text file in word2vec text format.",
   "behaviors": [
-    "`emb` must be a `wordEmbedding` compatibility object with `Dimension`, `Vocabulary`, and vector storage created by `readWordEmbedding`, `trainWordEmbedding`, or `fastTextWordEmbedding`.",
+    "`emb` must be a `wordEmbedding` object with `Dimension`, `Vocabulary`, and vector storage created by `readWordEmbedding`, `trainWordEmbedding`, or `fastTextWordEmbedding`.",
     "`filename` may be a string scalar, character vector, or a 1-by-1 cell array containing a character vector.",
     "The output file starts with a `numWords dimension` header followed by one row per vocabulary word and its vector values.",
     "The target file is created or overwritten. Parent directories must already exist.",
     "Vocabulary entries containing whitespace and non-finite vector values are rejected because word2vec text rows cannot represent them unambiguously.",
-    "Binary word2vec output, zip output, append mode, and format-selection options are not part of MATLAB's documented `writeWordEmbedding` syntax and are not accepted."
+    "Binary word2vec output, zip output, append mode, and format-selection options are not part of the compatibility target's documented `writeWordEmbedding` syntax and are not accepted.",
+    "The filename must be host text. Native integer and resident numeric filename values are rejected before provider or filesystem access."
   ],
   "examples": [
     {
@@ -45,7 +46,7 @@
     {
       "description": "Round-trip an embedding file",
       "input": "writeWordEmbedding(emb, \"model.vec\");\ncopy = readWordEmbedding(\"model.vec\");\ncopy.Dimension",
-      "output": "`copy` is a `wordEmbedding` compatibility object with the same vocabulary and vectors."
+      "output": "`copy` is a `wordEmbedding` object with the same vocabulary and vectors."
     }
   ],
   "faqs": [
@@ -100,5 +101,5 @@
     "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/embeddings.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/embeddings.rs"
   },
-  "gpu_residency": "`writeWordEmbedding` is a file-I/O sink. Any GPU-resident filename input is gathered before serialization; wordEmbedding objects are host metadata objects, and no provider kernels are launched."
+  "gpu_residency": "`writeWordEmbedding` is a host file-I/O sink and does not launch provider kernels. Resident numeric filename inputs are rejected rather than gathered because they are not valid paths."
 }

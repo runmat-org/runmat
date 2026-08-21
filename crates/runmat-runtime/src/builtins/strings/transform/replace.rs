@@ -4,16 +4,19 @@ use regex::Regex;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, StringArray, Value,
 };
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, StringArray, Value};
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
+use crate::builtins::strings::common::{
+    char_row_to_string_slice, contains_resident_text_input, is_missing_string,
+};
 use crate::builtins::strings::core::compat::pattern_regex;
 use crate::builtins::strings::type_resolvers::text_preserve_type;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
@@ -166,6 +169,12 @@ pub const REPLACE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &REPLACE_ERRORS,
 };
 
+pub const REPLACE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "replace accepts host string, character, cell text, and pattern inputs only and preserves the input text container. Numeric, logical, symbolic, and provider-resident values reject before gather or provider access.",
+};
+
 fn map_flow(err: RuntimeError) -> RuntimeError {
     map_control_flow_with_builtin(err, BUILTIN_NAME)
 }
@@ -193,9 +202,16 @@ fn replace_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     accel = "sink",
     type_resolver(text_preserve_type),
     descriptor(crate::builtins::strings::transform::replace::REPLACE_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::transform::replace::REPLACE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::transform::replace"
 )]
 async fn replace_builtin(text: Value, old: Value, new: Value) -> BuiltinResult<Value> {
+    if [&text, &old, &new]
+        .into_iter()
+        .any(contains_resident_text_input)
+    {
+        return Err(replace_error(&REPLACE_ERROR_INVALID_INPUT));
+    }
     let text = gather_if_needed_async(&text).await.map_err(map_flow)?;
     let old = gather_if_needed_async(&old).await.map_err(map_flow)?;
     let new = gather_if_needed_async(&new).await.map_err(map_flow)?;
@@ -236,9 +252,19 @@ fn replace_string_array(array: StringArray, spec: &ReplacementSpec) -> BuiltinRe
 }
 
 fn replace_char_array(array: CharArray, spec: &ReplacementSpec) -> BuiltinResult<Value> {
-    let CharArray { data, rows, cols } = array;
+    let CharArray {
+        data,
+        shape,
+        rows,
+        cols,
+    } = array;
     if rows == 0 {
-        return Ok(Value::CharArray(CharArray { data, rows, cols }));
+        return Ok(Value::CharArray(CharArray {
+            data,
+            shape,
+            rows,
+            cols,
+        }));
     }
 
     let mut replaced_rows = Vec::with_capacity(rows);
@@ -322,7 +348,9 @@ fn extract_text_list(
         Value::String(text) => Ok(vec![text.clone()]),
         Value::StringArray(array) => Ok(array.data.clone()),
         Value::CharArray(array) => {
-            let CharArray { data, rows, cols } = array.clone();
+            let CharArray {
+                data, rows, cols, ..
+            } = array.clone();
             if rows == 0 {
                 Ok(Vec::new())
             } else {

@@ -2,9 +2,11 @@
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -59,6 +61,11 @@ pub const ISSTABLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ISSTABLE_ERRORS,
 };
+pub const ISSTABLE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "isstable requires a dynamic-system model; fundamental integer host or resident values are invalid-domain inputs and reject before payload or provider access.",
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::isstable")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -94,18 +101,41 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "isstable,control system,stability,poles,tf",
     type_resolver(isstable_type),
     descriptor(crate::builtins::control::isstable::ISSTABLE_DESCRIPTOR),
+    integer_audit(crate::builtins::control::isstable::ISSTABLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::control::isstable"
 )]
 async fn isstable_builtin(sys: Value) -> BuiltinResult<Value> {
+    if value_has_integer_storage(&sys) {
+        return Err(crate::build_runtime_error(
+            "isstable: input must be a dynamic-system model, not an integer value",
+        )
+        .with_builtin("isstable")
+        .with_identifier(
+            ISSTABLE_ERRORS[0]
+                .identifier
+                .expect("isstable invalid-model descriptor identifier"),
+        )
+        .build()
+        .into());
+    }
     let model = TfModel::from_value_async(sys, "isstable").await?;
     Ok(Value::Bool(model.is_stable()?))
+}
+
+fn value_has_integer_storage(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::SparseTensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::Tensor;
+    use runmat_value::Tensor;
+    use runmat_value::{IntValue, IntegerStorage};
 
     #[test]
     fn stable_continuous_model_returns_true() {
@@ -121,5 +151,42 @@ mod tests {
             block_on(isstable_builtin(sys)).expect("isstable"),
             Value::Bool(true)
         );
+    }
+
+    #[test]
+    fn all_integer_classes_are_invalid_model_inputs() {
+        for integer in [
+            IntValue::I8(-1),
+            IntValue::I16(-2),
+            IntValue::I32(-3),
+            IntValue::I64(i64::MIN),
+            IntValue::U8(1),
+            IntValue::U16(2),
+            IntValue::U32(3),
+            IntValue::U64(u64::MAX),
+        ] {
+            let error = block_on(isstable_builtin(Value::Int(integer)))
+                .expect_err("integer is not a system model");
+            assert_eq!(
+                error.identifier.as_deref(),
+                Some("RunMat:isstable:InvalidModel")
+            );
+        }
+    }
+
+    #[test]
+    fn resident_integer_rejects_before_model_gather() {
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("integer tensor");
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+                .expect("upload integer");
+            let error = block_on(isstable_builtin(Value::GpuTensor(handle)))
+                .expect_err("resident integer is not a system model");
+            assert_eq!(
+                error.identifier.as_deref(),
+                Some("RunMat:isstable:InvalidModel")
+            );
+        });
     }
 }

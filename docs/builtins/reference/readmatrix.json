@@ -16,7 +16,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Performs host-side file I/O and parsing. GPU providers are not involved; gathered results remain CPU-resident."
+    "notes": "File I/O and parsing run on the host. Ordinary resident inputs gather transparently; the RunMat-only `Like` form may upload the typed result through the exact provider that owns the prototype."
   },
   "fusion": {
     "elementwise": false,
@@ -37,8 +37,9 @@
     "Automatically detects comma, tab, semicolon, pipe, or whitespace delimiters when none are specified. Detection is based on the first few non-empty data lines.",
     "Parses numeric values using MATLAB-compatible rules, recognising `NaN`, `Inf`, `-Inf`, and locale-specific decimal/thousands separators.",
     "Treats empty fields as `NaN` by default; specify `'EmptyValue', value` to inject a replacement scalar, or `'TreatAsMissing', tokens` to mark additional strings as missing.",
-    "`'OutputType','logical'` coalesces non-zero numeric values (including `NaN`) to logical true, mirroring MATLAB's casting behaviour.",
-    "`'Like', prototype` matches the output class and residency of an existing array. Supplying a GPU tensor keeps the parsed matrix on the device when an acceleration provider is active.",
+    "`'OutputType'` supports `double`, `single`, `logical`, and all eight native integer classes. Integer imports parse decimal fields directly into authoritative storage, preserve `int64` and `uint64` values above `flintmax`, and saturate values that exceed the selected class; logical output maps nonzero values, including `NaN`, to true.",
+    "`'Like', prototype` is a RunMat-only extension. It matches host class or uploads through the exact provider that owns a resident prototype; upload failure, wrong ownership, wrong device, or wrong dtype is an error rather than a silent host fallback.",
+    "Typed-integer range, header, size, and empty-value controls are RunMat-only extensions when the public datatype table excludes native integers. MATLAB compatibility mode rejects those forms before gathering or opening the file, while documented integer `OutputType` results remain available.",
     "Tolerates ragged rows by padding trailing elements with the configured empty value (default `NaN`).",
     "Raises descriptive errors when the file cannot be read or when a field cannot be parsed as a numeric value."
   ],
@@ -125,7 +126,7 @@
     },
     {
       "question": "Can I request single-precision output?",
-      "answer": "`readmatrix` currently returns double-precision arrays, matching MATLAB defaults. Cast the result with `single(...)` when you need single precision."
+      "answer": "Yes. Pass `'OutputType','single'`. RunMat returns a native single-precision array."
     },
     {
       "question": "How are delimiters detected automatically?",
@@ -207,7 +208,7 @@
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/readmatrix.rs"
   },
   "gpu_behavior": [
-    "`readmatrix` always executes on the host CPU. If the file name or option arguments are GPU-resident scalars, RunMat gathers them automatically before accessing the filesystem. The resulting matrix is created in host memory unless you pass `'Like', gpuPrototype`, in which case the parsed tensor is uploaded to the same provider so subsequent operations remain on the device. Acceleration providers do not need bespoke hooks for this builtin."
+    "`readmatrix` performs file access and parsing on the host. Ordinary resident arguments gather automatically. The RunMat-only `'Like', gpuPrototype` form restores the parsed native dtype through the prototype's exact owning provider and marks the output as explicitly resident; it errors rather than returning a host tensor when that contract cannot be met."
   ],
   "syntax": {
     "example": {

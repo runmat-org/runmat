@@ -31,7 +31,8 @@
     "`savefig(filename)` saves the current figure and appends `.fig` when no extension is present.",
     "`savefig(fig, filename)` accepts a scalar figure handle or an array of figure handles.",
     "`savefig(fig, filename, version)` accepts MATLAB version tokens `-v6`, `-v7`, `-v7.3`, and `compact` as compatibility options for the RunMat FIG scene format.",
-    "Non-`.fig` extensions are rejected for `savefig`."
+    "Non-`.fig` extensions are rejected for `savefig`.",
+    "Figure handles are double graphics identities and filenames/version tokens are text. Direct typed-integer or gpuArray arguments are invalid and reject before file I/O; native integer graphics source data is serialized through the scene payload rather than converted into a direct argument."
   ],
   "examples": [
     {

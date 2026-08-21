@@ -3,11 +3,21 @@
 use crate::core::{AlphaMode, BoundingBox, DrawCall, Material, PipelineType, RenderData, Vertex};
 use crate::geometry::stroke3d::{tessellate_polyline, StrokeCap3D, StrokeStyle3D};
 use crate::plots::line::LineStyle;
+use crate::plots::NumericPlotData;
 use glam::{Vec2, Vec3, Vec4};
 
 const TRIANGULATION_EPSILON: f32 = 1.0e-6;
 
 const POINTS_TO_PX: f32 = 96.0 / 72.0;
+
+pub type PatchSourceData<'a> = (
+    Option<&'a NumericPlotData>,
+    Option<&'a NumericPlotData>,
+    Option<&'a NumericPlotData>,
+    Option<&'a NumericPlotData>,
+    Option<&'a NumericPlotData>,
+    Option<&'a NumericPlotData>,
+);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PatchFaceColorMode {
@@ -41,6 +51,12 @@ pub struct PatchPlot {
     bounds: Option<BoundingBox>,
     force_3d: bool,
     dirty: bool,
+    x_data: Option<NumericPlotData>,
+    y_data: Option<NumericPlotData>,
+    z_data: Option<NumericPlotData>,
+    c_data: Option<NumericPlotData>,
+    faces_data: Option<NumericPlotData>,
+    vertices_data: Option<NumericPlotData>,
 }
 
 impl PatchPlot {
@@ -72,11 +88,45 @@ impl PatchPlot {
             bounds: None,
             force_3d: false,
             dirty: true,
+            x_data: None,
+            y_data: None,
+            z_data: None,
+            c_data: None,
+            faces_data: None,
+            vertices_data: None,
         })
     }
 
     pub fn vertices(&self) -> &[Vec3] {
         &self.vertices
+    }
+
+    pub fn source_data(&self) -> PatchSourceData<'_> {
+        (
+            self.x_data.as_ref(),
+            self.y_data.as_ref(),
+            self.z_data.as_ref(),
+            self.c_data.as_ref(),
+            self.faces_data.as_ref(),
+            self.vertices_data.as_ref(),
+        )
+    }
+
+    pub fn set_source_data(
+        &mut self,
+        x_data: Option<NumericPlotData>,
+        y_data: Option<NumericPlotData>,
+        z_data: Option<NumericPlotData>,
+        c_data: Option<NumericPlotData>,
+        faces_data: Option<NumericPlotData>,
+        vertices_data: Option<NumericPlotData>,
+    ) {
+        self.x_data = x_data;
+        self.y_data = y_data;
+        self.z_data = z_data;
+        self.c_data = c_data;
+        self.faces_data = faces_data;
+        self.vertices_data = vertices_data;
     }
 
     pub fn faces(&self) -> &[Vec<usize>] {

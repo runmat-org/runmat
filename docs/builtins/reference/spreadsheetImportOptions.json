@@ -34,8 +34,8 @@
     "Accepts name-value options including `'NumVariables'`, `'VariableNames'`, `'VariableTypes'`, `'DataRange'`, `'Range'`, `'Sheet'`, `'ReadVariableNames'`, `'ReadRowNames'`, `'TreatAsMissing'`, `'VariableNamingRule'`, `'TextType'`, `'DatetimeType'`, and `'EmptyLineRule'`.",
     "`'NumVariables'` creates default `Var1`, `Var2`, ... names and `auto` variable types; edited `VariableNames` and `VariableTypes` are validated against that count.",
     "`DataRange` is treated as the spreadsheet cell range for `readtable`, matching the common MATLAB workflow `opts.DataRange = 'C2:C37'`.",
-    "`VariableTypes` entries guide import coercion for double, single, uint8, uint16, logical, string, char, cellstr, datetime, and duration columns.",
-    "Requests for table column classes that RunMat cannot represent yet, including categorical and signed integer array imports, raise explicit errors instead of silently returning a different class.",
+    "`VariableTypes` entries guide import coercion for double, single, all eight native integer classes, logical, string, char, cellstr, datetime, and duration columns. Integer text is parsed directly into authoritative storage, including exact 64-bit values.",
+    "A typed-integer `NumVariables` is accepted as the documented positive scalar integer and must fit the host index domain. Typed integers used for other location controls are a RunMat-only extension and are rejected in MATLAB compatibility mode before metadata construction.",
     "Default options do not force a zero-column import; `readtable` infers the column count unless a positive `NumVariables` is supplied.",
     "Invalid option names, malformed ranges, unsupported sheets, and unparseable typed values raise descriptive `readtable` errors instead of silently changing the schema."
   ],

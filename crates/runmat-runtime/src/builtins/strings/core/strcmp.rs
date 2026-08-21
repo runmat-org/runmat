@@ -2,9 +2,11 @@
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 use crate::builtins::common::map_control_flow_with_builtin;
@@ -13,6 +15,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::strings::common::contains_numeric_or_resident_text_input;
 use crate::builtins::strings::search::text_utils::{logical_result, TextCollection, TextElement};
 use crate::builtins::strings::type_resolvers::logical_text_match_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -111,6 +114,12 @@ pub const STRCMP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &STRCMP_ERRORS,
 };
 
+pub const STRCMP_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "strcmp compares text containers. An unsupported integer or other numeric input returns scalar logical false as documented, without reading numeric payloads or accessing a provider.",
+};
+
 fn strcmp_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     strcmp_error_with_message(error.message, error)
 }
@@ -138,9 +147,13 @@ fn remap_strcmp_flow(err: RuntimeError) -> RuntimeError {
     accel = "sink",
     type_resolver(logical_text_match_type),
     descriptor(crate::builtins::strings::core::strcmp::STRCMP_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::core::strcmp::STRCMP_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::core::strcmp"
 )]
 async fn strcmp_builtin(a: Value, b: Value) -> crate::BuiltinResult<Value> {
+    if contains_numeric_or_resident_text_input(&a) || contains_numeric_or_resident_text_input(&b) {
+        return Ok(Value::Bool(false));
+    }
     let a = gather_if_needed_async(&a)
         .await
         .map_err(remap_strcmp_flow)?;
@@ -182,7 +195,8 @@ fn evaluate_strcmp(left: &TextCollection, right: &TextCollection) -> BuiltinResu
 pub(crate) mod tests {
     use super::*;
     use crate::RuntimeError;
-    use runmat_builtins::{CellArray, CharArray, LogicalArray, ResolveContext, StringArray, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{CellArray, CharArray, LogicalArray, StringArray};
 
     fn strcmp_builtin(a: Value, b: Value) -> BuiltinResult<Value> {
         futures::executor::block_on(super::strcmp_builtin(a, b))
@@ -353,11 +367,10 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn strcmp_invalid_argument_type() {
-        let err = error_message(
-            strcmp_builtin(Value::Num(1.0), Value::String("a".into())).expect_err("invalid type"),
-        );
-        assert!(err.contains(STRCMP_ERROR_INVALID_INPUT.message));
+    fn strcmp_unsupported_numeric_argument_returns_false() {
+        let result =
+            strcmp_builtin(Value::Num(1.0), Value::String("a".into())).expect("comparison");
+        assert_eq!(result, Value::Bool(false));
     }
 
     #[test]

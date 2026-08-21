@@ -1,8 +1,8 @@
 use crate::bytecode::program::ExecutionContext;
 use crate::bytecode::EmitLabel;
 use crate::ops::stack as stack_ops;
-use runmat_builtins::Value;
 use runmat_runtime::RuntimeError;
+use runmat_value::Value;
 use std::collections::HashMap;
 
 pub async fn emit_stack_top(
@@ -24,6 +24,10 @@ pub async fn emit_var(
 
 pub fn load_const(stack: &mut Vec<Value>, value: f64) {
     stack_ops::load_const(stack, value);
+}
+
+pub fn load_int(stack: &mut Vec<Value>, value: runmat_value::IntValue) {
+    stack_ops::load_int(stack, value);
 }
 
 pub fn load_complex(stack: &mut Vec<Value>, re: f64, im: f64) {

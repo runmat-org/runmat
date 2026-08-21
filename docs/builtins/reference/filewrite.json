@@ -9,13 +9,13 @@
     "append",
     "encoding"
   ],
-  "summary": "Write text or raw bytes to files in MATLAB and RunMat.",
+  "summary": "Write text or raw bytes with RunMat's native file-writing extension.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Executes entirely on the host CPU. When either the file path or data reside on the GPU they are gathered before the write; providers are not involved."
+    "notes": "Executes file I/O on the host CPU. Provider-resident numeric data is gathered through its owning provider before the write; no specialized filewrite provider hook or kernel is required."
   },
   "fusion": {
     "elementwise": false,
@@ -28,15 +28,15 @@
     "unit": "builtins::io::filetext::filewrite::tests",
     "integration": "builtins::io::filetext::filewrite::tests::filewrite_writes_text_content"
   },
-  "description": "`filewrite(filename, data)` writes text or raw byte content to a file and returns the number of bytes written. By default it overwrites existing content; use `'WriteMode','append'` to append. Encoding options and input coercions follow MATLAB semantics.",
+  "description": "`filewrite(filename, data)` is a RunMat-native extension that writes text or raw byte content to a file and returns the number of bytes written. MATLAB does not provide a `filewrite` builtin; MATLAB-compatible mode therefore rejects this API before gathering data or modifying the filesystem. Enable RunMat extensions to use it.",
   "behaviors": [
     "Accepts file names supplied as character vectors, string scalars, or scalar string arrays.",
-    "Accepts data supplied as character vectors, string scalars, string arrays, or numeric arrays of bytes (`uint8`/`double` values in the range 0–255). Logical arrays map to bytes `0` and `1`.",
+    "Accepts data supplied as character vectors, string scalars, string arrays, or numeric arrays of bytes. All eight integer classes (`int8`, `int16`, `int32`, `int64`, `uint8`, `uint16`, `uint32`, and `uint64`) are read exactly and must lie in the range 0–255; double inputs use the existing integral-byte validation in that range, and logical arrays map to bytes `0` and `1`.",
     "By default the file is truncated (overwrite mode). Pass `'WriteMode','append'` to add to an existing file.",
     "Encoding is optional. Provide either a positional encoding argument or the `'Encoding', value` keyword pair. Supported encodings mirror `fileread`: `auto` (default), `utf-8`, `ascii`, `latin1`, and `raw`.",
     "When writing text data with `filewrite` and `Encoding` set to `ascii` or `latin1`, an error is raised if any characters fall outside the permitted code page.",
     "When writing raw numeric bytes, encoding is ignored except to validate ASCII requests.",
-    "Returns the number of bytes written as a double scalar. Ignoring the output behaves like MATLAB (data is still written)."
+    "Returns the number of bytes written as a double scalar."
   ],
   "examples": [
     {
@@ -77,7 +77,7 @@
     },
     {
       "question": "How are string arrays written?",
-      "answer": "Each element of the string array is written sequentially (column-major order), separated by newline characters. This mirrors MATLAB’s `filewrite` behaviour and matches what most users expect when exporting string arrays."
+      "answer": "Each element of the string array is written sequentially in column-major order, separated by newline characters. This is RunMat-native behavior."
     },
     {
       "question": "Does `filewrite` add a newline automatically?",
@@ -143,6 +143,6 @@
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/filewrite.rs"
   },
   "gpu_behavior": [
-    "`filewrite` performs synchronous host file I/O. If either the path or data reside on the GPU (for example through lazy residency), RunMat gathers those values before performing the write. No GPU kernels are launched and providers do not need to implement specialised hooks for this builtin."
+    "`filewrite` performs synchronous host file I/O. Provider-resident numeric data is gathered before writing. No GPU kernels are launched and providers do not need to implement specialised hooks for this RunMat-native builtin."
   ]
 }

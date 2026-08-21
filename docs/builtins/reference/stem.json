@@ -18,7 +18,7 @@
       "double"
     ],
     "broadcasting": "none",
-    "notes": "`stem` has a dedicated GPU geometry path for stem segments and shared marker rendering for supported input combinations."
+    "notes": "`stem` has a dedicated GPU geometry path for supported floating buffers and shares the plotting marker pipeline. Integer source buffers use an exact owner-aware gather when direct export is unavailable; automatic residency remains transparent and integer bytes are never reinterpreted as floating geometry."
   },
   "fusion": {
     "elementwise": false,
@@ -31,11 +31,13 @@
     "unit": "builtins::plotting::stem::tests",
     "integration": "runmat-plot/tests/renderer_tests.rs"
   },
-  "description": "`stem` creates vertical stems from a baseline to sample values and returns a graphics handle. It supports MATLAB-compatible shorthand, explicit `x/y` forms, and shared plot-property styling workflows.",
+  "description": "`stem` draws discrete samples as vertical lines from a baseline and returns a graphics handle. Pass `Y` alone for one-based x coordinates or paired `X,Y` data for explicit positions. `X` and `Y` may use `single`, `double`, or any of the eight integer classes. RunMat retains the native source class for property queries and figure persistence while deriving floating geometry for display.",
   "behaviors": [
     "`stem(y)` uses implicit x-values `1:n`, while `stem(x, y)` uses explicit paired coordinates.",
     "The returned value is a stem plot handle that works with `get` and `set`.",
     "Baseline visibility, markers, fill behavior, display names, and line styling all flow through the shared plotting property model.",
+    "`XData` and `YData` retain the input numeric class, shape, and exact values, including wide `int64` and `uint64` data that cannot be represented exactly as double.",
+    "Figure-scene serialization preserves typed source data. Older scenes without typed source fields continue to load as ordinary double-backed plots.",
     "The plot remains subplot-local and composes naturally with legends and axes-local state.",
     "GPU-backed geometry is used when plotting-compatible buffers are available, with marker rendering sharing the point/marker pipeline."
   ],

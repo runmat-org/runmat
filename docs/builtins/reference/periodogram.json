@@ -26,7 +26,7 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::math::signal::periodogram::tests",
-    "integration": "crates/runmat-vm/tests/basics.rs"
+    "integration": "crates/runmat-vm/tests/integer_numeric_transform_semantics.rs"
   },
   "description": "`periodogram(x)` estimates the power spectral density of a signal by windowing the full input and evaluating its DFT. Optional arguments select the analysis window, DFT length or explicit frequency grid, sampling frequency, frequency range, and spectrum scale.",
   "behaviors": [
@@ -36,7 +36,8 @@
     "`window` must be a finite real vector matching the signal length. `[]` uses a rectangular window.",
     "`nfft` defaults to `max(256, 2^nextpow2(length(x)))` and controls the DFT grid. If `nfft` is shorter than the window, windowed samples are summed modulo `nfft` before the DFT. A real frequency vector may be supplied in the same position to evaluate explicit frequencies.",
     "The optional range selector accepts `'onesided'`, `'twosided'`, or `'centered'`; `'onesided'` is valid only for real-valued signals.",
-    "The optional spectrum type accepts `'psd'` (default) or `'power'`; `'power'` reports power spectrum values using coherent-gain normalization."
+    "The optional spectrum type accepts `'psd'` (default) or `'power'`; `'power'` reports power spectrum values using coherent-gain normalization.",
+    "Typed-integer signals and typed-integer numeric controls are separate RunMat extensions. Structural DFT lengths are decoded exactly; signals, windows, frequency grids, and sample rates must be exactly representable before entering the floating spectral domain."
   ],
   "examples": [
     {

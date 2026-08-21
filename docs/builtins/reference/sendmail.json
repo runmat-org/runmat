@@ -10,7 +10,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Host-side compatibility builtin; GPU-resident inputs are gathered before execution."
+    "notes": "Host-side compatibility builtin. Resident numeric arguments are invalid mail inputs and reject before gathering or transport selection."
   },
   "fusion": {
     "elementwise": false,
@@ -25,7 +25,8 @@
   },
   "description": "Creates and sends a plain-text email message through a configured local transport or outbox capture path.",
   "behaviors": [
-    "Accepts scalar, string-array, or cell-array recipients plus subject and body text.",
+    "Accepts textual scalar, string-array, or cell-array recipients plus subject text, an optional message, and an optional attachment argument. Omitting the message sends an empty body; the current transports do not yet support attachments.",
+    "Direct integer, numeric-array, nested integer, or resident numeric arguments are not mail text and reject before provider access or transport side effects.",
     "Writes RFC822-style messages to RUNMAT_SENDMAIL_OUTBOX when configured.",
     "On native hosts, uses RUNMAT_SENDMAIL_COMMAND or /usr/sbin/sendmail when available.",
     "Reports a clear error when only SMTP preferences are configured because direct TLS SMTP transport is not available in this build."

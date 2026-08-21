@@ -11,8 +11,6 @@ const BINARY_BROADCAST_SHADER_F64: &str =
     crate::backend::wgpu::shaders::elementwise::BINARY_BROADCAST_SHADER_F64;
 const BINARY_BROADCAST_SHADER_F32: &str =
     crate::backend::wgpu::shaders::elementwise::BINARY_BROADCAST_SHADER_F32;
-const UNARY_SHADER_F64: &str = crate::backend::wgpu::shaders::elementwise::UNARY_LAYOUT_SHADER_F64;
-const UNARY_SHADER_F32: &str = crate::backend::wgpu::shaders::elementwise::UNARY_LAYOUT_SHADER_F32;
 const SCALAR_SHADER_F64: &str = crate::backend::wgpu::shaders::elementwise::SCALAR_SHADER_F64;
 const SCALAR_SHADER_F32: &str = crate::backend::wgpu::shaders::elementwise::SCALAR_SHADER_F32;
 const TRANSPOSE_SHADER_F64: &str = crate::backend::wgpu::shaders::transpose::TRANSPOSE_SHADER_F64;
@@ -127,8 +125,6 @@ const LINSPACE_SHADER_F64: &str = crate::backend::wgpu::shaders::creation::LINSP
 const LINSPACE_SHADER_F32: &str = crate::backend::wgpu::shaders::creation::LINSPACE_SHADER_F32;
 const WINDOW_SHADER_F64: &str = crate::backend::wgpu::shaders::window::WINDOW_SHADER_F64;
 const WINDOW_SHADER_F32: &str = crate::backend::wgpu::shaders::window::WINDOW_SHADER_F32;
-const RANDOM_INT_SHADER_F64: &str = crate::backend::wgpu::shaders::creation::RANDOM_INT_SHADER_F64;
-const RANDOM_INT_SHADER_F32: &str = crate::backend::wgpu::shaders::creation::RANDOM_INT_SHADER_F32;
 const RANDOM_EXPRND_SHADER_F64: &str =
     crate::backend::wgpu::shaders::creation::RANDOM_EXPRND_SHADER_F64;
 const RANDOM_EXPRND_SHADER_F32: &str =
@@ -275,7 +271,9 @@ pub struct WgpuPipelines {
     pub scalar: PipelineBundle,
     pub transpose: PipelineBundle,
     pub permute: PipelineBundle,
+    pub integer_permute: PipelineBundle,
     pub flip: PipelineBundle,
+    pub integer_flip: PipelineBundle,
     pub diff: PipelineBundle,
     pub gradient: PipelineBundle,
     pub gradient_coordinates: PipelineBundle,
@@ -288,6 +286,7 @@ pub struct WgpuPipelines {
     pub cummin: PipelineBundle,
     pub cummax: PipelineBundle,
     pub circshift: PipelineBundle,
+    pub integer_circshift: PipelineBundle,
     pub fft_init: PipelineBundle,
     pub fft_stage: PipelineBundle,
     pub fft_reorder: PipelineBundle,
@@ -305,6 +304,7 @@ pub struct WgpuPipelines {
     pub tril: PipelineBundle,
     pub triu: PipelineBundle,
     pub repmat: PipelineBundle,
+    pub integer_repmat: PipelineBundle,
     pub kron: PipelineBundle,
     pub matmul: PipelineBundle,
     pub matmul_vec4: PipelineBundle,
@@ -321,7 +321,6 @@ pub struct WgpuPipelines {
     pub fill: PipelineBundle,
     pub linspace: PipelineBundle,
     pub window: PipelineBundle,
-    pub random_int: PipelineBundle,
     pub random_uniform: PipelineBundle,
     pub random_normal: PipelineBundle,
     pub random_exprnd: PipelineBundle,
@@ -391,6 +390,12 @@ impl WgpuPipelines {
             },
         );
 
+        // `round(..., digits)` shares this three-binding layout. Real unary execution itself uses
+        // operation-specific fused shaders so Metal never compiles the oversized legacy template.
+        let unary_layout_shader = crate::backend::wgpu::shaders::elementwise::real_unary_shader(
+            crate::backend::wgpu::types::UnaryOpCode::Real,
+            precision,
+        );
         let unary = create_pipeline(
             device,
             "runmat-unary-layout",
@@ -401,10 +406,7 @@ impl WgpuPipelines {
                 storage_read_write_entry(1),
                 uniform_entry(2),
             ],
-            match precision {
-                NumericPrecision::F64 => UNARY_SHADER_F64,
-                NumericPrecision::F32 => UNARY_SHADER_F32,
-            },
+            unary_layout_shader,
         );
 
         let scalar = create_pipeline(
@@ -454,6 +456,19 @@ impl WgpuPipelines {
                 NumericPrecision::F32 => PERMUTE_SHADER_F32,
             },
         );
+        let integer_permute_shader = crate::backend::wgpu::shaders::permute::permute_shader_u32();
+        let integer_permute = create_pipeline(
+            device,
+            "runmat-integer-permute-layout",
+            "runmat-integer-permute-shader",
+            "runmat-integer-permute-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            integer_permute_shader,
+        );
 
         let flip = create_pipeline(
             device,
@@ -469,6 +484,19 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => FLIP_SHADER_F64,
                 NumericPrecision::F32 => FLIP_SHADER_F32,
             },
+        );
+        let integer_flip_shader = crate::backend::wgpu::shaders::flip::flip_shader_u32();
+        let integer_flip = create_pipeline(
+            device,
+            "runmat-integer-flip-layout",
+            "runmat-integer-flip-shader",
+            "runmat-integer-flip-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            integer_flip_shader,
         );
 
         let conv1d = create_pipeline(
@@ -703,6 +731,20 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => CIRCSHIFT_SHADER_F64,
                 NumericPrecision::F32 => CIRCSHIFT_SHADER_F32,
             },
+        );
+        let integer_circshift_shader =
+            crate::backend::wgpu::shaders::circshift::circshift_shader_u32();
+        let integer_circshift = create_pipeline(
+            device,
+            "runmat-integer-circshift-layout",
+            "runmat-integer-circshift-shader",
+            "runmat-integer-circshift-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            integer_circshift_shader,
         );
 
         let fft_init = create_pipeline(
@@ -949,6 +991,19 @@ impl WgpuPipelines {
                 NumericPrecision::F32 => REPMAT_SHADER_F32,
             },
         );
+        let integer_repmat_shader = crate::backend::wgpu::shaders::repmat::repmat_shader_u32();
+        let integer_repmat = create_pipeline(
+            device,
+            "runmat-integer-repmat-layout",
+            "runmat-integer-repmat-shader",
+            "runmat-integer-repmat-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            integer_repmat_shader,
+        );
 
         let kron = create_pipeline(
             device,
@@ -1184,18 +1239,6 @@ impl WgpuPipelines {
             match precision {
                 NumericPrecision::F64 => LINSPACE_SHADER_F64,
                 NumericPrecision::F32 => LINSPACE_SHADER_F32,
-            },
-        );
-
-        let random_int = create_pipeline(
-            device,
-            "runmat-random-int-layout",
-            "runmat-random-int-shader",
-            "runmat-random-int-pipeline",
-            vec![storage_read_write_entry(0), uniform_entry(1)],
-            match precision {
-                NumericPrecision::F64 => RANDOM_INT_SHADER_F64,
-                NumericPrecision::F32 => RANDOM_INT_SHADER_F32,
             },
         );
 
@@ -1624,7 +1667,9 @@ impl WgpuPipelines {
             scalar,
             transpose,
             permute,
+            integer_permute,
             flip,
+            integer_flip,
             diff,
             gradient,
             gradient_coordinates,
@@ -1637,6 +1682,7 @@ impl WgpuPipelines {
             cummin,
             cummax,
             circshift,
+            integer_circshift,
             fft_init,
             fft_stage,
             fft_reorder,
@@ -1654,6 +1700,7 @@ impl WgpuPipelines {
             tril,
             triu,
             repmat,
+            integer_repmat,
             kron,
             matmul,
             matmul_vec4,
@@ -1670,7 +1717,6 @@ impl WgpuPipelines {
             fill,
             linspace,
             window,
-            random_int,
             random_uniform,
             random_normal,
             random_exprnd,

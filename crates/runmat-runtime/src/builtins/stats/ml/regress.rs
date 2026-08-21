@@ -2,11 +2,16 @@
 
 use nalgebra::{DMatrix, DVector};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::builtins::stats::summary::distribution_math::{regularized_beta, student_t_inv};
@@ -245,6 +250,69 @@ pub const REGRESS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const REGRESS_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "regress-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "regress accepts typed-integer response and design data as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RegressIntegerDataExtension"),
+};
+const REGRESS_INTEGER_ALPHA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "regress-integer-alpha",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "regress accepts a typed-integer alpha as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RegressIntegerAlphaExtension"),
+};
+pub const REGRESS_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    REGRESS_INTEGER_DATA_EXTENSION,
+    REGRESS_INTEGER_ALPHA_EXTENSION,
+];
+const REGRESS_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double response data; typed integers cross a checked binary64 regression boundary.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double design data; typed integers cross the same checked boundary independently of y.",
+    },
+];
+const REGRESS_INTEGER_ALPHA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "alpha",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double alpha; a typed integer is admitted only when exact in binary64 and within the open unit interval.",
+    }];
+pub const REGRESS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "regress(integer_y, integer_X [, alpha])",
+        inputs: &REGRESS_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Exact authoritative integer values are checked before transparent gather and then intentionally enter the binary64 least-squares domain; outputs are double.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "regress(y, X, integer_alpha)",
+        inputs: &REGRESS_INTEGER_ALPHA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The typed alpha extension is gated and checked before provider access; the statistical computation and outputs are double.",
+    },
+];
+
 fn regress_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Unknown
 }
@@ -294,11 +362,36 @@ struct CoefficientSolve {
     keywords = "regress,linear regression,least squares,statistics,machine learning",
     type_resolver(regress_type),
     descriptor(crate::builtins::stats::ml::regress::REGRESS_DESCRIPTOR),
+    extensions(crate::builtins::stats::ml::regress::REGRESS_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::ml::regress::REGRESS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::ml::regress"
 )]
 async fn regress_builtin(y: Value, x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(invalid("regress: accepts at most one alpha argument"));
+    }
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &y,
+        &REGRESS_INTEGER_DATA_EXTENSION,
+        NAME,
+        "response",
+    )
+    .await?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &x,
+        &REGRESS_INTEGER_DATA_EXTENSION,
+        NAME,
+        "design",
+    )
+    .await?;
+    if let Some(value) = rest.first() {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            value,
+            &REGRESS_INTEGER_ALPHA_EXTENSION,
+            NAME,
+            "alpha",
+        )
+        .await?;
     }
     let y = gather_tensor(y).await?;
     let x = gather_tensor(x).await?;
@@ -337,7 +430,16 @@ async fn parse_alpha(value: &Value) -> BuiltinResult<f64> {
     let alpha = match gathered {
         Value::Num(value) => value,
         Value::Int(value) => value.to_f64(),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) => {
+            let values = tensor::tensor_values_f64(&tensor);
+            if values.len() != 1 {
+                return Err(invalid(format!(
+                    "regress: alpha must be a numeric scalar, got {:?}",
+                    Value::Tensor(tensor)
+                )));
+            }
+            values[0]
+        }
         other => {
             return Err(invalid(format!(
                 "regress: alpha must be a numeric scalar, got {other:?}"
@@ -580,10 +682,11 @@ fn vector_values(tensor: &Tensor) -> BuiltinResult<Vec<f64>> {
     if tensor.shape.len() > 2 || !(tensor.rows == 1 || tensor.cols == 1) {
         return Err(invalid("regress: y must be a vector"));
     }
-    Ok(tensor.data.clone())
+    Ok(tensor::tensor_values_f64(tensor))
 }
 
 fn complete_rows(x: &Tensor, y: &[f64]) -> BuiltinResult<PreparedData> {
+    let x_values = tensor::tensor_values_f64_cow(x);
     let mut rows = Vec::new();
     let mut y_values = Vec::new();
     for row in 0..x.rows {
@@ -592,7 +695,7 @@ fn complete_rows(x: &Tensor, y: &[f64]) -> BuiltinResult<PreparedData> {
         let mut has_inf = y_value.is_infinite();
         let start = rows.len();
         for col in 0..x.cols {
-            let value = matrix_value(x, row, col);
+            let value = matrix_value(&x_values, x.rows, row, col);
             has_nan |= value.is_nan();
             has_inf |= value.is_infinite();
             rows.push(value);
@@ -613,8 +716,8 @@ fn complete_rows(x: &Tensor, y: &[f64]) -> BuiltinResult<PreparedData> {
     })
 }
 
-fn matrix_value(tensor: &Tensor, row: usize, col: usize) -> f64 {
-    tensor.data[row + col * tensor.rows]
+fn matrix_value(values: &[f64], rows: usize, row: usize, col: usize) -> f64 {
+    values[row + col * rows]
 }
 
 fn independent_columns(design: &DMatrix<f64>) -> BuiltinResult<Vec<usize>> {
@@ -827,9 +930,20 @@ fn tensor_value(data: Vec<f64>, shape: Vec<usize>, label: &str) -> BuiltinResult
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_value::IntegerStorage;
 
     fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
+    }
+
+    fn poisoned_int_tensor(
+        storage: IntegerStorage,
+        rows: usize,
+        cols: usize,
+        _poison: f64,
+    ) -> Value {
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
+        Value::Tensor(tensor)
     }
 
     fn outputs(value: Value) -> Vec<Value> {
@@ -865,15 +979,43 @@ mod tests {
         let out = outputs(block_on(regress_builtin(y, x, Vec::new())).unwrap());
         let b = tensor_ref(&out[0]);
         assert_eq!(b.shape, vec![2, 1]);
-        assert_close(b.data[0], 1.0);
-        assert_close(b.data[1], 2.0);
+        assert_close(b.materialize_f64()[0], 1.0);
+        assert_close(b.materialize_f64()[1], 2.0);
         assert_eq!(tensor_ref(&out[1]).shape, vec![2, 2]);
         assert_eq!(tensor_ref(&out[2]).shape, vec![4, 1]);
         assert_eq!(tensor_ref(&out[3]).shape, vec![4, 2]);
         let stats = tensor_ref(&out[4]);
         assert_eq!(stats.shape, vec![1, 4]);
-        assert_close(stats.data[0], 1.0);
-        assert_close(stats.data[3], 0.0);
+        assert_close(stats.materialize_f64()[0], 1.0);
+        assert_close(stats.materialize_f64()[3], 0.0);
+    }
+
+    #[test]
+    fn regress_accepts_typed_integer_design_and_response() {
+        let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
+        let _guard = crate::output_count::push_output_count(Some(1));
+        let y = poisoned_int_tensor(IntegerStorage::I16(vec![1, 3, 5, 7]), 4, 1, f64::NAN);
+        let x = poisoned_int_tensor(
+            IntegerStorage::I16(vec![1, 1, 1, 1, 0, 1, 2, 3]),
+            4,
+            2,
+            f64::NAN,
+        );
+        let out = outputs(block_on(regress_builtin(y, x, Vec::new())).unwrap());
+        let b = tensor_ref(&out[0]);
+        assert_eq!(b.shape, vec![2, 1]);
+        assert_close(b.materialize_f64()[0], 1.0);
+        assert_close(b.materialize_f64()[1], 2.0);
+    }
+
+    #[test]
+    fn regress_rejects_typed_integer_alpha_boundaries() {
+        let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
+        let y = poisoned_int_tensor(IntegerStorage::I16(vec![1, 3, 5, 7]), 4, 1, 0.0);
+        let x = poisoned_int_tensor(IntegerStorage::I16(vec![1, 1, 1, 1, 0, 1, 2, 3]), 4, 2, 0.0);
+        let alpha = poisoned_int_tensor(IntegerStorage::U8(vec![1]), 1, 1, 0.5);
+        let err = block_on(regress_builtin(y, x, vec![alpha])).unwrap_err();
+        assert!(err.message.contains("alpha must be between 0 and 1"));
     }
 
     #[test]
@@ -883,8 +1025,8 @@ mod tests {
         let x = tensor(vec![1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 2.0, 3.0], 4, 2);
         let out = outputs(block_on(regress_builtin(y, x, vec![Value::Num(0.1)])).unwrap());
         let b = tensor_ref(&out[0]);
-        assert_close(b.data[0], 1.0);
-        assert_close(b.data[1], 2.0);
+        assert_close(b.materialize_f64()[0], 1.0);
+        assert_close(b.materialize_f64()[1], 2.0);
         assert_eq!(tensor_ref(&out[2]).shape, vec![3, 1]);
         assert_eq!(tensor_ref(&out[3]).shape, vec![3, 2]);
     }
@@ -916,8 +1058,8 @@ mod tests {
         let out = outputs(block_on(regress_builtin(y, x, Vec::new())).unwrap());
 
         let b = tensor_ref(&out[0]);
-        assert_close_tol(b.data[0], 1.023809523809523, 1.0e-12);
-        assert_close_tol(b.data[1], 0.9971428571428576, 1.0e-12);
+        assert_close_tol(b.materialize_f64()[0], 1.023809523809523, 1.0e-12);
+        assert_close_tol(b.materialize_f64()[1], 0.9971428571428576, 1.0e-12);
 
         let bint = tensor_ref(&out[1]);
         let expected_bint = [
@@ -926,7 +1068,7 @@ mod tests {
             1.3542858140996163,
             1.1062955833956896,
         ];
-        for (actual, expected) in bint.data.iter().zip(expected_bint) {
+        for (actual, expected) in bint.materialize_f64().iter().zip(expected_bint) {
             assert_close_tol(*actual, expected, 1.0e-9);
         }
 
@@ -945,7 +1087,7 @@ mod tests {
             0.1118688233249418,
             0.4729586349799683,
         ];
-        for (actual, expected) in rint.data.iter().zip(expected_rint) {
+        for (actual, expected) in rint.materialize_f64().iter().zip(expected_rint) {
             assert_close_tol(*actual, expected, 1.0e-9);
         }
 
@@ -956,7 +1098,7 @@ mod tests {
             1.4348829360466553e-05,
             0.027047619047619084,
         ];
-        for (actual, expected) in stats.data.iter().zip(expected_stats) {
+        for (actual, expected) in stats.materialize_f64().iter().zip(expected_stats) {
             assert_close_tol(*actual, expected, 1.0e-9);
         }
     }
@@ -976,12 +1118,12 @@ mod tests {
         );
         let out = outputs(block_on(regress_builtin(y, x, Vec::new())).unwrap());
         let b = tensor_ref(&out[0]);
-        assert_close(b.data[0], 1.0);
-        assert_close(b.data[1], 0.0);
-        assert_close(b.data[2], 1.0);
+        assert_close(b.materialize_f64()[0], 1.0);
+        assert_close(b.materialize_f64()[1], 0.0);
+        assert_close(b.materialize_f64()[2], 1.0);
         let bint = tensor_ref(&out[1]);
-        assert_close(bint.data[1], 0.0);
-        assert_close(bint.data[4], 0.0);
+        assert_close(bint.materialize_f64()[1], 0.0);
+        assert_close(bint.materialize_f64()[4], 0.0);
     }
 
     #[test]

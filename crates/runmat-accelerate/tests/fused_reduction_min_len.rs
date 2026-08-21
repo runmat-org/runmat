@@ -8,7 +8,7 @@ use runmat_accelerate::fusion_exec::{execute_reduction, FusionExecutionRequest};
 use runmat_accelerate::graph::{InstrSpan, PrimitiveOp, ShapeInfo, ValueId};
 use runmat_accelerate::ReductionAxes;
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView, ReductionFlavor};
-use runmat_builtins::Value;
+use runmat_value::Value;
 use std::collections::HashMap;
 
 fn upload(
@@ -106,6 +106,8 @@ fn fused_single_pass_reduce_len_1_no_alias() {
     let req = FusionExecutionRequest {
         plan: &plan,
         inputs: vec![Value::GpuTensor(x), Value::GpuTensor(w)],
+        placement: None,
+        runtime: None,
     };
     // reduce_len=rows=1, num_slices=cols
     let _ = execute_reduction(req, rows, cols, 0).expect("fused sum(x.*W,1) should run");

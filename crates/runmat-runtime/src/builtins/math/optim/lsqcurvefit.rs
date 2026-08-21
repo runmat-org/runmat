@@ -1,16 +1,21 @@
 //! MATLAB-compatible `lsqcurvefit` builtin for nonlinear curve fitting.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    LogicalArray, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{LogicalArray, StructValue, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::math::optim::common::{
     call_function, initial_guess, option_f64, option_string, option_usize,
 };
@@ -27,6 +32,110 @@ const DEFAULT_TOL_FUN: f64 = 1.0e-6;
 const DEFAULT_MAX_ITER: usize = 400;
 const DEFAULT_MAX_FUN_EVALS_FACTOR: usize = 100;
 const ALGORITHM: &str = "levenberg-marquardt";
+
+const INTEGER_X0_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "lsqcurvefit-integer-x0",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "lsqcurvefit with a native-class integer initial point is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LsqcurvefitIntegerX0Extension"),
+};
+const INTEGER_XDATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "lsqcurvefit-integer-xdata",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "lsqcurvefit with native-class integer model data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LsqcurvefitIntegerXdataExtension"),
+};
+const INTEGER_YDATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "lsqcurvefit-integer-ydata",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "lsqcurvefit with native-class integer response data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LsqcurvefitIntegerYdataExtension"),
+};
+const INTEGER_BOUND_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "lsqcurvefit-integer-bound",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "lsqcurvefit with native-class integer bounds is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LsqcurvefitIntegerBoundExtension"),
+};
+const INTEGER_OPTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "lsqcurvefit-integer-option",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "lsqcurvefit with native-class integer numeric options is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LsqcurvefitIntegerOptionExtension"),
+};
+const INTEGER_CALLBACK_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "lsqcurvefit-integer-callback-result",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "lsqcurvefit with a native-class integer model result is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LsqcurvefitIntegerCallbackExtension"),
+};
+const LOGICAL_NUMERIC_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "lsqcurvefit-logical-numeric",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "lsqcurvefit with logical solver data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LsqcurvefitLogicalNumericExtension"),
+};
+const RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "lsqcurvefit-resident-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "lsqcurvefit host fallback for explicit gpuArray values is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LsqcurvefitResidentInputExtension"),
+};
+
+pub const EXTENSIONS: [BuiltinExtensionDescriptor; 8] = [
+    INTEGER_X0_EXTENSION,
+    INTEGER_XDATA_EXTENSION,
+    INTEGER_YDATA_EXTENSION,
+    INTEGER_BOUND_EXTENSION,
+    INTEGER_OPTION_EXTENSION,
+    INTEGER_CALLBACK_EXTENSION,
+    LOGICAL_NUMERIC_EXTENSION,
+    RESIDENT_INPUT_EXTENSION,
+];
+
+const INTEGER_X0_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "x0",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "Native integer initial points are gated before gather and cross only an exact binary64 solver boundary.",
+}];
+const INTEGER_XDATA_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "xdata",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "Native integer model data remains exact callback payload rather than being eagerly materialized as double.",
+}];
+const INTEGER_YDATA_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "ydata or fun result",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "Integer response and model values are independently gated and must be exact at residual subtraction.",
+}];
+const INTEGER_BOUND_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "lb or ub",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "Native integer bounds are gated before gather and must be exactly representable in the double solver domain.",
+}];
+const INTEGER_OPTION_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "numeric option field",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "Typed MaxIter and MaxFunEvals are parsed structurally; typed tolerances cross a checked binary64 boundary.",
+}];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 5] = [
+    BuiltinIntegerCapabilityDescriptor { form: "x = lsqcurvefit(fun, integer_x0, xdata, ydata, ___)", inputs: &INTEGER_X0_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "The host nonlinear solver works in double and rejects any integer initial point that cannot cross exactly." },
+    BuiltinIntegerCapabilityDescriptor { form: "x = lsqcurvefit(fun, x0, integer_xdata, ydata, ___)", inputs: &INTEGER_XDATA_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::Multiple, notes: "RunMat passes exact integer model data to the callback unchanged, including supported resident payloads." },
+    BuiltinIntegerCapabilityDescriptor { form: "x = lsqcurvefit(fun, x0, xdata, integer_ydata, ___)", inputs: &INTEGER_YDATA_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Response data and callback results enter double residual arithmetic only after exact representability checks." },
+    BuiltinIntegerCapabilityDescriptor { form: "x = lsqcurvefit(fun, x0, xdata, ydata, integer_lb, integer_ub, ___)", inputs: &INTEGER_BOUND_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Integer bounds are a RunMat-only extension and cross the double bound projection boundary exactly." },
+    BuiltinIntegerCapabilityDescriptor { form: "x = lsqcurvefit(___, options_with_integer_field)", inputs: &INTEGER_OPTION_INPUT, computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Integer option fields are gated before recursive gather; counts remain exact structural controls and tolerances convert exactly." },
+];
 
 const fn output_x() -> BuiltinParamDescriptor {
     BuiltinParamDescriptor {
@@ -367,6 +476,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     type_resolver(nonlinear_solve_type),
     descriptor(crate::builtins::math::optim::lsqcurvefit::LSQCURVEFIT_DESCRIPTOR),
+    extensions(crate::builtins::math::optim::lsqcurvefit::EXTENSIONS),
+    integer_capabilities(crate::builtins::math::optim::lsqcurvefit::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::optim::lsqcurvefit"
 )]
 async fn lsqcurvefit_builtin(
@@ -377,9 +488,17 @@ async fn lsqcurvefit_builtin(
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
     validate_requested_outputs()?;
+    ensure_input_extensions(&x0, &xdata, &ydata, &rest)?;
     let parsed = ParsedArgs::parse(rest)
         .await
         .map_err(|err| map_error(err, &ERROR_INVALID_ARGUMENT))?;
+    let parsed = parsed
+        .prepare_options()
+        .await
+        .map_err(|err| map_error(err, &ERROR_INVALID_ARGUMENT))?;
+    let x0 = prepare_floating_input("initial point", x0, &INTEGER_X0_EXTENSION)
+        .await
+        .map_err(|err| map_error(err, &ERROR_INVALID_INPUT))?;
     let guess = initial_guess(NAME, x0)
         .await
         .map_err(|err| map_error(err, &ERROR_INVALID_INPUT))?;
@@ -390,7 +509,7 @@ async fn lsqcurvefit_builtin(
         .bounds(n)
         .await
         .map_err(|err| map_error(err, &ERROR_INVALID_ARGUMENT))?;
-    let ydata = real_array("ydata", ydata)
+    let ydata = real_array_checked("ydata", ydata, &INTEGER_YDATA_EXTENSION)
         .await
         .map_err(|err| map_error(err, &ERROR_INVALID_INPUT))?;
     if ydata.values.is_empty() {
@@ -417,6 +536,74 @@ async fn lsqcurvefit_builtin(
         &bounds,
         &options.algorithm,
     )
+}
+
+fn ensure_input_extensions(
+    x0: &Value,
+    xdata: &Value,
+    ydata: &Value,
+    rest: &[Value],
+) -> BuiltinResult<()> {
+    use crate::builtins::common::validation::{
+        value_contains_explicit_gpu, value_contains_native_integer_class,
+    };
+    if value_contains_native_integer_class(x0) {
+        crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_X0_EXTENSION, NAME)?;
+    }
+    if value_contains_native_integer_class(xdata) {
+        crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_XDATA_EXTENSION, NAME)?;
+    }
+    if value_contains_native_integer_class(ydata) {
+        crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_YDATA_EXTENSION, NAME)?;
+    }
+    if rest.len() >= 2 {
+        for value in rest.iter().take(2) {
+            if value_contains_native_integer_class(value) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &INTEGER_BOUND_EXTENSION,
+                    NAME,
+                )?;
+            }
+        }
+    }
+    if is_logical_numeric(x0) || is_logical_numeric(xdata) || is_logical_numeric(ydata) {
+        crate::compatibility::ensure_builtin_extension_enabled(&LOGICAL_NUMERIC_EXTENSION, NAME)?;
+    }
+    if value_contains_explicit_gpu(x0)
+        || value_contains_explicit_gpu(xdata)
+        || value_contains_explicit_gpu(ydata)
+        || rest.iter().any(value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(&RESIDENT_INPUT_EXTENSION, NAME)?;
+    }
+    Ok(())
+}
+
+fn is_logical_numeric(value: &Value) -> bool {
+    matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+}
+
+async fn prepare_floating_input(
+    role: &str,
+    value: Value,
+    integer_extension: &'static BuiltinExtensionDescriptor,
+) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::value_contains_native_integer_class(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(integer_extension, NAME)?;
+        if !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(&value)
+            .await?
+        {
+            return Err(lsq_error_with_detail(
+                &ERROR_INVALID_ARGUMENT,
+                format!("integer {role} must be exactly representable as double"),
+            ));
+        }
+    }
+    if is_logical_numeric(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(&LOGICAL_NUMERIC_EXTENSION, NAME)?;
+    }
+    crate::dispatcher::gather_if_needed_async(&value).await
 }
 
 fn validate_requested_outputs() -> BuiltinResult<()> {
@@ -488,6 +675,45 @@ impl ParsedArgs {
         bounds.validate(NAME, n)?;
         Ok(bounds)
     }
+
+    async fn prepare_options(mut self) -> BuiltinResult<Self> {
+        let Some(options) = self.options.take() else {
+            return Ok(self);
+        };
+        for field in ["TolX", "TolFun", "MaxIter", "MaxFunEvals"] {
+            let Some(value) = options
+                .fields
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(field))
+                .map(|(_, value)| value)
+            else {
+                continue;
+            };
+            if crate::builtins::common::validation::value_contains_native_integer_class(value) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &INTEGER_OPTION_EXTENSION,
+                    NAME,
+                )?;
+                if matches!(field, "TolX" | "TolFun")
+                    && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(
+                        value,
+                    )
+                    .await?
+                {
+                    return Err(lsq_error_with_detail(
+                        &ERROR_INVALID_ARGUMENT,
+                        format!("integer option {field} must be exactly representable as double"),
+                    ));
+                }
+            }
+        }
+        let gathered = crate::dispatcher::gather_if_needed_async(&Value::Struct(options)).await?;
+        let Value::Struct(options) = gathered else {
+            unreachable!("gather preserves struct shape")
+        };
+        self.options = Some(options);
+        Ok(self)
+    }
 }
 
 struct LsqOptions {
@@ -557,7 +783,8 @@ impl LeastSquaresEvaluator for CurveFitEvaluator {
         Box::pin(async move {
             let arg = x_value(x, &self.x_shape, self.x_scalar)?;
             let value = call_function(&self.function, vec![arg, self.xdata.clone()]).await?;
-            let model = real_array("model output", value).await?;
+            let model =
+                real_array_checked("model output", value, &INTEGER_CALLBACK_EXTENSION).await?;
             if model.shape != self.ydata.shape {
                 return Err(lsq_error_with_detail(
                     &ERROR_INVALID_INPUT,
@@ -589,7 +816,10 @@ async fn real_array(label: &str, value: Value) -> BuiltinResult<RealArray> {
         Value::Num(n) => finite_array(label, vec![n], vec![1, 1]),
         Value::Int(i) => finite_array(label, vec![i.to_f64()], vec![1, 1]),
         Value::Bool(flag) => finite_array(label, vec![if flag { 1.0 } else { 0.0 }], vec![1, 1]),
-        Value::Tensor(tensor) => finite_array(label, tensor.data, tensor.shape),
+        Value::Tensor(tensor) => {
+            let shape = tensor.shape.clone();
+            finite_array(label, tensor::tensor_into_values_f64(tensor), shape)
+        }
         Value::LogicalArray(LogicalArray { data, shape }) => finite_array(
             label,
             data.into_iter()
@@ -602,6 +832,15 @@ async fn real_array(label: &str, value: Value) -> BuiltinResult<RealArray> {
             format!("{label} must be real numeric, got {other:?}"),
         )),
     }
+}
+
+async fn real_array_checked(
+    label: &str,
+    value: Value,
+    integer_extension: &'static BuiltinExtensionDescriptor,
+) -> BuiltinResult<RealArray> {
+    let value = prepare_floating_input(label, value, integer_extension).await?;
+    real_array(label, value).await
 }
 
 fn finite_array(label: &str, values: Vec<f64>, shape: Vec<usize>) -> BuiltinResult<RealArray> {
@@ -630,7 +869,7 @@ async fn bound_vector(
     n: usize,
     default: f64,
 ) -> BuiltinResult<Vec<f64>> {
-    let value = crate::dispatcher::gather_if_needed_async(&value).await?;
+    let value = prepare_floating_input(label, value, &INTEGER_BOUND_EXTENSION).await?;
     if is_empty_value(&value) {
         return Ok(vec![default; n]);
     }
@@ -638,7 +877,7 @@ async fn bound_vector(
         Value::Num(value) => vec![value],
         Value::Int(value) => vec![value.to_f64()],
         Value::Bool(flag) => vec![if flag { 1.0 } else { 0.0 }],
-        Value::Tensor(Tensor { data, .. }) => data,
+        Value::Tensor(tensor) => tensor::tensor_into_values_f64(tensor),
         Value::LogicalArray(LogicalArray { data, .. }) => data
             .into_iter()
             .map(|flag| if flag == 0 { 0.0 } else { 1.0 })
@@ -671,7 +910,7 @@ async fn bound_vector(
 
 fn is_empty_value(value: &Value) -> bool {
     match value {
-        Value::Tensor(Tensor { data, .. }) => data.is_empty(),
+        Value::Tensor(tensor) => tensor::tensor_element_len(tensor) == 0,
         Value::LogicalArray(LogicalArray { data, .. }) => data.is_empty(),
         _ => false,
     }
@@ -793,11 +1032,170 @@ fn gradient(jacobian: &[f64], residual: &[f64], n: usize) -> Vec<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_accelerate_api::HostTensorView;
+    use runmat_value::IntegerStorage;
     use std::sync::Arc;
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
+    }
+
+    #[test]
+    fn lsqcurvefit_real_array_reads_typed_integer_storage_exactly() {
+        let input =
+            Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 3]), vec![1, 3]).expect("integer");
+
+        let parsed = block_on(real_array("xdata", Value::Tensor(input))).expect("real array");
+
+        assert_eq!(parsed.values, vec![1.0, 2.0, 3.0]);
+        assert_eq!(parsed.shape, vec![1, 3]);
+    }
+
+    #[test]
+    fn lsqcurvefit_bound_vector_reads_typed_integer_storage_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let input =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1, 2]), vec![1, 2]).expect("integer");
+
+        let parsed = block_on(bound_vector(
+            "lower bounds",
+            Value::Tensor(input),
+            2,
+            f64::NEG_INFINITY,
+        ))
+        .expect("bounds");
+
+        assert_eq!(parsed, vec![-1.0, 2.0]);
+    }
+
+    #[test]
+    fn lsqcurvefit_strict_mode_rejects_integer_initial_point() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let x0 = Tensor::new_integer(IntegerStorage::I32(vec![0]), vec![1, 1]).unwrap();
+
+        let error = block_on(lsqcurvefit_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::Tensor(x0),
+            Value::Num(0.0),
+            Value::Num(0.0),
+            Vec::new(),
+        ))
+        .expect_err("integer x0 is a RunMat-only extension");
+
+        assert_eq!(error.identifier(), INTEGER_X0_EXTENSION.error_identifier);
+    }
+
+    #[test]
+    fn lsqcurvefit_runmat_mode_rejects_wide_integer_initial_point() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let x0 =
+            Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1]).unwrap();
+
+        let error = block_on(lsqcurvefit_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::Tensor(x0),
+            Value::Num(0.0),
+            Value::Num(0.0),
+            Vec::new(),
+        ))
+        .expect_err("wide integer x0 cannot cross exactly");
+
+        assert!(error.message().contains("exactly representable"));
+    }
+
+    #[test]
+    fn lsqcurvefit_passes_wide_integer_xdata_to_callback_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let expected = u64::MAX;
+        let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            move |_function, args, _requested_outputs| {
+                let Value::Tensor(xdata) = &args[1] else {
+                    panic!("expected exact integer xdata")
+                };
+                assert!(matches!(
+                    xdata.numeric_value_at(0),
+                    Some(runmat_value::NumericScalar::U64(value)) if value == expected
+                ));
+                Box::pin(async move { Ok(Value::Num(0.0)) })
+            },
+        )));
+        let xdata = Tensor::new_integer(IntegerStorage::U64(vec![expected]), vec![1, 1]).unwrap();
+
+        let result = block_on(lsqcurvefit_builtin(
+            Value::BoundFunctionHandle {
+                name: "wide_xdata".to_string(),
+                function: 901,
+            },
+            Value::Num(0.0),
+            Value::Tensor(xdata),
+            Value::Num(0.0),
+            Vec::new(),
+        ))
+        .expect("exact xdata pass-through");
+
+        assert!(matches!(result, Value::Num(value) if value == 0.0));
+    }
+
+    #[test]
+    fn lsqcurvefit_automatic_resident_input_gathers_but_explicit_input_is_gated() {
+        test_support::with_test_provider(|provider| {
+            let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
+                Arc::new(|_function, _args, _requested_outputs| {
+                    Box::pin(async move { Ok(Value::Num(0.0)) })
+                }),
+            ));
+            let values = [0.0];
+            let shape = [1, 1];
+            let automatic = provider
+                .upload(&HostTensorView {
+                    data: &values,
+                    shape: &shape,
+                })
+                .expect("automatic upload");
+            let automatic =
+                automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let result = block_on(lsqcurvefit_builtin(
+                Value::BoundFunctionHandle {
+                    name: "zero_model".to_string(),
+                    function: 904,
+                },
+                Value::GpuTensor(automatic),
+                Value::Num(0.0),
+                Value::Num(0.0),
+                Vec::new(),
+            ))
+            .expect("automatic resident initial point gathers");
+            assert!(matches!(
+                result,
+                Value::Tensor(ref tensor)
+                    if tensor.shape == vec![1, 1]
+                        && matches!(tensor.numeric_value_at(0), Some(runmat_value::NumericScalar::F64(value)) if value == 0.0)
+            ));
+
+            let explicit = provider
+                .upload(&HostTensorView {
+                    data: &values,
+                    shape: &shape,
+                })
+                .expect("explicit upload");
+            let explicit =
+                explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(lsqcurvefit_builtin(
+                Value::FunctionHandle("unused".into()),
+                Value::GpuTensor(explicit),
+                Value::Num(0.0),
+                Value::Num(0.0),
+                Vec::new(),
+            ))
+            .expect_err("explicit resident input is gated before fallback");
+            assert_eq!(
+                error.identifier(),
+                RESIDENT_INPUT_EXTENSION.error_identifier
+            );
+        });
     }
 
     #[test]
@@ -806,11 +1204,11 @@ mod tests {
             |_function, args, requested_outputs| {
                 assert_eq!(requested_outputs, 1);
                 let p = match &args[0] {
-                    Value::Tensor(t) => t.data.clone(),
+                    Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected params, got {other:?}"),
                 };
                 let xdata = match &args[1] {
-                    Value::Tensor(t) => t.data.clone(),
+                    Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected xdata, got {other:?}"),
                 };
                 Box::pin(async move {
@@ -835,8 +1233,8 @@ mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                assert!((t.data[0] - 2.0).abs() < 1.0e-5);
-                assert!((t.data[1] - 1.0).abs() < 1.0e-5);
+                assert!((t.materialize_f64()[0] - 2.0).abs() < 1.0e-5);
+                assert!((t.materialize_f64()[1] - 1.0).abs() < 1.0e-5);
             }
             other => panic!("unexpected value {other:?}"),
         }
@@ -847,11 +1245,11 @@ mod tests {
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, _requested_outputs| {
                 let p = match &args[0] {
-                    Value::Tensor(t) => t.data.clone(),
+                    Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected params, got {other:?}"),
                 };
                 let xdata = match &args[1] {
-                    Value::Tensor(t) => t.data.clone(),
+                    Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected xdata, got {other:?}"),
                 };
                 Box::pin(async move {
@@ -883,8 +1281,8 @@ mod tests {
         .expect("lsqcurvefit");
         match result {
             Value::Tensor(t) => {
-                assert!((t.data[0] - 2.5).abs() < 1.0e-4);
-                assert!((t.data[1] - 0.7).abs() < 1.0e-4);
+                assert!((t.materialize_f64()[0] - 2.5).abs() < 1.0e-4);
+                assert!((t.materialize_f64()[1] - 0.7).abs() < 1.0e-4);
             }
             other => panic!("unexpected value {other:?}"),
         }
@@ -895,11 +1293,11 @@ mod tests {
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, _requested_outputs| {
                 let p = match &args[0] {
-                    Value::Tensor(t) => t.data.clone(),
+                    Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected params, got {other:?}"),
                 };
                 let xdata = match &args[1] {
-                    Value::Tensor(t) => t.data.clone(),
+                    Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected xdata, got {other:?}"),
                 };
                 Box::pin(async move {
@@ -922,7 +1320,7 @@ mod tests {
         ))
         .expect("lsqcurvefit");
         match result {
-            Value::Tensor(t) => assert!((t.data[0] - 1.0).abs() < 1.0e-8),
+            Value::Tensor(t) => assert!((t.materialize_f64()[0] - 1.0).abs() < 1.0e-8),
             Value::Num(n) => assert!((n - 1.0).abs() < 1.0e-8),
             other => panic!("unexpected value {other:?}"),
         }
@@ -934,11 +1332,11 @@ mod tests {
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, _requested_outputs| {
                 let p = match &args[0] {
-                    Value::Tensor(t) => t.data.clone(),
+                    Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected params, got {other:?}"),
                 };
                 let xdata = match &args[1] {
-                    Value::Tensor(t) => t.data.clone(),
+                    Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected xdata, got {other:?}"),
                 };
                 Box::pin(async move {
@@ -976,7 +1374,7 @@ mod tests {
                     Value::Tensor(j) => {
                         assert_eq!(j.shape, vec![3, 2]);
                         let expected = [0.0, 1.0, 2.0, 1.0, 1.0, 1.0];
-                        for (actual, expected) in j.data.iter().zip(expected) {
+                        for (actual, expected) in j.materialize_f64().iter().zip(expected) {
                             assert!((actual - expected).abs() < 1.0e-6);
                         }
                     }
@@ -997,7 +1395,7 @@ mod tests {
                     other => panic!("expected scalar param, got {other:?}"),
                 };
                 let xdata = match &args[1] {
-                    Value::Tensor(t) => t.data.clone(),
+                    Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected xdata, got {other:?}"),
                 };
                 Box::pin(async move {
@@ -1044,7 +1442,7 @@ mod tests {
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, _requested_outputs| {
                 let p = match &args[0] {
-                    Value::Tensor(t) => t.data.clone(),
+                    Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected params, got {other:?}"),
                 };
                 Box::pin(async move { Ok(Value::Num(p[0] + p[1])) })
@@ -1062,7 +1460,9 @@ mod tests {
         ))
         .expect("lsqcurvefit");
         match result {
-            Value::Tensor(t) => assert!((t.data[0] + t.data[1] - 3.0).abs() < 1.0e-6),
+            Value::Tensor(t) => {
+                assert!((t.materialize_f64()[0] + t.materialize_f64()[1] - 3.0).abs() < 1.0e-6)
+            }
             other => panic!("unexpected value {other:?}"),
         }
     }

@@ -1,10 +1,3 @@
----
-title: "Telemetry"
-category: "Development"
-section: "14.5"
-last_updated: "May 28, 2026"
----
-
 # Telemetry
 
 RunMat telemetry exists to answer a small set of product and runtime health questions: whether installs are succeeding by OS and architecture, how often acceleration and JIT execution are active, and where parser, compiler, runtime, GPU, or fusion failures happen often enough to prioritize.

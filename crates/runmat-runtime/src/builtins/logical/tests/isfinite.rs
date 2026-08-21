@@ -3,9 +3,14 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, LogicalArray, Tensor, Value,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, LogicalArray, NumericScalar, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -104,6 +109,15 @@ pub const ISFINITE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ISFINITE_ERRORS,
 };
+const ISFINITE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Every fixed-width integer value is finite.",
+    }];
+pub const ISFINITE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "tf = isfinite(integer_A)", inputs: &ISFINITE_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Predicate, output_class: BuiltinIntegerOutputClassRule::Logical, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving, notes: "Returns a same-shaped all-true logical mask directly from integer class and shape; resident execution or exact fallback preserves typed storage." }];
 
 fn isfinite_error(name: &str, error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     isfinite_error_with_message(name, error.message, error)
@@ -129,17 +143,39 @@ fn isfinite_error_with_message(
     accel = "elementwise",
     type_resolver(logical_unary_type),
     descriptor(crate::builtins::logical::tests::isfinite::ISFINITE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::logical::tests::isfinite::ISFINITE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::logical::tests::isfinite"
 )]
 async fn isfinite_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => {
-            if let Some(provider) = runmat_accelerate_api::provider() {
+            if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
+                return resident_integer_mask(&handle, true);
+            }
+            let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+                isfinite_error_with_message(
+                    BUILTIN_NAME,
+                    "isfinite: no acceleration provider owns the input handle",
+                    &ISFINITE_ERROR_INTERNAL,
+                )
+            })?;
+            let metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+            {
                 if let Ok(mask) = provider.logical_isfinite(&handle) {
-                    return Ok(gpu_helpers::logical_gpu_value(mask));
+                    gpu_helpers::restore_handle_metadata(&handle, &metadata);
+                    if valid_logical_mask(&handle, &mask, provider) {
+                        return Ok(gpu_helpers::logical_gpu_value(mask));
+                    }
+                    gpu_helpers::free_unprotected_exact_owner(&mask, &[&handle]);
+                    return Err(isfinite_error_with_message(
+                        BUILTIN_NAME,
+                        "isfinite: provider returned an invalid logical mask",
+                        &ISFINITE_ERROR_INTERNAL,
+                    ));
                 }
             }
-            let tensor = gpu_helpers::gather_tensor_async(&handle)
+            gpu_helpers::restore_handle_metadata(&handle, &metadata);
+            let host = gpu_helpers::download_value_preserving_residency_async(provider, &handle)
                 .await
                 .map_err(|err| {
                     isfinite_error_with_message(
@@ -148,10 +184,57 @@ async fn isfinite_builtin(value: Value) -> BuiltinResult<Value> {
                         &ISFINITE_ERROR_INTERNAL,
                     )
                 })?;
-            isfinite_tensor(BUILTIN_NAME, tensor)
+            let mask = isfinite_host(host)?;
+            gpu_helpers::restore_class_preserving_value(&handle, mask, BUILTIN_NAME)
         }
         other => isfinite_host(other),
     }
+}
+
+fn valid_logical_mask(
+    input: &runmat_accelerate_api::GpuTensorHandle,
+    output: &runmat_accelerate_api::GpuTensorHandle,
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+) -> bool {
+    output.shape == input.shape
+        && output.device_id == provider.device_id()
+        && gpu_helpers::exact_provider_for_handle(output)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+        && !gpu_helpers::same_gpu_handle(input, output)
+        && runmat_accelerate_api::handle_storage(output)
+            == runmat_accelerate_api::GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_precision(output) == Some(provider.precision())
+        && runmat_accelerate_api::handle_integer_type(output).is_none()
+        && runmat_accelerate_api::handle_class_name(output)
+            .as_deref()
+            .is_none_or(|class| matches!(class, "logical" | "single" | "double"))
+}
+
+fn resident_integer_mask(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+    value: bool,
+) -> BuiltinResult<Value> {
+    let integer = runmat_accelerate_api::handle_integer_type(handle)
+        .expect("resident integer mask requires integer metadata");
+    if gpu_helpers::exact_provider_for_handle(handle).is_none()
+        || runmat_accelerate_api::handle_storage(handle)
+            != runmat_accelerate_api::GpuTensorStorage::Real
+        || runmat_accelerate_api::handle_precision(handle).is_some()
+        || runmat_accelerate_api::handle_is_logical(handle)
+        || !gpu_helpers::gpu_class_metadata_matches(handle, None, Some(integer), false)
+    {
+        return Err(isfinite_error_with_message(
+            BUILTIN_NAME,
+            format!("{BUILTIN_NAME}: resident integer metadata is contradictory"),
+            &ISFINITE_ERROR_INTERNAL,
+        ));
+    }
+    let mask = LogicalArray::new(
+        vec![u8::from(value); tensor::element_count(&handle.shape)],
+        handle.shape.clone(),
+    )
+    .map_err(|error| internal_error(BUILTIN_NAME, format!("{BUILTIN_NAME}: {error}")))?;
+    gpu_helpers::restore_class_preserving_value(handle, Value::LogicalArray(mask), BUILTIN_NAME)
 }
 
 fn isfinite_host(value: Value) -> BuiltinResult<Value> {
@@ -170,27 +253,37 @@ fn isfinite_host(value: Value) -> BuiltinResult<Value> {
 }
 
 fn isfinite_tensor(name: &str, tensor: Tensor) -> BuiltinResult<Value> {
-    let data = tensor
-        .data
-        .iter()
-        .map(|&x| if x.is_finite() { 1u8 } else { 0u8 })
-        .collect::<Vec<_>>();
-    logical_result(name, data, tensor.shape)
+    let shape = tensor.shape.clone();
+    let mut data = Vec::with_capacity(tensor::element_count(&shape));
+    for index in 0..tensor::element_count(&shape) {
+        let value = tensor
+            .numeric_value_at(index)
+            .ok_or_else(|| internal_error(name, format!("{name}: invalid numeric storage")))?;
+        data.push(u8::from(numeric_scalar_is_finite(value)));
+    }
+    logical_result(name, data, shape)
 }
 
 fn isfinite_complex_tensor(name: &str, tensor: ComplexTensor) -> BuiltinResult<Value> {
-    let data = tensor
-        .data
-        .iter()
-        .map(|&(re, im)| {
-            if re.is_finite() && im.is_finite() {
-                1u8
-            } else {
-                0u8
-            }
-        })
-        .collect::<Vec<_>>();
-    logical_result(name, data, tensor.shape)
+    let shape = tensor.shape.clone();
+    let mut data = Vec::with_capacity(tensor::element_count(&shape));
+    for index in 0..tensor::element_count(&shape) {
+        let (real, imag) = tensor
+            .numeric_value_at(index)
+            .ok_or_else(|| internal_error(name, format!("{name}: invalid complex storage")))?;
+        data.push(u8::from(
+            numeric_scalar_is_finite(real) && numeric_scalar_is_finite(imag),
+        ));
+    }
+    logical_result(name, data, shape)
+}
+
+fn numeric_scalar_is_finite(value: NumericScalar) -> bool {
+    match value {
+        NumericScalar::F64(value) => value.is_finite(),
+        NumericScalar::F32(value) => value.is_finite(),
+        _ => true,
+    }
 }
 
 fn logical_full(name: &str, shape: Vec<usize>, value: bool) -> BuiltinResult<Value> {
@@ -240,6 +333,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntegerComplexStorage, IntegerStorage};
 
     #[test]
     fn isfinite_type_returns_logical() {
@@ -249,7 +343,7 @@ pub(crate) mod tests {
         );
         assert_eq!(out, Type::logical());
     }
-    use runmat_builtins::{CharArray, IntValue, StringArray};
+    use runmat_value::{CharArray, IntValue, StringArray};
 
     fn run_isfinite(value: Value) -> BuiltinResult<Value> {
         block_on(super::isfinite_builtin(value))
@@ -315,6 +409,21 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn isfinite_typed_integer_tensor_is_always_true() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 3, 4]), vec![2, 2]).unwrap();
+        let result = run_isfinite(Value::Tensor(tensor)).expect("isfinite");
+        match result {
+            Value::LogicalArray(mask) => {
+                assert_eq!(mask.shape, vec![2, 2]);
+                assert_eq!(mask.data, vec![1, 1, 1, 1]);
+            }
+            other => panic!("expected logical array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn isfinite_complex_tensor_mask() {
         let tensor = ComplexTensor::new(
             vec![(0.0, 0.0), (f64::NAN, 0.0), (1.0, f64::INFINITY)],
@@ -326,6 +435,25 @@ pub(crate) mod tests {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![3, 1]);
                 assert_eq!(mask.data, vec![1, 0, 0]);
+            }
+            other => panic!("expected logical array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn isfinite_typed_complex_integer_storage_is_always_true() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+            IntegerStorage::U64(vec![0, 7]),
+        )
+        .unwrap();
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).unwrap();
+        let result = run_isfinite(Value::ComplexTensor(tensor)).expect("isfinite");
+        match result {
+            Value::LogicalArray(mask) => {
+                assert_eq!(mask.shape, vec![1, 2]);
+                assert_eq!(mask.data, vec![1, 1]);
             }
             other => panic!("expected logical array, got {other:?}"),
         }
@@ -411,15 +539,17 @@ pub(crate) mod tests {
     fn isfinite_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, f64::INFINITY, 3.0], vec![3, 1]).unwrap();
-            let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result = run_isfinite(Value::GpuTensor(handle)).expect("isfinite");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![3, 1]);
-            assert_eq!(gathered.data, vec![1.0, 0.0, 1.0]);
+            assert_eq!(
+                gathered
+                    .into_numeric_storage()
+                    .expect("gathered storage")
+                    .materialize_f64(),
+                vec![1.0, 0.0, 1.0]
+            );
         });
     }
 
@@ -433,18 +563,17 @@ pub(crate) mod tests {
         let tensor =
             Tensor::new(vec![1.0, f64::NAN, f64::INFINITY, 5.0], vec![4, 1]).expect("tensor");
         let cpu = isfinite_tensor("isfinite", tensor.clone()).expect("cpu path");
-        let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
-            shape: &tensor.shape,
-        };
-        let handle = runmat_accelerate_api::provider()
-            .unwrap()
-            .upload(&view)
-            .expect("upload");
+        let provider = runmat_accelerate_api::provider().unwrap();
+        let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
         let gpu = run_isfinite(Value::GpuTensor(handle)).expect("gpu path");
         let gathered = test_support::gather(gpu).expect("gather");
-        match (cpu, gathered) {
-            (Value::LogicalArray(expected), Tensor { data, shape, .. }) => {
+        let shape = gathered.shape.clone();
+        let data = gathered
+            .into_numeric_storage()
+            .expect("gathered storage")
+            .materialize_f64();
+        match cpu {
+            Value::LogicalArray(expected) => {
                 assert_eq!(shape, expected.shape);
                 let expected_f64: Vec<f64> = expected
                     .data
@@ -453,7 +582,7 @@ pub(crate) mod tests {
                     .collect();
                 assert_eq!(data, expected_f64);
             }
-            (Value::Bool(flag), Tensor { data, .. }) => {
+            Value::Bool(flag) => {
                 assert_eq!(data, vec![if flag { 1.0 } else { 0.0 }]);
             }
             other => panic!("unexpected results {other:?}"),

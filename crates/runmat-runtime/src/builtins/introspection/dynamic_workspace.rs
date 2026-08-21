@@ -1,10 +1,15 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor,
 };
-use runmat_hir::{
+use runmat_types::{
     ASSIGNIN_BUILTIN_NAME, EVALC_BUILTIN_NAME, EVALIN_BUILTIN_NAME, EVAL_BUILTIN_NAME,
 };
+use runmat_value::Value;
 
 const DYNAMIC_WORKSPACE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "varargout",
@@ -119,6 +124,27 @@ const ASSIGNIN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDe
     outputs: &[],
 }];
 
+const ASSIGNIN_INTEGER_VALUE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "val",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented value domain accepts any data type, including scalar or array values from every real integer class.",
+    }];
+
+pub const ASSIGNIN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "assignin(ws, var, integer_val)",
+        inputs: &ASSIGNIN_INTEGER_VALUE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Assignment clones the already evaluated value into the selected workspace without numeric conversion, preserving exact integer class, shape, authoritative storage, and resident provider ownership. The public builtin has no output.",
+    }];
+
 pub const DYNAMIC_WORKSPACE_ERROR_REQUIRES_VM: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.DYNAMIC_WORKSPACE.REQUIRES_VM",
     identifier: Some("RunMat:DynamicWorkspaceRequiresVm"),
@@ -128,6 +154,30 @@ pub const DYNAMIC_WORKSPACE_ERROR_REQUIRES_VM: BuiltinErrorDescriptor = BuiltinE
 
 pub const DYNAMIC_WORKSPACE_ERRORS: [BuiltinErrorDescriptor; 1] =
     [DYNAMIC_WORKSPACE_ERROR_REQUIRES_VM];
+
+pub const ASSIGNIN_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ASSIGNIN.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:assignin:TooManyOutputs"),
+    when: "One or more outputs are requested from assignin.",
+    message: "assignin: too many output arguments",
+};
+
+pub const ASSIGNIN_ERROR_INVALID_NAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ASSIGNIN.INVALID_NAME",
+    identifier: Some("RunMat:DynamicWorkspaceName"),
+    when: "The variable-name argument is not a valid MATLAB variable name.",
+    message: "assignin: invalid workspace variable name",
+};
+
+pub const ASSIGNIN_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    DYNAMIC_WORKSPACE_ERROR_REQUIRES_VM,
+    ASSIGNIN_ERROR_TOO_MANY_OUTPUTS,
+    ASSIGNIN_ERROR_INVALID_NAME,
+];
+
+pub fn assignin_too_many_outputs_error() -> crate::RuntimeError {
+    crate::runtime_descriptor_error(ASSIGNIN_BUILTIN_NAME, &ASSIGNIN_ERROR_TOO_MANY_OUTPUTS)
+}
 
 pub const EVAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &EVAL_SIGNATURES,
@@ -154,7 +204,7 @@ pub const ASSIGNIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ASSIGNIN_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DYNAMIC_WORKSPACE_ERRORS,
+    errors: &ASSIGNIN_ERRORS,
 };
 
 fn requires_vm_workspace_context(builtin: &'static str) -> crate::BuiltinResult<Value> {
@@ -223,6 +273,7 @@ pub fn evalin_builtin_registered(args: Vec<Value>) -> crate::BuiltinResult<Value
     sink = true,
     suppress_auto_output = true,
     descriptor(self::ASSIGNIN_DESCRIPTOR),
+    integer_capabilities(self::ASSIGNIN_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::introspection::dynamic_workspace"
 )]
 pub fn assignin_builtin_registered(args: Vec<Value>) -> crate::BuiltinResult<Value> {

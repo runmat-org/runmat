@@ -1,6 +1,6 @@
 [package]
 name = "runmat-server-client"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2021"
 description = "Authenticated public API client and auth helpers for RunMat server integrations"
 authors = ["Dystr Team"]
@@ -15,12 +15,16 @@ chrono = { workspace = true }
 dirs = "5.0"
 keyring = "2.3"
 rand = "0.8"
+runmat-execution = { workspace = true }
+runmat-package = { workspace = true }
 progenitor-client = "0.11"
 regress = "0.10"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+futures = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = "0.10"
+thiserror = { workspace = true }
 tokio = { workspace = true, features = ["net", "time"] }
 url = "2.5"
 uuid = { workspace = true, features = ["serde"] }

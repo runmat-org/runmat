@@ -1,6 +1,6 @@
 use anyhow::{anyhow, ensure, Result};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ImfilterOptions, ImfilterPadding};
-use runmat_builtins::Tensor;
+use runmat_value::Tensor;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
@@ -23,6 +23,16 @@ impl WgpuProvider {
         kernel: &GpuTensorHandle,
         options: &ImfilterOptions,
     ) -> Result<GpuTensorHandle> {
+        ensure!(
+            runmat_accelerate_api::handle_integer_type(image).is_none()
+                && runmat_accelerate_api::handle_integer_type(kernel).is_none(),
+            "imfilter: integer buffers must be converted before floating provider dispatch"
+        );
+        ensure!(
+            !runmat_accelerate_api::handle_is_logical(image)
+                && !runmat_accelerate_api::handle_is_logical(kernel),
+            "imfilter: logical buffers must be converted before floating provider dispatch"
+        );
         if std::env::var("RUNMAT_WGPU_DISABLE_IMFILTER")
             .ok()
             .and_then(|v| match v.trim().to_ascii_lowercase().as_str() {
@@ -496,7 +506,7 @@ impl WgpuProvider {
         let result =
             runtime_apply_imfilter_tensor(&image_tensor, &kernel_tensor, options, "imfilter")
                 .map_err(|err| anyhow!("{err}"))?;
-        let data_owned = result.data;
+        let data_owned = result.materialize_f64();
         let shape_owned = result.shape;
         let view = HostTensorView {
             data: &data_owned,

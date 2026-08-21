@@ -26,11 +26,11 @@ use runmat_accelerate_api::{
     SetdiffResult, SortComparison, SortOrder, SortResult, SortRowsColumnSpec,
     SpawnHandleConcurrency, UnionOptions, UnionResult, UniqueOptions, UniqueResult, WgpuBufferRef,
 };
-use runmat_builtins::{Tensor, Value};
 use runmat_runtime::builtins::common::shape::normalize_scalar_shape;
 use runmat_runtime::builtins::image::filters::fspecial::{
     spec_from_request as runtime_fspecial_spec_from_request, FspecialFilterSpec,
 };
+use runmat_value::{Tensor, Value};
 
 use runmat_runtime::builtins::math::linalg::ops::{
     mldivide_host_real_for_provider, mrdivide_host_real_for_provider,
@@ -83,6 +83,8 @@ mod image;
 mod indexing;
 #[path = "init.rs"]
 mod init;
+#[path = "ops/integer.rs"]
+mod integer;
 #[path = "ops/interpolation.rs"]
 mod interpolation;
 #[path = "ops/io.rs"]

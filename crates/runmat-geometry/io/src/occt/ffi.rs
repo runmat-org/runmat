@@ -1,3 +1,4 @@
+use sha2::Digest as _;
 use std::collections::BTreeMap;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
@@ -14,6 +15,22 @@ pub(crate) mod bridge {
         Brep,
     }
 
+    #[repr(u8)]
+    #[derive(Debug, Clone, Copy)]
+    enum OcctHealingEntityKind {
+        Vertex,
+        Edge,
+        Face,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctHealingRelationPayload {
+        kind: OcctHealingEntityKind,
+        path_segments: Vec<String>,
+        source_digest: Vec<u8>,
+        target_digest: Vec<u8>,
+    }
+
     #[derive(Debug, Clone, Copy)]
     struct OcctImportOptions {
         linear_deflection: f64,
@@ -21,6 +38,15 @@ pub(crate) mod bridge {
         relative_deflection: bool,
         max_triangles: u64,
         truncate_at_max_triangles: bool,
+        max_exact_representation_bytes: u64,
+        max_exact_entities: u64,
+        max_exact_identity_bytes: u64,
+        heal_sew: bool,
+        heal_orientation: bool,
+        heal_duplicates: bool,
+        heal_gaps: bool,
+        heal_short_edges_and_sliver_faces: bool,
+        maximum_healing_displacement: f64,
         cancel_token_id: u64,
     }
 
@@ -83,6 +109,264 @@ pub(crate) mod bridge {
     }
 
     #[derive(Debug, Clone)]
+    struct OcctExactShapePayload {
+        kernel_version: String,
+        kernel_abi: String,
+        representation: Vec<u8>,
+        compound_count: u64,
+        compsolid_count: u64,
+        solid_count: u64,
+        shell_count: u64,
+        face_count: u64,
+        wire_count: u64,
+        edge_count: u64,
+        vertex_count: u64,
+        kernel_valid: bool,
+        original_geometry_digest: Vec<u8>,
+        orientation_repaired: bool,
+        duplicates_consolidated: bool,
+        original_kernel_valid: bool,
+        post_duplicate_kernel_valid: bool,
+        post_sewing_kernel_valid: bool,
+        post_small_topology_kernel_valid: bool,
+        healing_identity_work_bytes: u64,
+        sewn: bool,
+        gaps_repaired: bool,
+        short_edges_simplified: bool,
+        sliver_faces_simplified: bool,
+        healing_relations: Vec<OcctHealingRelationPayload>,
+        maximum_healing_displacement: f64,
+        displacement_original_x: f64,
+        displacement_original_y: f64,
+        displacement_original_z: f64,
+        displacement_proposed_x: f64,
+        displacement_proposed_y: f64,
+        displacement_proposed_z: f64,
+        has_volume_properties: bool,
+        volume: f64,
+        surface_area: f64,
+        centroid_x: f64,
+        centroid_y: f64,
+        centroid_z: f64,
+        inertia_xx: f64,
+        inertia_yy: f64,
+        inertia_zz: f64,
+        inertia_xy: f64,
+        inertia_xz: f64,
+        inertia_yz: f64,
+        vertices: Vec<OcctExactVertexPayload>,
+        edges: Vec<OcctExactEdgePayload>,
+        faces: Vec<OcctExactFacePayload>,
+        wires: Vec<OcctExactWirePayload>,
+        coedges: Vec<OcctExactCoedgePayload>,
+        shells: Vec<OcctExactShellPayload>,
+        solids: Vec<OcctExactSolidPayload>,
+        lumps: Vec<OcctExactLumpPayload>,
+        definitions: Vec<OcctExactDefinitionPayload>,
+        occurrences: Vec<OcctExactOccurrencePayload>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctExactDefinitionPayload {
+        definition_index: u64,
+        representation: Vec<u8>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctExactOccurrencePayload {
+        occurrence_index: u64,
+        parent_occurrence_index: u64,
+        path_segments: Vec<String>,
+        definition_index: u64,
+        transform: Vec<f64>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctExactVertexPayload {
+        occurrence_index: u64,
+        shape_key: u64,
+        identity_digest: Vec<u8>,
+        point_x: f64,
+        point_y: f64,
+        point_z: f64,
+        tolerance: f64,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctExactEdgePayload {
+        occurrence_index: u64,
+        shape_key: u64,
+        identity_digest: Vec<u8>,
+        start_vertex_key: u64,
+        end_vertex_key: u64,
+        closed: bool,
+        periodic: bool,
+        degenerate: bool,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctExactFacePayload {
+        occurrence_index: u64,
+        shape_key: u64,
+        identity_digest: Vec<u8>,
+        reversed: bool,
+        outer_wire_key: u64,
+        inner_wire_keys: Vec<u64>,
+        periodic_u: bool,
+        periodic_v: bool,
+        singular: bool,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctExactWirePayload {
+        occurrence_index: u64,
+        shape_key: u64,
+        identity_digest: Vec<u8>,
+        face_key: u64,
+        reversed: bool,
+        coedge_keys: Vec<u64>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctExactCoedgePayload {
+        occurrence_index: u64,
+        coedge_key: u64,
+        face_key: u64,
+        wire_key: u64,
+        edge_key: u64,
+        reversed: bool,
+        has_pcurve: bool,
+        seam_image: i8,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctExactShellPayload {
+        occurrence_index: u64,
+        shape_key: u64,
+        identity_digest: Vec<u8>,
+        reversed: bool,
+        face_keys: Vec<u64>,
+        face_reversed: Vec<bool>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctExactSolidPayload {
+        occurrence_index: u64,
+        shape_key: u64,
+        identity_digest: Vec<u8>,
+        outer_shell_key: u64,
+        void_shell_keys: Vec<u64>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctExactLumpPayload {
+        occurrence_index: u64,
+        shape_key: u64,
+        identity_digest: Vec<u8>,
+        from_compsolid: bool,
+        solid_keys: Vec<u64>,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct OcctCurveRangePayload {
+        start: f64,
+        end: f64,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct OcctCurveDerivativesPayload {
+        point_x: f64,
+        point_y: f64,
+        point_z: f64,
+        first_x: f64,
+        first_y: f64,
+        first_z: f64,
+        second_x: f64,
+        second_y: f64,
+        second_z: f64,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct OcctCurveProjectionPayload {
+        parameter: f64,
+        point_x: f64,
+        point_y: f64,
+        point_z: f64,
+        distance: f64,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct OcctPcurveDerivativesPayload {
+        range_start: f64,
+        range_end: f64,
+        point_u: f64,
+        point_v: f64,
+        first_u: f64,
+        first_v: f64,
+        second_u: f64,
+        second_v: f64,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct OcctSurfacePropertiesPayload {
+        u_start: f64,
+        u_end: f64,
+        v_start: f64,
+        v_end: f64,
+        u_periodic: bool,
+        u_period: f64,
+        v_periodic: bool,
+        v_period: f64,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct OcctSurfaceDerivativesPayload {
+        point_x: f64,
+        point_y: f64,
+        point_z: f64,
+        du_x: f64,
+        du_y: f64,
+        du_z: f64,
+        dv_x: f64,
+        dv_y: f64,
+        dv_z: f64,
+        duu_x: f64,
+        duu_y: f64,
+        duu_z: f64,
+        duv_x: f64,
+        duv_y: f64,
+        duv_z: f64,
+        dvv_x: f64,
+        dvv_y: f64,
+        dvv_z: f64,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct OcctSurfaceProjectionPayload {
+        u: f64,
+        v: f64,
+        point_x: f64,
+        point_y: f64,
+        point_z: f64,
+        distance: f64,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct OcctMassPropertiesPayload {
+        volume: f64,
+        surface_area: f64,
+        centroid_x: f64,
+        centroid_y: f64,
+        centroid_z: f64,
+        inertia_xx: f64,
+        inertia_yy: f64,
+        inertia_zz: f64,
+        inertia_xy: f64,
+        inertia_xz: f64,
+        inertia_yz: f64,
+    }
+
+    #[derive(Debug, Clone)]
     struct OcctPreviewSessionStartPayload {
         session_id: u64,
         face_count: u64,
@@ -114,6 +398,93 @@ pub(crate) mod bridge {
             options: OcctImportOptions,
         ) -> Result<OcctImportPayload>;
 
+        fn import_exact_cad_bytes(
+            path: &str,
+            bytes: &[u8],
+            format: OcctCadFormat,
+            options: OcctImportOptions,
+        ) -> Result<OcctExactShapePayload>;
+
+        fn start_exact_evaluator_session(
+            representation: &[u8],
+            meters_per_source_unit: f64,
+        ) -> Result<u64>;
+
+        fn exact_curve_range(session_id: u64, shape_key: u64) -> Result<OcctCurveRangePayload>;
+
+        fn exact_curve_derivatives(
+            session_id: u64,
+            shape_key: u64,
+            parameter: f64,
+        ) -> Result<OcctCurveDerivativesPayload>;
+
+        fn exact_curve_arc_length(
+            session_id: u64,
+            shape_key: u64,
+            start: f64,
+            end: f64,
+            absolute_error_m: f64,
+        ) -> Result<f64>;
+
+        fn exact_curve_inverse_project(
+            session_id: u64,
+            shape_key: u64,
+            point_m: &[f64],
+            absolute_error_m: f64,
+        ) -> Result<OcctCurveProjectionPayload>;
+
+        fn exact_pcurve_derivatives(
+            session_id: u64,
+            face_key: u64,
+            wire_key: u64,
+            coedge_position: u64,
+            seam_image: i8,
+            parameter: f64,
+        ) -> Result<OcctPcurveDerivativesPayload>;
+
+        fn exact_pcurve_range(
+            session_id: u64,
+            face_key: u64,
+            wire_key: u64,
+            coedge_position: u64,
+            seam_image: i8,
+        ) -> Result<OcctCurveRangePayload>;
+
+        fn exact_trim_classify(
+            session_id: u64,
+            face_key: u64,
+            u: f64,
+            v: f64,
+            boundary_tolerance_uv: f64,
+        ) -> Result<i8>;
+
+        fn exact_surface_properties(
+            session_id: u64,
+            face_key: u64,
+        ) -> Result<OcctSurfacePropertiesPayload>;
+
+        fn exact_surface_derivatives(
+            session_id: u64,
+            face_key: u64,
+            u: f64,
+            v: f64,
+        ) -> Result<OcctSurfaceDerivativesPayload>;
+
+        fn exact_surface_closest_point(
+            session_id: u64,
+            face_key: u64,
+            point_m: &[f64],
+            absolute_error_m: f64,
+        ) -> Result<OcctSurfaceProjectionPayload>;
+
+        fn exact_mass_properties(
+            session_id: u64,
+            shape_keys: &[u64],
+            is_sheet_body: bool,
+        ) -> Result<OcctMassPropertiesPayload>;
+
+        fn close_exact_evaluator_session(session_id: u64);
+
         fn start_cad_preview_session(
             path: &str,
             bytes: &[u8],
@@ -131,6 +502,8 @@ pub(crate) mod bridge {
 
     extern "Rust" {
         fn occt_import_cancelled(cancel_token_id: u64) -> bool;
+        fn occt_exact_identity_digest(bytes: &[u8]) -> Vec<u8>;
+        fn occt_geometry_digest(bytes: &[u8]) -> Vec<u8>;
     }
 }
 
@@ -181,6 +554,17 @@ fn occt_import_cancelled(cancel_token_id: u64) -> bool {
         .and_then(|tokens| tokens.get(&cancel_token_id).cloned())
         .map(|flag| flag.load(Ordering::Relaxed))
         .unwrap_or(false)
+}
+
+fn occt_exact_identity_digest(bytes: &[u8]) -> Vec<u8> {
+    let mut hasher = sha2::Sha256::new();
+    sha2::Digest::update(&mut hasher, b"runmat.occt-persistent-shape-name\0");
+    sha2::Digest::update(&mut hasher, bytes);
+    sha2::Digest::finalize(hasher).to_vec()
+}
+
+fn occt_geometry_digest(bytes: &[u8]) -> Vec<u8> {
+    sha2::Sha256::digest(bytes).to_vec()
 }
 
 fn cancel_tokens() -> &'static Mutex<BTreeMap<u64, Arc<AtomicBool>>> {

@@ -15,10 +15,12 @@
   "tested": { "unit": "builtins::stats::random::sampling::tests", "integration": null },
   "description": "`unidrnd(n)` generates random integers from `1` through `n`. Size arguments can be supplied as separate dimensions or as a size vector.",
   "behaviors": [
-    "`n` must be a positive integer scalar or an array of positive integers.",
+    "`n` must contain positive integer-valued single or double values.",
+    "Native typed-integer `n` is a RunMat extension. It is gated before gather and admitted only when every value is exactly representable at the binary64 sampling boundary.",
     "Scalar `n` broadcasts over the requested output size.",
     "Array `n` requires the requested size to match the shape of `n`.",
-    "A single size argument creates a square matrix, following MATLAB random-size conventions."
+    "A single size argument creates a square matrix, following MATLAB random-size conventions.",
+    "Documented size controls are single or double. Native typed-integer sizes are a separately gated RunMat extension and are decoded exactly as structural extents."
   ],
   "examples": [
     { "description": "Scalar sample", "input": "r = unidrnd(10)" },

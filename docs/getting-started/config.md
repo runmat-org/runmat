@@ -1,10 +1,3 @@
----
-title: "Configuration Reference"
-category: "Getting Started"
-section: "1.5"
-last_updated: "May 30, 2026"
----
-
 # Configuration Reference
 
 RunMat utilizes a hierarchical configuration system that manages project-level metadata, source organization, and runtime execution parameters. The configuration is primarily driven by a manifest file (`runmat.toml` or `runmat.json`) and can be overridden by environment variables and CLI arguments.
@@ -79,10 +72,18 @@ utils = { path = "../utils", version = "0.1.0" }
 ```
 
 
-| Field     | Type   | Default | Notes                                                        |
-| --------- | ------ | ------- | ------------------------------------------------------------ |
-| `path`    | string | unset   | Local dependency path. Required for local composition today. |
-| `version` | string | unset   | Version metadata for dependency declaration.                 |
+| Field      | Type   | Default | Notes                                                                  |
+| ---------- | ------ | ------- | ---------------------------------------------------------------------- |
+| `path`     | string | unset   | Local dependency path; mutually exclusive with remote source fields.   |
+| `git`      | string | unset   | Credential-free HTTPS or SSH Git repository URL.                       |
+| `rev`      | string | unset   | Exact Git commit selector.                                             |
+| `tag`      | string | unset   | Mutable Git tag selector; mutually exclusive with `rev` and `branch`.  |
+| `branch`   | string | unset   | Mutable Git branch selector.                                           |
+| `subdir`   | string | `""`    | Package subdirectory inside a Git repository.                          |
+| `project`  | string | unset   | RunMat Server project ID.                                              |
+| `service`  | string | active Server | Credential-free HTTPS Server origin.                             |
+| `snapshot` | string | `main`  | Server snapshot tag or exact `snap_...` ID.                             |
+| `version`  | string | unset   | Version requirement or metadata for the dependency declaration.        |
 
 
 ### `[entrypoints.<name>]`
@@ -118,6 +119,41 @@ runmat run studies/bracket_static.fea
 runmat benchmark main --iterations 25 --jit
 ```
 
+## Desktop Project Reference
+
+Desktop project settings are stored in the same `runmat.toml` or `runmat.json` document as package, source, test, and runtime configuration. Updating Desktop settings preserves unrelated sections and comments.
+
+Legacy `.runmat` settings are migrated automatically into the project’s `runmat.toml` or `runmat.json` file.
+
+```toml
+[desktop.artifacts]
+root = ".artifacts"
+
+[desktop.run_history]
+mode = "budgeted"
+trace = true
+logs = "all"
+
+[desktop.script]
+clear_workspace_before_run = true
+clear_figures_before_run = true
+
+[desktop.notebook]
+on_error = "stop"
+rerun_after_cancel = "remaining"
+```
+
+| Section and key | Type | Default | Allowed values / notes |
+| --- | --- | --- | --- |
+| `desktop.artifacts.root` | string | `".artifacts"` | Project-relative subdirectory; absolute paths, `..`, and overlap with RunMat configuration/internal-state paths are rejected. |
+| `desktop.run_history.mode` | string | `"budgeted"` | `off`, `budgeted`, `full`. |
+| `desktop.run_history.trace` | boolean | `true` | Persists the trace channel with retained runs. |
+| `desktop.run_history.logs` | string | `"all"` | `off`, `errors`, `all`. |
+| `desktop.script.clear_workspace_before_run` | boolean | `true` | Clears workspace state before a script run. |
+| `desktop.script.clear_figures_before_run` | boolean | `true` | Clears figures before a script run. |
+| `desktop.notebook.on_error` | string | `"stop"` | `stop`, `continue`. |
+| `desktop.notebook.rerun_after_cancel` | string | `"remaining"` | `remaining`, `all`. |
+
 ## Runtime Reference
 
 All runtime settings are under `[runtime]`. Runtime settings control the behavior of the RunMat runtime.
@@ -128,7 +164,7 @@ All runtime settings are under `[runtime]`. Runtime settings control the behavio
 | Key               | Type    | Default | Notes                                                                                    |
 | ----------------- | ------- | ------- | ---------------------------------------------------------------------------------------- |
 | `callstack_limit` | integer | `200`   | Max retained call stack frames for diagnostics.                                          |
-| `error_namespace` | string  | `""`    | Error ID namespace. Empty value is normalized at startup by [language compatibility mode](/docs/runtime/getting-started/compatability) (set to `RunMat` in `compat = "runmat"` mode). |
+| `error_namespace` | string  | `""`    | Error ID namespace. Empty value is normalized at startup by [language compatibility mode](/docs/runtime/matlab-compatibility) (set to `RunMat` in `compat = "runmat"` mode). |
 | `verbose`         | boolean | `false` | Enables verbose execution output.                                                        |
 
 
@@ -140,7 +176,7 @@ All runtime settings are under `[runtime]`. Runtime settings control the behavio
 | `compat` | string | `"runmat"` | `runmat`, `matlab`, `strict` | Language compatibility mode. |
 
 
-See [MATLAB Language Compatability](/docs/runtime/getting-started/compatability) for more details on runtime language compatibility modes.
+See [MATLAB Language Compatibility](/docs/runtime/matlab-compatibility) for the compatibility modes and [MATLAB Language Extensions](/docs/runtime/getting-started/matlab-language-extensions) for the RunMat-only behavior controlled by those modes.
 
 ### `[runtime.jit]`
 
@@ -217,6 +253,7 @@ See [MATLAB Language Compatability](/docs/runtime/getting-started/compatability)
 | `format`     | string  | `"png"` | `png`, `svg`, `pdf`, `html`.     |
 | `dpi`        | integer | `300`   | Raster export DPI.               |
 | `output_dir` | string  | unset   | Default export output directory. |
+| `scene_budget_bytes` | integer | `8388608` | Maximum serialized figure-scene payload size used by Desktop/browser export and replay. |
 
 
 ### `[runtime.fea]`

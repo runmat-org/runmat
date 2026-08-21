@@ -29,7 +29,8 @@
   "behaviors": [
     "Returns a pp structure with `form`, `breaks`, `coefs`, `pieces`, `order`, and `dim` fields.",
     "The direct evaluation form extrapolates outside the sample range, matching MATLAB's standalone `spline` behavior.",
-    "Dense real numeric inputs are supported in the initial implementation."
+    "Dense real numeric inputs are supported in the initial implementation.",
+    "The documented storage classes for sample locations, sample values, and query points are single and double. Typed integer values in any of those roles are separate RunMat-only extensions and reject before interpolation if conversion to binary64 would round."
   ],
   "examples": [
     {

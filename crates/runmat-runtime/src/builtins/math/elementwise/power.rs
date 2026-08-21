@@ -1,12 +1,18 @@
 //! MATLAB-compatible `power` builtin (element-wise exponentiation) with GPU-aware semantics.
 
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CharArray, ComplexStorage, ComplexTensor, IntegerStorage, NumericStorage, Tensor, Value,
+};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -17,7 +23,9 @@ use crate::builtins::common::{
     broadcast::BroadcastPlan, gpu_helpers, map_control_flow_with_builtin,
     random_args::complex_tensor_into_value, random_args::keyword_of, tensor,
 };
-use crate::builtins::math::elementwise::integer_arithmetic::{try_integer_binary, IntegerBinaryOp};
+use crate::builtins::math::elementwise::integer_arithmetic::{
+    reject_integer_logical_operands, try_integer_binary, IntegerBinaryOp,
+};
 use crate::builtins::math::symbolic::{
     symbolic_binary, symbolic_binary_broadcast, SymbolicBinaryOp,
 };
@@ -40,8 +48,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes:
-        "Providers execute element-wise pow when both operands reside on the device; host fallbacks cover implicit expansion and complex inputs.",
+    notes: "Providers execute floating element-wise pow when both operands reside on the device; integer operands gather for exact exponent-domain validation and arithmetic.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::power")]
@@ -66,6 +73,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "power";
+
+pub const POWER_LIKE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "power-like-prototype",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "power with a 'like' output prototype is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PowerLikePrototypeExtension"),
+};
+pub const POWER_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [POWER_LIKE_EXTENSION];
+const POWER_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability { name: "A", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Integer bases preserve their class, reject complex integer storage, and require a nonnegative integer-valued exponent." },
+    BuiltinIntegerInputCapability { name: "B", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Integer exponents are validated exactly before exponentiation and compatible dimensions expand implicitly." },
+];
+pub const POWER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "C = power(A, B)", inputs: &POWER_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput, overflow: BuiltinIntegerOverflowRule::Saturate, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::BroadcastCompatible, notes: "Integer powers use exact exponent validation and saturating exponentiation in the preserved integer class. Resident integer values gather authoritatively before the exact host path rather than entering floating provider pow." }];
 
 const POWER_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "C",
@@ -210,11 +230,28 @@ fn power_error_with_detail(
     keywords = "power,element-wise,.^,gpu,broadcast",
     accel = "elementwise",
     type_resolver(numeric_binary_type),
+    extensions(POWER_EXTENSIONS),
+    integer_capabilities(POWER_INTEGER_CAPABILITIES),
     descriptor(crate::builtins::math::elementwise::power::POWER_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::power"
 )]
 async fn power_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::is_typed_complex_integer(&lhs)
+        || crate::builtins::common::validation::is_typed_complex_integer(&rhs)
+        || rest
+            .iter()
+            .any(crate::builtins::common::validation::is_typed_complex_integer)
+    {
+        return Err(builtin_error("complex integer arithmetic is not supported"));
+    }
+    reject_integer_logical_operands(&lhs, &rhs, BUILTIN_NAME).map_err(builtin_error)?;
     let template = parse_output_template(&rest)?;
+    if matches!(template, OutputTemplate::Like(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &POWER_LIKE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let base_result = match (lhs, rhs) {
         (Value::GpuTensor(la), Value::GpuTensor(lb)) => power_gpu_pair(la, lb).await,
         (Value::GpuTensor(la), rhs) => power_gpu_host_left(la, rhs).await,
@@ -273,9 +310,7 @@ async fn apply_output_template(value: Value, template: &OutputTemplate) -> Built
 fn scalar_real_value(value: &Value) -> Option<f64> {
     match value {
         Value::Num(n) => Some(*n),
-        Value::Int(i) => Some(i.to_f64()),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => t.data.first().copied(),
         Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
         Value::CharArray(ca) if ca.rows * ca.cols == 1 => {
             Some(ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
@@ -287,12 +322,16 @@ fn scalar_real_value(value: &Value) -> Option<f64> {
 fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
     match value {
         Value::Complex(re, im) => Some((*re, *im)),
-        Value::ComplexTensor(ct) if ct.data.len() == 1 => ct.data.first().copied(),
         _ => None,
     }
 }
 
 fn scalar_power_value(lhs: &Value, rhs: &Value) -> Option<Value> {
+    if matches!(lhs, Value::Tensor(_) | Value::ComplexTensor(_))
+        || matches!(rhs, Value::Tensor(_) | Value::ComplexTensor(_))
+    {
+        return None;
+    }
     let base_is_complex = matches!(lhs, Value::Complex(_, _) | Value::ComplexTensor(_));
     let exp_is_complex = matches!(rhs, Value::Complex(_, _) | Value::ComplexTensor(_));
     let base = scalar_complex_value(lhs).or_else(|| scalar_real_value(lhs).map(|v| (v, 0.0)))?;
@@ -325,8 +364,9 @@ fn power_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     // points. An exact-integer operand on the other side must not claim this
     // operation before the character operand is converted below.
     if !matches!(lhs, Value::CharArray(_)) && !matches!(rhs, Value::CharArray(_)) {
-        if let Some(result) = try_integer_binary(&lhs, &rhs, IntegerBinaryOp::Power, BUILTIN_NAME)
-            .map_err(builtin_error)?
+        if let Some(result) =
+            try_integer_binary(&lhs, &rhs, IntegerBinaryOp::Power, BUILTIN_NAME)
+                .map_err(|error| power_error_with_detail(&POWER_ERROR_INVALID_INPUT, error))?
         {
             return Ok(result);
         }
@@ -335,64 +375,164 @@ fn power_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
         return Ok(result);
     }
     match (classify_operand(lhs)?, classify_operand(rhs)?) {
-        (PowerOperand::Real(a), PowerOperand::Real(b)) => power_real_real(&a, &b),
+        (PowerOperand::Real(a), PowerOperand::Real(b)) => power_real_real(a, b),
         (PowerOperand::Complex(a), PowerOperand::Complex(b)) => power_complex_complex(&a, &b),
         (PowerOperand::Complex(a), PowerOperand::Real(b)) => power_complex_real(&a, &b),
         (PowerOperand::Real(a), PowerOperand::Complex(b)) => power_real_complex(&a, &b),
     }
 }
 
-fn power_real_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Value> {
+fn power_real_real(lhs: Tensor, rhs: Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
         .map_err(|err| power_error_with_detail(&POWER_ERROR_SIZE_MISMATCH, &err))?;
-    if plan.is_empty() {
-        let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| builtin_error(format!("power: {e}")))?;
-        return Ok(tensor::tensor_into_value(tensor));
-    }
-    let mut out = Vec::with_capacity(plan.len());
-    let mut all_im_zero = true;
-    for (_, idx_lhs, idx_rhs) in plan.iter() {
-        let base = lhs.data[idx_lhs];
-        let exponent = rhs.data[idx_rhs];
-        let pow = base.powf(exponent);
-        if pow.is_nan() {
-            let (re, im) = complex_pow_scalar(base, 0.0, exponent, 0.0);
-            if im.abs() > 1e-12 {
-                all_im_zero = false;
+    let output_shape = plan.output_shape().to_vec();
+    let lhs = lhs
+        .into_numeric_storage()
+        .map_err(|e| builtin_error(format!("power: {e}")))?;
+    let rhs = rhs
+        .into_numeric_storage()
+        .map_err(|e| builtin_error(format!("power: {e}")))?;
+    match (lhs, rhs) {
+        (NumericStorage::F64(lhs), NumericStorage::F64(rhs)) => {
+            let mut output = Vec::with_capacity(plan.len());
+            for (_, lhs_index, rhs_index) in plan.iter() {
+                output.push(power_real_pair_f64(lhs[lhs_index], rhs[rhs_index]));
             }
-            out.push((re, im));
-        } else {
-            out.push((pow, 0.0));
+            finish_real_power_f64(output, output_shape)
         }
+        (NumericStorage::F32(lhs), NumericStorage::F32(rhs)) => {
+            let mut output = Vec::with_capacity(plan.len());
+            for (_, lhs_index, rhs_index) in plan.iter() {
+                output.push(power_real_pair_f32(lhs[lhs_index], rhs[rhs_index]));
+            }
+            finish_real_power_f32(output, output_shape)
+        }
+        (NumericStorage::F32(lhs), NumericStorage::F64(rhs)) => {
+            let mut output = Vec::with_capacity(plan.len());
+            for (_, lhs_index, rhs_index) in plan.iter() {
+                output.push(power_real_pair_mixed(
+                    f64::from(lhs[lhs_index]),
+                    rhs[rhs_index],
+                ));
+            }
+            finish_real_power_f32(output, output_shape)
+        }
+        (NumericStorage::F64(lhs), NumericStorage::F32(rhs)) => {
+            let mut output = Vec::with_capacity(plan.len());
+            for (_, lhs_index, rhs_index) in plan.iter() {
+                output.push(power_real_pair_mixed(
+                    lhs[lhs_index],
+                    f64::from(rhs[rhs_index]),
+                ));
+            }
+            finish_real_power_f32(output, output_shape)
+        }
+        (lhs, rhs) => Err(builtin_error(format!(
+            "power: integer {} or {} storage did not use the exact integer arithmetic path",
+            lhs.class_name(),
+            rhs.class_name()
+        ))),
     }
-    if all_im_zero {
-        let real_data: Vec<f64> = out.into_iter().map(|(re, _)| re).collect();
-        let tensor = Tensor::new(real_data, plan.output_shape().to_vec())
-            .map_err(|e| builtin_error(format!("power: {e}")))?;
-        Ok(tensor::tensor_into_value(tensor))
+}
+
+fn power_real_pair_f64(base: f64, exponent: f64) -> (f64, f64) {
+    let value = base.powf(exponent);
+    if value.is_nan() {
+        complex_pow_scalar(base, 0.0, exponent, 0.0)
     } else {
-        let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
+        (value, 0.0)
+    }
+}
+
+fn power_real_pair_f32(base: f32, exponent: f32) -> (f32, f32) {
+    let value = base.powf(exponent);
+    if value.is_nan() {
+        complex_pow_scalar_f32(base, 0.0, exponent, 0.0)
+    } else {
+        (value, 0.0)
+    }
+}
+
+fn power_real_pair_mixed(base: f64, exponent: f64) -> (f32, f32) {
+    let (real, imag) = power_real_pair_f64(base, exponent);
+    (real as f32, imag as f32)
+}
+
+fn finish_real_power_f64(output: Vec<(f64, f64)>, shape: Vec<usize>) -> BuiltinResult<Value> {
+    if output.iter().any(|value| value.1.abs() > 1e-12) {
+        let tensor = ComplexTensor::from_complex_storage(ComplexStorage::F64(output), shape)
             .map_err(|e| builtin_error(format!("power: {e}")))?;
         Ok(complex_tensor_into_value(tensor))
+    } else {
+        let storage = NumericStorage::F64(output.into_iter().map(|value| value.0).collect());
+        let tensor = Tensor::from_numeric_storage(storage, shape)
+            .map_err(|e| builtin_error(format!("power: {e}")))?;
+        Ok(tensor::tensor_into_value(tensor))
+    }
+}
+
+fn finish_real_power_f32(output: Vec<(f32, f32)>, shape: Vec<usize>) -> BuiltinResult<Value> {
+    if output.iter().any(|value| value.1.abs() > 1e-6) {
+        let tensor = ComplexTensor::from_complex_storage(ComplexStorage::F32(output), shape)
+            .map_err(|e| builtin_error(format!("power: {e}")))?;
+        Ok(complex_tensor_into_value(tensor))
+    } else {
+        let storage = NumericStorage::F32(output.into_iter().map(|value| value.0).collect());
+        let tensor = Tensor::from_numeric_storage(storage, shape)
+            .map_err(|e| builtin_error(format!("power: {e}")))?;
+        Ok(tensor::tensor_into_value(tensor))
     }
 }
 
 fn power_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
         .map_err(|err| power_error_with_detail(&POWER_ERROR_SIZE_MISMATCH, &err))?;
-    if plan.is_empty() {
-        let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| builtin_error(format!("power: {e}")))?;
-        return Ok(complex_tensor_into_value(tensor));
-    }
-    let mut out = vec![(0.0f64, 0.0f64); plan.len()];
-    for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
-        let (ar, ai) = lhs.data[idx_lhs];
-        let (br, bi) = rhs.data[idx_rhs];
-        out[out_idx] = complex_pow_scalar(ar, ai, br, bi);
-    }
-    let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
+    let output = match (lhs.complex_storage(), rhs.complex_storage()) {
+        (ComplexStorage::F64(lhs), ComplexStorage::F64(rhs)) => {
+            let mut output = vec![(0.0f64, 0.0f64); plan.len()];
+            for (output_index, lhs_index, rhs_index) in plan.iter() {
+                let (br, bi) = lhs[lhs_index];
+                let (er, ei) = rhs[rhs_index];
+                output[output_index] = complex_pow_scalar(br, bi, er, ei);
+            }
+            ComplexStorage::F64(output)
+        }
+        (ComplexStorage::F32(lhs), ComplexStorage::F32(rhs)) => {
+            let mut output = vec![(0.0f32, 0.0f32); plan.len()];
+            for (output_index, lhs_index, rhs_index) in plan.iter() {
+                let (br, bi) = lhs[lhs_index];
+                let (er, ei) = rhs[rhs_index];
+                output[output_index] = complex_pow_scalar_f32(br, bi, er, ei);
+            }
+            ComplexStorage::F32(output)
+        }
+        (ComplexStorage::F32(lhs), ComplexStorage::F64(rhs)) => {
+            let mut output = vec![(0.0f32, 0.0f32); plan.len()];
+            for (output_index, lhs_index, rhs_index) in plan.iter() {
+                let (br, bi) = lhs[lhs_index];
+                let (er, ei) = rhs[rhs_index];
+                let value = complex_pow_scalar(f64::from(br), f64::from(bi), er, ei);
+                output[output_index] = (value.0 as f32, value.1 as f32);
+            }
+            ComplexStorage::F32(output)
+        }
+        (ComplexStorage::F64(lhs), ComplexStorage::F32(rhs)) => {
+            let mut output = vec![(0.0f32, 0.0f32); plan.len()];
+            for (output_index, lhs_index, rhs_index) in plan.iter() {
+                let (br, bi) = lhs[lhs_index];
+                let (er, ei) = rhs[rhs_index];
+                let value = complex_pow_scalar(br, bi, f64::from(er), f64::from(ei));
+                output[output_index] = (value.0 as f32, value.1 as f32);
+            }
+            ComplexStorage::F32(output)
+        }
+        _ => {
+            return Err(builtin_error(
+                "power: complex integer arithmetic is not supported",
+            ))
+        }
+    };
+    let tensor = ComplexTensor::from_complex_storage(output, plan.output_shape().to_vec())
         .map_err(|e| builtin_error(format!("power: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
 }
@@ -400,18 +540,12 @@ fn power_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinRes
 fn power_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
         .map_err(|err| power_error_with_detail(&POWER_ERROR_SIZE_MISMATCH, &err))?;
-    if plan.is_empty() {
-        let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| builtin_error(format!("power: {e}")))?;
-        return Ok(complex_tensor_into_value(tensor));
-    }
-    let mut out = vec![(0.0f64, 0.0f64); plan.len()];
-    for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
-        let (ar, ai) = lhs.data[idx_lhs];
-        let exponent = rhs.data[idx_rhs];
-        out[out_idx] = complex_pow_scalar(ar, ai, exponent, 0.0);
-    }
-    let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
+    let rhs = rhs
+        .clone()
+        .into_numeric_storage()
+        .map_err(|e| builtin_error(format!("power: {e}")))?;
+    let output = power_complex_real_storage(lhs.complex_storage(), &rhs, &plan)?;
+    let tensor = ComplexTensor::from_complex_storage(output, plan.output_shape().to_vec())
         .map_err(|e| builtin_error(format!("power: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
 }
@@ -419,20 +553,112 @@ fn power_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value>
 fn power_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
         .map_err(|err| power_error_with_detail(&POWER_ERROR_SIZE_MISMATCH, &err))?;
-    if plan.is_empty() {
-        let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| builtin_error(format!("power: {e}")))?;
-        return Ok(complex_tensor_into_value(tensor));
-    }
-    let mut out = vec![(0.0f64, 0.0f64); plan.len()];
-    for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
-        let base = lhs.data[idx_lhs];
-        let (br, bi) = rhs.data[idx_rhs];
-        out[out_idx] = complex_pow_scalar(base, 0.0, br, bi);
-    }
-    let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
+    let lhs = lhs
+        .clone()
+        .into_numeric_storage()
+        .map_err(|e| builtin_error(format!("power: {e}")))?;
+    let output = power_real_complex_storage(&lhs, rhs.complex_storage(), &plan)?;
+    let tensor = ComplexTensor::from_complex_storage(output, plan.output_shape().to_vec())
         .map_err(|e| builtin_error(format!("power: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
+}
+
+fn power_complex_real_storage(
+    base: &ComplexStorage,
+    exponent: &NumericStorage,
+    plan: &BroadcastPlan,
+) -> BuiltinResult<ComplexStorage> {
+    Ok(match (base, exponent) {
+        (ComplexStorage::F64(base), NumericStorage::F64(exponent)) => {
+            let mut output = vec![(0.0f64, 0.0f64); plan.len()];
+            for (output_index, base_index, exponent_index) in plan.iter() {
+                let (br, bi) = base[base_index];
+                output[output_index] = complex_pow_scalar(br, bi, exponent[exponent_index], 0.0);
+            }
+            ComplexStorage::F64(output)
+        }
+        (ComplexStorage::F32(base), NumericStorage::F32(exponent)) => {
+            let mut output = vec![(0.0f32, 0.0f32); plan.len()];
+            for (output_index, base_index, exponent_index) in plan.iter() {
+                let (br, bi) = base[base_index];
+                output[output_index] =
+                    complex_pow_scalar_f32(br, bi, exponent[exponent_index], 0.0);
+            }
+            ComplexStorage::F32(output)
+        }
+        (ComplexStorage::F32(base), NumericStorage::F64(exponent)) => {
+            let mut output = vec![(0.0f32, 0.0f32); plan.len()];
+            for (output_index, base_index, exponent_index) in plan.iter() {
+                let (br, bi) = base[base_index];
+                let value =
+                    complex_pow_scalar(f64::from(br), f64::from(bi), exponent[exponent_index], 0.0);
+                output[output_index] = (value.0 as f32, value.1 as f32);
+            }
+            ComplexStorage::F32(output)
+        }
+        (ComplexStorage::F64(base), NumericStorage::F32(exponent)) => {
+            let mut output = vec![(0.0f32, 0.0f32); plan.len()];
+            for (output_index, base_index, exponent_index) in plan.iter() {
+                let (br, bi) = base[base_index];
+                let value = complex_pow_scalar(br, bi, f64::from(exponent[exponent_index]), 0.0);
+                output[output_index] = (value.0 as f32, value.1 as f32);
+            }
+            ComplexStorage::F32(output)
+        }
+        _ => {
+            return Err(builtin_error(
+                "power: integer operands did not use the exact integer arithmetic path",
+            ))
+        }
+    })
+}
+
+fn power_real_complex_storage(
+    base: &NumericStorage,
+    exponent: &ComplexStorage,
+    plan: &BroadcastPlan,
+) -> BuiltinResult<ComplexStorage> {
+    Ok(match (base, exponent) {
+        (NumericStorage::F64(base), ComplexStorage::F64(exponent)) => {
+            let mut output = vec![(0.0f64, 0.0f64); plan.len()];
+            for (output_index, base_index, exponent_index) in plan.iter() {
+                let (er, ei) = exponent[exponent_index];
+                output[output_index] = complex_pow_scalar(base[base_index], 0.0, er, ei);
+            }
+            ComplexStorage::F64(output)
+        }
+        (NumericStorage::F32(base), ComplexStorage::F32(exponent)) => {
+            let mut output = vec![(0.0f32, 0.0f32); plan.len()];
+            for (output_index, base_index, exponent_index) in plan.iter() {
+                let (er, ei) = exponent[exponent_index];
+                output[output_index] = complex_pow_scalar_f32(base[base_index], 0.0, er, ei);
+            }
+            ComplexStorage::F32(output)
+        }
+        (NumericStorage::F32(base), ComplexStorage::F64(exponent)) => {
+            let mut output = vec![(0.0f32, 0.0f32); plan.len()];
+            for (output_index, base_index, exponent_index) in plan.iter() {
+                let (er, ei) = exponent[exponent_index];
+                let value = complex_pow_scalar(f64::from(base[base_index]), 0.0, er, ei);
+                output[output_index] = (value.0 as f32, value.1 as f32);
+            }
+            ComplexStorage::F32(output)
+        }
+        (NumericStorage::F64(base), ComplexStorage::F32(exponent)) => {
+            let mut output = vec![(0.0f32, 0.0f32); plan.len()];
+            for (output_index, base_index, exponent_index) in plan.iter() {
+                let (er, ei) = exponent[exponent_index];
+                let value = complex_pow_scalar(base[base_index], 0.0, f64::from(er), f64::from(ei));
+                output[output_index] = (value.0 as f32, value.1 as f32);
+            }
+            ComplexStorage::F32(output)
+        }
+        _ => {
+            return Err(builtin_error(
+                "power: integer operands did not use the exact integer arithmetic path",
+            ))
+        }
+    })
 }
 
 enum PowerOperand {
@@ -445,10 +671,6 @@ fn classify_operand(value: Value) -> BuiltinResult<PowerOperand> {
         Value::Tensor(t) => Ok(PowerOperand::Real(t)),
         Value::Num(n) => Ok(PowerOperand::Real(
             Tensor::new(vec![n], vec![1, 1]).map_err(|e| builtin_error(format!("power: {e}")))?,
-        )),
-        Value::Int(i) => Ok(PowerOperand::Real(
-            Tensor::new(vec![i.to_f64()], vec![1, 1])
-                .map_err(|e| builtin_error(format!("power: {e}")))?,
         )),
         Value::Bool(b) => Ok(PowerOperand::Real(
             Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
@@ -482,6 +704,17 @@ fn char_array_to_tensor(chars: &CharArray) -> BuiltinResult<Tensor> {
 }
 
 async fn power_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> BuiltinResult<Value> {
+    if runmat_accelerate_api::handle_integer_type(&lhs).is_some()
+        || runmat_accelerate_api::handle_integer_type(&rhs).is_some()
+    {
+        let host_lhs = gpu_helpers::gather_tensor_async(&lhs)
+            .await
+            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+        let host_rhs = gpu_helpers::gather_tensor_async(&rhs)
+            .await
+            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+        return power_host(Value::Tensor(host_lhs), Value::Tensor(host_rhs));
+    }
     if let Some(provider) = runmat_accelerate_api::provider() {
         if lhs.shape == rhs.shape {
             if let Ok(handle) = provider.elem_pow(&lhs, &rhs).await {
@@ -537,12 +770,8 @@ async fn power_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> BuiltinRe
 fn broadcast_reps(a: &[usize], b: &[usize]) -> Option<(Vec<usize>, Vec<usize>, Vec<usize>)> {
     let rank = a.len().max(b.len()).max(1);
     let mut out = vec![1usize; rank];
-    let mut aa = vec![1usize; rank];
-    let mut bb = vec![1usize; rank];
-    for i in 0..rank {
-        aa[i] = *a.get(i).unwrap_or(&1);
-        bb[i] = *b.get(i).unwrap_or(&1);
-    }
+    let aa = crate::builtins::common::broadcast::align_shape(a, rank);
+    let bb = crate::builtins::common::broadcast::align_shape(b, rank);
     for i in 0..rank {
         let (ad, bd) = (aa[i], bb[i]);
         if ad == bd {
@@ -572,8 +801,23 @@ async fn power_gpu_host_left(lhs: GpuTensorHandle, rhs: Value) -> BuiltinResult<
             .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
         return power_host(Value::Tensor(host_lhs), host_rhs);
     }
+    if runmat_accelerate_api::handle_integer_type(&lhs).is_some() || is_integer_value(&rhs) {
+        let host_lhs = gpu_helpers::gather_tensor_async(&lhs)
+            .await
+            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+        return power_host(Value::Tensor(host_lhs), rhs);
+    }
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(scalar) = extract_scalar_f64(&rhs)? {
+            if let Some(uploaded) =
+                gpu_helpers::upload_exact_integer_scalar_like(provider, &lhs, scalar)
+            {
+                let result = provider.elem_pow(&lhs, &uploaded).await;
+                let _ = provider.free(&uploaded);
+                if let Ok(handle) = result {
+                    return Ok(Value::GpuTensor(handle));
+                }
+            }
             if let Ok(filled) = provider.fill_like(&lhs, scalar) {
                 if let Ok(handle) = provider.elem_pow(&lhs, &filled).await {
                     let _ = provider.free(&filled);
@@ -583,11 +827,7 @@ async fn power_gpu_host_left(lhs: GpuTensorHandle, rhs: Value) -> BuiltinResult<
             }
         } else if let Some(tensor_rhs) = value_to_real_tensor_for_gpu(&rhs).await? {
             if tensor_rhs.shape == lhs.shape {
-                let view = HostTensorView {
-                    data: &tensor_rhs.data,
-                    shape: &tensor_rhs.shape,
-                };
-                if let Ok(uploaded) = provider.upload(&view) {
+                if let Ok(uploaded) = gpu_helpers::upload_tensor(provider, &tensor_rhs) {
                     let result = provider.elem_pow(&lhs, &uploaded).await;
                     let _ = provider.free(&uploaded);
                     if let Ok(handle) = result {
@@ -612,8 +852,23 @@ async fn power_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> BuiltinResult
             .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
         return power_host(host_lhs, Value::Tensor(host_rhs));
     }
+    if is_integer_value(&lhs) || runmat_accelerate_api::handle_integer_type(&rhs).is_some() {
+        let host_rhs = gpu_helpers::gather_tensor_async(&rhs)
+            .await
+            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+        return power_host(lhs, Value::Tensor(host_rhs));
+    }
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(scalar) = extract_scalar_f64(&lhs)? {
+            if let Some(uploaded) =
+                gpu_helpers::upload_exact_integer_scalar_like(provider, &rhs, scalar)
+            {
+                let result = provider.elem_pow(&uploaded, &rhs).await;
+                let _ = provider.free(&uploaded);
+                if let Ok(handle) = result {
+                    return Ok(Value::GpuTensor(handle));
+                }
+            }
             if let Ok(filled) = provider.fill_like(&rhs, scalar) {
                 if let Ok(handle) = provider.elem_pow(&filled, &rhs).await {
                     let _ = provider.free(&filled);
@@ -623,11 +878,7 @@ async fn power_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> BuiltinResult
             }
         } else if let Some(tensor_lhs) = value_to_real_tensor_for_gpu(&lhs).await? {
             if tensor_lhs.shape == rhs.shape {
-                let view = HostTensorView {
-                    data: &tensor_lhs.data,
-                    shape: &tensor_lhs.shape,
-                };
-                if let Ok(uploaded) = provider.upload(&view) {
+                if let Ok(uploaded) = gpu_helpers::upload_tensor(provider, &tensor_lhs) {
                     let result = provider.elem_pow(&uploaded, &rhs).await;
                     let _ = provider.free(&uploaded);
                     if let Ok(handle) = result {
@@ -659,9 +910,8 @@ async fn gather_value(value: Value) -> BuiltinResult<Value> {
 fn extract_scalar_f64(value: &Value) -> BuiltinResult<Option<f64>> {
     match value {
         Value::Num(n) => Ok(Some(*n)),
-        Value::Int(i) => Ok(Some(i.to_f64())),
         Value::Bool(b) => Ok(Some(if *b { 1.0 } else { 0.0 })),
-        Value::Tensor(t) if t.data.len() == 1 => Ok(Some(t.data[0])),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(Some(tensor::tensor_value_f64(t, 0))),
         Value::LogicalArray(l) if l.data.len() == 1 => {
             Ok(Some(if l.data[0] != 0 { 1.0 } else { 0.0 }))
         }
@@ -679,7 +929,7 @@ async fn value_to_real_tensor_for_gpu(value: &Value) -> BuiltinResult<Option<Ten
             Tensor::new(vec![*n], vec![1, 1]).map_err(|e| builtin_error(format!("power: {e}")))?,
         )),
         Value::Int(i) => Ok(Some(
-            Tensor::new(vec![i.to_f64()], vec![1, 1])
+            Tensor::new_integer(IntegerStorage::from_scalar(i.clone()), vec![1, 1])
                 .map_err(|e| builtin_error(format!("power: {e}")))?,
         )),
         Value::Bool(b) => Ok(Some(
@@ -702,6 +952,11 @@ async fn value_to_real_tensor_for_gpu(value: &Value) -> BuiltinResult<Option<Ten
 
 fn is_complex_value(value: &Value) -> bool {
     matches!(value, Value::Complex(_, _) | Value::ComplexTensor(_))
+}
+
+fn is_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
 }
 
 fn complex_pow_scalar(base_re: f64, base_im: f64, exp_re: f64, exp_im: f64) -> (f64, f64) {
@@ -739,6 +994,41 @@ fn complex_pow_scalar(base_re: f64, base_im: f64, exp_re: f64, exp_im: f64) -> (
     (mag * b.cos(), mag * b.sin())
 }
 
+fn complex_pow_scalar_f32(base_re: f32, base_im: f32, exp_re: f32, exp_im: f32) -> (f32, f32) {
+    if base_re == 0.0 && base_im == 0.0 {
+        if exp_re == 0.0 && exp_im == 0.0 {
+            return (1.0, 0.0);
+        }
+        if exp_im == 0.0 {
+            if exp_re > 0.0 {
+                return (0.0, 0.0);
+            }
+            if exp_re < 0.0 {
+                return (f32::INFINITY, 0.0);
+            }
+            return (f32::NAN, f32::NAN);
+        }
+        if exp_re > 0.0 {
+            return (0.0, 0.0);
+        }
+        if exp_re < 0.0 {
+            return (f32::INFINITY, f32::NAN);
+        }
+        return (f32::NAN, f32::NAN);
+    }
+
+    let radius = base_re.hypot(base_im);
+    if radius == 0.0 {
+        return (0.0, 0.0);
+    }
+    let theta = base_im.atan2(base_re);
+    let log_radius = radius.ln();
+    let real = exp_re * log_radius - exp_im * theta;
+    let imag = exp_re * theta + exp_im * log_radius;
+    let magnitude = real.exp();
+    (magnitude * imag.cos(), magnitude * imag.sin())
+}
+
 async fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<Value> {
     let analysed = analyse_like_prototype(prototype).await?;
     match analysed.class {
@@ -772,7 +1062,7 @@ async fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<
                     .map_err(|e| builtin_error(format!("power: {e}")))?,
             ),
             Value::Int(i) => upload_tensor(
-                Tensor::new(vec![i.to_f64()], vec![1, 1])
+                Tensor::new_integer(IntegerStorage::from_scalar(i), vec![1, 1])
                     .map_err(|e| builtin_error(format!("power: {e}")))?,
             ),
             Value::Bool(b) => upload_tensor(
@@ -799,13 +1089,8 @@ fn upload_tensor(tensor: Tensor) -> BuiltinResult<Value> {
             "no acceleration provider available to honour GPU output",
         ));
     };
-    let view = HostTensorView {
-        data: &tensor.data,
-        shape: &tensor.shape,
-    };
-    let handle = provider
-        .upload(&view)
-        .map_err(|e| power_error_with_detail(&POWER_ERROR_INTERNAL, e.to_string()))?;
+    let handle = gpu_helpers::upload_tensor(provider, &tensor)
+        .map_err(|e| power_error_with_detail(&POWER_ERROR_INTERNAL, &e))?;
     Ok(Value::GpuTensor(handle))
 }
 
@@ -814,8 +1099,20 @@ fn real_to_complex(value: Value) -> BuiltinResult<Value> {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
         Value::Tensor(t) => {
-            let data: Vec<(f64, f64)> = t.data.iter().map(|&v| (v, 0.0)).collect();
-            let tensor = ComplexTensor::new(data, t.shape.clone())
+            let shape = t.shape.clone();
+            let storage = t
+                .into_numeric_storage()
+                .map_err(|e| builtin_error(format!("power: {e}")))?;
+            let storage = match storage {
+                NumericStorage::F64(values) => {
+                    ComplexStorage::F64(values.into_iter().map(|value| (value, 0.0)).collect())
+                }
+                NumericStorage::F32(values) => {
+                    ComplexStorage::F32(values.into_iter().map(|value| (value, 0.0)).collect())
+                }
+                storage => promote_integer_real_storage_to_complex(storage),
+            };
+            let tensor = ComplexTensor::from_complex_storage(storage, shape)
                 .map_err(|e| builtin_error(format!("power: {e}")))?;
             Ok(complex_tensor_into_value(tensor))
         }
@@ -825,7 +1122,11 @@ fn real_to_complex(value: Value) -> BuiltinResult<Value> {
             real_to_complex(Value::Tensor(tensor))
         }
         Value::Bool(b) => real_to_complex(Value::Num(if b { 1.0 } else { 0.0 })),
-        Value::Int(i) => real_to_complex(Value::Num(i.to_f64())),
+        Value::Int(i) => {
+            let tensor = Tensor::new_integer(IntegerStorage::from_scalar(i), vec![1, 1])
+                .map_err(|e| builtin_error(format!("power: {e}")))?;
+            real_to_complex(Value::Tensor(tensor))
+        }
         other => Err(power_error_with_detail(
             &POWER_ERROR_INVALID_INPUT,
             format!(
@@ -834,6 +1135,16 @@ fn real_to_complex(value: Value) -> BuiltinResult<Value> {
             ),
         )),
     }
+}
+
+fn promote_integer_real_storage_to_complex(storage: NumericStorage) -> ComplexStorage {
+    ComplexStorage::F64(
+        storage
+            .materialize_f64()
+            .into_iter()
+            .map(|value| (value, 0.0))
+            .collect(),
+    )
 }
 
 #[derive(Clone, Copy)]
@@ -887,8 +1198,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{
-        IntValue, IntegerStorage, ResolveContext, SymbolicArray, SymbolicExpr, Tensor, Type,
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{
+        ComplexTensor, IntValue, IntegerStorage, SymbolicArray, SymbolicExpr, Tensor,
     };
 
     fn power_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -1031,6 +1343,89 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn power_integer_exponent_domain_has_stable_public_error() {
+        let base = Tensor::new_integer(IntegerStorage::I32(vec![2, -2]), vec![2, 1])
+            .expect("integer base");
+        for exponent in [Value::Num(-1.0), Value::Num(0.5), Value::Num(f64::NAN)] {
+            let error = power_builtin(Value::Tensor(base.clone()), exponent, Vec::new())
+                .expect_err("invalid integer exponent");
+            assert_eq!(error.identifier(), Some("RunMat:power:InvalidInput"));
+            assert!(error.message().contains("nonnegative integer values"));
+        }
+
+        let exponent =
+            Tensor::new_integer(IntegerStorage::I32(vec![2, -1, 0]), vec![1, 3]).unwrap();
+        let error = power_builtin(
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::I32(vec![-2, 0]), vec![2, 1]).unwrap(),
+            ),
+            Value::Tensor(exponent),
+            Vec::new(),
+        )
+        .expect_err("broadcast negative integer exponent");
+        assert_eq!(error.identifier(), Some("RunMat:power:InvalidInput"));
+        assert!(error.message().contains("nonnegative integer values"));
+    }
+
+    #[test]
+    fn power_integer_zero_and_negative_base_edges_remain_exact() {
+        let base = Tensor::new_integer(IntegerStorage::I16(vec![0, -2, -2]), vec![1, 3]).unwrap();
+        let exponent = Tensor::new_integer(IntegerStorage::I16(vec![0, 2, 3]), vec![1, 3]).unwrap();
+        let result =
+            power_builtin(Value::Tensor(base), Value::Tensor(exponent), Vec::new()).unwrap();
+        assert_eq!(
+            result,
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::I16(vec![1, 4, -8]), vec![1, 3]).unwrap()
+            )
+        );
+    }
+
+    #[test]
+    fn power_float_arrays_preserve_native_single_class() {
+        let base = Tensor::from_f32(vec![2.0, 4.0], vec![1, 2]).unwrap();
+        let exponent = Tensor::new(vec![3.0, 0.5], vec![1, 2]).unwrap();
+        let Value::Tensor(result) =
+            power_builtin(Value::Tensor(base), Value::Tensor(exponent), Vec::new()).unwrap()
+        else {
+            panic!("expected single tensor");
+        };
+        assert_eq!(
+            result.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![8.0, 2.0])
+        );
+    }
+
+    #[test]
+    fn power_single_negative_base_promotes_to_complex_single_without_scalar_collapse() {
+        let base = Tensor::from_f32(vec![-4.0], vec![1, 1]).unwrap();
+        let exponent = Tensor::from_f32(vec![0.5], vec![1, 1]).unwrap();
+        let result =
+            power_builtin(Value::Tensor(base), Value::Tensor(exponent), Vec::new()).unwrap();
+        let Value::ComplexTensor(result) = result else {
+            panic!("expected one-element complex single tensor");
+        };
+        let values = result.as_f32_slice().expect("complex single");
+        assert!(values[0].0.abs() < 1e-5);
+        assert!((values[0].1 - 2.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn power_like_complex_conversion_reads_typed_integer_storage_exactly() {
+        let tensor = Tensor::new_integer(IntegerStorage::I64(vec![-4, 5]), vec![1, 2]).unwrap();
+
+        let result = super::real_to_complex(Value::Tensor(tensor)).expect("complex conversion");
+
+        match result {
+            Value::ComplexTensor(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.materialize_f64(), vec![(-4.0, 0.0), (5.0, 0.0)]);
+            }
+            other => panic!("expected complex tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn power_compatible_symbolic_arrays_builds_symbolic_array() {
         let lhs = SymbolicArray::new(
             vec![SymbolicExpr::variable("x"), SymbolicExpr::variable("y")],
@@ -1129,6 +1524,118 @@ pub(crate) mod tests {
         assert_eq!(err.identifier(), POWER_ERROR_SIZE_MISMATCH.identifier);
     }
 
+    #[test]
+    fn power_like_complex_conversion_preserves_single_storage() {
+        let tensor = Tensor::from_f32(vec![-4.0, 5.0], vec![1, 2]).unwrap();
+
+        let result = super::real_to_complex(Value::Tensor(tensor)).expect("complex conversion");
+
+        let Value::ComplexTensor(result) = result else {
+            panic!("expected complex single tensor");
+        };
+        assert_eq!(result.as_f32_slice(), Some(&[(-4.0, 0.0), (5.0, 0.0)][..]));
+    }
+
+    #[test]
+    fn power_like_gpu_upload_reads_typed_integer_storage_exactly() {
+        test_support::with_test_provider(|_| {
+            let tensor =
+                Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 2]), vec![1, 2]).unwrap();
+
+            let uploaded = super::upload_tensor(tensor).expect("gpu upload");
+            let gathered = test_support::gather(uploaded).expect("gather");
+
+            assert_eq!(gathered.shape, vec![1, 2]);
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U64(vec![u64::MAX, 2]))
+            );
+        });
+    }
+
+    #[test]
+    fn power_gpu_left_rejects_nonscalar_host_integer_rhs() {
+        test_support::with_test_provider(|provider| {
+            let base = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
+            let base_handle = gpu_helpers::upload_tensor(provider, &base).expect("upload base");
+
+            let exponent =
+                Tensor::new_integer(IntegerStorage::U16(vec![3, 2]), vec![1, 2]).unwrap();
+
+            let error = power_builtin(
+                Value::GpuTensor(base_handle.clone()),
+                Value::Tensor(exponent),
+                Vec::new(),
+            )
+            .expect_err("mixed nonscalar integer and double arrays must reject");
+            assert!(error
+                .message()
+                .contains("integer arrays can only be combined with scalar double"));
+            let _ = provider.free(&base_handle);
+        });
+    }
+
+    #[test]
+    fn power_gpu_right_rejects_nonscalar_host_integer_lhs() {
+        test_support::with_test_provider(|provider| {
+            let exponent = Tensor::new(vec![3.0, 2.0], vec![1, 2]).unwrap();
+            let exponent_handle =
+                gpu_helpers::upload_tensor(provider, &exponent).expect("upload exponent");
+
+            let base = Tensor::new_integer(IntegerStorage::U16(vec![2, 3]), vec![1, 2]).unwrap();
+
+            let error = power_builtin(
+                Value::Tensor(base),
+                Value::GpuTensor(exponent_handle.clone()),
+                Vec::new(),
+            )
+            .expect_err("mixed nonscalar integer and double arrays must reject");
+            assert!(error
+                .message()
+                .contains("integer arrays can only be combined with scalar double"));
+            let _ = provider.free(&exponent_handle);
+        });
+    }
+
+    #[test]
+    fn power_gpu_integer_pairs_validate_exponents_before_provider_pow() {
+        test_support::with_test_provider(|provider| {
+            let base = Tensor::new_integer(IntegerStorage::I32(vec![2, -2]), vec![2, 1]).unwrap();
+            let invalid_exponent =
+                Tensor::new_integer(IntegerStorage::I32(vec![2, -1]), vec![1, 2]).unwrap();
+            let base_handle = gpu_helpers::upload_tensor(provider, &base).unwrap();
+            let invalid_handle = gpu_helpers::upload_tensor(provider, &invalid_exponent).unwrap();
+            let error = power_builtin(
+                Value::GpuTensor(base_handle.clone()),
+                Value::GpuTensor(invalid_handle.clone()),
+                Vec::new(),
+            )
+            .expect_err("resident negative integer exponent");
+            assert_eq!(error.identifier(), Some("RunMat:power:InvalidInput"));
+            assert!(error.message().contains("nonnegative integer values"));
+
+            let valid_exponent =
+                Tensor::new_integer(IntegerStorage::I32(vec![3, 0]), vec![1, 2]).unwrap();
+            let valid_handle = gpu_helpers::upload_tensor(provider, &valid_exponent).unwrap();
+            let result = power_builtin(
+                Value::GpuTensor(base_handle.clone()),
+                Value::GpuTensor(valid_handle.clone()),
+                Vec::new(),
+            )
+            .expect("resident valid integer exponent");
+            assert_eq!(
+                result,
+                Value::Tensor(
+                    Tensor::new_integer(IntegerStorage::I32(vec![8, -8, 1, 1]), vec![2, 2])
+                        .unwrap()
+                )
+            );
+            for handle in [&base_handle, &invalid_handle, &valid_handle] {
+                let _ = provider.free(handle);
+            }
+        });
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn power_matrix_broadcast() {
@@ -1140,7 +1647,12 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 3]);
                 let expected = [1.0, 2.0, 3.0, 1.0, 4.0, 9.0, 1.0, 8.0, 27.0];
-                for (got, exp) in t.data.iter().zip(expected.iter()) {
+                for (got, exp) in t
+                    .as_f64_slice()
+                    .expect("double result")
+                    .iter()
+                    .zip(expected.iter())
+                {
                     assert!((got - exp).abs() < 1e-12);
                 }
             }
@@ -1166,21 +1678,105 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn power_preserves_native_and_mixed_complex_single_storage() {
+        let single = ComplexTensor::from_f32(vec![(1.0, 2.0)], vec![1, 1]).unwrap();
+        let single_exponent = ComplexTensor::from_f32(vec![(2.0, 0.0)], vec![1, 1]).unwrap();
+        let result = power_builtin(
+            Value::ComplexTensor(single.clone()),
+            Value::ComplexTensor(single_exponent),
+            Vec::new(),
+        )
+        .expect("complex single power");
+        let Value::ComplexTensor(result) = result else {
+            panic!("expected complex single tensor");
+        };
+        let value = result.as_f32_slice().expect("complex single")[0];
+        assert!((value.0 + 3.0).abs() < 1e-5);
+        assert!((value.1 - 4.0).abs() < 1e-5);
+
+        let double_exponent = ComplexTensor::new(vec![(2.0, 0.0)], vec![1, 1]).unwrap();
+        let result = power_builtin(
+            Value::ComplexTensor(single),
+            Value::ComplexTensor(double_exponent),
+            Vec::new(),
+        )
+        .expect("mixed complex power");
+        let Value::ComplexTensor(result) = result else {
+            panic!("expected mixed complex result in single");
+        };
+        let value = result.as_f32_slice().expect("complex single")[0];
+        assert!((value.0 + 3.0).abs() < 1e-5);
+        assert!((value.1 - 4.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn power_mixed_real_complex_single_paths_preserve_single() {
+        let complex_base =
+            ComplexTensor::from_f32(vec![(1.0, 1.0), (2.0, 0.0)], vec![1, 2]).unwrap();
+        let real_exponent = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
+        let result = power_builtin(
+            Value::ComplexTensor(complex_base),
+            Value::Tensor(real_exponent),
+            Vec::new(),
+        )
+        .expect("complex-real power");
+        let Value::ComplexTensor(result) = result else {
+            panic!("expected complex single tensor");
+        };
+        let values = result.as_f32_slice().expect("complex single");
+        assert!((values[0].0 - 0.0).abs() < 1e-5);
+        assert!((values[0].1 - 2.0).abs() < 1e-5);
+        assert!((values[1].0 - 8.0).abs() < 1e-5);
+
+        let real_base = Tensor::new(vec![4.0, 2.0], vec![1, 2]).unwrap();
+        let complex_exponent =
+            ComplexTensor::from_f32(vec![(2.0, 0.0), (3.0, 0.0)], vec![1, 2]).unwrap();
+        let result = power_builtin(
+            Value::Tensor(real_base),
+            Value::ComplexTensor(complex_exponent),
+            Vec::new(),
+        )
+        .expect("real-complex power");
+        let Value::ComplexTensor(result) = result else {
+            panic!("expected complex single tensor");
+        };
+        assert_eq!(result.as_f32_slice(), Some(&[(16.0, 0.0), (8.0, 0.0)][..]));
+    }
+
+    #[test]
+    fn power_preserves_empty_complex_single_class() {
+        let base = ComplexTensor::from_f32(Vec::new(), vec![0, 2]).unwrap();
+        let exponent = ComplexTensor::new(Vec::new(), vec![0, 2]).unwrap();
+        let result = power_builtin(
+            Value::ComplexTensor(base),
+            Value::ComplexTensor(exponent),
+            Vec::new(),
+        )
+        .expect("complex power");
+        let Value::ComplexTensor(result) = result else {
+            panic!("expected complex single tensor");
+        };
+        assert_eq!(result.shape, vec![0, 2]);
+        assert_eq!(result.as_f32_slice(), Some(&[][..]));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn power_char_array() {
         let chars = CharArray::new("AZ".chars().collect(), 1, 2).unwrap();
-        let result = power_builtin(
-            Value::CharArray(chars),
-            Value::Int(IntValue::I32(2)),
-            Vec::new(),
-        )
-        .expect("power");
+        let result =
+            power_builtin(Value::CharArray(chars), Value::Num(2.0), Vec::new()).expect("power");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
                 let expected = [4225.0, 8100.0];
-                for (got, exp) in t.data.iter().zip(expected.iter()) {
+                for (got, exp) in t
+                    .as_f64_slice()
+                    .expect("double result")
+                    .iter()
+                    .zip(expected.iter())
+                {
                     assert!((got - exp).abs() < 1e-9);
                 }
             }
@@ -1191,6 +1787,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn power_like_complex_promotes_output() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let base = Tensor::new(vec![-2.0], vec![1, 1]).unwrap();
         let result = power_builtin(
             Value::Tensor(base),
@@ -1210,14 +1807,12 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn power_like_gpu_residency() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let base = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
             let exp = Tensor::new(vec![2.0, 3.0, 4.0], vec![1, 3]).unwrap();
-            let proto_view = HostTensorView {
-                data: &[0.0],
-                shape: &[1, 1],
-            };
-            let proto = provider.upload(&proto_view).expect("upload");
+            let proto_tensor = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
+            let proto = gpu_helpers::upload_tensor(provider, &proto_tensor).expect("upload");
             let result = power_builtin(
                 Value::Tensor(base.clone()),
                 Value::Tensor(exp.clone()),
@@ -1228,7 +1823,12 @@ pub(crate) mod tests {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
                     let expected = [1.0, 8.0, 81.0];
-                    for (got, exp) in gathered.data.iter().zip(expected.iter()) {
+                    for (got, exp) in gathered
+                        .as_f64_slice()
+                        .expect("double result")
+                        .iter()
+                        .zip(expected.iter())
+                    {
                         assert!((got - exp).abs() < 1e-9);
                     }
                 }
@@ -1244,21 +1844,18 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let base = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
             let exp = Tensor::new(vec![2.0, 3.0, 4.0], vec![1, 3]).unwrap();
-            let base_view = HostTensorView {
-                data: &base.data,
-                shape: &base.shape,
-            };
-            let exp_view = HostTensorView {
-                data: &exp.data,
-                shape: &exp.shape,
-            };
-            let hb = provider.upload(&base_view).expect("upload");
-            let he = provider.upload(&exp_view).expect("upload");
+            let hb = gpu_helpers::upload_tensor(provider, &base).expect("upload");
+            let he = gpu_helpers::upload_tensor(provider, &exp).expect("upload");
             let result = power_builtin(Value::GpuTensor(hb), Value::GpuTensor(he), Vec::new())
                 .expect("power");
             let gathered = test_support::gather(result).expect("gather");
             let expected = [1.0, 8.0, 81.0];
-            for (got, exp) in gathered.data.iter().zip(expected.iter()) {
+            for (got, exp) in gathered
+                .as_f64_slice()
+                .expect("double result")
+                .iter()
+                .zip(expected.iter())
+            {
                 assert!((got - exp).abs() < 1e-9);
             }
         });
@@ -1275,16 +1872,8 @@ pub(crate) mod tests {
         let exp = Tensor::new(vec![2.0, 0.5, -1.0], vec![1, 3]).unwrap();
         let cpu = power_host(Value::Tensor(base.clone()), Value::Tensor(exp.clone())).unwrap();
         let provider = runmat_accelerate_api::provider().unwrap();
-        let base_view = HostTensorView {
-            data: &base.data,
-            shape: &base.shape,
-        };
-        let exp_view = HostTensorView {
-            data: &exp.data,
-            shape: &exp.shape,
-        };
-        let hb = provider.upload(&base_view).unwrap();
-        let he = provider.upload(&exp_view).unwrap();
+        let hb = gpu_helpers::upload_tensor(provider, &base).unwrap();
+        let he = gpu_helpers::upload_tensor(provider, &exp).unwrap();
         let gpu = block_on(power_gpu_pair(hb.clone(), he.clone())).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         let cpu_tensor = match cpu {
@@ -1296,7 +1885,12 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-9,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        for (a, b) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (a, b) in gathered
+            .as_f64_slice()
+            .expect("gathered double")
+            .iter()
+            .zip(cpu_tensor.as_f64_slice().expect("CPU double"))
+        {
             assert!((a - b).abs() < tol);
         }
         let _ = provider.free(&hb);

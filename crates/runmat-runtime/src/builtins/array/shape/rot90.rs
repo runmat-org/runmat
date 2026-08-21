@@ -14,13 +14,18 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, ComplexTensor, IntValue, LogicalArray, StringArray, Tensor, Value};
 
 const BUILTIN_NAME: &str = "rot90";
 
@@ -176,6 +181,41 @@ pub const ROT90_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ROT90_ERRORS,
 };
 
+const ROT90_DIRECTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "rot90-direction-token",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "rot90 accepts textual direction tokens as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Rot90DirectionTokenExtension"),
+};
+pub const ROT90_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ROT90_DIRECTION_EXTENSION];
+const ROT90_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents all eight integer array classes; rotation is a pure permutation of authoritative native storage.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "K",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The integer rotation count is reduced modulo four directly in its native signed or unsigned domain.",
+    },
+];
+pub const ROT90_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "B = rot90(integer_A [, integer_K])",
+        inputs: &ROT90_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "No numeric conversion occurs. Host storage is reordered exactly; resident integer fallback gathers and re-uploads through the exact owning provider when direct permutation hooks are unavailable.",
+    }];
+
 fn rot90_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     rot90_error_with_message(error.message, error)
 }
@@ -199,11 +239,19 @@ fn rot90_error_with_message(
     accel = "custom",
     type_resolver(preserve_matrix_type),
     descriptor(crate::builtins::array::shape::rot90::ROT90_DESCRIPTOR),
+    extensions(crate::builtins::array::shape::rot90::ROT90_EXTENSIONS),
+    integer_capabilities(crate::builtins::array::shape::rot90::ROT90_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::shape::rot90"
 )]
 async fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(rot90_error(&ROT90_ERROR_TOO_MANY_INPUTS));
+    }
+    if rest.first().is_some_and(is_text_rotation_argument) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ROT90_DIRECTION_EXTENSION,
+            BUILTIN_NAME,
+        )?;
     }
     let steps = parse_rotation_steps(rest.first())?;
     match value {
@@ -238,24 +286,69 @@ async fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
         | Value::Closure(_)
         | Value::SparseTensor(_)
         | Value::Struct(_)
+        | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
         | Value::MException(_)
+        | Value::Future(_)
+        | Value::Task(_)
+        | Value::Pool(_)
+        | Value::Job(_)
+        | Value::Foreign(_)
         | Value::Symbolic(_)
         | Value::SymbolicArray(_)
         | Value::OutputList(_) => Err(rot90_error(&ROT90_ERROR_UNSUPPORTED_INPUT)),
     }
 }
 
+fn is_text_rotation_argument(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_)
+    )
+}
+
 fn parse_rotation_steps(arg: Option<&Value>) -> crate::BuiltinResult<usize> {
-    let raw = match arg {
-        None => 1,
-        Some(value) => parse_rotation_value(value)?,
-    };
-    let modulo = ((raw % 4 + 4) % 4) as usize;
-    Ok(modulo)
+    match arg {
+        None => Ok(1),
+        Some(Value::Int(value)) => Ok(integer_rotation_steps(value)),
+        Some(Value::Tensor(tensor)) if tensor.integer_storage().is_some() => {
+            parse_integer_tensor_rotation_steps(tensor)
+        }
+        Some(value) => {
+            let raw = parse_rotation_value(value)?;
+            Ok(((raw % 4 + 4) % 4) as usize)
+        }
+    }
+}
+
+fn integer_rotation_steps(value: &IntValue) -> usize {
+    if let Some(raw) = value.try_to_i64() {
+        return ((raw % 4 + 4) % 4) as usize;
+    }
+    (value
+        .try_to_u64()
+        .expect("only non-negative integer values miss the signed representation")
+        % 4) as usize
+}
+
+fn parse_integer_tensor_rotation_steps(tensor: &Tensor) -> crate::BuiltinResult<usize> {
+    let storage = tensor
+        .integer_storage()
+        .expect("integer tensor storage is present");
+    if storage.len() != 1 {
+        return Err(rot90_error_with_message(
+            "rot90: K must be a scalar integer",
+            &ROT90_ERROR_INVALID_ROTATION,
+        ));
+    }
+    Ok(integer_rotation_steps(
+        &storage
+            .value_at(0)
+            .expect("one-element integer tensor has a value"),
+    ))
 }
 
 fn parse_rotation_value(value: &Value) -> crate::BuiltinResult<i64> {
@@ -263,7 +356,12 @@ fn parse_rotation_value(value: &Value) -> crate::BuiltinResult<i64> {
         return Ok(direction);
     }
     match value {
-        Value::Int(i) => Ok(i.to_i64()),
+        Value::Int(i) => i.try_to_i64().ok_or_else(|| {
+            rot90_error_with_message(
+                "rot90: K is outside the supported signed range",
+                &ROT90_ERROR_INVALID_ROTATION,
+            )
+        }),
         Value::Num(n) => parse_numeric_rotation(*n),
         Value::Bool(flag) => Ok(if *flag { 1 } else { 0 }),
         Value::Tensor(t) => parse_tensor_rotation(t),
@@ -331,17 +429,26 @@ fn parse_numeric_rotation(value: f64) -> crate::BuiltinResult<i64> {
             &ROT90_ERROR_INVALID_ROTATION,
         ));
     }
+    if rounded < i64::MIN as f64
+        || rounded > i64::MAX as f64
+        || (i64::BITS == 64 && rounded == i64::MAX as f64)
+    {
+        return Err(rot90_error_with_message(
+            "rot90: K is outside the supported signed range",
+            &ROT90_ERROR_INVALID_ROTATION,
+        ));
+    }
     Ok(rounded as i64)
 }
 
 fn parse_tensor_rotation(tensor: &Tensor) -> crate::BuiltinResult<i64> {
-    if tensor.data.len() != 1 {
+    if !tensor::is_scalar_tensor(tensor) {
         return Err(rot90_error_with_message(
             "rot90: K must be a scalar integer",
             &ROT90_ERROR_INVALID_ROTATION,
         ));
     }
-    parse_numeric_rotation(tensor.data[0])
+    parse_numeric_rotation(tensor::tensor_value_f64(tensor, 0))
 }
 
 fn parse_logical_rotation(array: &LogicalArray) -> crate::BuiltinResult<i64> {
@@ -358,8 +465,14 @@ fn rot90_tensor(tensor: Tensor, steps: usize) -> crate::BuiltinResult<Tensor> {
     if steps == 0 {
         return Ok(tensor);
     }
-    let (data, shape) = rot90_generic(&tensor.data, &tensor.shape, steps)?;
-    Tensor::new(data, shape)
+    let shape = tensor.shape.clone();
+    let indices = (0..tensor.len()).collect::<Vec<_>>();
+    let (indices, shape) = rot90_generic(&indices, &shape, steps)?;
+    let storage = tensor
+        .into_numeric_storage()
+        .and_then(|storage| storage.gather(&indices))
+        .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL))?;
+    Tensor::from_numeric_storage(storage, shape)
         .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL))
 }
 
@@ -370,8 +483,13 @@ fn rot90_complex_tensor(
     if steps == 0 {
         return Ok(tensor);
     }
-    let (data, shape) = rot90_generic(&tensor.data, &tensor.shape, steps)?;
-    ComplexTensor::new(data, shape)
+    let indices = (0..tensor.len()).collect::<Vec<_>>();
+    let (indices, shape) = rot90_generic(&indices, &tensor.shape, steps)?;
+    let storage = tensor
+        .into_complex_storage()
+        .gather(&indices)
+        .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL))?;
+    ComplexTensor::from_complex_storage(storage, shape)
         .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL))
 }
 
@@ -430,20 +548,25 @@ async fn rot90_gpu(handle: GpuTensorHandle, steps: usize) -> crate::BuiltinResul
     if steps == 0 {
         return Ok(Value::GpuTensor(handle));
     }
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Some(out) = rot90_gpu_via_provider(provider, &handle, steps) {
-            return Ok(Value::GpuTensor(out));
+    #[cfg(all(test, feature = "wgpu"))]
+    {
+        if handle.device_id != 0 {
+            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+            );
+        }
+    }
+    if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
+        if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
+            if let Some(out) = rot90_gpu_via_provider(provider, &handle, steps) {
+                return Ok(Value::GpuTensor(out));
+            }
         }
     }
     let host_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let rotated = rot90_tensor(host_tensor, steps)?;
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        let view = HostTensorView {
-            data: &rotated.data,
-            shape: &rotated.shape,
-        };
-        provider
-            .upload(&view)
+    if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
+        gpu_helpers::upload_tensor(provider, &rotated)
             .map(Value::GpuTensor)
             .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL))
     } else {
@@ -590,9 +713,9 @@ fn ravel_index(coords: &[usize], shape: &[usize]) -> usize {
 }
 
 fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
-    if tensor.data.len() == 1 {
-        let (re, im) = tensor.data[0];
-        Value::Complex(re, im)
+    if tensor::is_scalar_complex_tensor(&tensor) && tensor.integer_storage().is_none() {
+        let value = tensor::complex_tensor_value_complex64(&tensor, 0);
+        Value::Complex(value.re, value.im)
     } else {
         Value::ComplexTensor(tensor)
     }
@@ -607,7 +730,33 @@ pub(crate) mod tests {
         block_on(super::rot90_builtin(value, rest))
     }
     use crate::builtins::common::test_support;
-    use runmat_builtins::{IntValue, Tensor, Type};
+    use runmat_accelerate_api::HostTensorView;
+    use runmat_builtins::Type;
+    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage, NumericStorage, Tensor};
+
+    #[test]
+    fn rot90_rotation_parser_reduces_full_uint64_range_exactly() {
+        assert_eq!(
+            parse_rotation_steps(Some(&Value::Int(IntValue::U64(u64::MAX))))
+                .expect("uint64 rotation count"),
+            (u64::MAX % 4) as usize
+        );
+        assert_eq!(
+            parse_rotation_steps(Some(&Value::Int(IntValue::I64(-1))))
+                .expect("negative signed rotation count"),
+            3
+        );
+    }
+
+    #[test]
+    fn rot90_rotation_parser_reads_typed_integer_storage_exactly() {
+        let count = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap();
+
+        assert_eq!(
+            parse_rotation_steps(Some(&Value::Tensor(count))).expect("typed integer K"),
+            (u64::MAX % 4) as usize
+        );
+    }
 
     #[test]
     fn rot90_type_preserves_matrix_shape() {
@@ -625,6 +774,89 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn rot90_preserves_all_exact_real_integer_classes() {
+        let storages = [
+            IntegerStorage::I8(vec![-2, 7, 9, 11]),
+            IntegerStorage::I16(vec![-300, 400, 900, 1_200]),
+            IntegerStorage::I32(vec![i32::MIN, 0, 7, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, -1, 1, i64::MAX]),
+            IntegerStorage::U8(vec![0, 7, 9, u8::MAX]),
+            IntegerStorage::U16(vec![0, 700, 900, u16::MAX]),
+            IntegerStorage::U32(vec![0, 9_007_199, 42, u32::MAX]),
+            IntegerStorage::U64(vec![0, 9_007_199_254_740_993, 42, u64::MAX]),
+        ];
+
+        for storage in storages {
+            let values = storage.exact_values();
+            let input = Tensor::new_integer(storage.clone(), vec![2, 2]).expect("input");
+            let Value::Tensor(output) =
+                rot90_builtin(Value::Tensor(input), Vec::new()).expect("rot90")
+            else {
+                panic!("expected exact real integer output");
+            };
+            assert_eq!(output.shape, vec![2, 2]);
+            assert_eq!(
+                output.integer_storage(),
+                Some(
+                    &storage
+                        .from_exact_values_like(vec![
+                            values[2].clone(),
+                            values[0].clone(),
+                            values[3].clone(),
+                            values[1].clone(),
+                        ])
+                        .expect("expected rotated storage")
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn rot90_preserves_native_single_storage() {
+        let input = Tensor::from_numeric_storage(
+            NumericStorage::F32(vec![1.25, 2.5, 3.75, 4.5]),
+            vec![2, 2],
+        )
+        .unwrap();
+        let Value::Tensor(output) = rot90_builtin(Value::Tensor(input), Vec::new()).expect("rot90")
+        else {
+            panic!("expected single tensor");
+        };
+
+        assert_eq!(
+            output.into_numeric_storage(),
+            Ok(NumericStorage::F32(vec![3.75, 1.25, 4.5, 2.5]))
+        );
+    }
+
+    #[test]
+    fn rot90_preserves_exact_typed_complex_integer_components_without_f64_mirror() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![1, 2, 3, 4]),
+            IntegerStorage::I16(vec![5, 6, 7, 8]),
+        )
+        .expect("typed complex storage");
+        let input = ComplexTensor::new_integer(storage, vec![2, 2]).expect("complex tensor");
+
+        let Value::ComplexTensor(output) =
+            rot90_builtin(Value::ComplexTensor(input), Vec::new()).expect("rot90")
+        else {
+            panic!("expected exact complex integer output");
+        };
+        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(
+            output.integer_storage().cloned(),
+            Some(
+                IntegerComplexStorage::new(
+                    IntegerStorage::I16(vec![3, 1, 4, 2]),
+                    IntegerStorage::I16(vec![7, 5, 8, 6]),
+                )
+                .expect("expected rotated storage")
+            )
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rot90_default_counterclockwise() {
@@ -633,7 +865,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 2]);
-                assert_eq!(out.data, vec![3.0, 2.0, 1.0, 6.0, 5.0, 4.0]);
+                assert_eq!(out.materialize_f64(), vec![3.0, 2.0, 1.0, 6.0, 5.0, 4.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -648,7 +880,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 3]);
-                assert_eq!(out.data, vec![6.0, 3.0, 5.0, 2.0, 4.0, 1.0]);
+                assert_eq!(out.materialize_f64(), vec![6.0, 3.0, 5.0, 2.0, 4.0, 1.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -657,13 +889,14 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rot90_clockwise_direction() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
         let result = rot90_builtin(Value::Tensor(tensor), vec![Value::from("clockwise")])
             .expect("rot90 clockwise");
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 2]);
-                assert_eq!(out.data, vec![4.0, 5.0, 6.0, 1.0, 2.0, 3.0]);
+                assert_eq!(out.materialize_f64(), vec![4.0, 5.0, 6.0, 1.0, 2.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -672,6 +905,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rot90_counterclockwise_direction_keyword() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).unwrap();
         let result = rot90_builtin(
             Value::Tensor(tensor.clone()),
@@ -687,7 +921,7 @@ pub(crate) mod tests {
                 match default {
                     Value::Tensor(default_tensor) => {
                         assert_eq!(out.shape, default_tensor.shape);
-                        assert_eq!(out.data, default_tensor.data);
+                        assert_eq!(out.materialize_f64(), default_tensor.materialize_f64());
                     }
                     other => panic!("expected tensor, got {other:?}"),
                 }
@@ -705,7 +939,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                assert_eq!(out.data, vec![4.0, 5.0, 1.0, 2.0]);
+                assert_eq!(out.materialize_f64(), vec![4.0, 5.0, 1.0, 2.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -721,7 +955,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                assert_eq!(out.data, vec![4.0, 5.0, 1.0, 2.0]);
+                assert_eq!(out.materialize_f64(), vec![4.0, 5.0, 1.0, 2.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -737,7 +971,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                assert_eq!(out.data, vec![2.0, 1.0, 5.0, 4.0]);
+                assert_eq!(out.materialize_f64(), vec![2.0, 1.0, 5.0, 4.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -766,7 +1000,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 0]);
-                assert!(out.data.is_empty());
+                assert!(out.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -782,7 +1016,7 @@ pub(crate) mod tests {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 2, 2]);
                 assert_eq!(
-                    out.data,
+                    out.materialize_f64(),
                     vec![5.0, 3.0, 1.0, 6.0, 4.0, 2.0, 11.0, 9.0, 7.0, 12.0, 10.0, 8.0]
                 );
             }
@@ -802,7 +1036,7 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 3, 4]);
-                assert_eq!(out.data, data);
+                assert_eq!(out.materialize_f64(), data);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -862,14 +1096,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let rotated = rot90_builtin(Value::GpuTensor(handle), Vec::new()).expect("rot90");
             let gathered = test_support::gather(rotated).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![2.0, 1.0, 5.0, 4.0]);
+            assert_eq!(gathered.materialize_f64(), vec![2.0, 1.0, 5.0, 4.0]);
         });
     }
 
@@ -890,7 +1124,7 @@ pub(crate) mod tests {
 
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
@@ -898,6 +1132,6 @@ pub(crate) mod tests {
         let gpu_tensor = test_support::gather(gpu_value).expect("gather");
 
         assert_eq!(gpu_tensor.shape, cpu_tensor.shape);
-        assert_eq!(gpu_tensor.data, cpu_tensor.data);
+        assert_eq!(gpu_tensor.materialize_f64(), cpu_tensor.materialize_f64());
     }
 }

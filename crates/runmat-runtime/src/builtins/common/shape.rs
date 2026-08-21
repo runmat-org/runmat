@@ -1,6 +1,6 @@
-use runmat_builtins::{Tensor, Value};
+use runmat_value::{Tensor, Value};
 
-use crate::dispatcher::gather_if_needed_async;
+use crate::builtins::common::tensor as tensor_utils;
 use crate::RuntimeError;
 
 /// Return true if a shape should be treated as a scalar.
@@ -35,6 +35,15 @@ fn normalize_shape(shape: &[usize]) -> Vec<usize> {
     shape.to_vec()
 }
 
+/// Return MATLAB's effective rank after ignoring trailing singleton dimensions.
+/// MATLAB arrays retain a minimum visible rank of two.
+pub fn effective_rank(shape: &[usize]) -> usize {
+    shape
+        .iter()
+        .rposition(|extent| *extent != 1)
+        .map_or(2, |index| (index + 1).max(2))
+}
+
 /// Return the MATLAB-visible dimension vector for a runtime value.
 #[async_recursion::async_recursion(?Send)]
 pub async fn value_dimensions(value: &Value) -> Result<Vec<usize>, RuntimeError> {
@@ -45,15 +54,10 @@ pub async fn value_dimensions(value: &Value) -> Result<Vec<usize>, RuntimeError>
         Value::LogicalArray(la) => normalize_shape(&la.shape),
         Value::StringArray(sa) => normalize_shape(&sa.shape),
         Value::SymbolicArray(sa) => normalize_shape(&sa.shape),
-        Value::CharArray(ca) => vec![ca.rows, ca.cols],
+        Value::CharArray(ca) => ca.shape.clone(),
         Value::Cell(ca) => normalize_shape(&ca.shape),
-        Value::GpuTensor(handle) => {
-            if handle.shape.is_empty() {
-                let gathered = gather_if_needed_async(&Value::GpuTensor(handle.clone())).await?;
-                return value_dimensions(&gathered).await;
-            }
-            normalize_shape(&handle.shape)
-        }
+        Value::ObjectArray(array) => normalize_shape(array.shape()),
+        Value::GpuTensor(handle) => normalize_shape(&handle.shape),
         _ => vec![1, 1],
     };
     Ok(dims)
@@ -63,25 +67,20 @@ pub async fn value_dimensions(value: &Value) -> Result<Vec<usize>, RuntimeError>
 #[async_recursion::async_recursion(?Send)]
 pub async fn value_numel(value: &Value) -> Result<usize, RuntimeError> {
     let numel = match value {
-        Value::Tensor(t) => t.data.len(),
+        Value::Tensor(t) => tensor_utils::tensor_element_len(t),
         Value::SparseTensor(t) => t.rows.saturating_mul(t.cols),
-        Value::ComplexTensor(t) => t.data.len(),
+        Value::ComplexTensor(t) => tensor_utils::complex_tensor_element_len(t),
         Value::LogicalArray(la) => la.data.len(),
         Value::StringArray(sa) => sa.data.len(),
         Value::SymbolicArray(sa) => sa.data.len(),
-        Value::CharArray(ca) => ca.rows * ca.cols,
+        Value::CharArray(ca) => ca.data.len(),
         Value::Cell(ca) => ca.data.len(),
-        Value::GpuTensor(handle) => {
-            if handle.shape.is_empty() {
-                let gathered = gather_if_needed_async(&Value::GpuTensor(handle.clone())).await?;
-                return value_numel(&gathered).await;
-            }
-            handle
-                .shape
-                .iter()
-                .copied()
-                .fold(1usize, |acc, dim| acc.saturating_mul(dim))
-        }
+        Value::ObjectArray(array) => array.len(),
+        Value::GpuTensor(handle) => handle
+            .shape
+            .iter()
+            .copied()
+            .fold(1usize, |acc, dim| acc.saturating_mul(dim)),
         _ => 1,
     };
     Ok(numel)
@@ -90,11 +89,7 @@ pub async fn value_numel(value: &Value) -> Result<usize, RuntimeError> {
 /// Compute the dimensionality (NDIMS) of a runtime value, with MATLAB semantics.
 pub async fn value_ndims(value: &Value) -> Result<usize, RuntimeError> {
     let dims = value_dimensions(value).await?;
-    if dims.len() < 2 {
-        Ok(2)
-    } else {
-        Ok(dims.len())
-    }
+    Ok(effective_rank(&dims))
 }
 
 /// Convert a dimension vector into a 1×N tensor encoded as `f64`.
@@ -109,6 +104,7 @@ pub fn dims_to_row_tensor(dims: &[usize]) -> Result<Tensor, String> {
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_value::IntegerStorage;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -136,10 +132,48 @@ pub(crate) mod tests {
             shape: vec![4, 5, 6],
             device_id: 0,
             buffer_id: 1,
+            descriptor: Default::default(),
         };
         assert_eq!(
             block_on(value_numel(&Value::GpuTensor(handle))).unwrap(),
             120
+        );
+    }
+
+    #[test]
+    fn empty_gpu_shape_is_scalar_metadata_without_provider_access() {
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: Vec::new(),
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+            descriptor: Default::default(),
+        };
+        let value = Value::GpuTensor(handle);
+        assert_eq!(block_on(value_dimensions(&value)).unwrap(), vec![1, 1]);
+        assert_eq!(block_on(value_numel(&value)).unwrap(), 1);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn numel_reads_typed_integer_storage_length_exactly() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 7, 9]), vec![1, 3]).unwrap();
+
+        assert_eq!(block_on(value_numel(&Value::Tensor(tensor))).unwrap(), 3);
+    }
+
+    #[test]
+    fn numel_reads_typed_complex_integer_storage_length_exactly() {
+        let storage = runmat_value::IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX, 7]),
+            IntegerStorage::U64(vec![0, 0]),
+        )
+        .unwrap();
+        let tensor = runmat_value::ComplexTensor::new_integer(storage, vec![1, 2]).unwrap();
+
+        assert_eq!(
+            block_on(value_numel(&Value::ComplexTensor(tensor))).unwrap(),
+            2
         );
     }
 
@@ -148,6 +182,14 @@ pub(crate) mod tests {
     fn dims_to_row_tensor_converts() {
         let tensor = dims_to_row_tensor(&[2, 4, 6]).unwrap();
         assert_eq!(tensor.shape, vec![1, 3]);
-        assert_eq!(tensor.data, vec![2.0, 4.0, 6.0]);
+        assert_eq!(tensor.materialize_f64(), vec![2.0, 4.0, 6.0]);
+    }
+
+    #[test]
+    fn effective_rank_ignores_only_trailing_singletons() {
+        assert_eq!(effective_rank(&[2, 3]), 2);
+        assert_eq!(effective_rank(&[2, 3, 1, 1]), 2);
+        assert_eq!(effective_rank(&[1, 1, 4, 1]), 3);
+        assert_eq!(effective_rank(&[1, 1, 1]), 2);
     }
 }

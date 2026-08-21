@@ -18,11 +18,13 @@
   },
   "description": "`lhsdesign(n,p)` returns an `n`-by-`p` Latin hypercube design with one sample in each stratum of every column.",
   "behaviors": [
-    "`n` and `p` must be positive integer scalars.",
+    "`n` and `p` must be positive integer-valued single or double scalars in MATLAB-compatible mode; native typed-integer dimensions are a RunMat extension and decode exactly.",
     "`\"Smooth\",\"on\"` jitters points uniformly within each stratum. `\"Smooth\",\"off\"` places points at stratum midpoints.",
     "`\"Criterion\"` supports `\"maximin\"`, `\"correlation\"`, and `\"none\"`; the correlation criterion uses midpoint strata, matching MATLAB's discrete correlation-optimized design behavior.",
     "`\"Iterations\",k` generates multiple candidate designs for optimized criteria and keeps the best scored candidate.",
-    "The result uses column-major `n`-by-`p` shape and values in the open interval `(0,1)`."
+    "The result uses column-major `n`-by-`p` shape and values in the open interval `(0,1)`.",
+    "Native typed-integer Iterations and Smooth controls are separately gated RunMat extensions.",
+    "Interactive gpuArray input is a RunMat-only host-fallback extension. Automatic internal residency may gather transparently without changing compatibility admission."
   ],
   "examples": [
     { "description": "Default maximin design", "input": "X = lhsdesign(20, 4)" },

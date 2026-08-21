@@ -18,7 +18,8 @@
     "The returned value is an axes handle that can be passed explicitly to later plotting commands.",
     "Subplot-local metadata stays isolated per axes: titles, legends, limits, log modes, and 3-D view state are all tracked independently.",
     "Subsequent plotting commands operate on the selected subplot unless another axes handle is passed explicitly.",
-    "Indices are one-based in the MATLAB style. `subplot(2, 2, 3)` selects the third slot in row-major order."
+    "Indices are one-based in the MATLAB style. `subplot(2, 2, 3)` selects the third slot in row-major order.",
+    "The documented grid controls use single or double values. RunMat can additionally parse typed-integer scalar controls exactly when RunMat extensions are enabled; strict compatibility mode rejects that extra form before changing figure state."
   ],
   "examples": [
     {
@@ -48,6 +49,10 @@
     {
       "question": "Can I make subplots of unequal sizes?",
       "answer": "You can span multiple grid slots by passing a vector as the third argument. `subplot(2, 2, [1 2])` creates a subplot that spans the entire top row of a 2x2 grid, while the bottom row keeps two separate panels."
+    },
+    {
+      "question": "Can the grid controls be typed integers?",
+      "answer": "The compatibility surface documents single and double controls. If RunMat extensions are enabled, all eight native integer scalar classes are also accepted and parsed exactly; strict compatibility mode rejects that extra form."
     }
   ],
   "links": [

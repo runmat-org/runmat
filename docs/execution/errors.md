@@ -1,10 +1,3 @@
----
-title: "Errors & Diagnostics"
-category: "Execution"
-section: "12.2"
-last_updated: "May 28, 2026"
----
-
 # Errors & Diagnostics
 
 RunMat separates request setup and compile-stage failures from runtime failures. Source resolution, parser, HIR, and bytecode compilation failures leave `execute_request` as `Err(RunError)`. Runtime failures raised after bytecode execution begins use `RuntimeError`; the session captures them as diagnostics in `ExecutionOutcome` so hosts can still receive streams, warnings, figures, and other execution metadata.

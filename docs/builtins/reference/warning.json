@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Runs entirely on the host. GPU tensors appearing in formatted arguments are gathered before formatting."
+    "notes": "Runs entirely on the host. Resident formatting values are not accepted."
   },
   "fusion": {
     "elementwise": false,
@@ -31,6 +31,8 @@
   "behaviors": [
     "`warning(message)` prints the message using the default identifier `RunMat:warning`.",
     "`warning(id, fmt, args...)` associates the warning with the identifier `id`, formats the message using MATLAB's `sprintf` rules, and honours per-identifier state.",
+    "Numeric scalar formatting values include every integer class and are formatted from authoritative storage, so wide signed and unsigned values remain exact.",
+    "Nonscalar integer formatting arrays are a gated RunMat extension and are consumed in column-major order.",
     "`warning(MException_obj)` reissues an existing exception as a warning.",
     "`warning(struct)` restores warning state previously captured with `warning('query', ...)`.",
     "`warning(state, id)` changes the mode for `id` (`'on'`, `'off'`, `'once'`, `'error'`, and the aliases `'all'` or `'last'`). The call returns a struct describing the prior state so you can restore it later.",
@@ -97,7 +99,7 @@
     },
     {
       "question": "Does `warning` run on the GPU?",
-      "answer": "No. Control-flow builtins execute on the host. GPU inputs referenced in formatted messages are gathered automatically before the message is emitted."
+      "answer": "No. Control-flow builtins execute on the host, and resident formatting values are rejected rather than gathered implicitly."
     },
     {
       "question": "Can I provide multiple state structs to `warning(state)`?",
@@ -142,8 +144,8 @@
     "label": "`crates/runmat-runtime/src/builtins/diagnostics/warning.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/diagnostics/warning.rs"
   },
-  "gpu_residency": "`warning` is a control-flow builtin that runs on the host. When formatted arguments include GPU resident arrays (for example via `%g` specifiers), RunMat gathers the values to host memory before formatting the message so the diagnostic text matches MATLAB expectations.",
+  "gpu_residency": "`warning` is a control-flow builtin that runs on the host. Resident formatting arguments are rejected without launching a provider operation.",
   "gpu_behavior": [
-    "`warning` is a control-flow builtin that runs on the host. When formatted arguments include GPU resident arrays (for example via `%g` specifiers), RunMat gathers the values to host memory before formatting the message so the diagnostic text matches MATLAB expectations."
+    "No GPU kernel or automatic gather is used by `warning`."
   ]
 }

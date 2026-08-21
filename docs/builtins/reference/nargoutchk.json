@@ -1,0 +1,46 @@
+{
+  "title": "nargoutchk",
+  "category": "introspection",
+  "keywords": ["nargoutchk", "function outputs", "arity", "validation"],
+  "summary": "Validate requested function outputs or create a legacy output-count message.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host call-context or explicit-count validation. Interactive resident bounds are not a documented input surface and reject without provider access."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 4,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::arity_check::tests::arity_checks_accept_every_documented_integer_class",
+    "integration": "crates/runmat-vm/tests/integer_datetime_metadata_and_nonzero_semantics.rs"
+  },
+  "description": "`nargoutchk(minArgs,maxArgs)` throws when the current function's requested output count is outside the bounds. The discouraged legacy forms return message text or a message structure for an explicit `numArgs` count.",
+  "behaviors": [
+    "`minArgs`, `maxArgs`, and legacy `numArgs` accept scalar single, double, or any of the eight integer classes; positive double infinity is allowed only as `maxArgs`.",
+    "All integer classes are read from authoritative scalar storage without floating conversion.",
+    "The two-argument form uses the current VM output-call context and throws on a violation.",
+    "`msg = nargoutchk(minArgs,maxArgs,numArgs)` returns character message text on a violation and an empty `0×0` character array otherwise.",
+    "`msg = nargoutchk(minArgs,maxArgs,numArgs,'struct')` returns a structure with `message` and `identifier` fields on a violation and an empty structure otherwise.",
+    "Bounds outside the host argument-count range are rejected rather than rounded or saturated."
+  ],
+  "examples": [
+    {
+      "description": "Require exactly one requested output",
+      "input": "function y = f(x)\n    nargoutchk(1, 1);\n    y = x;\nend",
+      "output": "Calls requesting exactly one output continue; other calls throw."
+    }
+  ],
+  "faqs": [],
+  "links": [{"label": "narginchk", "url": "./narginchk"}],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/arity_check.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/arity_check.rs"
+  }
+}

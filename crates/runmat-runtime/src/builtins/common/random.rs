@@ -117,6 +117,14 @@ impl LegacyTokenState {
 
 static LEGACY_TOKENS: OnceLock<Mutex<LegacyTokenState>> = OnceLock::new();
 
+#[cfg(test)]
+static TEST_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
+
+#[cfg(test)]
+pub(crate) fn test_lock() -> &'static Mutex<()> {
+    TEST_MUTEX.get_or_init(|| Mutex::new(()))
+}
+
 fn rng_state() -> &'static Mutex<GlobalRng> {
     RNG_STATE.get_or_init(|| Mutex::new(GlobalRng::new()))
 }
@@ -213,6 +221,57 @@ pub(crate) fn generate_uniform(len: usize, label: &str) -> BuiltinResult<Vec<f64
     Ok(out)
 }
 
+/// Generate unbiased offsets in `0..span` from the authoritative 64-bit RNG stream.
+///
+/// A span of `2^64` denotes the complete `u64` domain. Smaller spans use
+/// rejection before the modulo operation, so no destination value receives an
+/// extra source word when the span does not divide `2^64`.
+pub(crate) fn generate_integer_offsets(
+    span: u128,
+    len: usize,
+    label: &str,
+) -> BuiltinResult<Vec<u64>> {
+    if span == 0 || span > (1_u128 << 64) {
+        return Err(random_error(
+            label,
+            format!("{label}: integer sampling span must be in 1..=2^64"),
+        ));
+    }
+    let mut guard = rng_state()
+        .lock()
+        .map_err(|_| random_error(label, format!("{label}: failed to acquire RNG lock")))?;
+    Ok(generate_integer_offsets_from_state(
+        &mut guard.state,
+        span,
+        len,
+    ))
+}
+
+fn generate_integer_offsets_from_state(state: &mut u64, span: u128, len: usize) -> Vec<u64> {
+    if span == 1 {
+        return vec![0; len];
+    }
+    if span == (1_u128 << 64) {
+        return (0..len).map(|_| next_u64_state(state)).collect();
+    }
+
+    let span = span as u64;
+    let mut out = Vec::with_capacity(len);
+    while out.len() < len {
+        let word = next_u64_state(state);
+        if let Some(offset) = unbiased_offset_from_word(word, span) {
+            out.push(offset);
+        }
+    }
+    out
+}
+
+fn unbiased_offset_from_word(word: u64, span: u64) -> Option<u64> {
+    debug_assert!(span > 1);
+    let rejection_floor = span.wrapping_neg() % span;
+    (word >= rejection_floor).then(|| word % span)
+}
+
 pub(crate) fn generate_uniform_single(len: usize, label: &str) -> BuiltinResult<Vec<f64>> {
     generate_uniform(len, label).map(|data| {
         data.into_iter()
@@ -269,11 +328,16 @@ pub(crate) fn generate_complex(len: usize, label: &str) -> BuiltinResult<Vec<(f6
 }
 
 pub(crate) fn next_uniform_state(state: &mut u64) -> f64 {
+    let word = next_u64_state(state);
+    let bits = word >> RNG_SHIFT;
+    (bits as f64) * RNG_SCALE
+}
+
+fn next_u64_state(state: &mut u64) -> u64 {
     *state = state
         .wrapping_mul(RNG_MULTIPLIER)
         .wrapping_add(RNG_INCREMENT);
-    let bits = *state >> RNG_SHIFT;
-    (bits as f64) * RNG_SCALE
+    *state
 }
 
 fn next_normal_pair(state: &mut u64) -> (f64, f64) {
@@ -295,6 +359,26 @@ pub(crate) fn generate_exponential(mu: f64, len: usize, label: &str) -> BuiltinR
     for _ in 0..len {
         let u = next_uniform_state(&mut guard.state).max(MIN_UNIFORM);
         out.push(-mu * u.ln());
+    }
+    Ok(out)
+}
+
+/// Generate one exponential variate per output element, expanding a scalar mean
+/// or pairing an array of means elementwise with the shared host stream.
+pub(crate) fn generate_exponential_array(
+    mu: &[f64],
+    len: usize,
+    label: &str,
+) -> BuiltinResult<Vec<f64>> {
+    debug_assert!(mu.len() == 1 || mu.len() == len);
+    let mut guard = rng_state()
+        .lock()
+        .map_err(|_| random_error(label, format!("{label}: failed to acquire RNG lock")))?;
+    let mut out = Vec::with_capacity(len);
+    for index in 0..len {
+        let u = next_uniform_state(&mut guard.state).max(MIN_UNIFORM);
+        let mean = if mu.len() == 1 { mu[0] } else { mu[index] };
+        out.push(-mean * u.ln());
     }
     Ok(out)
 }
@@ -616,6 +700,12 @@ pub(crate) fn expected_uniform_sequence(count: usize) -> Vec<f64> {
 }
 
 #[cfg(test)]
+pub(crate) fn expected_integer_offset_sequence(span: u128, count: usize) -> Vec<u64> {
+    let mut seed = DEFAULT_RNG_SEED;
+    generate_integer_offsets_from_state(&mut seed, span, count)
+}
+
+#[cfg(test)]
 pub(crate) fn expected_complex_sequence(count: usize) -> Vec<(f64, f64)> {
     let mut seed = DEFAULT_RNG_SEED;
     let mut seq = Vec::with_capacity(count);
@@ -654,4 +744,47 @@ pub(crate) fn expected_complex_normal_sequence(count: usize) -> Vec<(f64, f64)> 
 #[cfg(test)]
 pub(crate) fn test_guard() -> super::test_support::GlobalStateTestGuard {
     super::test_support::global_state_test_guard()
+}
+
+#[cfg(test)]
+mod integer_offset_tests {
+    use super::*;
+
+    #[test]
+    fn rejection_floor_removes_the_incomplete_modulo_bucket() {
+        let span = 10_u64;
+        let rejection_floor = span.wrapping_neg() % span;
+        assert_eq!(rejection_floor, 6);
+        for word in 0..rejection_floor {
+            assert_eq!(unbiased_offset_from_word(word, span), None);
+        }
+        assert_eq!(unbiased_offset_from_word(6, span), Some(6));
+        assert_eq!(unbiased_offset_from_word(10, span), Some(0));
+        assert_eq!(unbiased_offset_from_word(u64::MAX, span), Some(5));
+        assert_eq!(
+            (u128::from(u64::MAX) + 1 - u128::from(rejection_floor)) % 10,
+            0
+        );
+    }
+
+    #[test]
+    fn full_width_offsets_preserve_every_rng_word() {
+        let mut state = DEFAULT_RNG_SEED;
+        let expected: Vec<u64> = (0..32).map(|_| next_u64_state(&mut state)).collect();
+        let mut state = DEFAULT_RNG_SEED;
+        assert_eq!(
+            generate_integer_offsets_from_state(&mut state, 1_u128 << 64, 32),
+            expected
+        );
+    }
+
+    #[test]
+    fn integer_offset_sequences_are_reproducible_for_non_power_of_two_spans() {
+        let first = expected_integer_offset_sequence(10, 512);
+        let second = expected_integer_offset_sequence(10, 512);
+        assert_eq!(first, second);
+        assert!(first.iter().all(|value| *value < 10));
+        assert!(first.contains(&0));
+        assert!(first.contains(&9));
+    }
 }

@@ -1,24 +1,29 @@
 //! MATLAB-compatible `readmatrix` builtin for RunMat.
 
+use runmat_value::NumericScalar;
 use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use encoding_rs::Encoding;
-use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    LogicalArray, Tensor, Value,
 };
 use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntegerStorage, LogicalArray, NumericDType, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::io::filetext::helpers::decode_bytes;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -238,6 +243,81 @@ pub const READMATRIX_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &READMATRIX_ERRORS,
 };
 
+const READMATRIX_LIKE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "readmatrix-like-output",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "readmatrix accepts a Like prototype and optional resident result as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ReadmatrixLikeOutputExtension"),
+};
+const READMATRIX_TYPED_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "readmatrix-typed-integer-control",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "readmatrix accepts typed-integer range, header, size, empty-value, and related numeric controls as a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:ReadmatrixTypedIntegerControlExtension"),
+    };
+pub const READMATRIX_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    READMATRIX_LIKE_EXTENSION,
+    READMATRIX_TYPED_INTEGER_CONTROL_EXTENSION,
+];
+const READMATRIX_INTEGER_OUTPUT_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "OutputType integer class selector",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented OutputType selector names any of the eight integer classes. Decimal integer tokens are parsed directly into native storage, including exact int64 and uint64 endpoints, while fractional and exceptional values follow saturating cast rules.",
+    }];
+const READMATRIX_INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Range, NumHeaderLines, ExpectedNumVariables, EmptyValue, or related numeric option",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target's public datatype tables constrain implemented numeric controls to single/double. RunMat mode retains the typed-integer extension and reads structural values exactly; compatibility mode rejects before gather or file access.",
+    }];
+const READMATRIX_INTEGER_LIKE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Like integer prototype",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Like is not a documented readmatrix option. RunMat mode uses the exact prototype class and owner; integer text is parsed directly in that class rather than through binary64.",
+    }];
+pub const READMATRIX_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "M = readmatrix(filename, 'OutputType', integer_class)",
+        inputs: &READMATRIX_INTEGER_OUTPUT_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "File I/O and parsing are host operations. Every integer OutputType produces the requested integer class and preserves exactly representable parsed values.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "M = readmatrix(filename, typed_integer_controls...)",
+        inputs: &READMATRIX_INTEGER_CONTROL_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed controls are an independently gated extension; ordinary automatic residency may gather transparently for host file I/O.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "M = readmatrix(filename, 'Like', integer_prototype)",
+        inputs: &READMATRIX_INTEGER_LIKE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Compatibility mode rejects the whole Like extension. RunMat mode preserves host class and attempts explicit owner-resident restoration only when the provider can represent the exact class.",
+    },
+];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::tabular::readmatrix")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "readmatrix",
@@ -251,7 +331,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Runs entirely on the host; acceleration providers are not involved.",
+    notes: "File I/O and parsing run on the host. The gated Like extension may perform a typed upload through the exact provider that owns the prototype.",
 };
 
 fn readmatrix_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
@@ -317,12 +397,28 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::readmatrix_type),
     descriptor(crate::builtins::io::tabular::readmatrix::READMATRIX_DESCRIPTOR),
+    extensions(crate::builtins::io::tabular::readmatrix::READMATRIX_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::io::tabular::readmatrix::READMATRIX_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::io::tabular::readmatrix"
 )]
 pub(crate) async fn readmatrix_builtin(
     path: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
+    if raw_args_contain_option(&rest, "Like") {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &READMATRIX_LIKE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if rest.iter().any(value_contains_typed_integer) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &READMATRIX_TYPED_INTEGER_CONTROL_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let path_value = gather_if_needed_async(&path)
         .await
         .map_err(map_control_flow)?;
@@ -331,6 +427,37 @@ pub(crate) async fn readmatrix_builtin(
     let resolved = resolve_path(&path_value)?;
     let tensor = read_numeric_matrix(&resolved, &options).await?;
     finalize_output(tensor, &options)
+}
+
+fn value_contains_typed_integer(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+        || matches!(value, Value::Struct(structure) if structure.fields.values().any(value_contains_typed_integer))
+        || matches!(value, Value::Cell(cell) if cell.data.iter().any(value_contains_typed_integer))
+}
+
+fn raw_args_contain_option(args: &[Value], sought: &str) -> bool {
+    if let Some(Value::Struct(structure)) = args.first() {
+        if structure
+            .fields
+            .keys()
+            .any(|name| name.eq_ignore_ascii_case(sought))
+        {
+            return true;
+        }
+    }
+    args.windows(2)
+        .any(|pair| raw_scalar_text(&pair[0]).is_some_and(|name| name.eq_ignore_ascii_case(sought)))
+}
+
+fn raw_scalar_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(value) => Some(value.clone()),
+        Value::CharArray(value) if value.rows == 1 => Some(value.data.iter().collect()),
+        Value::StringArray(value) if value.data.len() == 1 => Some(value.data[0].clone()),
+        _ => None,
+    }
 }
 
 async fn parse_options(args: &[Value]) -> BuiltinResult<ReadMatrixOptions> {
@@ -359,7 +486,7 @@ async fn parse_options(args: &[Value]) -> BuiltinResult<ReadMatrixOptions> {
 }
 
 async fn parse_struct_options(
-    struct_value: &runmat_builtins::StructValue,
+    struct_value: &runmat_value::StructValue,
     options: &mut ReadMatrixOptions,
 ) -> BuiltinResult<()> {
     for (name, value) in &struct_value.fields {
@@ -410,7 +537,7 @@ async fn apply_option(
         return Ok(());
     }
     if name.eq_ignore_ascii_case("EmptyValue") {
-        let numeric = value_to_f64(&effective_value, "EmptyValue")?;
+        let numeric = value_to_numeric_scalar(&effective_value, "EmptyValue")?;
         options.empty_value = Some(numeric);
         return Ok(());
     }
@@ -515,18 +642,16 @@ fn value_to_string_scalar(value: &Value, context: &str) -> BuiltinResult<String>
 }
 
 fn value_to_usize(value: &Value, context: &str) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer.try_to_usize().ok_or_else(|| {
+            readmatrix_error_with(
+                &READMATRIX_ERROR_OPTION_VALUE,
+                format!("readmatrix: {context} must be a non-negative integer"),
+            )
+        });
+    }
+
     match value {
-        Value::Int(i) => {
-            let num = i.to_i64();
-            if num < 0 {
-                Err(readmatrix_error_with(
-                    &READMATRIX_ERROR_OPTION_VALUE,
-                    format!("readmatrix: {context} must be a non-negative integer"),
-                ))
-            } else {
-                Ok(num as usize)
-            }
-        }
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(readmatrix_error_with(
@@ -540,13 +665,30 @@ fn value_to_usize(value: &Value, context: &str) -> BuiltinResult<usize> {
                     format!("readmatrix: {context} must be a non-negative integer"),
                 ));
             }
-            if (n.round() - n).abs() > f64::EPSILON {
+            let rounded = n.round();
+            if (rounded - n).abs() > f64::EPSILON {
                 return Err(readmatrix_error_with(
                     &READMATRIX_ERROR_OPTION_VALUE,
                     format!("readmatrix: {context} must be an integer value"),
                 ));
             }
-            Ok(n.round() as usize)
+            if rounded > usize::MAX.saturating_sub(1) as f64 {
+                return Err(readmatrix_error_with(
+                    &READMATRIX_ERROR_OPTION_VALUE,
+                    format!("readmatrix: {context} is too large"),
+                ));
+            }
+            let parsed = rounded as usize;
+            if parsed as f64 != rounded || parsed == usize::MAX {
+                return Err(readmatrix_error_with(
+                    &READMATRIX_ERROR_OPTION_VALUE,
+                    format!("readmatrix: {context} is too large"),
+                ));
+            }
+            Ok(parsed)
+        }
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
+            value_to_usize(&Value::Num(tensor::tensor_value_f64(t, 0)), context)
         }
         _ => Err(readmatrix_error_with(
             &READMATRIX_ERROR_OPTION_VALUE,
@@ -555,42 +697,20 @@ fn value_to_usize(value: &Value, context: &str) -> BuiltinResult<usize> {
     }
 }
 
-fn value_to_f64(value: &Value, context: &str) -> BuiltinResult<f64> {
-    match value {
-        Value::Num(n) => {
-            if n.is_finite() {
-                Ok(*n)
-            } else {
-                Err(readmatrix_error_with(
-                    &READMATRIX_ERROR_OPTION_VALUE,
-                    format!("readmatrix: {context} must be a finite numeric scalar"),
-                ))
-            }
+fn value_to_numeric_scalar(value: &Value, context: &str) -> BuiltinResult<NumericScalar> {
+    Ok(match value {
+        Value::Num(value) => NumericScalar::F64(*value),
+        Value::Int(value) => NumericScalar::from(value.clone()),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => tensor
+            .numeric_value_at(0)
+            .expect("scalar tensor has authoritative numeric storage"),
+        _ => {
+            return Err(readmatrix_error_with(
+                &READMATRIX_ERROR_OPTION_VALUE,
+                format!("readmatrix: {context} must be a numeric scalar"),
+            ))
         }
-        Value::Int(i) => Ok(i.to_f64()),
-        Value::Tensor(t) => {
-            if t.data.len() == 1 {
-                let v = t.data[0];
-                if v.is_finite() {
-                    Ok(v)
-                } else {
-                    Err(readmatrix_error_with(
-                        &READMATRIX_ERROR_OPTION_VALUE,
-                        format!("readmatrix: {context} must be a finite numeric scalar"),
-                    ))
-                }
-            } else {
-                Err(readmatrix_error_with(
-                    &READMATRIX_ERROR_OPTION_VALUE,
-                    format!("readmatrix: {context} must be a numeric scalar"),
-                ))
-            }
-        }
-        _ => Err(readmatrix_error_with(
-            &READMATRIX_ERROR_OPTION_VALUE,
-            format!("readmatrix: {context} must be a numeric scalar"),
-        )),
-    }
+    })
 }
 
 async fn parse_treat_as_missing(value: &Value) -> BuiltinResult<Vec<String>> {
@@ -602,10 +722,15 @@ async fn parse_treat_as_missing(value: &Value) -> BuiltinResult<Vec<String>> {
             Value::CharArray(ca) if ca.rows == 1 => out.push(ca.data.iter().collect()),
             Value::StringArray(sa) => out.extend(sa.data),
             Value::Num(n) => out.push(format_numeric_token(n)),
-            Value::Int(i) => out.push(format!("{}", i.to_i64())),
+            Value::Int(i) => out.push(i.decimal_string()),
             Value::Tensor(t) => {
-                if t.data.len() == 1 {
-                    out.push(format_numeric_token(t.data[0]));
+                if tensor::is_scalar_tensor(&t) {
+                    if let Some(storage) = t.integer_storage() {
+                        let value = storage.value_at(0).expect("one-element integer storage");
+                        out.push(value.decimal_string());
+                    } else {
+                        out.push(format_numeric_token(tensor::tensor_value_f64(&t, 0)));
+                    }
                 } else {
                     return Err(readmatrix_error_with(
                         &READMATRIX_ERROR_OPTION_VALUE,
@@ -648,7 +773,7 @@ struct ReadMatrixOptions {
     decimal_separator: char,
     thousands_separator: Option<char>,
     treat_as_missing: HashSet<String>,
-    empty_value: Option<f64>,
+    empty_value: Option<NumericScalar>,
     range: Option<RangeSpec>,
     output_template: OutputTemplate,
     encoding: String,
@@ -664,7 +789,7 @@ impl Default for ReadMatrixOptions {
             treat_as_missing: HashSet::new(),
             empty_value: None,
             range: None,
-            output_template: OutputTemplate::Double,
+            output_template: OutputTemplate::Numeric(NumericDType::F64),
             encoding: "utf-8".to_string(),
         }
     }
@@ -684,8 +809,12 @@ impl ReadMatrixOptions {
         self.treat_as_missing.contains(&norm)
     }
 
-    fn empty_value(&self) -> f64 {
-        self.empty_value.unwrap_or(f64::NAN)
+    fn empty_value(&self) -> NumericScalar {
+        self.empty_value.unwrap_or(NumericScalar::F64(f64::NAN))
+    }
+
+    fn empty_value_f64(&self) -> f64 {
+        self.empty_value().materialize_f64()
     }
 
     fn validate(&self) -> BuiltinResult<()> {
@@ -710,18 +839,30 @@ impl ReadMatrixOptions {
                 "readmatrix: cannot combine 'Like' with OutputType",
             ));
         }
-        if spec.eq_ignore_ascii_case("double") {
-            self.output_template = OutputTemplate::Double;
-            return Ok(());
-        }
         if spec.eq_ignore_ascii_case("logical") {
             self.output_template = OutputTemplate::Logical;
             return Ok(());
         }
-        Err(readmatrix_error_with(
-            &READMATRIX_ERROR_OUTPUT_TYPE,
-            format!("readmatrix: unsupported OutputType '{}'", spec),
-        ))
+        let dtype = match spec.to_ascii_lowercase().as_str() {
+            "double" => NumericDType::F64,
+            "single" => NumericDType::F32,
+            "int8" => NumericDType::I8,
+            "int16" => NumericDType::I16,
+            "int32" => NumericDType::I32,
+            "int64" => NumericDType::I64,
+            "uint8" => NumericDType::U8,
+            "uint16" => NumericDType::U16,
+            "uint32" => NumericDType::U32,
+            "uint64" => NumericDType::U64,
+            _ => {
+                return Err(readmatrix_error_with(
+                    &READMATRIX_ERROR_OUTPUT_TYPE,
+                    format!("readmatrix: unsupported OutputType '{}'", spec),
+                ));
+            }
+        };
+        self.output_template = OutputTemplate::Numeric(dtype);
+        Ok(())
     }
 
     fn set_like(&mut self, proto: Value) -> BuiltinResult<()> {
@@ -731,7 +872,10 @@ impl ReadMatrixOptions {
                 "readmatrix: multiple 'Like' specifications are not supported",
             ));
         }
-        if !matches!(self.output_template, OutputTemplate::Double) {
+        if !matches!(
+            self.output_template,
+            OutputTemplate::Numeric(NumericDType::F64)
+        ) {
             return Err(readmatrix_error_with(
                 &READMATRIX_ERROR_OUTPUT_TYPE,
                 "readmatrix: cannot combine 'Like' with OutputType overrides",
@@ -751,7 +895,7 @@ enum Delimiter {
 
 #[derive(Clone)]
 enum OutputTemplate {
-    Double,
+    Numeric(NumericDType),
     Logical,
     Like(Value),
 }
@@ -864,7 +1008,7 @@ fn parse_range_string(text: &str) -> BuiltinResult<RangeSpec> {
 
 fn parse_range_numeric(value: &Value) -> BuiltinResult<RangeSpec> {
     let elements = match value {
-        Value::Tensor(t) => t.data.clone(),
+        Value::Tensor(t) => tensor::tensor_values_f64(t),
         _ => {
             return Err(readmatrix_error_with(
                 &READMATRIX_ERROR_RANGE,
@@ -1025,12 +1169,12 @@ fn column_index_from_letters(letters: &str) -> BuiltinResult<usize> {
     })
 }
 
-fn apply_range(
-    rows: &[Vec<f64>],
+fn apply_range<T: Clone>(
+    rows: &[Vec<T>],
     max_cols: usize,
     range: &RangeSpec,
-    default_fill: f64,
-) -> (Vec<Vec<f64>>, usize) {
+    default_fill: T,
+) -> (Vec<Vec<T>>, usize) {
     if rows.is_empty() || max_cols == 0 {
         return (Vec::new(), 0);
     }
@@ -1067,7 +1211,10 @@ fn apply_range(
             if col_idx >= max_cols {
                 break;
             }
-            let value = row.get(col_idx).copied().unwrap_or(default_fill);
+            let value = row
+                .get(col_idx)
+                .cloned()
+                .unwrap_or_else(|| default_fill.clone());
             extracted.push(value);
         }
         subset_max_cols = subset_max_cols.max(extracted.len());
@@ -1083,19 +1230,34 @@ fn apply_range(
 
 fn finalize_output(tensor: Tensor, options: &ReadMatrixOptions) -> BuiltinResult<Value> {
     match &options.output_template {
-        OutputTemplate::Double => Ok(Value::Tensor(tensor)),
+        OutputTemplate::Numeric(dtype) => {
+            let tensor = tensor::coerce_tensor_dtype(tensor, *dtype);
+            Ok(Value::Tensor(tensor))
+        }
         OutputTemplate::Logical => tensor_to_logical(tensor),
         OutputTemplate::Like(proto) => finalize_like(tensor, proto),
     }
 }
 
 fn tensor_to_logical(tensor: Tensor) -> BuiltinResult<Value> {
-    let mut data = Vec::with_capacity(tensor.data.len());
-    for value in &tensor.data {
-        let bit = if *value == 0.0 { 0 } else { 1 };
-        data.push(bit);
-    }
-    let logical = LogicalArray::new(data, tensor.shape.clone()).map_err(|e| {
+    let shape = tensor.shape.clone();
+    let storage = tensor.into_numeric_storage().map_err(|error| {
+        readmatrix_error_with(
+            &READMATRIX_ERROR_TENSOR_BUILD,
+            format!("readmatrix: {error}"),
+        )
+    })?;
+    let NumericStorage::F64(values) = storage else {
+        return Err(readmatrix_error_with(
+            &READMATRIX_ERROR_TENSOR_BUILD,
+            "readmatrix: parsed logical source was not double",
+        ));
+    };
+    let data = values
+        .into_iter()
+        .map(|value| if value == 0.0 { 0 } else { 1 })
+        .collect();
+    let logical = LogicalArray::new(data, shape).map_err(|e| {
         readmatrix_error_with(&READMATRIX_ERROR_TENSOR_BUILD, format!("readmatrix: {e}"))
     })?;
     Ok(Value::LogicalArray(logical))
@@ -1105,7 +1267,14 @@ fn finalize_like(tensor: Tensor, proto: &Value) -> BuiltinResult<Value> {
     match proto {
         Value::LogicalArray(_) | Value::Bool(_) => tensor_to_logical(tensor),
         Value::GpuTensor(handle) => tensor_to_gpu(tensor, handle),
-        Value::Tensor(_) | Value::Num(_) | Value::Int(_) => Ok(Value::Tensor(tensor)),
+        Value::Tensor(prototype) => Ok(Value::Tensor(tensor::coerce_tensor_dtype(
+            tensor,
+            prototype.numeric_dtype(),
+        ))),
+        Value::Int(value) => {
+            tensor_to_integer_like(tensor, &IntegerStorage::from_scalar(value.clone()))
+        }
+        Value::Num(_) => Ok(Value::Tensor(tensor)),
         Value::ComplexTensor(_) | Value::Complex(_, _) => Ok(Value::Tensor(tensor)),
         Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => Ok(Value::Tensor(tensor)),
         Value::Cell(_) => Ok(Value::Tensor(tensor)),
@@ -1113,20 +1282,111 @@ fn finalize_like(tensor: Tensor, proto: &Value) -> BuiltinResult<Value> {
     }
 }
 
+fn tensor_to_integer_like(tensor: Tensor, prototype: &IntegerStorage) -> BuiltinResult<Value> {
+    if tensor.numeric_dtype() == prototype.numeric_dtype() {
+        return Ok(Value::Tensor(tensor));
+    }
+    let shape = tensor.shape.clone();
+    let storage = tensor.into_numeric_storage().map_err(|e| {
+        readmatrix_error_with(&READMATRIX_ERROR_TENSOR_BUILD, format!("readmatrix: {e}"))
+    })?;
+    let NumericStorage::F64(values) = storage else {
+        return Err(readmatrix_error_with(
+            &READMATRIX_ERROR_TENSOR_BUILD,
+            "readmatrix: parsed integer-like source was not double",
+        ));
+    };
+    let tensor =
+        crate::builtins::common::tensor::integer_tensor_from_f64_like(prototype, values, &shape)
+            .map_err(|e| {
+                readmatrix_error_with(&READMATRIX_ERROR_TENSOR_BUILD, format!("readmatrix: {e}"))
+            })?;
+    Ok(Value::Tensor(tensor))
+}
+
 fn tensor_to_gpu(
     tensor: Tensor,
-    _handle: &runmat_accelerate_api::GpuTensorHandle,
+    prototype: &runmat_accelerate_api::GpuTensorHandle,
 ) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        let view = HostTensorView {
-            data: &tensor.data,
-            shape: &tensor.shape,
-        };
-        if let Ok(uploaded) = provider.upload(&view) {
-            return Ok(Value::GpuTensor(uploaded));
+    use runmat_accelerate_api::{GpuTensorStorage, ProviderPrecision};
+
+    let owner = gpu_helpers::exact_provider_for_handle(prototype).ok_or_else(|| {
+        readmatrix_error_with(
+            &READMATRIX_ERROR_OUTPUT_TYPE,
+            "readmatrix: no acceleration provider owns the Like prototype",
+        )
+    })?;
+    let expected_integer = runmat_accelerate_api::handle_integer_type(prototype);
+    let expected_logical = runmat_accelerate_api::handle_is_logical(prototype);
+    let expected_precision = if expected_integer.is_some() {
+        None
+    } else {
+        runmat_accelerate_api::handle_precision(prototype)
+    };
+    let target_dtype = if let Some(integer) = expected_integer {
+        integer_element_dtype(integer)
+    } else {
+        match expected_precision {
+            Some(ProviderPrecision::F32) => NumericDType::F32,
+            Some(ProviderPrecision::F64) => NumericDType::F64,
+            None => {
+                return Err(readmatrix_error_with(
+                    &READMATRIX_ERROR_OUTPUT_TYPE,
+                    "readmatrix: the Like prototype is missing numeric class metadata",
+                ))
+            }
         }
+    };
+    let tensor = if tensor.numeric_dtype() == target_dtype {
+        tensor
+    } else {
+        tensor::coerce_tensor_dtype(tensor, target_dtype)
+    };
+    let expected_shape = tensor.shape.clone();
+    let mut uploaded = gpu_helpers::upload_tensor(owner, &tensor).map_err(|error| {
+        readmatrix_error_with(
+            &READMATRIX_ERROR_OUTPUT_TYPE,
+            format!("readmatrix: failed to restore Like output to its owning provider: {error}"),
+        )
+    })?;
+    if expected_logical {
+        runmat_accelerate_api::set_handle_logical(&uploaded, true);
     }
-    Ok(Value::Tensor(tensor))
+    runmat_accelerate_api::set_handle_provenance(
+        &mut uploaded,
+        runmat_accelerate_api::GpuHandleProvenance::Explicit,
+    );
+    let valid = uploaded.buffer_id != prototype.buffer_id
+        && uploaded.device_id == prototype.device_id
+        && uploaded.shape == expected_shape
+        && gpu_helpers::exact_provider_for_handle(&uploaded)
+            .is_some_and(|uploaded_owner| std::ptr::eq(uploaded_owner, owner))
+        && runmat_accelerate_api::handle_storage(&uploaded) == GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_integer_type(&uploaded) == expected_integer
+        && runmat_accelerate_api::handle_precision(&uploaded) == expected_precision
+        && runmat_accelerate_api::handle_is_logical(&uploaded) == expected_logical;
+    if !valid {
+        let _ = owner.free(&uploaded);
+        return Err(readmatrix_error_with(
+            &READMATRIX_ERROR_OUTPUT_TYPE,
+            "readmatrix: the Like provider returned an invalid class, shape, owner, or storage representation",
+        ));
+    }
+    Ok(Value::GpuTensor(uploaded))
+}
+
+fn integer_element_dtype(integer: runmat_accelerate_api::IntegerElementType) -> NumericDType {
+    use runmat_accelerate_api::IntegerElementType;
+    match integer {
+        IntegerElementType::I8 => NumericDType::I8,
+        IntegerElementType::I16 => NumericDType::I16,
+        IntegerElementType::I32 => NumericDType::I32,
+        IntegerElementType::I64 => NumericDType::I64,
+        IntegerElementType::U8 => NumericDType::U8,
+        IntegerElementType::U16 => NumericDType::U16,
+        IntegerElementType::U32 => NumericDType::U32,
+        IntegerElementType::U64 => NumericDType::U64,
+    }
 }
 
 async fn read_numeric_matrix(path: &Path, options: &ReadMatrixOptions) -> BuiltinResult<Tensor> {
@@ -1163,8 +1423,9 @@ async fn read_numeric_matrix(path: &Path, options: &ReadMatrixOptions) -> Builti
         .clone()
         .or_else(|| detect_delimiter(&data_lines))
         .unwrap_or(Delimiter::Whitespace);
+    let integer_dtype = integer_output_dtype(&options.output_template);
 
-    let mut rows: Vec<Vec<f64>> = Vec::new();
+    let mut rows: Vec<Vec<String>> = Vec::new();
     let mut max_cols = 0usize;
 
     for (line_number, text) in &data_lines {
@@ -1174,8 +1435,12 @@ async fn read_numeric_matrix(path: &Path, options: &ReadMatrixOptions) -> Builti
         }
         let mut row = Vec::with_capacity(fields.len());
         for (index, field) in fields.iter().enumerate() {
-            let value = parse_numeric_token(field, options, *line_number, index + 1)?;
-            row.push(value);
+            if let Some(dtype) = integer_dtype {
+                parse_integer_numeric_token(field, options, dtype, *line_number, index + 1)?;
+            } else {
+                validate_numeric_token(field, options, *line_number, index + 1)?;
+            }
+            row.push(field.clone());
         }
         if row.len() > max_cols {
             max_cols = row.len();
@@ -1189,9 +1454,8 @@ async fn read_numeric_matrix(path: &Path, options: &ReadMatrixOptions) -> Builti
         });
     }
 
-    let default_fill = options.empty_value();
     if let Some(range) = &options.range {
-        let (subset_rows, subset_cols) = apply_range(&rows, max_cols, range, default_fill);
+        let (subset_rows, subset_cols) = apply_range(&rows, max_cols, range, String::new());
         rows = subset_rows;
         max_cols = subset_cols;
     }
@@ -1202,17 +1466,50 @@ async fn read_numeric_matrix(path: &Path, options: &ReadMatrixOptions) -> Builti
         });
     }
     let row_count = rows.len();
-    let mut data = vec![default_fill; row_count * max_cols];
-
-    for (row_index, row) in rows.iter().enumerate() {
-        for col_index in 0..max_cols {
-            let value = row.get(col_index).copied().unwrap_or(default_fill);
-            data[col_index * row_count + row_index] = value;
+    if let Some(dtype) = integer_dtype {
+        let mut storage = NumericStorage::zeros(dtype, row_count * max_cols);
+        for (row_index, row) in rows.iter().enumerate() {
+            for col_index in 0..max_cols {
+                let token = row.get(col_index).map(String::as_str).unwrap_or("");
+                let value = parse_integer_numeric_token(
+                    token,
+                    options,
+                    dtype,
+                    row_index + 1,
+                    col_index + 1,
+                )?;
+                storage
+                    .set_value(col_index * row_count + row_index, value)
+                    .map_err(|error| {
+                        readmatrix_error_with(
+                            &READMATRIX_ERROR_TENSOR_BUILD,
+                            format!("readmatrix: {error}"),
+                        )
+                    })?;
+            }
         }
+        return Tensor::from_numeric_storage(storage, vec![row_count, max_cols]).map_err(|error| {
+            readmatrix_error_with(
+                &READMATRIX_ERROR_TENSOR_BUILD,
+                format!("readmatrix: {error}"),
+            )
+        });
     }
 
-    Tensor::new(data, vec![row_count, max_cols]).map_err(|e| {
-        readmatrix_error_with(&READMATRIX_ERROR_TENSOR_BUILD, format!("readmatrix: {e}"))
+    let default_fill = options.empty_value_f64();
+    let mut data = vec![default_fill; row_count * max_cols];
+    for (row_index, row) in rows.iter().enumerate() {
+        for col_index in 0..max_cols {
+            let token = row.get(col_index).map(String::as_str).unwrap_or("");
+            data[col_index * row_count + row_index] =
+                parse_numeric_token(token, options, row_index + 1, col_index + 1)?;
+        }
+    }
+    Tensor::new(data, vec![row_count, max_cols]).map_err(|error| {
+        readmatrix_error_with(
+            &READMATRIX_ERROR_TENSOR_BUILD,
+            format!("readmatrix: {error}"),
+        )
     })
 }
 
@@ -1404,19 +1701,19 @@ fn parse_numeric_token(
 ) -> BuiltinResult<f64> {
     let trimmed = token.trim();
     if trimmed.is_empty() {
-        return Ok(options.empty_value());
+        return Ok(options.empty_value_f64());
     }
     let unquoted = unquote(trimmed);
     let inner = unquoted.trim();
     if inner.is_empty() {
-        return Ok(options.empty_value());
+        return Ok(options.empty_value_f64());
     }
     if options.is_missing_token(inner) {
         return Ok(f64::NAN);
     }
     let normalized = normalize_numeric_token(inner, options);
     if normalized.is_empty() {
-        return Ok(options.empty_value());
+        return Ok(options.empty_value_f64());
     }
     let lower = normalized.to_ascii_lowercase();
     if lower == "nan" {
@@ -1437,6 +1734,217 @@ fn parse_numeric_token(
             ),
         )
     })
+}
+
+fn validate_numeric_token(
+    token: &str,
+    options: &ReadMatrixOptions,
+    line_number: usize,
+    column_number: usize,
+) -> BuiltinResult<()> {
+    parse_numeric_token(token, options, line_number, column_number).map(|_| ())
+}
+
+fn integer_output_dtype(template: &OutputTemplate) -> Option<NumericDType> {
+    let dtype = match template {
+        OutputTemplate::Numeric(dtype) => *dtype,
+        OutputTemplate::Like(Value::Tensor(tensor)) => tensor.numeric_dtype(),
+        OutputTemplate::Like(Value::Int(value)) => {
+            IntegerStorage::from_scalar(value.clone()).numeric_dtype()
+        }
+        OutputTemplate::Like(Value::GpuTensor(handle)) => {
+            integer_element_dtype(runmat_accelerate_api::handle_integer_type(handle)?)
+        }
+        OutputTemplate::Logical | OutputTemplate::Like(_) => return None,
+    };
+    matches!(
+        dtype,
+        NumericDType::I8
+            | NumericDType::I16
+            | NumericDType::I32
+            | NumericDType::I64
+            | NumericDType::U8
+            | NumericDType::U16
+            | NumericDType::U32
+            | NumericDType::U64
+    )
+    .then_some(dtype)
+}
+
+fn parse_integer_numeric_token(
+    token: &str,
+    options: &ReadMatrixOptions,
+    dtype: NumericDType,
+    line_number: usize,
+    column_number: usize,
+) -> BuiltinResult<NumericScalar> {
+    let trimmed = token.trim();
+    let unquoted = unquote(trimmed);
+    let inner = unquoted.trim();
+    if inner.is_empty() {
+        return Ok(integer_scalar_from_numeric(dtype, options.empty_value()));
+    }
+    if options.is_missing_token(inner) {
+        return Ok(integer_scalar_from_f64(dtype, f64::NAN));
+    }
+    let normalized = normalize_numeric_token(inner, options);
+    if normalized.is_empty() {
+        return Ok(integer_scalar_from_numeric(dtype, options.empty_value()));
+    }
+    let lower = normalized.to_ascii_lowercase();
+    if lower == "nan" {
+        return Ok(integer_scalar_from_f64(dtype, f64::NAN));
+    }
+    if matches!(lower.as_str(), "inf" | "+inf" | "infinity" | "+infinity") {
+        return Ok(integer_scalar_from_f64(dtype, f64::INFINITY));
+    }
+    if matches!(lower.as_str(), "-inf" | "-infinity") {
+        return Ok(integer_scalar_from_f64(dtype, f64::NEG_INFINITY));
+    }
+    let invalid = || {
+        readmatrix_error_with(
+            &READMATRIX_ERROR_NON_NUMERIC_TOKEN,
+            format!(
+                "readmatrix: unable to parse numeric value '{}' on line {} column {}",
+                inner, line_number, column_number
+            ),
+        )
+    };
+    if normalized.chars().any(|ch| matches!(ch, '.' | 'e' | 'E')) {
+        return normalized
+            .parse::<f64>()
+            .map(|value| integer_scalar_from_f64(dtype, value))
+            .map_err(|_| invalid());
+    }
+    parse_decimal_integer_saturating(&normalized, dtype).ok_or_else(invalid)
+}
+
+fn parse_decimal_integer_saturating(text: &str, dtype: NumericDType) -> Option<NumericScalar> {
+    let (negative, digits) = match text.as_bytes().first() {
+        Some(b'-') => (true, &text[1..]),
+        Some(b'+') => (false, &text[1..]),
+        Some(_) => (false, text),
+        None => return None,
+    };
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let magnitude = digits.parse::<u128>().ok();
+    Some(if negative {
+        match magnitude {
+            Some(value) if value <= i128::MAX as u128 => {
+                integer_scalar_from_signed(dtype, -(value as i128))
+            }
+            _ => integer_scalar_from_signed(dtype, i128::MIN),
+        }
+    } else {
+        integer_scalar_from_unsigned(dtype, magnitude.unwrap_or(u128::MAX))
+    })
+}
+
+fn integer_scalar_from_numeric(dtype: NumericDType, value: NumericScalar) -> NumericScalar {
+    match value {
+        NumericScalar::F64(value) => integer_scalar_from_f64(dtype, value),
+        NumericScalar::F32(value) => integer_scalar_from_f64(dtype, f64::from(value)),
+        NumericScalar::I8(value) => integer_scalar_from_signed(dtype, i128::from(value)),
+        NumericScalar::I16(value) => integer_scalar_from_signed(dtype, i128::from(value)),
+        NumericScalar::I32(value) => integer_scalar_from_signed(dtype, i128::from(value)),
+        NumericScalar::I64(value) => integer_scalar_from_signed(dtype, i128::from(value)),
+        NumericScalar::U8(value) => integer_scalar_from_unsigned(dtype, u128::from(value)),
+        NumericScalar::U16(value) => integer_scalar_from_unsigned(dtype, u128::from(value)),
+        NumericScalar::U32(value) => integer_scalar_from_unsigned(dtype, u128::from(value)),
+        NumericScalar::U64(value) => integer_scalar_from_unsigned(dtype, u128::from(value)),
+    }
+}
+
+fn integer_scalar_from_signed(dtype: NumericDType, value: i128) -> NumericScalar {
+    match dtype {
+        NumericDType::I8 | NumericDType::I16 | NumericDType::I32 | NumericDType::I64 => {
+            integer_scalar_from_i128(dtype, value)
+        }
+        NumericDType::U8 | NumericDType::U16 | NumericDType::U32 | NumericDType::U64 => {
+            integer_scalar_from_u128(dtype, value.max(0) as u128)
+        }
+        NumericDType::F64 | NumericDType::F32 => {
+            unreachable!("integer conversion requested floating dtype")
+        }
+    }
+}
+
+fn integer_scalar_from_unsigned(dtype: NumericDType, value: u128) -> NumericScalar {
+    match dtype {
+        NumericDType::I8 | NumericDType::I16 | NumericDType::I32 | NumericDType::I64 => {
+            integer_scalar_from_i128(dtype, value.min(i128::MAX as u128) as i128)
+        }
+        NumericDType::U8 | NumericDType::U16 | NumericDType::U32 | NumericDType::U64 => {
+            integer_scalar_from_u128(dtype, value)
+        }
+        NumericDType::F64 | NumericDType::F32 => {
+            unreachable!("integer conversion requested floating dtype")
+        }
+    }
+}
+
+fn integer_scalar_from_i128(dtype: NumericDType, value: i128) -> NumericScalar {
+    match dtype {
+        NumericDType::I8 => NumericScalar::I8(value.clamp(i8::MIN as i128, i8::MAX as i128) as i8),
+        NumericDType::I16 => {
+            NumericScalar::I16(value.clamp(i16::MIN as i128, i16::MAX as i128) as i16)
+        }
+        NumericDType::I32 => {
+            NumericScalar::I32(value.clamp(i32::MIN as i128, i32::MAX as i128) as i32)
+        }
+        NumericDType::I64 => {
+            NumericScalar::I64(value.clamp(i64::MIN as i128, i64::MAX as i128) as i64)
+        }
+        _ => unreachable!("signed conversion requested non-signed dtype"),
+    }
+}
+
+fn integer_scalar_from_u128(dtype: NumericDType, value: u128) -> NumericScalar {
+    match dtype {
+        NumericDType::U8 => NumericScalar::U8(value.min(u8::MAX as u128) as u8),
+        NumericDType::U16 => NumericScalar::U16(value.min(u16::MAX as u128) as u16),
+        NumericDType::U32 => NumericScalar::U32(value.min(u32::MAX as u128) as u32),
+        NumericDType::U64 => NumericScalar::U64(value.min(u64::MAX as u128) as u64),
+        _ => unreachable!("unsigned conversion requested non-unsigned dtype"),
+    }
+}
+
+fn integer_scalar_from_f64(dtype: NumericDType, value: f64) -> NumericScalar {
+    if value.is_nan() {
+        return match dtype {
+            NumericDType::I8 => NumericScalar::I8(0),
+            NumericDType::I16 => NumericScalar::I16(0),
+            NumericDType::I32 => NumericScalar::I32(0),
+            NumericDType::I64 => NumericScalar::I64(0),
+            NumericDType::U8 => NumericScalar::U8(0),
+            NumericDType::U16 => NumericScalar::U16(0),
+            NumericDType::U32 => NumericScalar::U32(0),
+            NumericDType::U64 => NumericScalar::U64(0),
+            _ => unreachable!("integer conversion requested floating dtype"),
+        };
+    }
+    let rounded = value.round();
+    match dtype {
+        NumericDType::I8 => NumericScalar::I8(rounded.clamp(i8::MIN as f64, i8::MAX as f64) as i8),
+        NumericDType::I16 => {
+            NumericScalar::I16(rounded.clamp(i16::MIN as f64, i16::MAX as f64) as i16)
+        }
+        NumericDType::I32 => {
+            NumericScalar::I32(rounded.clamp(i32::MIN as f64, i32::MAX as f64) as i32)
+        }
+        NumericDType::I64 => {
+            NumericScalar::I64(rounded.clamp(i64::MIN as f64, i64::MAX as f64) as i64)
+        }
+        NumericDType::U8 => NumericScalar::U8(rounded.clamp(0.0, u8::MAX as f64) as u8),
+        NumericDType::U16 => NumericScalar::U16(rounded.clamp(0.0, u16::MAX as f64) as u16),
+        NumericDType::U32 => NumericScalar::U32(rounded.clamp(0.0, u32::MAX as f64) as u32),
+        NumericDType::U64 => NumericScalar::U64(rounded.clamp(0.0, u64::MAX as f64) as u64),
+        NumericDType::F64 | NumericDType::F32 => {
+            unreachable!("integer conversion requested floating dtype")
+        }
+    }
 }
 
 fn normalize_numeric_token(token: &str, options: &ReadMatrixOptions) -> String {
@@ -1509,14 +2017,171 @@ pub(crate) mod tests {
     use std::fs;
 
     use crate::builtins::common::test_support;
-    use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{CharArray, IntValue, LogicalArray, StringArray, Tensor};
+    use runmat_value::{CharArray, IntValue, LogicalArray, StringArray, Tensor};
 
     fn unique_path(prefix: &str) -> PathBuf {
         let millis = unix_timestamp_ms();
         let mut path = std::env::temp_dir();
         path.push(format!("runmat_{prefix}_{}_{}", std::process::id(), millis));
         path
+    }
+
+    fn values(tensor: &Tensor) -> Vec<f64> {
+        tensor.materialize_f64()
+    }
+
+    #[test]
+    fn readmatrix_like_preserves_every_exact_integer_class() {
+        let prototypes = [
+            IntegerStorage::I8(vec![0]),
+            IntegerStorage::I16(vec![0]),
+            IntegerStorage::I32(vec![0]),
+            IntegerStorage::I64(vec![0]),
+            IntegerStorage::U8(vec![0]),
+            IntegerStorage::U16(vec![0]),
+            IntegerStorage::U32(vec![0]),
+            IntegerStorage::U64(vec![0]),
+        ];
+
+        for storage in prototypes {
+            let expected = storage
+                .from_same_class_values(
+                    [1.0, 2.5, -3.0]
+                        .into_iter()
+                        .map(|value| storage.cast_f64_assignment(value))
+                        .collect(),
+                )
+                .expect("expected storage");
+            let source = Tensor::new(vec![1.0, 2.5, -3.0], vec![3, 1]).unwrap();
+            let prototype = Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).unwrap());
+            let output = finalize_like(source, &prototype).expect("integer like output");
+            let Value::Tensor(output) = output else {
+                panic!("expected tensor output");
+            };
+            assert_eq!(output.integer_storage(), Some(&expected));
+        }
+
+        let source = Tensor::new(vec![1.0, 2.5, -3.0], vec![3, 1]).unwrap();
+        let prototype = Value::Tensor(Tensor::from_f32(vec![0.0], vec![1, 1]).unwrap());
+        let output = finalize_like(source, &prototype).expect("single like output");
+        let Value::Tensor(output) = output else {
+            panic!("expected single tensor output");
+        };
+        assert_eq!(output.numeric_dtype(), NumericDType::F32);
+        assert_eq!(values(&output), vec![1.0, 2.5, -3.0]);
+    }
+
+    #[test]
+    fn readmatrix_output_type_supports_every_numeric_class() {
+        let cases = [
+            ("int8", IntegerStorage::I8(vec![1, 3, -3])),
+            ("int16", IntegerStorage::I16(vec![1, 3, -3])),
+            ("int32", IntegerStorage::I32(vec![1, 3, -3])),
+            ("int64", IntegerStorage::I64(vec![1, 3, -3])),
+            ("uint8", IntegerStorage::U8(vec![1, 3, 0])),
+            ("uint16", IntegerStorage::U16(vec![1, 3, 0])),
+            ("uint32", IntegerStorage::U32(vec![1, 3, 0])),
+            ("uint64", IntegerStorage::U64(vec![1, 3, 0])),
+        ];
+        for (class_name, expected) in cases {
+            let mut options = ReadMatrixOptions::default();
+            options
+                .set_output_type(class_name)
+                .expect("numeric output type");
+            let source = Tensor::new(vec![1.0, 2.5, -3.0], vec![3, 1]).unwrap();
+            let Value::Tensor(output) = finalize_output(source, &options).expect("numeric output")
+            else {
+                panic!("expected numeric tensor output");
+            };
+            assert_eq!(output.integer_storage(), Some(&expected));
+        }
+
+        let mut single_options = ReadMatrixOptions::default();
+        single_options
+            .set_output_type("single")
+            .expect("single output type");
+        let source = Tensor::new(vec![1.0, 2.5, -3.0], vec![3, 1]).unwrap();
+        let Value::Tensor(single) =
+            finalize_output(source, &single_options).expect("single output")
+        else {
+            panic!("expected single tensor output");
+        };
+        assert_eq!(single.numeric_dtype(), NumericDType::F32);
+        assert_eq!(values(&single), vec![1.0, 2.5, -3.0]);
+    }
+
+    #[test]
+    fn readmatrix_output_type_parses_wide_integer_text_without_binary64() {
+        let path = unique_path("readmatrix_wide_integer");
+        fs::write(
+            &path,
+            "9007199254740993,18446744073709551615\n9223372036854775808,7\n",
+        )
+        .expect("write sample file");
+        let result = block_on(readmatrix_builtin(
+            Value::from(path.to_string_lossy().to_string()),
+            vec![Value::from("OutputType"), Value::from("uint64")],
+        ))
+        .expect("readmatrix");
+        let Value::Tensor(result) = result else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::U64(vec![
+                9_007_199_254_740_993,
+                1_u64 << 63,
+                u64::MAX,
+                7,
+            ]))
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn readmatrix_documented_integer_output_remains_enabled_in_matlab_mode() {
+        let path = unique_path("readmatrix_integer_matlab_mode");
+        fs::write(&path, "9007199254740993\n").expect("write sample file");
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let result = block_on(readmatrix_builtin(
+            Value::from(path.to_string_lossy().to_string()),
+            vec![Value::from("OutputType"), Value::from("uint64")],
+        ))
+        .expect("documented integer output");
+        let Value::Tensor(result) = result else {
+            panic!("expected integer tensor");
+        };
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::U64(vec![9_007_199_254_740_993]))
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn readmatrix_compatibility_gates_extensions_before_file_access() {
+        let missing = Value::from("runmat_missing_readmatrix_input.csv");
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+
+        let like_error = block_on(readmatrix_builtin(
+            missing.clone(),
+            vec![Value::from("Like"), Value::Int(IntValue::U8(0))],
+        ))
+        .expect_err("Like must be gated");
+        assert_eq!(
+            like_error.identifier(),
+            READMATRIX_LIKE_EXTENSION.error_identifier
+        );
+
+        let control_error = block_on(readmatrix_builtin(
+            missing,
+            vec![Value::from("NumHeaderLines"), Value::Int(IntValue::U8(1))],
+        ))
+        .expect_err("typed control must be gated");
+        assert_eq!(
+            control_error.identifier(),
+            READMATRIX_TYPED_INTEGER_CONTROL_EXTENSION.error_identifier
+        );
     }
 
     #[test]
@@ -1561,7 +2226,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
-                assert_eq!(t.data, vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
+                assert_eq!(values(&t), vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1570,7 +2235,133 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn treat_as_missing_preserves_exact_uint64_text() {
+        let tokens = block_on(parse_treat_as_missing(&Value::Int(IntValue::U64(u64::MAX))))
+            .expect("TreatAsMissing token");
+        assert_eq!(tokens, vec!["18446744073709551615"]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn treat_as_missing_reads_typed_integer_tensor_storage_exactly() {
+        let wide = (1_u64 << 53) + 1;
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("token");
+
+        let tokens =
+            block_on(parse_treat_as_missing(&Value::Tensor(tensor))).expect("TreatAsMissing token");
+        assert_eq!(tokens, vec!["9007199254740993"]);
+    }
+
+    #[test]
+    fn empty_value_reads_typed_integer_tensor_storage_exactly() {
+        assert!(matches!(
+            value_to_numeric_scalar(&Value::Num(f64::NAN), "EmptyValue"),
+            Ok(NumericScalar::F64(value)) if value.is_nan()
+        ));
+        let wide = 9_007_199_254_740_993_u64;
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("empty value");
+        let value =
+            value_to_numeric_scalar(&Value::Tensor(tensor), "EmptyValue").expect("EmptyValue");
+        assert_eq!(value, NumericScalar::U64(wide));
+
+        let mut options = ReadMatrixOptions {
+            empty_value: Some(value),
+            ..ReadMatrixOptions::default()
+        };
+        assert_eq!(
+            parse_integer_numeric_token("", &options, NumericDType::U64, 1, 1).unwrap(),
+            NumericScalar::U64(wide)
+        );
+        options.add_missing_token("NA");
+        assert_eq!(
+            parse_integer_numeric_token("NA", &options, NumericDType::U64, 1, 1).unwrap(),
+            NumericScalar::U64(0)
+        );
+        assert_eq!(
+            parse_integer_numeric_token(
+                "999999999999999999999999999999999999999999999999",
+                &options,
+                NumericDType::U64,
+                1,
+                1,
+            )
+            .unwrap(),
+            NumericScalar::U64(u64::MAX)
+        );
+        assert_eq!(
+            parse_integer_numeric_token(
+                "-999999999999999999999999999999999999999999999999",
+                &options,
+                NumericDType::I64,
+                1,
+                1,
+            )
+            .unwrap(),
+            NumericScalar::I64(i64::MIN)
+        );
+    }
+
+    #[test]
+    fn numeric_range_reads_typed_integer_tensor_storage_exactly() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U16(vec![2, 3, 4, 5]), vec![1, 4]).expect("range");
+
+        let range = parse_range_numeric(&Value::Tensor(tensor)).expect("range");
+        assert_eq!(range.start_row, 1);
+        assert_eq!(range.start_col, 2);
+        assert_eq!(range.end_row, Some(3));
+        assert_eq!(range.end_col, Some(4));
+    }
+
+    #[test]
+    fn option_usize_preserves_representable_uint64_values() {
+        assert_eq!(
+            value_to_usize(&Value::Int(IntValue::U64(u64::MAX)), "option").ok(),
+            usize::try_from(u64::MAX).ok()
+        );
+        assert!(value_to_usize(&Value::Int(IntValue::I64(-1)), "option").is_err());
+
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![9]), vec![1, 1]).expect("option");
+        assert_eq!(value_to_usize(&Value::Tensor(tensor), "option").unwrap(), 9);
+
+        let negative =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("option");
+        assert!(value_to_usize(&Value::Tensor(negative), "option").is_err());
+        assert!(value_to_usize(&Value::Num(1.0e300), "option").is_err());
+    }
+
+    #[test]
+    fn option_usize_reads_every_integer_class_exactly() {
+        let classes = [
+            IntegerStorage::I8(vec![7]),
+            IntegerStorage::I16(vec![7]),
+            IntegerStorage::I32(vec![7]),
+            IntegerStorage::I64(vec![7]),
+            IntegerStorage::U8(vec![7]),
+            IntegerStorage::U16(vec![7]),
+            IntegerStorage::U32(vec![7]),
+            IntegerStorage::U64(vec![7]),
+        ];
+
+        for storage in classes {
+            let value = Tensor::new_integer(storage, vec![1, 1]).expect("typed option");
+            assert_eq!(value_to_usize(&Value::Tensor(value), "option").unwrap(), 7);
+        }
+
+        let too_wide =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("wide");
+        assert_eq!(
+            value_to_usize(&Value::Tensor(too_wide), "option").ok(),
+            usize::try_from(u64::MAX).ok()
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn readmatrix_skips_header_lines() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let path = unique_path("readmatrix_header");
         fs::write(&path, "time,value\n0,10\n1,12\n").expect("write sample file");
         let args = vec![Value::from("NumHeaderLines"), Value::Int(IntValue::I32(1))];
@@ -1582,7 +2373,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![0.0, 1.0, 10.0, 12.0]);
+                assert_eq!(values(&t), vec![0.0, 1.0, 10.0, 12.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1603,7 +2394,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
-                assert_eq!(t.data, vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
+                assert_eq!(values(&t), vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1624,7 +2415,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![22.0, 32.0, 23.0, 33.0]);
+                assert_eq!(values(&t), vec![22.0, 32.0, 23.0, 33.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1646,7 +2437,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![22.0, 32.0, 23.0, 33.0]);
+                assert_eq!(values(&t), vec![22.0, 32.0, 23.0, 33.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1669,9 +2460,10 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
-                assert!(t.data[1].is_nan()); // column 1, row 2
-                assert!(t.data[2].is_nan()); // column 2, row 1
-                assert!(t.data[5].is_nan()); // column 3, row 2
+                let values = values(&t);
+                assert!(values[1].is_nan()); // column 1, row 2
+                assert!(values[2].is_nan()); // column 2, row 1
+                assert!(values[5].is_nan()); // column 3, row 2
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1699,8 +2491,9 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert!((t.data[0] - 1234.56).abs() < 1e-9);
-                assert!((t.data[1] - 7890.12).abs() < 1e-9);
+                let values = values(&t);
+                assert!((values[0] - 1234.56).abs() < 1e-9);
+                assert!((values[1] - 7890.12).abs() < 1e-9);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1721,7 +2514,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
-                assert_eq!(t.data, vec![1.0, 4.0, 0.0, 0.0, 3.0, 6.0]);
+                assert_eq!(values(&t), vec![1.0, 4.0, 0.0, 0.0, 3.0, 6.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1731,9 +2524,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_accepts_struct_options() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let path = unique_path("readmatrix_struct_opts");
         fs::write(&path, "header1,header2\n9,10\n11,12\n").expect("write sample file");
-        let mut options_struct = runmat_builtins::StructValue::new();
+        let mut options_struct = runmat_value::StructValue::new();
         options_struct
             .fields
             .insert("Delimiter".to_string(), Value::from(","));
@@ -1749,7 +2543,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![9.0, 11.0, 10.0, 12.0]);
+                assert_eq!(values(&t), vec![9.0, 11.0, 10.0, 12.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1787,7 +2581,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 0]);
-                assert!(t.data.is_empty());
+                assert!(t.is_empty());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1818,6 +2612,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_like_logical_proto() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let path = unique_path("readmatrix_like_logical");
         fs::write(&path, "1,0\n0,5\n").expect("write sample file");
         let proto = LogicalArray::new(vec![1], vec![1]).expect("logical prototype");
@@ -1840,29 +2635,69 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_like_gpu_proto() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let path = unique_path("readmatrix_like_gpu");
             fs::write(&path, "1,2\n3,4\n").expect("write sample file");
             let proto_tensor = Tensor::new(vec![0.0, 0.0], vec![1, 2]).expect("tensor");
-            let view = HostTensorView {
-                data: &proto_tensor.data,
-                shape: &proto_tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload prototype");
+            let handle =
+                gpu_helpers::upload_tensor(provider, &proto_tensor).expect("upload prototype");
             let args = vec![Value::from("Like"), Value::GpuTensor(handle.clone())];
             let result = block_on(readmatrix_builtin(
                 Value::from(path.to_string_lossy().to_string()),
                 args,
             ))
             .expect("readmatrix");
-            assert!(
-                matches!(result, Value::GpuTensor(_)),
-                "expected GPU tensor result, got {result:?}"
+            let Value::GpuTensor(output) = &result else {
+                panic!("expected GPU tensor result, got {result:?}");
+            };
+            assert!(gpu_helpers::exact_provider_for_handle(output)
+                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(output),
+                Some(runmat_accelerate_api::ProviderPrecision::F64)
+            );
+            assert_eq!(
+                runmat_accelerate_api::handle_provenance(output),
+                Some(runmat_accelerate_api::GpuHandleProvenance::Explicit)
             );
             let gathered = test_support::gather(result).expect("gather result");
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![1.0, 3.0, 2.0, 4.0]);
+            assert_eq!(values(&gathered), vec![1.0, 3.0, 2.0, 4.0]);
             let _ = fs::remove_file(&path);
+        });
+    }
+
+    #[test]
+    fn readmatrix_integer_gpu_like_preserves_wide_storage_and_exact_owner() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        test_support::with_test_provider(|provider| {
+            let path = unique_path("readmatrix_integer_gpu_like");
+            fs::write(&path, "9007199254740993,18446744073709551615\n").expect("write sample file");
+            let prototype = Tensor::new_integer(IntegerStorage::U64(vec![0]), vec![1, 1])
+                .expect("integer prototype");
+            let prototype =
+                gpu_helpers::upload_tensor(provider, &prototype).expect("upload integer prototype");
+            let result = block_on(readmatrix_builtin(
+                Value::from(path.to_string_lossy().to_string()),
+                vec![Value::from("Like"), Value::GpuTensor(prototype)],
+            ))
+            .expect("integer Like readmatrix");
+            let Value::GpuTensor(output) = &result else {
+                panic!("expected resident integer output");
+            };
+            assert!(gpu_helpers::exact_provider_for_handle(output)
+                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(output),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            let gathered = test_support::gather(result).expect("gather integer output");
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]))
+            );
+            let _ = fs::remove_file(path);
         });
     }
 
@@ -1880,7 +2715,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 3]);
-                assert_eq!(t.data, vec![1.0, 2.0, 3.0]);
+                assert_eq!(values(&t), vec![1.0, 2.0, 3.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1900,7 +2735,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 3]);
-                assert_eq!(t.data, vec![1.0, 2.0, 3.0]);
+                assert_eq!(values(&t), vec![1.0, 2.0, 3.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1920,9 +2755,10 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 3]);
-                assert!(t.data[0].is_infinite() && t.data[0].is_sign_negative());
-                assert!(t.data[1].is_infinite() && t.data[1].is_sign_positive());
-                assert!(t.data[2].is_nan());
+                let values = values(&t);
+                assert!(values[0].is_infinite() && values[0].is_sign_negative());
+                assert!(values[1].is_infinite() && values[1].is_sign_positive());
+                assert!(values[2].is_nan());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1942,7 +2778,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![1.0, 3.0, 2.0, 4.0]);
+                assert_eq!(values(&t), vec![1.0, 3.0, 2.0, 4.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1966,7 +2802,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![1.0, 3.0, 2.0, 4.0]);
+                assert_eq!(values(&t), vec![1.0, 3.0, 2.0, 4.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1986,7 +2822,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
-                assert_eq!(t.data, vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
+                assert_eq!(values(&t), vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }

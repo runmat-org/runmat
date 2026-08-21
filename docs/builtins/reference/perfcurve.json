@@ -30,6 +30,7 @@
   },
   "description": "`perfcurve(labels,scores,posclass)` treats `posclass` as the positive class, all other nonmissing classes as negative classes, and returns ROC false-positive-rate values. `[X,Y,T,AUC,OPTROCPT,SUBY,SUBYNAMES] = perfcurve(...)` returns the Y criterion, thresholds, trapezoidal AUC, optimal ROC point, per-negative-subclass Y values, and subclass labels as a cell array.",
   "behaviors": [
+    "Typed-integer labels are a RunMat-mode extension and remain exact during class comparison, including adjacent 64-bit values above `flintmax`; typed-integer scores and numeric options must be exactly representable in double before entering curve computation.",
     "Labels may be numeric, logical, string, character rows, categorical values, or cell strings. Text label families can be mixed between string, char, cell-string, and categorical inputs.",
     "`scores` must be a numeric vector with one score per label. Score matrices for class-column inference are rejected explicitly until the classifier object/class-order surface is available.",
     "Rows with missing labels, zero weights, or `NaN` scores are omitted by default. `\"ProcessNaN\",\"addtofalse\"` keeps `NaN` scores: positive-class `NaN` scores are counted as false negatives and negative-class `NaN` scores as false positives at every threshold.",

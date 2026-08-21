@@ -1,4 +1,5 @@
 //! MATLAB-compatible `superclasses` builtin backed by RunMat class metadata.
+use runmat_types::MemberAccess;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -6,13 +7,15 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::introspection::class::class_name_for_value;
 use crate::builtins::introspection::type_resolvers::superclasses_type;
+use crate::class_registry::{register_class, superclass_chain};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::{
-    superclass_chain, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CellArray, CharArray, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, Value};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::superclasses")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -27,7 +30,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Metadata-only class hierarchy query. gpuArray inputs stay resident while RunMat checks host class metadata.",
+    notes: "Metadata-only class hierarchy query. Explicit gpuArray inputs use wrapper metadata, while internally auto-resident values use their underlying host class; neither path downloads payload data.",
 };
 
 #[runmat_macros::register_fusion_spec(
@@ -67,6 +70,13 @@ const SUPERCLASSES_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatu
 
 const BUILTIN_NAME: &str = "superclasses";
 
+pub const SUPERCLASSES_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "superclasses accepts class-name text or class objects. Integer primitives are neither and reject from type metadata without numeric conversion or provider payload access.",
+    };
+
 const SUPERCLASSES_ERROR_CLASS_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.SUPERCLASSES.CLASS_INVALID",
     identifier: Some("RunMat:SuperclassesClassInvalid"),
@@ -101,11 +111,12 @@ pub const SUPERCLASSES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "metadata",
     type_resolver(superclasses_type),
     descriptor(crate::builtins::introspection::superclasses::SUPERCLASSES_DESCRIPTOR),
+    integer_audit(crate::builtins::introspection::superclasses::SUPERCLASSES_INTEGER_AUDIT),
     builtin_path = "crate::builtins::introspection::superclasses"
 )]
 fn superclasses_builtin(value: Value) -> crate::BuiltinResult<Value> {
     let class_name = requested_class_name(&value)?;
-    let supers = if let Some(chain) = superclass_chain(&class_name) {
+    let supers = if let Some(chain) = crate::class_registry::superclass_chain(&class_name) {
         chain
     } else if known_leaf_class_without_registered_metadata(&class_name) {
         Vec::new()
@@ -132,11 +143,16 @@ fn requested_class_name(value: &Value) -> BuiltinResult<String> {
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
         Value::CharArray(ca) if ca.rows <= 1 => Ok(ca.data.iter().collect::<String>()),
         Value::ClassRef(class_name) => Ok(class_name.clone()),
-        Value::Object(_)
+        Value::ObjectArray(_)
+        | Value::Object(_)
         | Value::HandleObject(_)
         | Value::GpuTensor(_)
         | Value::Listener(_)
-        | Value::MException(_) => Ok(class_name_for_value(value)),
+        | Value::MException(_)
+        | Value::Future(_)
+        | Value::Task(_)
+        | Value::Pool(_)
+        | Value::Job(_) => Ok(class_name_for_value(value)),
         _ => Err(superclasses_error(&SUPERCLASSES_ERROR_CLASS_INVALID)),
     }
 }
@@ -201,19 +217,16 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{
-        register_class, Access, CharArray, ClassDef, HandleRef, MethodDef, ObjectInstance,
-        StringArray, Tensor,
-    };
+    use runmat_value::{CharArray, HandleRef, ObjectInstance, StringArray, Tensor};
     use std::collections::HashMap;
 
-    fn method(name: &str) -> MethodDef {
-        MethodDef {
+    fn method(name: &str) -> crate::class_registry::RuntimeMethod {
+        crate::class_registry::RuntimeMethod {
             name: name.to_string(),
             is_static: false,
             is_abstract: false,
             is_sealed: false,
-            access: Access::Public,
+            access: MemberAccess::Public,
             function_name: format!("{name}_impl"),
             implicit_class_argument: None,
         }
@@ -232,19 +245,19 @@ mod tests {
         let parent = unique_class_name(&format!("{label}Parent"));
         let child = unique_class_name(&format!("{label}Child"));
 
-        register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: grand.clone(),
             parent: None,
             properties: HashMap::new(),
             methods: HashMap::from([("root".to_string(), method("root"))]),
         });
-        register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: parent.clone(),
             parent: Some(grand.clone()),
             properties: HashMap::new(),
             methods: HashMap::from([("mid".to_string(), method("mid"))]),
         });
-        register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: child.clone(),
             parent: Some(parent.clone()),
             properties: HashMap::new(),
@@ -323,39 +336,12 @@ mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn superclasses_uses_gpuarray_metadata_without_gather() {
-        register_class(ClassDef {
-            name: "gpuArray".to_string(),
-            parent: Some("handle".to_string()),
-            properties: HashMap::new(),
-            methods: HashMap::new(),
-        });
-        register_class(ClassDef {
-            name: "handle".to_string(),
-            parent: None,
-            properties: HashMap::new(),
-            methods: HashMap::new(),
-        });
-
-        test_support::with_test_provider(|provider| {
-            let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("tensor");
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
-            assert_eq!(call(Value::GpuTensor(handle)), vec!["handle".to_string()]);
-        });
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
     fn superclasses_handles_known_runtime_leaf_classes_without_registry_metadata() {
         assert!(call(Value::GpuTensor(test_support::with_test_provider(
             |provider| {
                 let tensor = Tensor::new(vec![1.0], vec![1, 1]).expect("tensor");
                 let view = HostTensorView {
-                    data: &tensor.data,
+                    data: &tensor.materialize_f64(),
                     shape: &tensor.shape,
                 };
                 provider.upload(&view).expect("upload")

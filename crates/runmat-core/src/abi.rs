@@ -1,6 +1,6 @@
-use runmat_builtins::Value;
 use runmat_hir::{BindingName, DefPath, Span};
 use runmat_parser::CompatMode;
+use runmat_value::Value;
 use uuid::Uuid;
 
 use crate::execution::{ExecutionProfiling, ExecutionStreamEntry, StdinEvent};

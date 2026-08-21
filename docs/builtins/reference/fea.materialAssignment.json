@@ -1,0 +1,19 @@
+{
+  "title": "fea.materialAssignment",
+  "category": "fea",
+  "keywords": ["fea", "material", "assignment", "region"],
+  "summary": "Assign a RunMat FEA material to a region.",
+  "requires_feature": "fea",
+  "tested": { "unit": "builtins::fea::tests", "integration": null },
+  "description": "`fea.materialAssignment(region, material, Name, Value, ...)` creates an exact region-to-material assignment with optional expected-material and evidence-confidence metadata.",
+  "behaviors": [
+    "Region, assigned material, and optional expected material are exact text identifiers.",
+    "Confidence is an enumerated structural value and defaults to verified.",
+    "No numeric field exists; integer and resident numeric inputs are rejected before assignment construction.",
+    "Region existence and material consistency are checked when the assignment is assembled into or validated with a model."
+  ],
+  "examples": [{ "description": "Assign steel to a region", "input": "assignment = fea.materialAssignment(\"name:Bracket\", \"steel\");" }],
+  "faqs": [{ "question": "Does construction prove the region exists?", "answer": "No. Construction preserves the selector; model assembly and validation resolve it against geometry." }],
+  "links": [{ "label": "FEA models", "url": "../../fea/models" }],
+  "source": { "label": "`crates/runmat-runtime/src/builtins/fea/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/mod.rs" }
+}

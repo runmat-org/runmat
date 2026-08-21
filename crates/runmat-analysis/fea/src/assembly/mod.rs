@@ -2,6 +2,8 @@ pub mod dofs;
 pub mod elements;
 pub mod solid;
 mod solid_boundary;
+mod solid_matrix;
+pub mod solver_solid;
 
 use std::{collections::BTreeMap, fmt};
 

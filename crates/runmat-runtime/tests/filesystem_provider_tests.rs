@@ -1,13 +1,13 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use pollster::block_on;
-use runmat_builtins::{CellArray, NumericDType, Tensor, Value};
 use runmat_filesystem::{self as vfs, SandboxFsProvider};
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_filesystem::{RemoteFsConfig, RemoteFsProvider};
 use runmat_runtime::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
 use runmat_runtime::call_builtin;
 use runmat_runtime::call_builtin_async_with_outputs;
+use runmat_value::{CellArray, Tensor, Value};
 use std::convert::TryFrom;
 use std::io::{Cursor, Write};
 use std::sync::Arc;
@@ -332,14 +332,7 @@ fn sandbox_provider_supports_repl_and_tabular_builtins() {
 
     call_builtin("mkdir", &[Value::from("reports")]).expect("mkdir succeeds");
 
-    let matrix = Tensor {
-        data: vec![1.0, 2.0, 3.5, 4.0],
-        integer_data: None,
-        shape: vec![2, 2],
-        rows: 2,
-        cols: 2,
-        dtype: NumericDType::F64,
-    };
+    let matrix = Tensor::new(vec![1.0, 2.0, 3.5, 4.0], vec![2, 2]).expect("validated test matrix");
     let filename = Value::from("reports/data.csv".to_string());
     call_builtin(
         "dlmwrite",
@@ -381,14 +374,8 @@ fn remote_provider_supports_repl_and_tabular_builtins() {
     exercise_recent_import_export_builtins_through_provider();
 
     call_builtin("mkdir", &[Value::from("remote")]).expect("mkdir succeeds");
-    let matrix = Tensor {
-        data: vec![10.0, 20.0, 30.0, 40.0],
-        integer_data: None,
-        shape: vec![2, 2],
-        rows: 2,
-        cols: 2,
-        dtype: NumericDType::F64,
-    };
+    let matrix =
+        Tensor::new(vec![10.0, 20.0, 30.0, 40.0], vec![2, 2]).expect("validated test matrix");
     let filename = Value::from("remote/data.csv".to_string());
     call_builtin(
         "dlmwrite",

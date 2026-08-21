@@ -152,10 +152,10 @@ fn test_execution_with_control_flow() {
 
         let x = runmat_core::execute_text_request_for_testing(&mut engine, "x")
             .expect("x readback should succeed");
-        assert_eq!(x.value, Some(runmat_builtins::Value::Num(5.0)));
+        assert_eq!(x.value, Some(runmat_value::Value::Num(5.0)));
         let y = runmat_core::execute_text_request_for_testing(&mut engine, "y")
             .expect("y readback should succeed");
-        assert_eq!(y.value, Some(runmat_builtins::Value::Num(3.0)));
+        assert_eq!(y.value, Some(runmat_value::Value::Num(3.0)));
     });
 }
 
@@ -282,7 +282,7 @@ fn test_independent_sessions_execute_on_distinct_threads() {
             gc_test_context(|| {
                 let mut engine = RunMatSession::new().unwrap();
                 let input = format!("x{i} = {i} * 2");
-                let expected = runmat_builtins::Value::Num((i * 2) as f64);
+                let expected = runmat_value::Value::Num((i * 2) as f64);
                 let assigned = runmat_core::execute_text_request_for_testing(&mut engine, &input)
                     .map(|result| result.error.is_none())
                     .unwrap_or(false);

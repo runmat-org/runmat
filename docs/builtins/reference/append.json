@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "matlab",
-    "notes": "No GPU kernel is registered for this compatibility builtin; GPU-resident inputs are gathered to host memory before evaluation."
+    "notes": "MATLAB documents GPU code generation, not interactive GPU-array execution, for append. RunMat rejects resident numeric handles before provider dispatch or gather because numeric values are not text inputs."
   },
   "fusion": {
     "elementwise": false,
@@ -28,7 +28,7 @@
     "unit": "builtins::strings::transform::compat::tests",
     "integration": null
   },
-  "description": "s = append(arg1, ...) - Append text inputs elementwise.",
+  "description": "s = append(arg1, ...) combines string arrays, character vectors, or cell arrays of character vectors elementwise. A string input selects string output; otherwise a cell input selects cellstr output; otherwise all-character-vector input produces a character vector.",
   "signatures": [
     {
       "label": "s = append(arg1, ...)",
@@ -53,10 +53,17 @@
     }
   ],
   "behaviors": [
-    "Append text inputs elementwise."
+    "Inputs are string arrays, character vectors, or cell arrays of character vectors.",
+    "If any input is a string array, the output is a string array. Otherwise, if any input is a cell array, the output is a cell array of character vectors. If all inputs are character vectors, the output is a character vector.",
+    "String arrays and cell arrays use compatible-size implicit expansion; a character vector is compatible with every other input size.",
+    "Trailing whitespace in every supported text representation is preserved.",
+    "Numeric, logical, and integer inputs reject rather than undergoing implicit text conversion. This includes all eight integer classes in scalar and array form.",
+    "Resident numeric handles reject before provider dispatch or gather; append has no interactive GPU-array or integer-output surface."
   ],
   "examples": [
-    "append(\"run\", \"mat\") returns \"runmat\"."
+    "append(\"run\", \"mat\") returns the string scalar \"runmat\".",
+    "append('Hello ', 'World') returns the character vector 'Hello World' and preserves the space.",
+    "append([\"A\"; \"B\"], [\"1\" \"2\"]) returns the 2-by-2 string array [\"A1\" \"A2\"; \"B1\" \"B2\"]."
   ],
   "faqs": [],
   "links": [

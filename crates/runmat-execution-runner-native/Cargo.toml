@@ -1,0 +1,53 @@
+[package]
+name = "runmat-execution-runner-native"
+version = "0.6.1"
+edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../../LICENSE.md"
+description = "Native process adapter for RunMat execution"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
+
+[dependencies]
+runmat-value = { workspace = true }
+runmat-builtins = { workspace = true }
+runmat-core = { workspace = true }
+runmat-execution = { workspace = true }
+runmat-execution-artifact = { workspace = true }
+runmat-execution-runner = { workspace = true }
+runmat-execution-transport-native = { workspace = true }
+runmat-meshing-core = { workspace = true }
+runmat-meshing-execution = { workspace = true }
+runmat-process-host = { workspace = true }
+runmat-package = { workspace = true }
+runmat-runtime = { workspace = true }
+runmat-test-runner = { workspace = true }
+runmat-test-runner-execution = { workspace = true }
+runmat-vm = { workspace = true }
+dirs = "5.0"
+base64 = "0.22"
+async-trait = "0.1"
+rand = "0.8"
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "rt", "sync", "time"] }
+uuid = { workspace = true }
+tempfile = "3.12"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"] }
+
+[dev-dependencies]
+rcgen = "0.14"
+runmat-geometry-core = { workspace = true }
+runmat-geometry-fixtures = { workspace = true }
+runmat-meshing-curve = { workspace = true }
+runmat-test = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+
+[[test]]
+name = "meshing_process_conformance"
+path = "tests/meshing_process_conformance.rs"
+harness = false

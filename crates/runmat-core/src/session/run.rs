@@ -15,20 +15,17 @@ fn mir_local_fact_count_for_entrypoint(
     analysis: &runmat_mir::analysis::AnalysisStore,
     assembly: &runmat_hir::HirAssembly,
 ) -> usize {
-    let Some(entrypoint_target) = entrypoint_target_function(assembly) else {
-        return analysis.mir_locals.len();
-    };
-    analysis
-        .mir_locals
-        .keys()
-        .filter(|key| key.function == entrypoint_target)
-        .count()
+    let function = entrypoint_target_function(assembly)
+        .and_then(|function| u32::try_from(function.0).ok())
+        .map(runmat_types::ProgramFunctionId);
+    analysis.local_value_count(function)
 }
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
 fn discover_source_catalog(
     source_name: Option<&str>,
-) -> Option<runmat_config::project::DiscoveredSourceSymbols> {
-    use runmat_config::project::discover_source_symbols_from_source_name;
+) -> Option<runmat_package::DiscoveredSourceSymbols> {
+    use runmat_package::discover_source_symbols_from_source_name;
     use std::path::{Path, PathBuf};
 
     let Ok(cwd) = runmat_filesystem::current_dir() else {
@@ -58,6 +55,7 @@ async fn load_dynamic_function(
     compat: CompatMode,
     top_level_await_enabled: bool,
     cache: Arc<Mutex<HashMap<std::path::PathBuf, DynamicFunctionCacheEntry>>>,
+    project_handoff: Option<runmat_package::FrozenProjectHandoff>,
 ) -> Option<Result<Value, RuntimeError>> {
     let resolve_span = info_span!(
         "runtime.callable.resolve",
@@ -97,12 +95,38 @@ async fn load_dynamic_function(
                         .with_identifier("RunMat:FunctionSourceRead")
                         .build()
                     })?;
+            let path_name = path.to_string_lossy();
+            let project_context = if let Some(handoff) = project_handoff.as_ref() {
+                Some(super::compile::project_compilation_context_from_handoff(
+                    path_name.as_ref(),
+                    handoff,
+                ))
+                .transpose()
+            } else {
+                super::compile::discover_project_compilation_context_async(path_name.as_ref()).await
+            }
+            .map_err(|error| {
+                build_runtime_error(format!(
+                    "Could not construct project context for '{}': {error}",
+                    path.display()
+                ))
+                .with_identifier("RunMat:ProjectComposition")
+                .build()
+            })?;
+            let source_catalog = project_context
+                .as_ref()
+                .and_then(|context| context.source_catalog.clone());
+            let project_revision = source_catalog
+                .as_ref()
+                .and_then(|catalog| catalog.project_revision());
 
             let cached = cache
                 .lock()
                 .unwrap_or_else(|poison| poison.into_inner())
                 .get(&path)
-                .filter(|entry| entry.source_text == source_text)
+                .filter(|entry| {
+                    entry.source_text == source_text && entry.project_revision == project_revision
+                })
                 .cloned();
             let registry = if let Some(entry) = cached {
                 debug!(
@@ -127,24 +151,23 @@ async fn load_dynamic_function(
                         .with_identifier("RunMat:FunctionParseError")
                         .build()
                     })?;
-                let path_name = path.to_string_lossy();
-                let mut companion = super::compile::discover_companion_source_statements_async(
-                    path_name.as_ref(),
-                    compat,
-                )
-                .await
-                .map_err(|error| {
-                    build_runtime_error(format!(
-                        "Could not compose function source '{}': {error}",
-                        path.display()
-                    ))
-                    .with_identifier("RunMat:FunctionCompositionError")
-                    .build()
-                })?;
+                let mut companion = if let Some(context) = project_context.as_ref() {
+                    super::compile::compose_project_compilation_context_async(context, compat)
+                        .await
+                        .map_err(|error| {
+                            build_runtime_error(format!(
+                                "Could not compose function source '{}': {error}",
+                                path.display()
+                            ))
+                            .with_identifier("RunMat:FunctionCompositionError")
+                            .build()
+                        })?
+                } else {
+                    super::compile::CompanionSourceDiscovery::default()
+                };
                 if !companion.statements.is_empty() {
                     ast.body.append(&mut companion.statements);
                 }
-                let source_catalog = discover_source_catalog(Some(path_name.as_ref()));
                 let known_project_symbols = source_catalog
                     .as_ref()
                     .map(|catalog| &catalog.symbols)
@@ -154,6 +177,7 @@ async fn load_dynamic_function(
                     &ast,
                     &LoweringContext::new(&HashMap::new())
                         .with_known_project_symbols(&known_project_symbols)
+                        .with_project_symbol_aliases(&companion.project_symbol_aliases)
                         .with_private_functions(
                             &companion.private_function_owners,
                             &companion.private_function_aliases,
@@ -220,6 +244,7 @@ async fn load_dynamic_function(
                         path.clone(),
                         DynamicFunctionCacheEntry {
                             source_text,
+                            project_revision,
                             registry: Arc::clone(&registry),
                         },
                     );
@@ -250,7 +275,7 @@ async fn load_dynamic_function(
     )
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 fn discover_known_project_symbols(source_name: Option<&str>) -> HashSet<String> {
     discover_source_catalog(source_name)
         .map(|catalog| catalog.symbols)
@@ -262,12 +287,29 @@ impl RunMatSession {
         &mut self,
         input: &str,
     ) -> std::result::Result<crate::abi::ExecutionOutcome, RunError> {
+        self.configure_runtime_context();
+        let runtime = self.runtime_context.clone();
+        runtime.scope(self.run_in_context(input)).await
+    }
+
+    async fn run_in_context(
+        &mut self,
+        input: &str,
+    ) -> std::result::Result<crate::abi::ExecutionOutcome, RunError> {
+        let _test_services = runmat_runtime::testing::install_test_services(
+            crate::testing::runtime_adapter::services(
+                self.compat_mode,
+                self.project_handoff.clone(),
+            ),
+        );
         let dynamic_function_cache = Arc::clone(&self.dynamic_function_cache);
         let dynamic_function_compat = self.compat_mode;
         let dynamic_function_top_level_await = self.top_level_await_enabled;
+        let dynamic_project_handoff = self.project_handoff.clone();
         let loader: Arc<runmat_runtime::user_functions::DynamicFunctionLoader> =
             Arc::new(move |name, args, requested_outputs| {
                 let cache = Arc::clone(&dynamic_function_cache);
+                let project_handoff = dynamic_project_handoff.clone();
                 Box::pin(load_dynamic_function(
                     name,
                     args,
@@ -275,22 +317,28 @@ impl RunMatSession {
                     dynamic_function_compat,
                     dynamic_function_top_level_await,
                     cache,
+                    project_handoff,
                 ))
             });
-        let runtime_context = Arc::new(
-            runmat_runtime::user_functions::RuntimeContext::new(Arc::clone(&self.search_path))
-                .with_dynamic_function_loader(loader),
-        );
-        let _runtime_context =
-            runmat_runtime::user_functions::install_runtime_context(runtime_context);
+        self.runtime_context
+            .set_dynamic_function_loader(Some(loader));
         let source_lookup_name = self
             .current_source_fullpath_name()
             .unwrap_or_else(|| self.current_source_name());
-        let companion = super::compile::discover_companion_source_statements_async(
-            source_lookup_name,
-            self.compat_mode,
-        )
-        .await
+        let companion = if let Some(handoff) = self.project_handoff.as_ref() {
+            super::compile::companion_source_statements_from_handoff_async(
+                source_lookup_name,
+                self.compat_mode,
+                handoff,
+            )
+            .await
+        } else {
+            super::compile::discover_companion_source_statements_async(
+                source_lookup_name,
+                self.compat_mode,
+            )
+            .await
+        }
         .map_err(|error| {
             RunError::Runtime(
                 build_runtime_error(format!("project composition failed: {error}"))
@@ -331,7 +379,7 @@ impl RunMatSession {
         &mut self,
         request: crate::abi::ExecutionRequest,
     ) -> crate::abi::ExecutionResponse {
-        let requested_outputs = request.requested_outputs.clone();
+        let requested_outputs = request.requested_outputs;
         let source_input = request.source.clone();
         let source_resolution = match source_input_text(request.source).await {
             Ok(resolved) => resolved,
@@ -397,8 +445,6 @@ impl RunMatSession {
             )
         })?;
         let _diary_state = SessionDiaryStateGuard::new(self);
-        runmat_vm::set_call_stack_limit(self.callstack_limit);
-        runmat_vm::set_error_namespace(&self.error_namespace);
         runmat_vm::set_dynamic_eval_options(
             self.compat_mode,
             self.compat_mode.allows_runmat_extensions(),
@@ -416,7 +462,7 @@ impl RunMatSession {
         runmat_runtime::console::record_diary_command(input);
         runmat_runtime::plotting_hooks::reset_recent_figures();
         runmat_runtime::warning_store::reset();
-        runmat_builtins::set_display_format(self.format_mode);
+        runmat_value::set_display_format(self.format_mode);
         reset_provider_telemetry();
         self.interrupt_flag.store(false, Ordering::Relaxed);
         let _interrupt_guard =
@@ -527,10 +573,11 @@ impl RunMatSession {
         let dynamic_eval_enabled = self.dynamic_eval_enabled;
         #[cfg(target_arch = "wasm32")]
         let top_level_await_enabled = self.top_level_await_enabled;
-        let source_name_for_eval_hook = self.current_source_name().to_string();
-        let source_catalog_for_eval_hook = Arc::new(discover_source_catalog(Some(
-            source_name_for_eval_hook.as_str(),
-        )));
+        let source_catalog_for_eval_hook = Arc::new(
+            self.pending_companion_source_discovery
+                .as_ref()
+                .and_then(|companion| companion.source_catalog.clone()),
+        );
         let _eval_hook_guard =
             runmat_runtime::interaction::replace_eval_hook(Some(std::sync::Arc::new(
                 move |expr: String| -> runmat_runtime::interaction::EvalHookFuture {
@@ -540,9 +587,7 @@ impl RunMatSession {
                         expr: String,
                         compat: runmat_parser::CompatMode,
                         top_level_await_enabled: bool,
-                        source_catalog: Arc<
-                            Option<runmat_config::project::DiscoveredSourceSymbols>,
-                        >,
+                        source_catalog: Arc<Option<runmat_package::DiscoveredSourceSymbols>>,
                     ) -> Result<Value, RuntimeError> {
                         let wrapped = format!("__runmat_input_result__ = ({expr});");
                         let ast = parse_with_options(&wrapped, ParserOptions::new(compat))
@@ -637,11 +682,50 @@ impl RunMatSession {
         let PreparedExecution {
             ast,
             lowering,
+            mir,
             analysis,
-            mut bytecode,
+            bytecode,
             function_registry_after_success,
             next_semantic_function_id_after_success,
         } = self.compile_input(input)?;
+        #[cfg(not(target_arch = "wasm32"))]
+        let interactive_unit = {
+            let source = crate::ExecutableSource::new(
+                format!("interactive:{}", self.abi_workspace_handle.0),
+                self.current_source_name(),
+                input,
+            );
+            let revision = crate::ExecutableRevision::derive(
+                &source,
+                self.runtime_context.program_revision().cloned(),
+                crate::program_environment(self.compat_mode),
+            );
+            crate::ExecutableUnit::new(
+                source.clone(),
+                revision,
+                self.executable_source_map(&source),
+                mir,
+                analysis,
+                bytecode,
+            )
+            .map_err(|error| {
+                RunError::Runtime(
+                    build_runtime_error(error)
+                        .with_identifier("RunMat:ExecutableProduct")
+                        .build(),
+                )
+            })?
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        let analysis = interactive_unit.analysis();
+        #[cfg(not(target_arch = "wasm32"))]
+        let mut bytecode = interactive_unit.bytecode().clone();
+        #[cfg(target_arch = "wasm32")]
+        let _ = mir;
+        #[cfg(target_arch = "wasm32")]
+        let _ = analysis;
+        #[cfg(target_arch = "wasm32")]
+        let mut bytecode = bytecode;
         let source_catalog_entries = self
             .source_pool
             .entries()
@@ -660,8 +744,6 @@ impl RunMatSession {
             );
         let _source_id_guard =
             runmat_runtime::source_context::replace_current_source_id(bytecode.source_id);
-        #[cfg(target_arch = "wasm32")]
-        let _ = &analysis;
         if self.verbose {
             debug!("AST: {ast:?}");
         }
@@ -670,6 +752,8 @@ impl RunMatSession {
         let display_var_ids = display.display_var_ids;
         let stmt_count = entry_statement_count(&lowering.assembly);
         let execution_vars = execution_workspace_mapping(&bytecode);
+        #[cfg(not(target_arch = "wasm32"))]
+        let mut execution_vars = execution_vars;
         let max_var_id = execution_vars.values().copied().max().unwrap_or(0);
         if debug_trace {
             debug!(?execution_vars, "[repl] execution vars");
@@ -729,7 +813,7 @@ impl RunMatSession {
                     },
                     accel_graph_source: runtime_graph_source.as_str().to_string(),
                     mir_local_fact_count: mir_local_fact_count_for_entrypoint(
-                        &analysis,
+                        analysis,
                         &lowering.assembly,
                     ),
                     mir_diagnostic_count: analysis.diagnostics.len(),
@@ -759,13 +843,13 @@ impl RunMatSession {
             debug!("Bytecode instructions: {:?}", bytecode.instructions);
         }
 
-        #[cfg(feature = "jit")]
+        #[cfg(not(target_arch = "wasm32"))]
         let mut used_jit = false;
-        #[cfg(not(feature = "jit"))]
+        #[cfg(target_arch = "wasm32")]
         let used_jit = false;
-        #[cfg(feature = "jit")]
+        #[cfg(not(target_arch = "wasm32"))]
         let mut execution_completed = false;
-        #[cfg(not(feature = "jit"))]
+        #[cfg(target_arch = "wasm32")]
         let execution_completed = false;
         let mut result_value: Option<Value> = None; // Always start fresh for each execution
         let mut suppressed_value: Option<Value> = None; // Track value for type info when suppressed
@@ -773,6 +857,10 @@ impl RunMatSession {
         let mut workspace_updates: Vec<WorkspaceEntry> = Vec::new();
         let mut workspace_snapshot_force_full = false;
         let mut ans_update: Option<(usize, Value)> = None;
+        #[cfg(not(target_arch = "wasm32"))]
+        let tiered_interactive = self.prepare_tiered_interactive(&interactive_unit);
+        #[cfg(not(target_arch = "wasm32"))]
+        let mut native_loop_backedges = std::collections::BTreeMap::new();
 
         // Check if this is an expression statement (ends with Pop)
         let is_expression_stmt = bytecode
@@ -809,78 +897,66 @@ impl RunMatSession {
             debug!("is_semicolon_suppressed: {is_semicolon_suppressed}");
         }
 
-        // Use JIT for assignments, interpreter for expressions (to capture results properly)
-        #[cfg(feature = "jit")]
-        {
-            if let Some(ref mut jit_engine) = &mut self.jit_engine {
-                if !is_expression_stmt {
-                    // Ensure variable array is large enough
-                    if self.variable_array.len() < bytecode.var_count {
-                        self.variable_array
-                            .resize(bytecode.var_count, Value::Num(0.0));
-                    }
-
-                    if self.verbose {
-                        debug!(
-                            "JIT path for assignment: variable_array size: {}, bytecode.var_count: {}",
-                            self.variable_array.len(),
-                            bytecode.var_count
-                        );
-                    }
-
-                    // Use JIT for assignments
-                    match jit_engine.execute_or_compile(&bytecode, &mut self.variable_array) {
-                        Ok((_, actual_used_jit)) => {
-                            used_jit = actual_used_jit;
-                            execution_completed = true;
-                            if actual_used_jit {
-                                self.stats.jit_compiled += 1;
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some((workspace, profile)) = tiered_interactive.as_ref() {
+            match self
+                .invoke_tiered_interactive(&interactive_unit, workspace, profile)
+                .await
+            {
+                Ok(Some(native)) => {
+                    native_loop_backedges = native.loop_backedges.clone();
+                    if is_expression_stmt {
+                        if let Some(expression) = native.expression.clone() {
+                            if is_semicolon_suppressed {
+                                suppressed_value = Some(expression);
                             } else {
-                                self.stats.interpreter_fallback += 1;
+                                result_value = Some(expression);
                             }
-                            if !display_context.single_stmt_non_assign {
-                                if let Some(var_id) = display_context.first_assign_var {
-                                    if let Some(name) = id_to_name.get(&var_id) {
-                                        assigned_this_execution.insert(name.clone());
-                                    }
-                                    if var_id < self.variable_array.len() {
-                                        let assignment_value = self.variable_array[var_id].clone();
-                                        if !is_semicolon_suppressed {
-                                            result_value = Some(assignment_value);
-                                            if self.verbose {
-                                                debug!("JIT assignment result: {result_value:?}");
-                                            }
-                                        } else {
-                                            suppressed_value = Some(assignment_value);
-                                            if self.verbose {
-                                                debug!(
-                                                    "JIT assignment suppressed due to semicolon, captured for type info"
-                                                );
-                                            }
-                                        }
-                                    }
+                        }
+                    }
+                    let snapshot = native.workspace.ok_or_else(|| {
+                        RunError::Runtime(
+                            build_runtime_error(
+                                "interactive native execution produced no workspace snapshot",
+                            )
+                            .with_identifier("RunMat:NativeWorkspace")
+                            .build(),
+                        )
+                    })?;
+                    execution_vars.retain(|name, _| snapshot.values.contains_key(name));
+                    for (name, value) in snapshot.values {
+                        let slot = execution_vars.get(&name).copied().unwrap_or_else(|| {
+                            let slot = self.variable_array.len();
+                            execution_vars.insert(name.clone(), slot);
+                            slot
+                        });
+                        if self.variable_array.len() <= slot {
+                            self.variable_array.resize(slot + 1, Value::Num(0.0));
+                        }
+                        self.variable_array[slot] = value;
+                    }
+                    used_jit = true;
+                    execution_completed = true;
+                    if !display_context.single_stmt_non_assign {
+                        if let Some(var_id) = display_context.first_assign_var {
+                            if let Some(name) = id_to_name.get(&var_id) {
+                                assigned_this_execution.insert(name.clone());
+                            }
+                            if let Some(assignment_value) = self.variable_array.get(var_id).cloned()
+                            {
+                                if is_semicolon_suppressed {
+                                    suppressed_value = Some(assignment_value);
+                                } else {
+                                    result_value = Some(assignment_value);
                                 }
                             }
-
-                            if self.verbose {
-                                debug!(
-                                    "{} assignment successful, variable_array: {:?}",
-                                    if actual_used_jit {
-                                        "JIT"
-                                    } else {
-                                        "Interpreter"
-                                    },
-                                    self.variable_array
-                                );
-                            }
-                        }
-                        Err(e) => {
-                            if self.verbose {
-                                debug!("JIT execution failed: {e}, using interpreter");
-                            }
-                            // Fall back to interpreter
                         }
                     }
+                }
+                Ok(None) => {}
+                Err(native_error) => {
+                    execution_completed = true;
+                    error = Some(native_error);
                 }
             }
         }
@@ -925,10 +1001,7 @@ impl RunMatSession {
 
             match self.interpret_with_context(&execution_bytecode).await {
                 Ok(runmat_vm::InterpreterOutcome::Completed(results)) => {
-                    // Only increment interpreter_fallback if JIT wasn't attempted
-                    if !self.has_jit() || is_expression_stmt {
-                        self.stats.interpreter_fallback += 1;
-                    }
+                    self.stats.interpreter_fallback += 1;
                     if self.verbose {
                         debug!("Interpreter results: {results:?}");
                     }
@@ -1053,7 +1126,32 @@ impl RunMatSession {
             }
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
+        if used_jit && is_expression_stmt {
+            if let Some(value) = result_value.clone() {
+                let slot = execution_vars.get("ans").copied().unwrap_or_else(|| {
+                    let slot = self.variable_array.len();
+                    execution_vars.insert("ans".to_string(), slot);
+                    slot
+                });
+                if self.variable_array.len() <= slot {
+                    self.variable_array.resize(slot + 1, Value::Num(0.0));
+                }
+                self.variable_array[slot] = value.clone();
+                ans_update = Some((slot, value));
+            }
+        }
+
         let execution_time = start_time.elapsed();
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some((_, profile)) = tiered_interactive.as_ref() {
+            self.observe_tiered_interactive(
+                &interactive_unit,
+                profile,
+                execution_time,
+                &native_loop_backedges,
+            );
+        }
         let execution_time_ms = execution_time.as_millis() as u64;
 
         self.stats.total_execution_time_ms += execution_time_ms;
@@ -1062,7 +1160,9 @@ impl RunMatSession {
 
         // Update variable names mapping and function definitions if execution was successful
         if error.is_none() {
-            if let Some(workspace_state) = runmat_vm::take_updated_workspace_state() {
+            let vm_workspace_state = runmat_vm::take_updated_workspace_state();
+            let vm_workspace_state = (!used_jit).then_some(vm_workspace_state).flatten();
+            if let Some(workspace_state) = vm_workspace_state {
                 let mutated_names = workspace_state.names;
                 let assigned = workspace_state.assigned;
                 if debug_trace {
@@ -1163,6 +1263,10 @@ impl RunMatSession {
                     }
                 }
             }
+            #[cfg(not(target_arch = "wasm32"))]
+            self.generic_native_cache
+                .publish_session_registry(&self.function_registry, &function_registry_after_success)
+                .map_err(RunError::Runtime)?;
             self.function_registry = function_registry_after_success;
             self.next_semantic_function_id = next_semantic_function_id_after_success;
             // Apply 'ans' update if applicable (persisting expression result)
@@ -1382,7 +1486,7 @@ impl RunMatSession {
             profiling,
         };
 
-        self.format_mode = runmat_builtins::get_display_format();
+        self.format_mode = runmat_value::get_display_format();
         Ok(SessionExecution {
             outcome,
             workspace_snapshot,
@@ -1395,10 +1499,11 @@ impl RunMatSession {
         bytecode: &runmat_vm::Bytecode,
     ) -> Result<runmat_vm::InterpreterOutcome, RuntimeError> {
         let source_name = self.current_source_name().to_string();
-        runmat_vm::interpret_with_vars(
+        runmat_vm::interpret_with_vars_in_context(
             bytecode,
             &mut self.variable_array,
             Some(source_name.as_str()),
+            self.runtime_context.clone(),
         )
         .await
     }
@@ -2096,8 +2201,8 @@ roots = ["."]
             "expected base dependency symbol in known-project discovery"
         );
         assert!(
-            symbols.contains("statslib.summarize"),
-            "expected package-qualified dependency symbol in known-project discovery"
+            !symbols.contains("statslib.summarize"),
+            "dependency package identity must not become a MATLAB namespace"
         );
         assert!(
             symbols.contains("statsdep.summarize"),

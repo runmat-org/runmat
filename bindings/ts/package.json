@@ -1,6 +1,6 @@
 {
   "name": "runmat",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Blazing fast runtime for math. Run MATLAB code on CPU or GPU.",
   "type": "module",
   "license": "Apache-2.0",
@@ -16,11 +16,6 @@
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
-    "dist/pkg/runmat_wasm.js",
-    "dist/pkg/runmat_wasm_bg.js",
-    "dist/pkg/runmat_wasm.d.ts",
-    "dist/pkg/runmat_wasm_bg.wasm",
-    "dist/pkg/runmat_wasm_bg.wasm.d.ts",
     "dist/pkg-web/runmat_wasm_web.js",
     "dist/pkg-web/runmat_wasm_web.d.ts",
     "dist/pkg-web/runmat_wasm_web_bg.wasm",
@@ -67,7 +62,22 @@
       "types": "./dist/fs/*.d.ts",
       "import": "./dist/fs/*.js"
     },
-    "./pkg/*": "./dist/pkg/*",
+    "./package-cache": {
+      "types": "./dist/package-cache/index.d.ts",
+      "import": "./dist/package-cache/index.js"
+    },
+    "./package-cache/*": {
+      "types": "./dist/package-cache/*.d.ts",
+      "import": "./dist/package-cache/*.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js"
+    },
+    "./testing/*": {
+      "types": "./dist/testing/*.d.ts",
+      "import": "./dist/testing/*.js"
+    },
     "./pkg-web/*": "./dist/pkg-web/*",
     "./lsp/*": "./dist/lsp/*"
   },

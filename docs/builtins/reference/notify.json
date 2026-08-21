@@ -1,0 +1,48 @@
+{
+  "title": "notify",
+  "category": "introspection",
+  "keywords": [
+    "notify",
+    "events",
+    "listeners",
+    "handle"
+  ],
+  "summary": "Notify listeners that a handle-object event is occurring.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Event dispatch operates on host object metadata and does not inspect or gather numeric payloads."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::notify::tests and runtime event-registry tests",
+    "integration": null
+  },
+  "description": "`notify(H, EventName)` notifies listeners registered for the named event on a handle object. An optional event-data object is passed to listener callbacks.",
+  "behaviors": [
+    "The documented target is a handle object and the event name is case-sensitive text defined by its class.",
+    "The documented optional data argument is an `event.EventData` subclass object. Application integer fields nested inside that object remain ordinary exact object payloads.",
+    "Integer scalars, arrays, and resident numeric handles have no direct target, event-name, data-control, output-class, or backend role; `notify` is therefore explicitly integer-inapplicable.",
+    "RunMat's current event subsystem retains broader callback-argument and status-return conveniences as general compatibility work; they are not treated as MATLAB integer forms."
+  ],
+  "examples": [
+    {
+      "description": "Notify listeners of an event",
+      "input": "notify(source, 'Changed')"
+    }
+  ],
+  "faqs": [],
+  "links": [],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/notify.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/notify.rs"
+  }
+}

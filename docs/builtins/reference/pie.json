@@ -17,6 +17,7 @@
   },
   "description": "`pie` creates part-to-whole charts from numeric slice values. Handle behavior, explode controls, and labeling follow MATLAB semantics.",
   "behaviors": [
+    "Typed-integer slice values are a RunMat-mode extension and cross an exactness-checked floating renderer boundary; typed explode controls are interpreted structurally.",
     "Slice values determine the relative angular extent of each wedge.",
     "Explode-style workflows and slice labels are part of the pie rendering path.",
     "The returned value is a pie-handle object participating in the same broader plotting handle model used across the plotting stack.",

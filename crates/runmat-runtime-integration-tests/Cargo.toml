@@ -1,12 +1,13 @@
 [package]
 name = "runmat-runtime-integration-tests"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2021"
 publish = false
 description = "Integration test suite for the RunMat runtime and acceleration backends"
 license-file = "../LICENSE.md"
 
 [dependencies]
+runmat-value = { workspace = true }
 runmat-runtime = { path = "../runmat-runtime", features = ["wgpu"] }
 runmat-accelerate = { path = "../runmat-accelerate", features = ["wgpu"] }
 runmat-accelerate-api = { workspace = true }

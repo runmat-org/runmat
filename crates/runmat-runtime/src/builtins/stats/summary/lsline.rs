@@ -3,9 +3,9 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
-    Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use crate::builtins::plotting::properties::{resolve_plot_handle, PlotHandle};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -160,7 +160,7 @@ mod tests {
         reset_hold_state_for_run,
     };
     use futures::executor::block_on;
-    use runmat_builtins::Tensor;
+    use runmat_value::Tensor;
 
     fn setup() -> PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -176,12 +176,12 @@ mod tests {
 
     fn x_data(handle: f64) -> Vec<f64> {
         let value = get_builtin(vec![Value::Num(handle), Value::String("XData".into())]).unwrap();
-        Tensor::try_from(&value).unwrap().data
+        Tensor::try_from(&value).unwrap().materialize_f64()
     }
 
     fn y_data(handle: f64) -> Vec<f64> {
         let value = get_builtin(vec![Value::Num(handle), Value::String("YData".into())]).unwrap();
-        Tensor::try_from(&value).unwrap().data
+        Tensor::try_from(&value).unwrap().materialize_f64()
     }
 
     #[test]

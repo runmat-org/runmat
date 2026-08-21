@@ -13,18 +13,49 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::linalg::ops::transpose_real_sparse_tensor;
-use crate::builtins::math::linalg::type_resolvers::transpose_type;
+use crate::builtins::math::linalg::type_resolvers::matrix_transpose_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use log::warn;
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, HostTensorView};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CellArray, CharArray, ComplexStorage, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
+};
 
 const NAME: &str = "ctranspose";
+
+const CTRANSPOSE_INTEGER_SPARSE_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "ctranspose-integer-sparse",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "ctranspose of integer-valued sparse storage is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:CtransposeIntegerSparseExtension"),
+    };
+pub const CTRANSPOSE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [CTRANSPOSE_INTEGER_SPARSE_EXTENSION];
+const CTRANSPOSE_DENSE_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes:
+            "All eight real dense integer classes are documented and transpose without conversion.",
+    }];
+const CTRANSPOSE_SPARSE_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability { name: "A", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Integer-valued sparse storage is a gated RunMat extension; MATLAB sparse value classes are floating or logical." }];
+pub const CTRANSPOSE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor { form: "B = ctranspose(integer_A)", inputs: &CTRANSPOSE_DENSE_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Dense real integer storage, shape, and GPU residency are preserved exactly. Complex integer storage is rejected." },
+    BuiltinIntegerCapabilityDescriptor { form: "B = ctranspose(sparse(integer_A))", inputs: &CTRANSPOSE_SPARSE_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "The sparse CSC structure and authoritative integer values are transposed exactly after the RunMat extension gate." },
+];
 
 const CTRANSPOSE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "B",
@@ -58,7 +89,7 @@ const CTRANSPOSE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDe
 const CTRANSPOSE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.CTRANSPOSE.INVALID_INPUT",
     identifier: Some("RunMat:ctranspose:InvalidInput"),
-    when: "Input type is unsupported for conjugate transpose.",
+    when: "Input type is unsupported for conjugate transpose, the input has a nonsingleton dimension above two, or the input uses complex integer storage.",
     message: "ctranspose: unsupported input type",
 };
 
@@ -130,6 +161,15 @@ fn internal_error(message: impl Into<String>) -> RuntimeError {
     builtin_error_with_message(message, &CTRANSPOSE_ERROR_INTERNAL)
 }
 
+fn ensure_vector_or_matrix_shape(shape: &[usize]) -> BuiltinResult<()> {
+    if !super::is_vector_or_matrix_shape(shape) {
+        return Err(invalid_input(
+            "ctranspose: N-D arrays are not supported; use permute to reorder N-D dimensions",
+        ));
+    }
+    Ok(())
+}
+
 #[runmat_macros::register_fusion_spec(
     builtin_path = "crate::builtins::math::linalg::ops::ctranspose"
 )]
@@ -146,11 +186,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "ctranspose",
     category = "math/linalg/ops",
-    summary = "Conjugate-transpose arrays.",
+    summary = "Conjugate-transpose vectors and matrices.",
     keywords = "ctranspose,conjugate transpose,hermitian,gpu",
     accel = "transpose",
-    type_resolver(transpose_type),
+    type_resolver(matrix_transpose_type),
     descriptor(crate::builtins::math::linalg::ops::ctranspose::CTRANSPOSE_DESCRIPTOR),
+    extensions(crate::builtins::math::linalg::ops::ctranspose::CTRANSPOSE_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::math::linalg::ops::ctranspose::CTRANSPOSE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::math::linalg::ops::ctranspose"
 )]
 async fn ctranspose_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
@@ -164,9 +208,18 @@ async fn ctranspose_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
         Value::Complex(re, im) => ctranspose_complex_scalar(re, im),
         Value::ComplexTensor(ct) => ctranspose_complex_tensor(ct),
         Value::Tensor(t) => Ok(tensor::tensor_into_value(ctranspose_tensor(t)?)),
-        Value::SparseTensor(s) => Ok(Value::SparseTensor(
-            transpose_real_sparse_tensor(s).map_err(|e| internal_error(format!("{NAME}: {e}")))?,
-        )),
+        Value::SparseTensor(s) => {
+            if s.integer_storage().is_some() {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &CTRANSPOSE_INTEGER_SPARSE_EXTENSION,
+                    NAME,
+                )?;
+            }
+            Ok(Value::SparseTensor(
+                transpose_real_sparse_tensor(s)
+                    .map_err(|e| internal_error(format!("{NAME}: {e}")))?,
+            ))
+        }
         Value::LogicalArray(la) => Ok(Value::LogicalArray(ctranspose_logical_array(la)?)),
         Value::CharArray(ca) => Ok(Value::CharArray(ctranspose_char_array(ca)?)),
         Value::StringArray(sa) => Ok(Value::StringArray(ctranspose_string_array(sa)?)),
@@ -175,6 +228,7 @@ async fn ctranspose_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
         Value::Int(i) => Ok(Value::Int(i)),
         Value::Bool(b) => Ok(Value::Bool(b)),
         Value::String(s) => Ok(Value::String(s)),
+        Value::Struct(s) => Ok(Value::Struct(s)),
         receiver @ Value::Object(_) | receiver @ Value::HandleObject(_) => {
             let class_name = crate::object_receiver_class_name(&receiver).ok_or_else(|| {
                 invalid_input("ctranspose: unsupported object receiver".to_string())
@@ -194,88 +248,98 @@ async fn ctranspose_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 fn ctranspose_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
+    ensure_vector_or_matrix_shape(&tensor.shape)?;
     let rank = tensor.shape.len();
-    if rank <= 2 {
-        ctranspose_tensor_matrix(&tensor)
-    } else {
-        let order = ctranspose_order(rank);
-        permute_tensor(NAME, tensor, &order)
+    if rank == 0 {
+        return Ok(tensor);
     }
+    let order = ctranspose_order(rank);
+    permute_tensor(NAME, tensor, &order)
 }
 
 fn ctranspose_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let rank = ct.shape.len();
-    if rank == 0 {
-        return ctranspose_complex_tensor_value(ct);
+    if ct.integer_storage().is_some() {
+        return Err(invalid_input(
+            "ctranspose: complex integer input is not supported",
+        ));
     }
-    if rank <= 2 {
-        let data = ctranspose_complex_matrix(&ct);
-        let shape = vec![ct.cols, ct.rows];
-        let transposed = ComplexTensor::new(data, shape.clone())
-            .map_err(|e| internal_error(format!("{NAME}: {e}")))?;
-        ctranspose_complex_tensor_value(transposed)
-    } else {
-        let order = ctranspose_order(rank);
-        let permuted = permute_complex_tensor(NAME, ct, &order)?;
-        ctranspose_complex_tensor_value(permuted)
-    }
-}
-
-fn ctranspose_complex_tensor_preserve_complex(ct: ComplexTensor) -> BuiltinResult<ComplexTensor> {
+    ensure_vector_or_matrix_shape(&ct.shape)?;
     let rank = ct.shape.len();
     let transposed = if rank == 0 {
         ct
-    } else if rank <= 2 {
-        let data = ctranspose_complex_matrix(&ct);
-        ComplexTensor::new(data, vec![ct.cols, ct.rows])
-            .map_err(|e| internal_error(format!("{NAME}: {e}")))?
+    } else {
+        let order = ctranspose_order(rank);
+        permute_complex_tensor(NAME, ct, &order)?
+    };
+    ctranspose_complex_tensor_value(transposed)
+}
+
+fn ctranspose_complex_tensor_preserve_complex(ct: ComplexTensor) -> BuiltinResult<ComplexTensor> {
+    ensure_vector_or_matrix_shape(&ct.shape)?;
+    let rank = ct.shape.len();
+    let transposed = if rank == 0 {
+        ct
     } else {
         let order = ctranspose_order(rank);
         permute_complex_tensor(NAME, ct, &order)?
     };
     let shape = transposed.shape.clone();
-    let data = transposed
-        .data
-        .into_iter()
-        .map(|(re, im)| (re, -im))
-        .collect();
-    ComplexTensor::new(data, shape).map_err(|e| internal_error(format!("{NAME}: {e}")))
+    let storage = match transposed.into_complex_storage() {
+        ComplexStorage::F64(values) => {
+            ComplexStorage::F64(values.into_iter().map(|(re, im)| (re, -im)).collect())
+        }
+        ComplexStorage::F32(values) => {
+            ComplexStorage::F32(values.into_iter().map(|(re, im)| (re, -im)).collect())
+        }
+        ComplexStorage::Integer(_) => {
+            return Err(invalid_input(
+                "ctranspose: complex integer input is not supported",
+            ));
+        }
+    };
+    ComplexTensor::from_complex_storage(storage, shape)
+        .map_err(|e| internal_error(format!("{NAME}: {e}")))
 }
 
 fn ctranspose_complex_tensor_value(ct: ComplexTensor) -> BuiltinResult<Value> {
     let shape = ct.shape.clone();
-    let data = ct.data;
-    let mut all_real = true;
-    let mut conj_data = Vec::with_capacity(data.len());
-    for (re, im) in data {
-        let imag = -im;
-        if imag != 0.0 || imag.is_nan() {
-            all_real = false;
+    match ct.into_complex_storage() {
+        ComplexStorage::F64(values) => {
+            let conj_data = values
+                .into_iter()
+                .map(|(re, im)| {
+                    let imag = -im;
+                    (re, imag)
+                })
+                .collect::<Vec<_>>();
+            ComplexTensor::from_complex_storage(ComplexStorage::F64(conj_data), shape)
+                .map(Value::ComplexTensor)
+                .map_err(|e| internal_error(format!("{NAME}: {e}")))
         }
-        conj_data.push((re, imag));
-    }
-    if all_real {
-        let real: Vec<f64> = conj_data.iter().map(|(re, _)| *re).collect();
-        let tensor =
-            Tensor::new(real, shape).map_err(|e| internal_error(format!("{NAME}: {e}")))?;
-        Ok(tensor::tensor_into_value(tensor))
-    } else {
-        let tensor = ComplexTensor::new(conj_data, shape)
-            .map_err(|e| internal_error(format!("{NAME}: {e}")))?;
-        Ok(Value::ComplexTensor(tensor))
+        ComplexStorage::F32(values) => {
+            let conj_data = values
+                .into_iter()
+                .map(|(re, im)| {
+                    let imag = -im;
+                    (re, imag)
+                })
+                .collect::<Vec<_>>();
+            ComplexTensor::from_complex_storage(ComplexStorage::F32(conj_data), shape)
+                .map(Value::ComplexTensor)
+                .map_err(|e| internal_error(format!("{NAME}: {e}")))
+        }
+        ComplexStorage::Integer(_) => Err(invalid_input(
+            "ctranspose: complex integer input is not supported",
+        )),
     }
 }
 
 fn ctranspose_complex_scalar(re: f64, im: f64) -> BuiltinResult<Value> {
-    let imag = -im;
-    if imag == 0.0 && !imag.is_nan() {
-        Ok(Value::Num(re))
-    } else {
-        Ok(Value::Complex(re, imag))
-    }
+    Ok(Value::Complex(re, -im))
 }
 
 fn ctranspose_logical_array(la: LogicalArray) -> BuiltinResult<LogicalArray> {
+    ensure_vector_or_matrix_shape(&la.shape)?;
     let rank = la.shape.len();
     if rank == 0 {
         return Ok(la);
@@ -326,6 +390,7 @@ fn ctranspose_char_array(ca: CharArray) -> BuiltinResult<CharArray> {
 }
 
 fn ctranspose_string_array(sa: StringArray) -> BuiltinResult<StringArray> {
+    ensure_vector_or_matrix_shape(&sa.shape)?;
     let rank = sa.shape.len();
     if rank == 0 {
         return Ok(sa);
@@ -373,20 +438,39 @@ fn ctranspose_cell_array(ca: CellArray) -> BuiltinResult<CellArray> {
 }
 
 async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    ensure_vector_or_matrix_shape(&handle.shape)?;
+    let input_complex =
+        runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved;
+    if input_complex && runmat_accelerate_api::handle_integer_type(&handle).is_some() {
+        return Err(invalid_input(
+            "ctranspose: complex integer input is not supported",
+        ));
+    }
     let rank = handle.shape.len();
     if rank == 0 {
         return Ok(Value::GpuTensor(handle));
     }
-    let input_complex =
-        runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved;
 
-    if let Some(provider) =
-        runmat_accelerate_api::provider_for_handle(&handle).or_else(runmat_accelerate_api::provider)
-    {
+    let owner = runmat_accelerate_api::provider_for_handle(&handle);
+    if let Some(provider) = owner {
+        let mut expected_shape = handle.shape.clone();
+        if expected_shape.len() >= 2 {
+            expected_shape.swap(0, 1);
+        }
         let mut transposed: Option<GpuTensorHandle> = None;
         if rank <= 2 {
             match provider.transpose(&handle) {
-                Ok(out) => transposed = Some(out),
+                Ok(out)
+                    if native_ctranspose_output_matches(
+                        &handle,
+                        &out,
+                        provider,
+                        &expected_shape,
+                    ) && !same_handle(&handle, &out) =>
+                {
+                    transposed = Some(out)
+                }
+                Ok(out) => free_rejected_native_output(&handle, &out, provider),
                 Err(err) => {
                     let info = provider.device_info_struct();
                     warn!(
@@ -400,7 +484,17 @@ async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             let order = ctranspose_order(rank);
             let zero_based: Vec<usize> = order.iter().map(|&idx| idx - 1).collect();
             match provider.permute(&handle, &zero_based) {
-                Ok(out) => transposed = Some(out),
+                Ok(out)
+                    if native_ctranspose_output_matches(
+                        &handle,
+                        &out,
+                        provider,
+                        &expected_shape,
+                    ) && !same_handle(&handle, &out) =>
+                {
+                    transposed = Some(out)
+                }
+                Ok(out) => free_rejected_native_output(&handle, &out, provider),
                 Err(err) => {
                     let info = provider.device_info_struct();
                     warn!(
@@ -414,7 +508,15 @@ async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 
         if let Some(transposed_handle) = transposed {
             match provider.unary_conj(&transposed_handle).await {
-                Ok(conjugated) => {
+                Ok(conjugated)
+                    if native_conjugate_output_matches(
+                        &handle,
+                        &transposed_handle,
+                        &conjugated,
+                        provider,
+                        &expected_shape,
+                    ) =>
+                {
                     if let Some(info) =
                         runmat_accelerate_api::handle_transpose_info(&transposed_handle)
                     {
@@ -424,11 +526,7 @@ async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                             info.base_cols,
                         );
                     }
-                    let aliases_transposed = conjugated.device_id == transposed_handle.device_id
-                        && conjugated.buffer_id == transposed_handle.buffer_id;
-                    if !aliases_transposed {
-                        provider.free(&transposed_handle).ok();
-                    }
+                    provider.free(&transposed_handle).ok();
                     if input_complex
                         || runmat_accelerate_api::handle_storage(&conjugated)
                             == GpuTensorStorage::ComplexInterleaved
@@ -437,8 +535,13 @@ async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                     }
                     return Ok(gpu_helpers::resident_gpu_value(conjugated));
                 }
+                Ok(rejected) => {
+                    cleanup_rejected_conjugate(&handle, &transposed_handle, &rejected, provider);
+                }
                 Err(err) => {
-                    provider.free(&transposed_handle).ok();
+                    if !same_handle(&handle, &transposed_handle) {
+                        provider.free(&transposed_handle).ok();
+                    }
                     let info = provider.device_info_struct();
                     warn!(
                         "ctranspose: provider {} (backend: {}) missing unary_conj hook; falling back ({err})",
@@ -468,16 +571,10 @@ async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             )));
         }
     };
-    if let Some(provider) =
-        runmat_accelerate_api::provider_for_handle(&handle).or_else(runmat_accelerate_api::provider)
-    {
+    if let Some(provider) = owner {
         match &transposed_value {
             Value::Tensor(transposed) => {
-                let view = HostTensorView {
-                    data: &transposed.data,
-                    shape: &transposed.shape,
-                };
-                match provider.upload(&view) {
+                match gpu_helpers::upload_tensor(provider, transposed) {
                     Ok(uploaded) => return Ok(gpu_helpers::resident_gpu_value(uploaded)),
                     Err(err) => warn!(
                         "ctranspose: re-upload after host fallback failed; returning host tensor ({err})"
@@ -515,6 +612,69 @@ async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     Ok(transposed_value)
 }
 
+fn native_ctranspose_output_matches(
+    input: &GpuTensorHandle,
+    output: &GpuTensorHandle,
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    expected_shape: &[usize],
+) -> bool {
+    output.shape == expected_shape
+        && output.device_id == input.device_id
+        && runmat_accelerate_api::handle_precision(output)
+            == Some(
+                runmat_accelerate_api::handle_precision(input)
+                    .unwrap_or_else(|| provider.precision()),
+            )
+        && runmat_accelerate_api::handle_storage(output)
+            == runmat_accelerate_api::handle_storage(input)
+        && runmat_accelerate_api::handle_integer_type(output)
+            == runmat_accelerate_api::handle_integer_type(input)
+        && runmat_accelerate_api::provider_for_handle(output)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+}
+
+fn native_conjugate_output_matches(
+    original: &GpuTensorHandle,
+    transposed: &GpuTensorHandle,
+    output: &GpuTensorHandle,
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    expected_shape: &[usize],
+) -> bool {
+    native_ctranspose_output_matches(transposed, output, provider, expected_shape)
+        && !same_handle(original, output)
+        && !same_handle(transposed, output)
+}
+
+fn cleanup_rejected_conjugate(
+    original: &GpuTensorHandle,
+    transposed: &GpuTensorHandle,
+    rejected: &GpuTensorHandle,
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+) {
+    if !same_handle(original, rejected) {
+        free_rejected_native_output(transposed, rejected, provider);
+    }
+    if !same_handle(original, transposed) {
+        let _ = provider.free(transposed);
+    }
+}
+
+fn free_rejected_native_output(
+    input: &GpuTensorHandle,
+    output: &GpuTensorHandle,
+    invoked_provider: &dyn runmat_accelerate_api::AccelProvider,
+) {
+    if same_handle(input, output) {
+        return;
+    }
+    let owner = runmat_accelerate_api::provider_for_handle(output).unwrap_or(invoked_provider);
+    let _ = owner.free(output);
+}
+
+fn same_handle(left: &GpuTensorHandle, right: &GpuTensorHandle) -> bool {
+    left.device_id == right.device_id && left.buffer_id == right.buffer_id
+}
+
 fn ctranspose_order(rank: usize) -> Vec<usize> {
     let mut order: Vec<usize> = (1..=rank.max(2)).collect();
     if order.len() >= 2 {
@@ -526,61 +686,18 @@ fn ctranspose_order(rank: usize) -> Vec<usize> {
     order
 }
 
-fn ctranspose_tensor_matrix(tensor: &Tensor) -> BuiltinResult<Tensor> {
-    let rows = tensor.rows();
-    let cols = tensor.cols();
-    if tensor.data.is_empty() {
-        return Tensor::new(Vec::new(), vec![cols, rows])
-            .map_err(|e| internal_error(format!("{NAME}: {e}")));
-    }
-    let mut out = vec![0.0; tensor.data.len()];
-    for r in 0..rows {
-        for c in 0..cols {
-            let src = r + c * rows;
-            let dst = c + r * cols;
-            if src < tensor.data.len() && dst < out.len() {
-                out[dst] = tensor.data[src];
-            }
-        }
-    }
-    Tensor::new(out, vec![cols, rows]).map_err(|e| internal_error(format!("{NAME}: {e}")))
-}
-
-fn ctranspose_complex_matrix(ct: &ComplexTensor) -> Vec<(f64, f64)> {
-    let rows = ct.rows;
-    let cols = ct.cols;
-    if ct.data.is_empty() {
-        return Vec::new();
-    }
-    let mut out = vec![(0.0, 0.0); ct.data.len()];
-    for r in 0..rows {
-        for c in 0..cols {
-            let src = r + c * rows;
-            let dst = c + r * cols;
-            if src < ct.data.len() && dst < out.len() {
-                out[dst] = ct.data[src];
-            }
-        }
-    }
-    out
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::array::shape::permute::permute_tensor;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
-        err
-    }
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_backend;
-    #[cfg(feature = "wgpu")]
-    use runmat_accelerate_api::AccelProvider;
-    use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{
-        IntValue, LogicalArray, ResolveContext, StringArray, StructValue, Tensor, Type,
+    use runmat_accelerate_api::{AccelProvider as _, HostTensorView};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{
+        IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray, StructValue,
+        Tensor,
     };
 
     fn call_ctranspose(value: Value) -> BuiltinResult<Value> {
@@ -589,6 +706,99 @@ pub(crate) mod tests {
 
     fn call_ctranspose_args(args: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::ctranspose_builtin(args))
+    }
+
+    fn all_integer_matrix_storages() -> [IntegerStorage; 8] {
+        [
+            IntegerStorage::I8(vec![1, 2, 3, 4]),
+            IntegerStorage::I16(vec![1, 2, 3, 4]),
+            IntegerStorage::I32(vec![1, 2, 3, 4]),
+            IntegerStorage::I64(vec![1, 2, 3, 4]),
+            IntegerStorage::U8(vec![1, 2, 3, 4]),
+            IntegerStorage::U16(vec![1, 2, 3, 4]),
+            IntegerStorage::U32(vec![1, 2, 3, 4]),
+            IntegerStorage::U64(vec![1, 2, 3, 4]),
+        ]
+    }
+
+    #[test]
+    fn ctranspose_preserves_every_real_integer_class_and_rejects_every_complex_integer_class() {
+        for storage in all_integer_matrix_storages() {
+            let expected =
+                super::super::transpose::transpose_integer_storage(storage.clone(), 2, 2);
+            let class = storage.class_name();
+            let real = Tensor::new_integer(storage.clone(), vec![2, 2]).expect("real tensor");
+            let Value::Tensor(real_result) =
+                call_ctranspose(Value::Tensor(real)).expect("real ctranspose")
+            else {
+                panic!("expected real tensor for {class}");
+            };
+            assert_eq!(real_result.integer_storage(), Some(&expected), "{class}");
+
+            let complex = ComplexTensor::new_integer(
+                IntegerComplexStorage::new(storage.clone(), storage).expect("complex storage"),
+                vec![2, 2],
+            )
+            .expect("complex tensor");
+            let err = call_ctranspose(Value::ComplexTensor(complex))
+                .expect_err("complex integer ctranspose must fail");
+            assert_eq!(
+                err.identifier(),
+                Some("RunMat:ctranspose:InvalidInput"),
+                "{class}"
+            );
+            assert!(err.message().contains("complex integer"), "{class}");
+        }
+    }
+
+    #[test]
+    fn ctranspose_preserves_typed_real_integer_storage_exactly() {
+        let input = Tensor::new_integer(
+            IntegerStorage::I64(vec![i64::MIN, 2, 3, 4, 5, i64::MAX]),
+            vec![2, 3],
+        )
+        .expect("tensor");
+
+        let Value::Tensor(result) = call_ctranspose(Value::Tensor(input)).expect("ctranspose")
+        else {
+            panic!("expected tensor");
+        };
+        assert_eq!(result.shape, vec![3, 2]);
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::I64(vec![i64::MIN, 3, 5, 2, 4, i64::MAX]))
+        );
+    }
+
+    #[test]
+    fn ctranspose_preserves_empty_typed_real_integer_storage() {
+        let input =
+            Tensor::new_integer(IntegerStorage::U64(Vec::new()), vec![0, 3]).expect("tensor");
+
+        let Value::Tensor(result) = call_ctranspose(Value::Tensor(input)).expect("ctranspose")
+        else {
+            panic!("expected tensor");
+        };
+        assert_eq!(result.shape, vec![3, 0]);
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::U64(Vec::new()))
+        );
+    }
+
+    #[test]
+    fn ctranspose_preserves_native_single_storage() {
+        let input = Tensor::from_f32(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3])
+            .expect("single tensor");
+        let Value::Tensor(result) = call_ctranspose(Value::Tensor(input)).expect("ctranspose")
+        else {
+            panic!("expected tensor");
+        };
+        assert_eq!(result.shape, vec![3, 2]);
+        assert_eq!(
+            result.into_numeric_storage().unwrap(),
+            runmat_value::NumericStorage::F32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+        );
     }
 
     fn tensor(data: &[f64], shape: &[usize]) -> Tensor {
@@ -603,7 +813,7 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 2]);
-                assert_eq!(out.data, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+                assert_eq!(out.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -652,7 +862,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
                 assert_eq!(
-                    out.data,
+                    out.materialize_f64(),
                     vec![(1.0, -2.0), (5.0, -0.0), (3.0, 4.0), (6.0, 7.0)]
                 );
             }
@@ -662,16 +872,16 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn ctranspose_complex_tensor_realises_real_when_imag_zero() {
+    fn ctranspose_complex_tensor_preserves_complex_when_imag_zero() {
         let data = vec![(1.0, 0.0), (2.0, -0.0)];
         let ct = ComplexTensor::new(data, vec![1, 2]).unwrap();
         let value = call_ctranspose(Value::ComplexTensor(ct)).expect("ctranspose");
         match value {
-            Value::Tensor(out) => {
+            Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
-                assert_eq!(out.data, vec![1.0, 2.0]);
+                assert_eq!(out.materialize_f64(), vec![(1.0, -0.0), (2.0, 0.0)]);
             }
-            other => panic!("expected tensor, got {other:?}"),
+            other => panic!("expected complex tensor, got {other:?}"),
         }
     }
 
@@ -792,32 +1002,106 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn ctranspose_tensor_swaps_first_two_dims_for_nd() {
+    fn ctranspose_rejects_nd_tensor_and_directs_to_permute() {
         let data: Vec<f64> = (1..=12).map(|n| n as f64).collect();
         let input = tensor(&data, &[2, 3, 2]);
-        let expected = permute_tensor(NAME, input.clone(), &[2, 1, 3]).unwrap();
-        let value = call_ctranspose(Value::Tensor(input)).expect("ctranspose");
-        match value {
-            Value::Tensor(out) => {
-                assert_eq!(out.shape, expected.shape);
-                assert_eq!(out.data, expected.data);
-            }
-            other => panic!("expected tensor, got {other:?}"),
+        let err = call_ctranspose(Value::Tensor(input)).expect_err("N-D ctranspose must fail");
+        assert_eq!(err.identifier(), Some("RunMat:ctranspose:InvalidInput"));
+        assert!(err.message().contains("use permute"));
+    }
+
+    #[test]
+    fn ctranspose_accepts_explicit_trailing_singleton_dimensions() {
+        let input = tensor(&[1.0, 2.0, 3.0, 4.0], &[2, 2, 1]);
+        let Value::Tensor(result) =
+            call_ctranspose(Value::Tensor(input)).expect("effective matrix")
+        else {
+            panic!("expected tensor");
+        };
+        assert_eq!(result.shape, vec![2, 2, 1]);
+        assert_eq!(result.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
+    }
+
+    #[test]
+    fn ctranspose_rejects_nd_complex_logical_and_string_arrays() {
+        let values = [
+            (
+                "complex",
+                Value::ComplexTensor(
+                    ComplexTensor::new(vec![(1.0, 1.0); 4], vec![2, 1, 2]).expect("complex tensor"),
+                ),
+            ),
+            (
+                "logical",
+                Value::LogicalArray(
+                    LogicalArray::new(vec![1, 0, 1, 0], vec![2, 1, 2]).expect("logical array"),
+                ),
+            ),
+            (
+                "string",
+                Value::StringArray(
+                    StringArray::new(
+                        vec!["a".into(), "b".into(), "c".into(), "d".into()],
+                        vec![2, 1, 2],
+                    )
+                    .expect("string array"),
+                ),
+            ),
+        ];
+        for (label, value) in values {
+            let err = call_ctranspose(value).expect_err("N-D ctranspose must fail");
+            assert_eq!(
+                err.identifier(),
+                Some("RunMat:ctranspose:InvalidInput"),
+                "{label}"
+            );
+            assert!(err.message().contains("use permute"), "{label}");
         }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn ctranspose_struct_unsupported() {
+    fn ctranspose_scalar_struct_is_identity() {
         let mut st = StructValue::new();
         st.fields.insert("field".to_string(), Value::Num(1.0));
-        let err = unwrap_error(call_ctranspose(Value::Struct(st)).unwrap_err());
-        assert!(err.message().contains("unsupported input type"));
+        let Value::Struct(out) = call_ctranspose(Value::Struct(st)).unwrap() else {
+            panic!("expected struct");
+        };
+        assert_eq!(out.fields.get("field"), Some(&Value::Num(1.0)));
+    }
+
+    #[test]
+    fn ctranspose_integer_sparse_is_independently_gated() {
+        let sparse = runmat_value::SparseTensor::new_integer(
+            2,
+            2,
+            vec![0, 1, 2],
+            vec![0, 1],
+            IntegerStorage::U64(vec![u64::MAX, 7]),
+        )
+        .unwrap();
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = call_ctranspose(Value::SparseTensor(sparse.clone())).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            CTRANSPOSE_INTEGER_SPARSE_EXTENSION.error_identifier
+        );
+        drop(strict);
+        let extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let Value::SparseTensor(out) = call_ctranspose(Value::SparseTensor(sparse)).unwrap() else {
+            panic!("expected sparse result");
+        };
+        assert_eq!(
+            out.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX, 7]))
+        );
+        drop(extensions);
+        assert_eq!(CTRANSPOSE_INTEGER_CAPABILITIES.len(), 2);
     }
 
     #[test]
     fn ctranspose_type_swaps_dims() {
-        let out = transpose_type(
+        let out = matrix_transpose_type(
             &[Type::Tensor {
                 shape: Some(vec![Some(2), Some(5)]),
             }],
@@ -837,14 +1121,185 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let t = tensor(&[1.0, 4.0, 2.0, 5.0], &[2, 2]);
             let view = HostTensorView {
-                data: &t.data,
+                data: &t.materialize_f64(),
                 shape: &t.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = call_ctranspose(Value::GpuTensor(handle)).expect("ctranspose");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![1.0, 2.0, 4.0, 5.0]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0, 2.0, 4.0, 5.0]);
+        });
+    }
+
+    #[test]
+    fn ctranspose_native_result_contract_checks_shape_device_storage_precision_and_owner() {
+        test_support::with_test_provider(|provider| {
+            let input_tensor = tensor(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3]);
+            let input = provider
+                .upload(&HostTensorView {
+                    data: &input_tensor.materialize_f64(),
+                    shape: &input_tensor.shape,
+                })
+                .unwrap();
+            let mut output = provider.transpose(&input).unwrap();
+            assert!(native_ctranspose_output_matches(
+                &input,
+                &output,
+                provider,
+                &[3, 2]
+            ));
+
+            let mut wrong_shape = output.clone();
+            wrong_shape.shape = vec![2, 3];
+            assert!(!native_ctranspose_output_matches(
+                &input,
+                &wrong_shape,
+                provider,
+                &[3, 2]
+            ));
+            let mut wrong_device = output.clone();
+            wrong_device.device_id = wrong_device.device_id.wrapping_add(1);
+            assert!(!native_ctranspose_output_matches(
+                &input,
+                &wrong_device,
+                provider,
+                &[3, 2]
+            ));
+
+            let original_storage = output.descriptor.storage;
+            output.descriptor.storage = Some(GpuTensorStorage::ComplexInterleaved);
+            assert!(!native_ctranspose_output_matches(
+                &input,
+                &output,
+                provider,
+                &[3, 2]
+            ));
+            output.descriptor.storage = original_storage;
+
+            let original_precision = runmat_accelerate_api::handle_precision(&output).unwrap();
+            let wrong_precision = match original_precision {
+                runmat_accelerate_api::ProviderPrecision::F32 => {
+                    runmat_accelerate_api::NumericElementType::F64
+                }
+                runmat_accelerate_api::ProviderPrecision::F64 => {
+                    runmat_accelerate_api::NumericElementType::F32
+                }
+            };
+            let original_element_type = output.descriptor.element_type;
+            output.descriptor.element_type = Some(wrong_precision);
+            assert!(!native_ctranspose_output_matches(
+                &input,
+                &output,
+                provider,
+                &[3, 2]
+            ));
+            output.descriptor.element_type = original_element_type;
+
+            provider.free(&output).unwrap();
+            provider.free(&input).unwrap();
+        });
+    }
+
+    #[test]
+    fn ctranspose_rejects_conjugate_aliases_without_freeing_the_original() {
+        test_support::with_test_provider(|provider| {
+            for reject_original in [true, false] {
+                let input = provider
+                    .upload(&HostTensorView {
+                        data: &[1.0, 2.0, 3.0, 4.0],
+                        shape: &[2, 2],
+                    })
+                    .unwrap();
+                let transposed = provider.transpose(&input).unwrap();
+                let rejected = if reject_original {
+                    input.clone()
+                } else {
+                    transposed.clone()
+                };
+
+                assert!(!native_conjugate_output_matches(
+                    &input,
+                    &transposed,
+                    &rejected,
+                    provider,
+                    &[2, 2]
+                ));
+                cleanup_rejected_conjugate(&input, &transposed, &rejected, provider);
+
+                block_on(provider.download(&input)).expect("original input remains live");
+                assert!(
+                    block_on(provider.download(&transposed)).is_err(),
+                    "rejected transpose temporary must be freed exactly once"
+                );
+                provider.free(&input).unwrap();
+            }
+        });
+    }
+
+    #[test]
+    fn ctranspose_unowned_handle_does_not_borrow_the_ambient_provider() {
+        let _guard = test_support::accel_test_lock();
+        runmat_accelerate_api::clear_provider();
+        let ambient = Box::leak(Box::new(
+            runmat_accelerate::simple_provider::InProcessProvider::new(),
+        ));
+        let _thread_provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(ambient));
+        let handle = GpuTensorHandle {
+            shape: vec![2, 2],
+            device_id: ambient.device_id().wrapping_add(1),
+            buffer_id: u64::MAX - 396,
+            descriptor: Default::default(),
+        };
+        assert!(runmat_accelerate_api::provider_for_handle(&handle).is_none());
+        call_ctranspose(Value::GpuTensor(handle))
+            .expect_err("an unowned handle must not dispatch through the ambient provider");
+    }
+
+    #[test]
+    fn ctranspose_gpu_preserves_every_real_integer_class() {
+        test_support::with_test_provider(|provider| {
+            for storage in all_integer_matrix_storages() {
+                let expected =
+                    super::super::transpose::transpose_integer_storage(storage.clone(), 2, 2);
+                let class = storage.class_name();
+                let input = Tensor::new_integer(storage, vec![2, 2]).expect("integer tensor");
+                let handle = gpu_helpers::upload_tensor(provider, &input).expect("integer upload");
+                let input_type = runmat_accelerate_api::handle_integer_type(&handle);
+                let result =
+                    call_ctranspose(Value::GpuTensor(handle)).expect("resident ctranspose");
+                let Value::GpuTensor(result_handle) = &result else {
+                    panic!("expected resident result for {class}");
+                };
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(result_handle),
+                    input_type,
+                    "{class}"
+                );
+                let gathered = test_support::gather(result).expect("integer gather");
+                assert_eq!(gathered.integer_storage(), Some(&expected), "{class}");
+            }
+        });
+    }
+
+    #[test]
+    fn ctranspose_gpu_rejects_complex_integer_metadata_before_provider_dispatch() {
+        test_support::with_test_provider(|provider| {
+            for complex in [
+                ComplexTensor::new(vec![(1.0, 2.0)], vec![]).expect("complex scalar"),
+                ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![1, 2])
+                    .expect("complex vector"),
+            ] {
+                let mut handle =
+                    gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
+                handle.descriptor.element_type =
+                    Some(runmat_accelerate_api::NumericElementType::I8);
+                let err = call_ctranspose(Value::GpuTensor(handle.clone()))
+                    .expect_err("complex integer GPU ctranspose must fail");
+                assert_eq!(err.identifier(), Some("RunMat:ctranspose:InvalidInput"));
+                assert!(err.message().contains("complex integer"));
+                provider.free(&handle).expect("free input");
+            }
         });
     }
 
@@ -884,7 +1339,7 @@ pub(crate) mod tests {
             )
             .expect("gather complex");
             assert_eq!(gathered.shape, expected.shape);
-            assert_eq!(gathered.data, expected.data);
+            assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
         });
     }
 
@@ -911,14 +1366,14 @@ pub(crate) mod tests {
             .expect("gather complex");
             assert_eq!(gathered.shape, vec![2, 2]);
             assert_eq!(
-                gathered.data,
+                gathered.materialize_f64(),
                 vec![(1.0, -0.0), (3.0, -0.0), (2.0, 0.0), (4.0, 0.0)]
             );
         });
     }
 
     #[test]
-    fn ctranspose_complex_gpu_inprocess_nd_stays_resident() {
+    fn ctranspose_complex_gpu_inprocess_rejects_nd_before_provider_dispatch() {
         test_support::with_test_provider(|provider| {
             let complex = ComplexTensor::new(
                 vec![
@@ -935,32 +1390,11 @@ pub(crate) mod tests {
             )
             .unwrap();
             let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
-            let result = call_ctranspose(Value::GpuTensor(handle)).expect("gpu ctranspose");
-            let Value::GpuTensor(out_handle) = result else {
-                panic!("expected complex gpu tensor");
-            };
-            assert_eq!(
-                runmat_accelerate_api::handle_storage(&out_handle),
-                GpuTensorStorage::ComplexInterleaved
-            );
-            let gathered = block_on(
-                crate::builtins::math::fft::common::gather_gpu_complex_tensor(&out_handle, NAME),
-            )
-            .expect("gather complex");
-            assert_eq!(gathered.shape, vec![2, 2, 2]);
-            assert_eq!(
-                gathered.data,
-                vec![
-                    (1.0, 1.0),
-                    (3.0, 3.0),
-                    (2.0, 2.0),
-                    (4.0, 4.0),
-                    (5.0, 5.0),
-                    (7.0, 7.0),
-                    (6.0, 6.0),
-                    (8.0, 8.0),
-                ]
-            );
+            let err = call_ctranspose(Value::GpuTensor(handle.clone()))
+                .expect_err("N-D GPU ctranspose must fail");
+            assert_eq!(err.identifier(), Some("RunMat:ctranspose:InvalidInput"));
+            assert!(err.message().contains("use permute"));
+            provider.free(&handle).expect("free input");
         });
     }
 
@@ -983,14 +1417,14 @@ pub(crate) mod tests {
         };
 
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu_value = call_ctranspose(Value::GpuTensor(handle)).expect("gpu");
         let gathered = test_support::gather(gpu_value).expect("gather");
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        assert_eq!(gathered.data, cpu_tensor.data);
+        assert_eq!(gathered.materialize_f64(), cpu_tensor.materialize_f64());
     }
 
     #[test]
@@ -1034,12 +1468,12 @@ pub(crate) mod tests {
         )
         .expect("gather complex");
         assert_eq!(gathered.shape, expected.shape);
-        assert_eq!(gathered.data, expected.data);
+        assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }
 
     #[test]
     #[cfg(feature = "wgpu")]
-    fn ctranspose_wgpu_complex_nd_matches_cpu_and_stays_resident() {
+    fn ctranspose_wgpu_complex_nd_is_rejected() {
         let _guard = test_support::accel_test_lock();
         let Ok(provider) =
             wgpu_backend::register_wgpu_provider(wgpu_backend::WgpuProviderOptions::default())
@@ -1060,23 +1494,11 @@ pub(crate) mod tests {
             vec![2, 2, 2],
         )
         .unwrap();
-        let expected =
-            ctranspose_complex_tensor_preserve_complex(complex.clone()).expect("cpu ctranspose");
-
         let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
-        let result = call_ctranspose(Value::GpuTensor(handle)).expect("gpu ctranspose");
-        let Value::GpuTensor(out_handle) = result else {
-            panic!("expected complex gpu tensor");
-        };
-        assert_eq!(
-            runmat_accelerate_api::handle_storage(&out_handle),
-            GpuTensorStorage::ComplexInterleaved
-        );
-        let gathered = block_on(
-            crate::builtins::math::fft::common::gather_gpu_complex_tensor(&out_handle, NAME),
-        )
-        .expect("gather complex");
-        assert_eq!(gathered.shape, expected.shape);
-        assert_eq!(gathered.data, expected.data);
+        let err = call_ctranspose(Value::GpuTensor(handle.clone()))
+            .expect_err("N-D GPU ctranspose must fail");
+        assert_eq!(err.identifier(), Some("RunMat:ctranspose:InvalidInput"));
+        assert!(err.message().contains("use permute"));
+        provider.free(&handle).expect("free input");
     }
 }

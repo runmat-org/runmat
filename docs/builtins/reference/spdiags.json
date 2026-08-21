@@ -37,7 +37,8 @@
     "`Bin` must have one column for each requested diagonal. Duplicate diagonal offsets sum their contributions.",
     "Positive diagonal offsets are padded at the top of extracted columns; negative offsets are padded at the bottom.",
     "Sparse extraction scans RunMat CSC storage directly instead of densifying the entire sparse input.",
-    "RunMat's current sparse representation is real double CSC storage, so complex sparse diagonal construction is not yet represented."
+    "RunMat sparse storage supports real double, single, logical, and mode-gated native integer CSC payloads; complex sparse diagonal construction is not yet represented.",
+    "Typed integer matrix data is a RunMat-only extension. Extraction and construction preserve the exact integer class; replacement follows the target matrix class with integer assignment and saturation semantics. Typed offsets and dimensions are separate RunMat-only extensions decoded structurally."
   ],
   "examples": [
     {

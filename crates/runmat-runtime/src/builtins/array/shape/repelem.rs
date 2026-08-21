@@ -19,10 +19,18 @@ use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::ResolveContext;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Type, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CellArray, CharArray, ComplexTensor, IntValue, LogicalArray, NumericScalar, NumericStorage,
+    StringArray, Tensor, Value,
+};
 
 const BUILTIN_NAME: &str = "repelem";
 
@@ -149,6 +157,44 @@ pub const REPELEM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &REPELEM_ERRORS,
 };
+const REPELEM_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target documents all eight integer classes; authoritative elements are copied without arithmetic or floating conversion.",
+    }];
+const REPELEM_INTEGER_FACTOR_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "R1,...,RN",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed repetition controls are read exactly as nonnegative structural sizes.",
+    }];
+pub const REPELEM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = repelem(integer_A, R1,...,RN)",
+        inputs: &REPELEM_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Replication preserves native class, shape order, and exact wide values; resident inputs use owner-preserving host fallback when no provider hook exists.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = repelem(A, integer_R1,...,integer_RN)",
+        inputs: &REPELEM_INTEGER_FACTOR_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Replication counts never pass through binary64; checked size arithmetic rejects unrepresentable output geometry.",
+    },
+];
 
 fn repelem_error(
     error: &'static BuiltinErrorDescriptor,
@@ -263,6 +309,7 @@ fn repelem_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     accel = "custom",
     type_resolver(repelem_type),
     descriptor(crate::builtins::array::shape::repelem::REPELEM_DESCRIPTOR),
+    integer_capabilities(crate::builtins::array::shape::repelem::REPELEM_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::shape::repelem"
 )]
 async fn repelem_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -276,58 +323,72 @@ async fn repelem_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult
     // input array is a vector; the per-type implementations enforce this).
     let single_arg = factors.len() == 1;
 
+    if let Value::GpuTensor(handle) = value {
+        let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
+            .await
+            .map_err(|error| repelem_internal(format!("repelem: {error}")))?;
+        let output = repelem_host_value(gathered, &factors, single_arg)?;
+        return gpu_helpers::restore_class_preserving_value(&handle, output, BUILTIN_NAME);
+    }
+    repelem_host_value(value, &factors, single_arg)
+}
+
+fn repelem_host_value(
+    value: Value,
+    factors: &[RepFactor],
+    single_arg: bool,
+) -> crate::BuiltinResult<Value> {
     match value {
         Value::Tensor(t) => {
-            let out = repelem_tensor(&t, &factors, single_arg)?;
+            let out = repelem_tensor(t, factors, single_arg)?;
             Ok(tensor::tensor_into_value(out))
         }
         Value::Num(_) | Value::Int(_) => {
             let tensor =
                 tensor::value_into_tensor_for("repelem", value).map_err(repelem_internal)?;
-            let out = repelem_tensor(&tensor, &factors, single_arg)?;
+            let out = repelem_tensor(tensor, factors, single_arg)?;
             Ok(tensor::tensor_into_value(out))
         }
         Value::Bool(flag) => {
             let logical = LogicalArray::new(vec![if flag { 1 } else { 0 }], vec![1, 1])
                 .map_err(|e| repelem_internal(format!("repelem: {e}")))?;
-            let out = repelem_logical(&logical, &factors, single_arg)?;
+            let out = repelem_logical(&logical, factors, single_arg)?;
             Ok(Value::LogicalArray(out))
         }
         Value::LogicalArray(logical) => {
-            let out = repelem_logical(&logical, &factors, single_arg)?;
+            let out = repelem_logical(&logical, factors, single_arg)?;
             Ok(Value::LogicalArray(out))
         }
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| repelem_internal(format!("repelem: {e}")))?;
-            let out = repelem_complex_tensor(&tensor, &factors, single_arg)?;
+            let out = repelem_complex_tensor(&tensor, factors, single_arg)?;
             Ok(complex_tensor_into_value(out))
         }
         Value::ComplexTensor(ct) => {
-            let out = repelem_complex_tensor(&ct, &factors, single_arg)?;
+            let out = repelem_complex_tensor(&ct, factors, single_arg)?;
             Ok(complex_tensor_into_value(out))
         }
         Value::String(s) => {
             let array = StringArray::new(vec![s], vec![1, 1])
                 .map_err(|e| repelem_internal(format!("repelem: {e}")))?;
-            let out = repelem_string_array(&array, &factors, single_arg)?;
+            let out = repelem_string_array(&array, factors, single_arg)?;
             Ok(Value::StringArray(out))
         }
         Value::StringArray(sa) => {
-            let out = repelem_string_array(&sa, &factors, single_arg)?;
+            let out = repelem_string_array(&sa, factors, single_arg)?;
             Ok(Value::StringArray(out))
         }
         Value::CharArray(ca) => {
-            let out = repelem_char_array(&ca, &factors, single_arg)?;
+            let out = repelem_char_array(&ca, factors, single_arg)?;
             Ok(Value::CharArray(out))
         }
         Value::Cell(ca) => {
-            let out = repelem_cell_array(&ca, &factors, single_arg)?;
+            let out = repelem_cell_array(&ca, factors, single_arg)?;
             Ok(Value::Cell(out))
         }
-        Value::GpuTensor(_) => Err(repelem_invalid_factors(
-            "repelem: GPU tensors must be gathered before replication; \
-             expected a host residency hint from the planner",
+        Value::GpuTensor(_) => Err(repelem_internal(
+            "repelem: resident input reached the host replication boundary",
         )),
         other => Err(repelem_unsupported(format!(
             "repelem: unsupported input type {:?}",
@@ -363,15 +424,51 @@ async fn parse_single_factor(value: &Value, position: usize) -> crate::BuiltinRe
 fn parse_host_factor(value: &Value, position: usize) -> crate::BuiltinResult<RepFactor> {
     match value {
         Value::Num(n) => Ok(RepFactor::Scalar(coerce_count(*n, position)?)),
-        Value::Int(i) => Ok(RepFactor::Scalar(coerce_count(i.to_f64(), position)?)),
+        Value::Int(i) => Ok(RepFactor::Scalar(coerce_integer_count(i, position)?)),
         Value::Bool(b) => Ok(RepFactor::Scalar(if *b { 1 } else { 0 })),
         Value::Tensor(tensor) => {
-            if tensor.data.len() == 1 {
-                Ok(RepFactor::Scalar(coerce_count(tensor.data[0], position)?))
+            if let Some(storage) = tensor.integer_storage() {
+                if storage.len() == 1 {
+                    return Ok(RepFactor::Scalar(coerce_integer_count(
+                        &storage.value_at(0).expect("one-element integer storage"),
+                        position,
+                    )?));
+                }
+                ensure_vector_shape(&tensor.shape, position)?;
+                return storage
+                    .exact_values()
+                    .iter()
+                    .map(|value| coerce_integer_count(value, position))
+                    .collect::<crate::BuiltinResult<Vec<_>>>()
+                    .map(RepFactor::Vector);
+            }
+            if tensor::is_scalar_tensor(tensor) {
+                Ok(RepFactor::Scalar(coerce_count(
+                    tensor::tensor_value_f64(tensor, 0),
+                    position,
+                )?))
             } else {
                 ensure_vector_shape(&tensor.shape, position)?;
-                let mut out = Vec::with_capacity(tensor.data.len());
-                for &v in &tensor.data {
+                let len = tensor::tensor_element_len(tensor);
+                let mut out = Vec::with_capacity(len);
+                for index in 0..len {
+                    let v = match tensor
+                        .numeric_value_at(index)
+                        .expect("replication tensor index is in bounds")
+                    {
+                        NumericScalar::F64(value) => value,
+                        NumericScalar::F32(value) => f64::from(value),
+                        NumericScalar::I8(_)
+                        | NumericScalar::I16(_)
+                        | NumericScalar::I32(_)
+                        | NumericScalar::I64(_)
+                        | NumericScalar::U8(_)
+                        | NumericScalar::U16(_)
+                        | NumericScalar::U32(_)
+                        | NumericScalar::U64(_) => {
+                            unreachable!("integer factors return through the exact parser")
+                        }
+                    };
                     out.push(coerce_count(v, position)?);
                 }
                 Ok(RepFactor::Vector(out))
@@ -422,12 +519,20 @@ fn coerce_count(value: f64, position: usize) -> crate::BuiltinResult<usize> {
             "repelem: replication count at argument {position} must be non-negative"
         )));
     }
-    if rounded > (usize::MAX as f64) {
+    if rounded >= (usize::MAX as f64) + 1.0 {
         return Err(repelem_invalid_factors(format!(
             "repelem: replication count at argument {position} exceeds the maximum supported size"
         )));
     }
     Ok(rounded as usize)
+}
+
+fn coerce_integer_count(value: &IntValue, position: usize) -> crate::BuiltinResult<usize> {
+    value.try_to_usize().ok_or_else(|| {
+        repelem_invalid_factors(format!(
+            "repelem: replication count at argument {position} must be a non-negative platform integer"
+        ))
+    })
 }
 
 /// Determine which axis to replicate along when `repelem(v, n)` is called with
@@ -461,15 +566,44 @@ fn vector_replication_axis(shape: &[usize]) -> crate::BuiltinResult<usize> {
 }
 
 fn repelem_tensor(
-    tensor: &Tensor,
+    tensor: Tensor,
     factors: &[RepFactor],
     single_arg: bool,
 ) -> crate::BuiltinResult<Tensor> {
-    let (data, shape) = repelem_column_major(&tensor.data, &tensor.shape, factors, single_arg)?;
-    let mut out = Tensor::new_with_dtype(data, shape, tensor.dtype)
+    let input_shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
         .map_err(|e| repelem_internal(format!("repelem: {e}")))?;
-    out.dtype = tensor.dtype;
-    Ok(out)
+    let (storage, output_shape) =
+        repelem_numeric_storage(storage, &input_shape, factors, single_arg)?;
+    Tensor::from_numeric_storage(storage, output_shape)
+        .map_err(|e| repelem_internal(format!("repelem: {e}")))
+}
+
+fn repelem_numeric_storage(
+    storage: NumericStorage,
+    shape: &[usize],
+    factors: &[RepFactor],
+    single_arg: bool,
+) -> crate::BuiltinResult<(NumericStorage, Vec<usize>)> {
+    macro_rules! repeat {
+        ($values:expr, $variant:ident) => {{
+            let (values, shape) = repelem_column_major(&$values, shape, factors, single_arg)?;
+            (NumericStorage::$variant(values), shape)
+        }};
+    }
+    Ok(match storage {
+        NumericStorage::F64(values) => repeat!(values, F64),
+        NumericStorage::F32(values) => repeat!(values, F32),
+        NumericStorage::I8(values) => repeat!(values, I8),
+        NumericStorage::I16(values) => repeat!(values, I16),
+        NumericStorage::I32(values) => repeat!(values, I32),
+        NumericStorage::I64(values) => repeat!(values, I64),
+        NumericStorage::U8(values) => repeat!(values, U8),
+        NumericStorage::U16(values) => repeat!(values, U16),
+        NumericStorage::U32(values) => repeat!(values, U32),
+        NumericStorage::U64(values) => repeat!(values, U64),
+    })
 }
 
 fn repelem_logical(
@@ -486,8 +620,14 @@ fn repelem_complex_tensor(
     factors: &[RepFactor],
     single_arg: bool,
 ) -> crate::BuiltinResult<ComplexTensor> {
-    let (data, shape) = repelem_column_major(&tensor.data, &tensor.shape, factors, single_arg)?;
-    ComplexTensor::new(data, shape).map_err(|e| repelem_internal(format!("repelem: {e}")))
+    let indices = (0..tensor.len()).collect::<Vec<_>>();
+    let (indices, shape) = repelem_column_major(&indices, &tensor.shape, factors, single_arg)?;
+    let storage = tensor
+        .complex_storage()
+        .gather(&indices)
+        .map_err(|e| repelem_internal(format!("repelem: {e}")))?;
+    ComplexTensor::from_complex_storage(storage, shape)
+        .map_err(|e| repelem_internal(format!("repelem: {e}")))
 }
 
 fn repelem_string_array(
@@ -669,7 +809,10 @@ fn expand_axis(
             let total = size.checked_mul(*m).ok_or_else(|| {
                 repelem_invalid_factors("repelem: requested output exceeds maximum size")
             })?;
-            let mut table = Vec::with_capacity(total);
+            let mut table = Vec::new();
+            table.try_reserve_exact(total).map_err(|_| {
+                repelem_invalid_factors("repelem: requested output exceeds maximum size")
+            })?;
             for i in 0..size {
                 for _ in 0..*m {
                     table.push(i);
@@ -691,7 +834,10 @@ fn expand_axis(
                 .ok_or_else(|| {
                     repelem_invalid_factors("repelem: requested output exceeds maximum size")
                 })?;
-            let mut table = Vec::with_capacity(total);
+            let mut table = Vec::new();
+            table.try_reserve_exact(total).map_err(|_| {
+                repelem_invalid_factors("repelem: requested output exceeds maximum size")
+            })?;
             for (i, &count) in v.iter().enumerate() {
                 for _ in 0..count {
                     table.push(i);
@@ -766,7 +912,9 @@ fn repelem_column_major<T: Clone>(
     }
 
     let src_strides = column_major_strides(&input_shape);
-    let mut out = Vec::with_capacity(new_total);
+    let mut out = Vec::new();
+    out.try_reserve_exact(new_total)
+        .map_err(|_| repelem_invalid_factors("repelem: requested output exceeds maximum size"))?;
     for idx in 0..new_total {
         let mut rem = idx;
         let mut src_index = 0usize;
@@ -801,7 +949,9 @@ fn repelem_row_major<T: Clone>(
     if total == 0 {
         return Ok((Vec::new(), new_rows, new_cols));
     }
-    let mut out = Vec::with_capacity(total);
+    let mut out = Vec::new();
+    out.try_reserve_exact(total)
+        .map_err(|_| repelem_invalid_factors("repelem: requested output exceeds maximum size"))?;
     for r in 0..new_rows {
         let src_row = plan.row_table[r];
         for c in 0..new_cols {
@@ -844,8 +994,9 @@ fn checked_total(shape: &[usize]) -> crate::BuiltinResult<usize> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, NumericDType};
+    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage};
 
     fn repelem_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::repelem_builtin(value, rest))
@@ -904,10 +1055,39 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 6]);
-                assert_eq!(t.data, vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn resident_integer_data_uses_exact_owner_fallback_and_preserves_provenance() {
+        test_support::with_test_provider(|provider| {
+            let wide = 9_007_199_254_740_993_u64;
+            let input = Tensor::new_integer(IntegerStorage::U64(vec![wide, 7]), vec![1, 2])
+                .expect("integer tensor");
+            let source = gpu_helpers::upload_tensor(provider, &input).expect("upload integer");
+            let source =
+                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let result = repelem_builtin(
+                Value::GpuTensor(source.clone()),
+                vec![Value::Int(IntValue::U8(2))],
+            )
+            .expect("resident repelem");
+            let Value::GpuTensor(output) = result else {
+                panic!("expected resident output");
+            };
+            assert!(runmat_accelerate_api::handle_is_explicit(&output));
+            assert!(gpu_helpers::exact_provider_for_handle(&source).is_some());
+            let gathered = test_support::gather(Value::GpuTensor(output.clone())).expect("gather");
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U64(vec![wide, wide, 7, 7]))
+            );
+            provider.free(&output).ok();
+            provider.free(&source).ok();
+        });
     }
 
     #[test]
@@ -919,7 +1099,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 6]);
-                assert_eq!(t.data, vec![1.0, 2.0, 2.0, 3.0, 3.0, 3.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 2.0, 3.0, 3.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -943,7 +1123,7 @@ pub(crate) mod tests {
             match result {
                 Value::Tensor(t) => {
                     assert_eq!(t.shape, vec![1, 6]);
-                    assert_eq!(t.data, vec![1.0, 2.0, 2.0, 3.0, 3.0, 3.0]);
+                    assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 2.0, 3.0, 3.0, 3.0]);
                 }
                 other => panic!("expected tensor, got {other:?}"),
             }
@@ -958,7 +1138,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![6, 1]);
-                assert_eq!(t.data, vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -973,7 +1153,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![5, 1]);
-                assert_eq!(t.data, vec![1.0, 1.0, 1.0, 3.0, 3.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 1.0, 3.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1007,7 +1187,8 @@ pub(crate) mod tests {
                         let src_idx = src_r + src_c * 3;
                         let dst_idx = r + c * rows;
                         assert_eq!(
-                            t.data[dst_idx], magic.data[src_idx],
+                            t.materialize_f64()[dst_idx],
+                            magic.materialize_f64()[src_idx],
                             "mismatch at (r={r}, c={c})"
                         );
                     }
@@ -1046,7 +1227,8 @@ pub(crate) mod tests {
                         let src_idx = src_r + src_c * 3;
                         let dst_idx = r + c * 4;
                         assert_eq!(
-                            t.data[dst_idx], magic.data[src_idx],
+                            t.materialize_f64()[dst_idx],
+                            magic.materialize_f64()[src_idx],
                             "mismatch at (r={r}, c={c})"
                         );
                     }
@@ -1115,7 +1297,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 1, 6]);
-                assert_eq!(t.data, vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1129,7 +1311,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 6, 1]);
-                assert_eq!(t.data, vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1150,7 +1332,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2, 2]);
-                assert_eq!(t.data, vec![5.0; 8]);
+                assert_eq!(t.materialize_f64(), vec![5.0; 8]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1165,7 +1347,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 0]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1180,7 +1362,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 1]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1194,7 +1376,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 1]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1209,7 +1391,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 1]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1226,7 +1408,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 4]);
-                assert_eq!(t.data, vec![2.0, 4.0, 4.0, 5.0]);
+                assert_eq!(t.materialize_f64(), vec![2.0, 4.0, 4.0, 5.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1257,7 +1439,11 @@ pub(crate) mod tests {
                 for (c, expected) in expected_cols.iter().enumerate() {
                     for (r, value) in expected.iter().enumerate() {
                         let dst_idx = r + c * rows;
-                        assert_eq!(t.data[dst_idx], *value, "mismatch at (r={r}, c={c})");
+                        assert_eq!(
+                            t.materialize_f64()[dst_idx],
+                            *value,
+                            "mismatch at (r={r}, c={c})"
+                        );
                     }
                 }
             }
@@ -1266,20 +1452,135 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn integer_dtype_tensor_preserves_dtype() {
-        let mut tensor =
-            Tensor::new_with_dtype(vec![1.0, 2.0, 3.0], vec![1, 3], NumericDType::U8).unwrap();
-        tensor.dtype = NumericDType::U8;
+    fn repelem_preserves_native_single_storage() {
+        let tensor = Tensor::from_f32(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
         let result = repelem_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(2))])
             .expect("repelem");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 6]);
-                assert_eq!(t.data, vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
-                assert_eq!(t.dtype, NumericDType::U8);
+                assert_eq!(
+                    t.into_numeric_storage().expect("single storage"),
+                    NumericStorage::F32(vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0])
+                );
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn repelem_preserves_all_exact_integer_classes() {
+        let storages = [
+            IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+            IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+            IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![0, u8::MAX]),
+            IntegerStorage::U16(vec![0, u16::MAX]),
+            IntegerStorage::U32(vec![0, u32::MAX]),
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        ];
+
+        for storage in storages {
+            let values = storage.exact_values();
+            let tensor = Tensor::new_integer(storage.clone(), vec![1, 2]).expect("integer tensor");
+            let Value::Tensor(output) =
+                repelem_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(2))])
+                    .expect("repelem")
+            else {
+                panic!("expected exact integer tensor");
+            };
+
+            assert_eq!(output.shape, vec![1, 4]);
+            assert_eq!(
+                output.integer_storage(),
+                Some(
+                    &storage
+                        .from_exact_values_like(vec![
+                            values[0].clone(),
+                            values[0].clone(),
+                            values[1].clone(),
+                            values[1].clone(),
+                        ])
+                        .expect("expected repeated storage")
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn typed_replication_factors_are_parsed_without_f64_rounding() {
+        let exact = 9_007_199_254_740_993_u64;
+        let scalar = parse_host_factor(&Value::Int(IntValue::U64(exact)), 1).unwrap();
+        assert!(matches!(scalar, RepFactor::Scalar(value) if value == exact as usize));
+
+        let vector = Tensor::new_integer(IntegerStorage::U64(vec![1, exact]), vec![1, 2]).unwrap();
+        let factors = parse_host_factor(&Value::Tensor(vector), 1).unwrap();
+        assert!(matches!(factors, RepFactor::Vector(values) if values == vec![1, exact as usize]));
+
+        let err = parse_host_factor(&Value::Int(IntValue::I64(-1)), 1)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("non-negative"), "unexpected error: {err}");
+
+        let err = parse_host_factor(&Value::Num((usize::MAX as f64) + 1.0), 1)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("maximum supported size"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn unallocatable_typed_factor_returns_error() {
+        let err = repelem_builtin(
+            Value::Int(IntValue::U8(1)),
+            vec![Value::Int(IntValue::U64(u64::MAX))],
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("maximum size"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn repelem_preserves_exact_typed_complex_integer_components() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+        )
+        .expect("typed complex storage");
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).expect("typed complex tensor");
+
+        let Value::ComplexTensor(output) = repelem_builtin(
+            Value::ComplexTensor(tensor),
+            vec![Value::Int(IntValue::I32(2))],
+        )
+        .expect("repelem") else {
+            panic!("expected typed complex integer tensor");
+        };
+
+        assert_eq!(output.shape, vec![1, 4]);
+        assert_eq!(
+            output.integer_storage().cloned(),
+            Some(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![
+                        9_007_199_254_740_993,
+                        9_007_199_254_740_993,
+                        u64::MAX,
+                        u64::MAX,
+                    ]),
+                    IntegerStorage::U64(vec![
+                        u64::MAX,
+                        u64::MAX,
+                        9_007_199_254_740_993,
+                        9_007_199_254_740_993,
+                    ]),
+                )
+                .expect("expected typed complex storage")
+            )
+        );
     }
 
     #[test]
@@ -1386,7 +1687,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![1, 4]);
                 assert_eq!(
-                    out.data,
+                    out.materialize_f64(),
                     vec![(1.0, -1.0), (1.0, -1.0), (0.0, 2.0), (0.0, 2.0)]
                 );
             }

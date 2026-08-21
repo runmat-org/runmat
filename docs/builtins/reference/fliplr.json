@@ -19,7 +19,7 @@
       "bool"
     ],
     "broadcasting": "none",
-    "notes": "Uses the generic flip provider hook with axis=1; falls back to gather→flip→upload when unavailable."
+    "notes": "Uses the generic flip provider hook with axis=1 for floating and logical data. All eight integer classes use an exact gather→flip→owner-upload fallback."
   },
   "fusion": {
     "elementwise": false,
@@ -30,13 +30,14 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::array::shape::fliplr::tests",
-    "integration": "["
+    "integration": "builtins::array::shape::fliplr::tests::fliplr_gpu_roundtrip"
   },
-  "description": "`fliplr(A)` mirrors `A` across its vertical axis by reversing column order (dimension 2). Inputs with fewer than two columns are unchanged, and type/device handling follows MATLAB semantics across numeric, logical, text, and gpuArray inputs.",
+  "description": "`fliplr(A)` mirrors `A` across its vertical axis by reversing column order (dimension 2). Inputs with fewer than two columns are unchanged. Numeric, logical, complex, text, and gpuArray paths are implemented; broader container and object parity remains pending.",
   "behaviors": [
     "Always reverses dimension 2 (columns) and leaves all other dimensions untouched, even for rank > 2 data.",
     "Inputs with fewer than two columns (column vectors, scalars) are returned unchanged because the second dimension is singleton.",
-    "Logical, numeric, complex, character, and string arrays all preserve their MATLAB types and storage layout.",
+    "Logical, numeric, complex, character, and string arrays preserve their types and full N-D shapes. All eight integer classes preserve authoritative values and class.",
+    "Cell, struct, table, timetable, categorical, datetime, duration, and calendar-duration support is not yet implemented.",
     "gpuArray inputs execute on the device via the generic `flip` provider hook (axis = 1); when that hook is missing, RunMat gathers once, mirrors the data on the host, and uploads the result so the returned value is still a gpuArray.",
     "Dimensions larger than `ndims(A)` are treated as singleton axes, so `fliplr` never errors when `A` has rank < 2."
   ],
@@ -91,7 +92,7 @@
     },
     {
       "question": "Does `fliplr` support string and character arrays?",
-      "answer": "Yes. String arrays reorder their elements, and character arrays mirror each row while preserving UTF-8 data."
+      "answer": "Yes. String arrays reorder their elements, and character arrays mirror each row while preserving their character storage."
     },
     {
       "question": "What happens on the GPU if there is no flip kernel?",

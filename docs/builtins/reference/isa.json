@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Returns host logical scalars and inspects gpuArray metadata without launching kernels."
+    "notes": "Returns host logical scalars and inspects resident metadata without launching kernels. Explicit gpuArray values expose wrapper identity; internal automatic residency exposes underlying host class/category semantics."
   },
   "fusion": {
     "elementwise": false,
@@ -25,16 +25,16 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::introspection::isa::tests",
-    "integration": "builtins::introspection::isa::tests::isa_gpu_arrays_treat_metadata_correctly"
+    "integration": "builtins::introspection::isa::tests::isa_distinguishes_automatic_numeric_class_from_explicit_wrapper"
   },
   "description": "`isa(x, T)` returns true when value `x` belongs to class or abstract category `T`. Supported class/category checks and type coercions follow MATLAB semantics.",
   "behaviors": [
     "Exact class names (such as `\"double\"`, `\"cell\"`, `\"struct\"`, `\"event.listener\"`) match the value’s dynamic class. Comparisons are case-insensitive.",
     "Abstract categories (`\"numeric\"`, `\"float\"`, `\"integer\"`, `\"handle\"`, `\"function_handle\"`, `\"gpuArray\"`, `\"listener\"`) mirror MATLAB’s grouping rules.",
-    "Logical scalars, logical arrays, and logical gpuArray masks satisfy `\"logical\"` and do not register as `\"numeric\"`. RunMat consults handle metadata rather than downloading device buffers.",
+    "Logical scalars and logical arrays satisfy `\"logical\"` and do not register as `\"numeric\"`. Internally auto-resident logical masks retain those host categories, while explicit gpuArray values expose the gpuArray wrapper instead.",
     "Handle inheritance is respected: if a class derives from `handle`, `isa(obj, \"handle\")` returns `true` even when `class(obj)` reports a subclass name.",
     "`isa` accepts either a string scalar or a character row vector as the class designator.",
-    "gpuArray inputs never need to be gathered; RunMat checks residency metadata to answer the query."
+    "Resident inputs never need to be gathered. Only explicit user-visible residency matches `\"gpuArray\"`; internal automatic residency matches its underlying host class and categories."
   ],
   "examples": [
     {
@@ -48,14 +48,14 @@
       "output": "is_numeric = logical(1)\nis_integer = logical(0)"
     },
     {
-      "description": "Confirming that gpuArray data counts as numeric",
-      "input": "G = gpuArray(rand(1024, 1024));\ntf_numeric = isa(G, \"numeric\");\ntf_double = isa(G, \"double\");   % false — the class reports gpuArray",
-      "output": "tf_numeric = logical(1)\ntf_double = logical(0)"
+      "description": "Checking explicit gpuArray wrapper identity",
+      "input": "G = gpuArray(rand(1024, 1024));\ntf_gpu = isa(G, \"gpuArray\");\ntf_numeric = isa(G, \"numeric\")",
+      "output": "tf_gpu = logical(1)\ntf_numeric = logical(0)"
     },
     {
-      "description": "Determining whether a GPU mask is logical",
-      "input": "G = gpuArray(rand(5) > 0.5);\nis_mask = isa(G, \"logical\");\nis_numeric = isa(G, \"numeric\")",
-      "output": "is_mask = logical(1)\nis_numeric = logical(0)"
+      "description": "Inspecting the underlying type of an explicit GPU mask",
+      "input": "G = gpuArray(rand(5) > 0.5);\nis_wrapper = isa(G, \"gpuArray\");\nis_mask = isUnderlyingType(G, \"logical\")",
+      "output": "is_wrapper = logical(1)\nis_mask = logical(1)"
     },
     {
       "description": "Validating handle subclasses",
@@ -76,7 +76,7 @@
   "faqs": [
     {
       "question": "Does `isa` treat gpuArray values as numeric?",
-      "answer": "Yes for numeric device arrays. `isa(gpuArray(rand(4)), \"numeric\")` and `isa(..., \"float\")` return `true`, even though the concrete class is `\"gpuArray\"`. Logical gpuArray masks skip the numeric categories and only satisfy `\"logical\"`. Use `isa(..., \"double\")` when you specifically need host doubles."
+      "answer": "An explicit gpuArray exposes its wrapper identity and matches `\"gpuArray\"`, not the underlying numeric categories. RunMat's internal automatic residency remains transparent and matches the underlying host class and categories. Use `isUnderlyingType` to inspect an explicit gpuArray's element type."
     },
     {
       "question": "How do I check for integer types?",
@@ -159,6 +159,6 @@
   },
   "gpu_residency": "You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB).\n\nIn RunMat, the fusion planner keeps residency on GPU in branches of fused expressions. As such, when you call `isa` on a gpuArray result, the planner preserves the device buffer and `isa` answers the query using metadata only.\n\nTo preserve backwards compatibility with MathWorks MATLAB, and for when you want to explicitly bootstrap GPU residency, you can call `gpuArray` explicitly to move data to the GPU if you want to be explicit about the residency.\n\nSince MathWorks MATLAB does not have a fusion planner, and they kept their parallel execution toolbox separate from the core language, as their toolbox is a separate commercial product, MathWorks MATLAB users need to call `gpuArray` to move data to the GPU manually whereas RunMat users can rely on the fusion planner to keep data on the GPU automatically.",
   "gpu_behavior": [
-    "`isa` never launches GPU kernels. For gpuArray inputs RunMat inspects the `GpuTensorHandle` metadata to identify the device array and satisfy category checks such as `\"numeric\"` and `\"gpuArray\"`. Because the builtin only returns a host logical scalar it does not participate in fusion, and providers do not need to expose additional hooks."
+    "`isa` never launches GPU kernels. Explicit gpuArray inputs satisfy only the public wrapper identity `\"gpuArray\"`; internal automatic residency remains transparent and satisfies its underlying host class and categories. Because the builtin returns a host logical scalar from metadata, it does not participate in fusion and providers need no additional hooks."
   ]
 }

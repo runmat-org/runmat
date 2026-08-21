@@ -27,14 +27,16 @@
     "unit": "builtins::plotting::triplot::tests",
     "integration": "crates/runmat-vm/tests/plotting.rs"
   },
-  "description": "`triplot` plots the edges of a 2-D triangulation. The common numeric form accepts an M-by-3 one-based connectivity matrix plus X and Y coordinate vectors. RunMat also accepts triangulation-like structs or `DelaunayTri` objects with connectivity and point properties for compatibility with saved or user-constructed triangulation data.",
+  "description": "`triplot` plots the edges of a 2-D triangulation. The common numeric form accepts an M-by-3 one-based connectivity matrix plus X and Y coordinate vectors. RunMat also accepts triangulation-like structs or `DelaunayTri` objects with connectivity and point properties for saved or user-constructed triangulation data.",
   "behaviors": [
     "`triplot(TRI, X, Y)` draws all triangle edges as one line graphics object.",
     "`triplot(TRI, X, Y, LineSpec)` applies MATLAB line shorthand such as `'r--'`.",
     "`triplot(TRI, X, Y, Name, Value, ...)` supports shared line styling properties including `Color`, `LineWidth`, `LineStyle`, `DisplayName`, `Parent`, and `Visible`.",
     "`triplot(ax, ...)` and `triplot(..., 'Parent', ax)` target a specific axes.",
     "`triplot(TR)` accepts a struct or `DelaunayTri` object with `ConnectivityList`/`Triangulation` and an N-by-2 or wider `Points`/`X` matrix. The first two point columns are used as X and Y coordinates.",
-    "Connectivity entries must be positive finite integer indices within the coordinate vectors."
+    "Connectivity entries must be positive finite integer indices within the coordinate vectors.",
+    "Native typed-integer connectivity and coordinates are separately available in RunMat mode. Connectivity is decoded exactly; coordinates must be exactly representable at the binary64 rendering boundary.",
+    "Explicit gpuArray input is available in RunMat mode and gathers through the owning provider because `triplot` is a plotting sink."
   ],
   "examples": [
     {

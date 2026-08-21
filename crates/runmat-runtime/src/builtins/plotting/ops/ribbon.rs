@@ -3,15 +3,23 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
+use runmat_plot::plots::NumericPlotData;
 use runmat_plot::plots::{ColorMap, ShadingMode, SurfacePlot};
+use runmat_value::NumericStorage;
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -160,6 +168,52 @@ pub const RIBBON_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &RIBBON_ERRORS,
 };
+const RIBBON_INTEGER_COORDINATE_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public numeric coordinate surface admits integer vectors; native source storage remains authoritative for XData.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "Y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Integer ribbon heights retain their native storage and class as authoritative ZData.",
+    },
+];
+const RIBBON_INTEGER_WIDTH_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "width",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The numeric width scalar is a rendering control and is materialized only at the ribbon-geometry boundary.",
+    }];
+pub const RIBBON_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = ribbon(integer_Y) or ribbon(integer_X,integer_Y,...)",
+        inputs: &RIBBON_INTEGER_COORDINATE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Rendering deliberately materializes floating geometry, while graphics properties reconstruct XData and ZData from duplicated exact native source storage; the returned graphics handles are double.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = ribbon(X,Y,integer_width)",
+        inputs: &RIBBON_INTEGER_WIDTH_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "Width is validated as a positive finite scalar before floating strip geometry is generated.",
+    },
+];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::ribbon")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -197,6 +251,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::ribbon::RIBBON_DESCRIPTOR),
+    integer_capabilities(crate::builtins::plotting::ribbon::RIBBON_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::ribbon"
 )]
 pub fn ribbon_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -218,11 +273,11 @@ pub fn ribbon_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 struct RibbonData {
     rows: usize,
     cols: usize,
-    data: Vec<f64>,
+    storage: NumericStorage,
 }
 
 struct ParsedRibbon {
-    x: Vec<f64>,
+    x: NumericStorage,
     y: RibbonData,
     width: f64,
     style: SurfaceStyle,
@@ -260,9 +315,9 @@ fn parse_ribbon_args(args: Vec<Value>) -> BuiltinResult<ParsedRibbon> {
         }
         x
     } else {
-        (1..=y.rows).map(|idx| idx as f64).collect()
+        NumericStorage::F64((1..=y.rows).map(|idx| idx as f64).collect())
     };
-    if x.iter().any(|value| !value.is_finite()) {
+    if x.materialize_f64().iter().any(|value| !value.is_finite()) {
         return Err(invalid_argument("X coordinates must be finite"));
     }
 
@@ -296,36 +351,37 @@ fn parse_ribbon_args(args: Vec<Value>) -> BuiltinResult<ParsedRibbon> {
 fn ribbon_data_from_value(value: &Value) -> BuiltinResult<RibbonData> {
     let tensor = Tensor::try_from(value)
         .map_err(|err| invalid_argument(format!("Y must be numeric: {err}")))?;
-    if tensor.data.is_empty() {
+    if tensor_utils::tensor_element_len(&tensor) == 0 {
         return Err(invalid_argument("Y must be non-empty"));
     }
     if tensor.shape.len() > 2 {
         return Err(invalid_argument("Y must be a vector or 2-D matrix"));
     }
     if tensor.shape.len() == 1 || tensor.rows == 1 || tensor.cols == 1 {
+        let storage = tensor.into_numeric_storage().map_err(invalid_argument)?;
         return Ok(RibbonData {
-            rows: tensor.data.len(),
+            rows: storage.len(),
             cols: 1,
-            data: tensor.data,
+            storage,
         });
     }
+    let rows = tensor.rows;
+    let cols = tensor.cols;
+    let storage = tensor.into_numeric_storage().map_err(invalid_argument)?;
     Ok(RibbonData {
-        rows: tensor.rows,
-        cols: tensor.cols,
-        data: tensor.data,
+        rows,
+        cols,
+        storage,
     })
 }
 
-fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
-    if let Some(value) = scalar_f64(value) {
-        return Ok(vec![value]);
-    }
+fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<NumericStorage> {
     let tensor =
         Tensor::try_from(value).map_err(|err| invalid_argument(format!("{name}: {err}")))?;
     if tensor.shape.len() > 2 || (tensor.rows > 1 && tensor.cols > 1) {
         return Err(invalid_argument(format!("{name} must be a vector")));
     }
-    Ok(tensor.data)
+    tensor.into_numeric_storage().map_err(invalid_argument)
 }
 
 fn scalar_f64(value: &Value) -> Option<f64> {
@@ -333,7 +389,9 @@ fn scalar_f64(value: &Value) -> Option<f64> {
         Value::Num(value) => Some(*value),
         Value::Int(value) => Some(value.to_f64()),
         Value::Bool(value) => Some(if *value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data.first().copied(),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            Some(tensor_utils::tensor_value_f64(tensor, 0))
+        }
         _ => None,
     }
 }
@@ -345,7 +403,7 @@ fn find_property_start(args: &[Value]) -> usize {
 }
 
 fn build_ribbon_surface(
-    x: &[f64],
+    x: &NumericStorage,
     y: &RibbonData,
     col: usize,
     width: f64,
@@ -353,19 +411,38 @@ fn build_ribbon_surface(
     let center = col as f64 + 1.0;
     let lower = center - width / 2.0;
     let upper = center + width / 2.0;
+    let x_values = x.materialize_f64();
+    let y_values = y.storage.materialize_f64();
     let heights = (0..y.rows)
-        .map(|row| y.data[row + col * y.rows])
+        .map(|row| y_values[row + col * y.rows])
         .collect::<Vec<_>>();
-    let x_grid = vec![x.to_vec(), x.to_vec()];
+    let x_grid = vec![x_values.clone(), x_values];
     let y_grid = vec![vec![lower; y.rows], vec![upper; y.rows]];
     let z_grid = vec![heights.clone(), heights];
-    SurfacePlot::from_coordinate_grids(x_grid, y_grid, z_grid)
+    let mut surface = SurfacePlot::from_coordinate_grids(x_grid, y_grid, z_grid)
         .map(|surface| {
             surface
                 .with_colormap(ColorMap::Parula)
                 .with_shading(ShadingMode::Smooth)
         })
-        .map_err(|err| invalid_argument(format!("failed to build ribbon surface: {err}")))
+        .map_err(|err| invalid_argument(format!("failed to build ribbon surface: {err}")))?;
+    let x_indices = (0..y.rows).chain(0..y.rows).collect::<Vec<_>>();
+    let z_indices = (0..y.rows)
+        .map(|row| row + col * y.rows)
+        .chain((0..y.rows).map(|row| row + col * y.rows))
+        .collect::<Vec<_>>();
+    let source_x = NumericPlotData::new(
+        x.gather(&x_indices).map_err(invalid_argument)?,
+        vec![y.rows, 2],
+    )
+    .map_err(invalid_argument)?;
+    let source_z = NumericPlotData::new(
+        y.storage.gather(&z_indices).map_err(invalid_argument)?,
+        vec![y.rows, 2],
+    )
+    .map_err(invalid_argument)?;
+    super::mesh::retain_surface_source_data(&mut surface, Some(source_x), None, Some(source_z));
+    Ok(surface)
 }
 
 fn render_ribbons(surfaces: Vec<SurfacePlot>) -> BuiltinResult<Value> {
@@ -467,18 +544,16 @@ mod tests {
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
     };
-    use runmat_builtins::NumericDType;
     use runmat_plot::plots::PlotElement;
+    use runmat_value::IntegerStorage;
 
     fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
-        Value::Tensor(Tensor {
-            data,
-            integer_data: None,
-            rows,
-            cols,
-            shape: vec![rows, cols],
-            dtype: NumericDType::F64,
-        })
+        Value::Tensor(Tensor::new(data, vec![rows, cols]).expect("ribbon test tensor"))
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor");
+        Value::Tensor(tensor)
     }
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
@@ -497,7 +572,7 @@ mod tests {
         let Value::Tensor(handles) = handles else {
             panic!("expected handle vector");
         };
-        assert_eq!(handles.data.len(), 2);
+        assert_eq!(handles.materialize_f64().len(), 2);
 
         let figure = clone_figure(current_figure_handle()).expect("figure");
         assert_eq!(figure.plots().count(), 2);
@@ -510,7 +585,7 @@ mod tests {
         assert_eq!(first.z_data.as_ref().unwrap()[0], vec![1.0, 2.0, 3.0]);
 
         let ty = get_builtin(vec![
-            Value::Num(handles.data[0]),
+            Value::Num(handles.materialize_f64()[0]),
             Value::String("Type".into()),
         ])
         .expect("get type");
@@ -569,6 +644,37 @@ mod tests {
             ])
             .unwrap(),
             Value::String("band".into())
+        );
+    }
+
+    #[test]
+    fn ribbon_reads_typed_integer_x_y_and_width_storage_exactly() {
+        let _guard = setup();
+        let handle = ribbon_builtin(vec![
+            poisoned_int_tensor(IntegerStorage::U16(vec![10, 20, 30]), 1, 3),
+            poisoned_int_tensor(IntegerStorage::I16(vec![2, 3, 4]), 3, 1),
+            poisoned_int_tensor(IntegerStorage::U8(vec![2]), 1, 1),
+        ])
+        .expect("ribbon");
+        let Value::Num(handle) = handle else {
+            panic!("expected scalar handle");
+        };
+
+        let figure = clone_figure(current_figure_handle()).expect("figure");
+        let PlotElement::Surface(surface) = figure.plots().next().unwrap() else {
+            panic!("expected surface");
+        };
+        assert_eq!(surface.x_grid.as_ref().unwrap()[0], vec![10.0, 20.0, 30.0]);
+        assert_eq!(surface.y_grid.as_ref().unwrap()[0], vec![0.0, 0.0, 0.0]);
+        assert_eq!(surface.y_grid.as_ref().unwrap()[1], vec![2.0, 2.0, 2.0]);
+        assert_eq!(surface.z_data.as_ref().unwrap()[0], vec![2.0, 3.0, 4.0]);
+        assert_eq!(
+            get_builtin(vec![Value::Num(handle), Value::String("XData".into())]).unwrap(),
+            poisoned_int_tensor(IntegerStorage::U16(vec![10, 20, 30, 10, 20, 30]), 3, 2)
+        );
+        assert_eq!(
+            get_builtin(vec![Value::Num(handle), Value::String("ZData".into())]).unwrap(),
+            poisoned_int_tensor(IntegerStorage::I16(vec![2, 3, 4, 2, 3, 4]), 3, 2)
         );
     }
 

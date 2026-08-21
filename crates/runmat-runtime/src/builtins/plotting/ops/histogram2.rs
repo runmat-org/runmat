@@ -2,12 +2,16 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode, SurfacePlot};
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -22,6 +26,46 @@ use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "histogram2";
+
+const HISTOGRAM2_INTEGER_DATA: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X and Y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Paired histogram observations accept every integer class and are retained as the chart Data matrix using the language concatenation dominance rule.",
+    }];
+const HISTOGRAM2_INTEGER_EDGES: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "XBinEdges and YBinEdges",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes:
+            "Explicit integer edge vectors are classified exactly before renderer materialization.",
+    }];
+pub const HISTOGRAM2_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = histogram2(integer_X, integer_Y, ...)",
+        inputs: &HISTOGRAM2_INTEGER_DATA,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Authoritative typed observations are retained on the chart while counts and rendering use explicit double boundaries.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = histogram2(X, Y, integer_XBinEdges, integer_YBinEdges)",
+        inputs: &HISTOGRAM2_INTEGER_EDGES,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Wide same-class integer edges remain exact during bin membership classification.",
+    },
+];
 const DEFAULT_FACE_ALPHA: f64 = 1.0;
 
 const OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -328,6 +372,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::histogram2::HISTOGRAM2_DESCRIPTOR),
+    integer_capabilities(crate::builtins::plotting::histogram2::HISTOGRAM2_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::histogram2"
 )]
 pub async fn histogram2_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
@@ -340,17 +385,27 @@ pub async fn histogram2_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
     let mut args = args.into_iter();
     let x = args.next().expect("x");
     let y = args.next().expect("y");
+    let retained_data = histogram2_data_value(&x, &y).await?;
+    let normalization_denominator = retained_data.rows as f64;
     let rest: Vec<Value> = args.collect();
     let options = parse_options(rest)?;
+    crate::builtins::stats::hist::histcounts2::ensure_histcounts2_public_syntax(
+        &options.histcounts_args,
+    )?;
 
-    let chart = build_chart(x.clone(), y.clone(), &options).await?;
-    render_histogram2(options, chart)
+    let chart = build_chart(x.clone(), y.clone(), &options, normalization_denominator).await?;
+    render_histogram2(
+        options,
+        chart,
+        Some(retained_data),
+        normalization_denominator,
+    )
 }
 
 fn parse_options(args: Vec<Value>) -> BuiltinResult<Histogram2Options> {
     let mut histcounts_args = Vec::new();
     let mut display_style = Histogram2DisplayStyle::Bar3;
-    let mut show_empty_bins = true;
+    let mut show_empty_bins = false;
     let mut face_alpha = DEFAULT_FACE_ALPHA;
     let mut display_name = None;
     let mut normalization = "count".to_string();
@@ -427,6 +482,7 @@ async fn build_chart(
     x: Value,
     y: Value,
     options: &Histogram2Options,
+    normalization_denominator: f64,
 ) -> BuiltinResult<Histogram2Chart> {
     let raw_args = histcounts_count_args(&options.histcounts_args);
     let raw_eval = crate::builtins::stats::hist::histcounts2::evaluate(x, y, &raw_args)
@@ -445,17 +501,20 @@ async fn build_chart(
             "histogram2: cannot convert YBinEdges tensor: {err}"
         ))
     })?;
+    let x_edges = tensor::tensor_into_values_f64(x_edges);
+    let y_edges = tensor::tensor_into_values_f64(y_edges);
     let values = apply_normalization_2d(
         &raw_counts,
-        &x_edges.data,
-        &y_edges.data,
+        &x_edges,
+        &y_edges,
         &options.normalization,
+        normalization_denominator,
     )?;
 
     let surface = build_surface_from_values(
         &values,
-        &x_edges.data,
-        &y_edges.data,
+        &x_edges,
+        &y_edges,
         options.display_style,
         options.show_empty_bins,
         options.face_alpha,
@@ -465,8 +524,8 @@ async fn build_chart(
     Ok(Histogram2Chart {
         values,
         raw_counts,
-        x_bin_edges: x_edges.data,
-        y_bin_edges: y_edges.data,
+        x_bin_edges: x_edges,
+        y_bin_edges: y_edges,
         surface,
     })
 }
@@ -506,7 +565,7 @@ pub(crate) fn build_surface_from_values(
     }
     let x_bins = x_edges.len() - 1;
     let y_bins = y_edges.len() - 1;
-    if values.data.len() != x_bins * y_bins {
+    if tensor::tensor_element_len(values) != x_bins * y_bins {
         return Err(internal(
             "histogram2: Values shape does not match bin edges",
         ));
@@ -516,7 +575,7 @@ pub(crate) fn build_surface_from_values(
     let mut z_grid = vec![vec![0.0; y_bins]; x_bins];
     for (ix, row) in z_grid.iter_mut().enumerate().take(x_bins) {
         for (iy, cell) in row.iter_mut().enumerate().take(y_bins) {
-            let mut value = values.data[ix + iy * x_bins];
+            let mut value = tensor::tensor_value_f64(values, ix + iy * x_bins);
             if !show_empty_bins && value == 0.0 {
                 value = f64::NAN;
             }
@@ -541,7 +600,12 @@ pub(crate) fn build_surface_from_values(
     Ok(surface)
 }
 
-fn render_histogram2(options: Histogram2Options, chart: Histogram2Chart) -> BuiltinResult<f64> {
+fn render_histogram2(
+    options: Histogram2Options,
+    chart: Histogram2Chart,
+    data: Option<Tensor>,
+    normalization_denominator: f64,
+) -> BuiltinResult<f64> {
     let mut surface = Some(chart.surface);
     let plot_index_out = Rc::new(RefCell::new(None));
     let plot_index_slot = Rc::clone(&plot_index_out);
@@ -576,10 +640,12 @@ fn render_histogram2(options: Histogram2Options, chart: Histogram2Chart) -> Buil
         chart.x_bin_edges,
         chart.y_bin_edges,
         options.normalization,
+        normalization_denominator,
         options.display_style,
         options.show_empty_bins,
         options.face_alpha,
         options.display_name,
+        data,
     );
     if let Err(err) = render_result {
         let lower = err.to_string().to_lowercase();
@@ -591,24 +657,68 @@ fn render_histogram2(options: Histogram2Options, chart: Histogram2Chart) -> Buil
     Ok(handle)
 }
 
+async fn histogram2_data_value(x: &Value, y: &Value) -> BuiltinResult<Tensor> {
+    let x = match x {
+        Value::GpuTensor(handle) => {
+            crate::builtins::common::gpu_helpers::gather_tensor_async(handle)
+                .await
+                .map_err(map_histcounts_error)?
+        }
+        _ => tensor::value_into_tensor_for(NAME, x.clone())
+            .map_err(|err| invalid(format!("histogram2: cannot retain X data: {err}")))?,
+    };
+    let y = match y {
+        Value::GpuTensor(handle) => {
+            crate::builtins::common::gpu_helpers::gather_tensor_async(handle)
+                .await
+                .map_err(map_histcounts_error)?
+        }
+        _ => tensor::value_into_tensor_for(NAME, y.clone())
+            .map_err(|err| invalid(format!("histogram2: cannot retain Y data: {err}")))?,
+    };
+    if x.len() != y.len() {
+        return Err(invalid(
+            "histogram2: X and Y must contain the same number of elements",
+        ));
+    }
+    let len = x.len();
+    let x = x
+        .reshape(vec![len, 1])
+        .map_err(|err| invalid(format!("histogram2: cannot reshape X data: {err}")))?;
+    let y = y
+        .reshape(vec![len, 1])
+        .map_err(|err| invalid(format!("histogram2: cannot reshape Y data: {err}")))?;
+    crate::builtins::common::concatenation::hcat_matrices(&x, &y)
+}
+
 pub(crate) fn apply_normalization_2d(
     raw_counts: &Tensor,
     x_edges: &[f64],
     y_edges: &[f64],
     norm: &str,
+    normalization_denominator: f64,
 ) -> BuiltinResult<Tensor> {
     validate_normalization(norm)?;
     let x_bins = x_edges.len().saturating_sub(1);
     let y_bins = y_edges.len().saturating_sub(1);
-    let counts = &raw_counts.data;
-    let total: f64 = counts.iter().sum();
+    let counts = raw_counts
+        .as_f64_slice()
+        .ok_or_else(|| internal("histogram2: raw bin counts must be double"))?;
+    let total = normalization_denominator;
     let x_widths: Vec<f64> = x_edges.windows(2).map(|pair| pair[1] - pair[0]).collect();
     let y_widths: Vec<f64> = y_edges.windows(2).map(|pair| pair[1] - pair[0]).collect();
     let values = match norm {
-        "count" => counts.clone(),
+        "count" => counts.to_vec(),
         "probability" => {
             if total > 0.0 {
                 counts.iter().map(|&c| c / total).collect()
+            } else {
+                vec![0.0; counts.len()]
+            }
+        }
+        "percentage" => {
+            if total > 0.0 {
+                counts.iter().map(|&c| 100.0 * c / total).collect()
             } else {
                 vec![0.0; counts.len()]
             }
@@ -621,8 +731,8 @@ pub(crate) fn apply_normalization_2d(
                 vec![0.0; counts.len()]
             }
         }
-        "cumcount" => cumulative_counts(counts, None),
-        "cdf" => cumulative_counts(counts, Some(total)),
+        "cumcount" => cumulative_counts(counts, x_bins, y_bins, None),
+        "cdf" => cumulative_counts(counts, x_bins, y_bins, Some(total)),
         other => {
             return Err(invalid(format!(
                 "histogram2: unsupported normalization '{other}'"
@@ -656,29 +766,42 @@ fn density_counts(
     out
 }
 
-fn cumulative_counts(counts: &[f64], total: Option<f64>) -> Vec<f64> {
-    let mut acc = 0.0;
-    counts
-        .iter()
-        .map(|&count| {
-            acc += count;
-            if let Some(total) = total {
-                if total > 0.0 {
-                    acc / total
-                } else {
-                    0.0
-                }
+fn cumulative_counts(
+    counts: &[f64],
+    x_bins: usize,
+    y_bins: usize,
+    divisor: Option<f64>,
+) -> Vec<f64> {
+    let mut out = vec![0.0; counts.len()];
+    for y in 0..y_bins {
+        for x in 0..x_bins {
+            let idx = x + y * x_bins;
+            let left = if x > 0 { out[idx - 1] } else { 0.0 };
+            let below = if y > 0 { out[idx - x_bins] } else { 0.0 };
+            let diagonal = if x > 0 && y > 0 {
+                out[idx - x_bins - 1]
             } else {
-                acc
+                0.0
+            };
+            out[idx] = counts[idx] + left + below - diagonal;
+        }
+    }
+    if let Some(divisor) = divisor {
+        if divisor > 0.0 {
+            for value in &mut out {
+                *value /= divisor;
             }
-        })
-        .collect()
+        } else {
+            out.fill(0.0);
+        }
+    }
+    out
 }
 
 pub(crate) fn validate_normalization(norm: &str) -> BuiltinResult<()> {
     match norm.trim().to_ascii_lowercase().as_str() {
-        "count" | "probability" | "countdensity" | "pdf" | "probabilitydensity" | "cumcount"
-        | "cdf" => Ok(()),
+        "count" | "probability" | "percentage" | "countdensity" | "pdf" | "probabilitydensity"
+        | "cumcount" | "cdf" => Ok(()),
         other => Err(invalid(format!(
             "histogram2: unsupported normalization '{other}'"
         ))),
@@ -695,10 +818,19 @@ pub(crate) fn validate_face_alpha(value: f64) -> BuiltinResult<()> {
 }
 
 pub(crate) fn option_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return match integer.try_to_u64() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(invalid(format!("histogram2: {name} must be 0 or 1"))),
+        };
+    }
     match value {
         Value::Bool(value) => Ok(*value),
         Value::Num(value) => numeric_bool(*value, name),
-        Value::Int(value) => numeric_bool(value.to_f64(), name),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            numeric_bool(tensor::tensor_value_f64(tensor, 0), name)
+        }
         _ => {
             if let Some(text) = tensor::value_to_string(value) {
                 match text.trim().to_ascii_lowercase().as_str() {
@@ -728,7 +860,9 @@ pub(crate) fn option_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
         Value::Num(value) => Ok(*value),
         Value::Int(value) => Ok(value.to_f64()),
         Value::Bool(value) => Ok(if *value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Ok(tensor::tensor_value_f64(tensor, 0))
+        }
         _ => Err(invalid(format!("histogram2: {name} must be a scalar"))),
     }
 }
@@ -771,6 +905,65 @@ mod tests {
         Value::Tensor(Tensor::new(values.to_vec(), vec![values.len(), 1]).unwrap())
     }
 
+    fn int_matrix(values: Vec<i16>, rows: usize, cols: usize) -> Tensor {
+        Tensor::new_integer(runmat_value::IntegerStorage::I16(values), vec![rows, cols])
+            .expect("integer matrix")
+    }
+
+    fn double_values(tensor: &Tensor) -> &[f64] {
+        tensor.as_f64_slice().expect("expected double tensor")
+    }
+
+    #[test]
+    fn histogram2_option_scalar_reads_typed_integer_storage_exactly() {
+        let tensor =
+            Tensor::new_integer(runmat_value::IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
+
+        assert_eq!(
+            option_scalar(&Value::Tensor(tensor), "FaceAlpha").unwrap(),
+            1.0
+        );
+    }
+
+    #[test]
+    fn histogram2_boolean_option_reads_all_integer_storage_classes_exactly() {
+        let storages = [
+            runmat_value::IntegerStorage::I8(vec![1]),
+            runmat_value::IntegerStorage::I16(vec![1]),
+            runmat_value::IntegerStorage::I32(vec![1]),
+            runmat_value::IntegerStorage::I64(vec![1]),
+            runmat_value::IntegerStorage::U8(vec![1]),
+            runmat_value::IntegerStorage::U16(vec![1]),
+            runmat_value::IntegerStorage::U32(vec![1]),
+            runmat_value::IntegerStorage::U64(vec![1]),
+        ];
+
+        for storage in storages {
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("logical");
+            assert!(option_bool(&Value::Tensor(tensor), "ShowEmptyBins").expect("logical"));
+        }
+    }
+
+    #[test]
+    fn histogram2_surface_values_read_typed_integer_storage_exactly() {
+        let surface = build_surface_from_values(
+            &int_matrix(vec![1, 2, 3, 4], 2, 2),
+            &[0.0, 1.0, 2.0],
+            &[0.0, 1.0, 2.0],
+            Histogram2DisplayStyle::Bar3,
+            true,
+            1.0,
+            None,
+            None,
+        )
+        .expect("surface");
+
+        assert_eq!(
+            surface.z_data.as_ref().unwrap(),
+            &vec![vec![1.0, 3.0], vec![2.0, 4.0]]
+        );
+    }
+
     #[test]
     fn histogram2_counts_edges_and_registers_chart_state() {
         let _guard = lock_plot_registry();
@@ -789,7 +982,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(values.shape, vec![2, 2]);
-        assert_eq!(values.data, vec![2.0, 0.0, 0.0, 2.0]);
+        assert_eq!(double_values(&values), &[2.0, 0.0, 0.0, 2.0]);
 
         let figure = clone_figure(current_figure_handle()).unwrap();
         let plot = figure.plots().next().unwrap();
@@ -800,6 +993,23 @@ mod tests {
         assert!(!surface.flatten_z);
         assert_eq!(surface.x_data, vec![0.25, 0.75]);
         assert_eq!(surface.y_data, vec![0.25, 0.75]);
+        assert_eq!(
+            get_builtin(vec![
+                Value::Num(handle),
+                Value::String("ShowEmptyBins".into())
+            ])
+            .unwrap(),
+            Value::Bool(false)
+        );
+        let data = Tensor::try_from(
+            &get_builtin(vec![Value::Num(handle), Value::String("Data".into())]).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(data.shape, vec![4, 2]);
+        assert_eq!(
+            double_values(&data),
+            &[0.0, 0.2, 0.8, 1.0, 0.0, 0.1, 0.9, 1.0]
+        );
     }
 
     #[test]
@@ -830,7 +1040,7 @@ mod tests {
             &get_builtin(vec![Value::Num(handle), Value::String("Values".into())]).unwrap(),
         )
         .unwrap();
-        assert_eq!(values.data, vec![0.5, 0.0, 0.0, 0.5]);
+        assert_eq!(double_values(&values), &[0.5, 0.0, 0.0, 0.5]);
         assert!(matches!(
             get_builtin(vec![Value::Num(handle), Value::String("DisplayStyle".into())]).unwrap(),
             Value::String(style) if style == "tile"
@@ -872,12 +1082,41 @@ mod tests {
             &get_builtin(vec![Value::Num(handle), Value::String("Values".into())]).unwrap(),
         )
         .unwrap();
-        assert_eq!(values.data, vec![0.5, 0.5, 0.5, 1.0]);
+        assert_eq!(double_values(&values), &[0.5, 0.5, 0.5, 1.0]);
         let figure = clone_figure(current_figure_handle()).unwrap();
         let PlotElement::Surface(surface) = figure.plots().next().unwrap() else {
             panic!("expected surface plot");
         };
         assert!(surface.image_mode);
+    }
+
+    #[test]
+    fn histogram2_normalization_uses_full_cardinality_and_preserves_raw_counts() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        let handle = futures::executor::block_on(histogram2_builtin(vec![
+            vec_tensor(&[0.25, 1.25, 99.0, f64::NAN]),
+            vec_tensor(&[0.25, 1.25, 99.0, 0.25]),
+            Value::String("XBinEdges".into()),
+            Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).unwrap()),
+            Value::String("YBinEdges".into()),
+            Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).unwrap()),
+            Value::String("Normalization".into()),
+            Value::String("percentage".into()),
+        ]))
+        .unwrap();
+        let raw = Tensor::try_from(
+            &get_builtin(vec![Value::Num(handle), Value::String("BinCounts".into())]).unwrap(),
+        )
+        .unwrap();
+        let values = Tensor::try_from(
+            &get_builtin(vec![Value::Num(handle), Value::String("Values".into())]).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(double_values(&raw), &[1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(double_values(&values), &[25.0, 0.0, 0.0, 25.0]);
     }
 
     #[test]

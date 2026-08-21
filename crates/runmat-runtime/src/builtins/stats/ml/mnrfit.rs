@@ -1,14 +1,19 @@
 //! Multinomial logistic regression compatibility helper.
 
+use runmat_value::{IntValue, NumericScalar};
 use std::cmp::Ordering;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, LogicalArray, ResolveContext, StringArray, StructValue, Tensor, Type,
-    Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, LogicalArray, StringArray, StructValue, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::builtins::stats::summary::distribution_math;
@@ -17,6 +22,124 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 const NAME: &str = "mnrfit";
 const EPS: f64 = 1.0e-12;
 const RIDGE: f64 = 1.0e-8;
+
+const INTEGER_X_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "mnrfit-integer-x",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "mnrfit with a typed-integer predictor matrix is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:MnrfitIntegerXExtension"),
+};
+const INTEGER_Y_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "mnrfit-integer-y",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "mnrfit with a typed-integer response array is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:MnrfitIntegerYExtension"),
+};
+const INTEGER_PARAMETER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "mnrfit-integer-parameter",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "mnrfit with typed-integer floating options is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:MnrfitIntegerParameterExtension"),
+};
+const INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "mnrfit-integer-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "mnrfit with typed-integer structural controls is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:MnrfitIntegerControlExtension"),
+};
+const LOGICAL_X_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "mnrfit-logical-x",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "mnrfit with logical predictor data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:MnrfitLogicalXExtension"),
+};
+const RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "mnrfit-resident-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "mnrfit host fallback for explicit gpuArray inputs is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:MnrfitResidentInputExtension"),
+};
+const LEGACY_OPTIONS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "mnrfit-legacy-options",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "mnrfit Constant, MaxIter, TolX, Options, and Display option aliases are RunMat extensions",
+    error_identifier: Some("RunMat:compatibility:MnrfitLegacyOptionsExtension"),
+};
+pub const EXTENSIONS: [BuiltinExtensionDescriptor; 7] = [
+    INTEGER_X_EXTENSION,
+    INTEGER_Y_EXTENSION,
+    INTEGER_PARAMETER_EXTENSION,
+    INTEGER_CONTROL_EXTENSION,
+    LOGICAL_X_EXTENSION,
+    RESIDENT_INPUT_EXTENSION,
+    LEGACY_OPTIONS_EXTENSION,
+];
+
+const INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer predictors are gated before gather and checked at the binary64 solver boundary.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "Y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The current public Y type list omits integer classes; typed-integer categories or grouped counts are a checked RunMat extension.",
+    },
+];
+const INTEGER_PARAMETER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Weights or Tolerance",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer floating solver parameters are independently gated and require exact binary64 representation.",
+    }];
+const INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "IterationLimit",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Current MATLAB documents single and double IterationLimit values; native integer controls are a gated structural extension.",
+    }];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = mnrfit(integer_X, integer_Y, ___)",
+        inputs: &INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat-only integer data crosses one checked binary64 host-solver boundary.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = mnrfit(X, Y, Name, integer_parameter)",
+        inputs: &INTEGER_PARAMETER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Floating option values reject lossy integer conversion.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = mnrfit(X, Y, 'IterationLimit', integer_control)",
+        inputs: &INTEGER_CONTROL_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Structural controls are parsed exactly; the MaxIter and Options spellings are separately gated RunMat extensions.",
+    },
+];
 
 const OUTPUT_B: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "B",
@@ -211,9 +334,12 @@ struct FitResult {
     keywords = "mnrfit,multinomial,logistic regression,nominal,binomial,statistics,machine learning",
     type_resolver(mnrfit_type),
     descriptor(crate::builtins::stats::ml::mnrfit::MNRFIT_DESCRIPTOR),
+    extensions(crate::builtins::stats::ml::mnrfit::EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::ml::mnrfit::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::ml::mnrfit"
 )]
 pub(crate) async fn mnrfit_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_extensions(&x, &y, &rest)?;
     let x = gather_value(x).await?;
     let y = gather_value(y).await?;
     let rest = gather_values(rest).await?;
@@ -227,6 +353,96 @@ pub(crate) async fn mnrfit_builtin(x: Value, y: Value, rest: Vec<Value>) -> Buil
             vec![result.b, result.dev, result.stats],
         )),
         None => Ok(result.b),
+    }
+}
+
+fn ensure_extensions(x: &Value, y: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    if is_typed_integer(x) {
+        crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_X_EXTENSION, NAME)?;
+    }
+    if is_typed_integer(y) {
+        crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_Y_EXTENSION, NAME)?;
+    }
+    if is_logical(x) {
+        crate::compatibility::ensure_builtin_extension_enabled(&LOGICAL_X_EXTENSION, NAME)?;
+    }
+    for pair in rest.chunks_exact(2) {
+        let Some(name) = scalar_text(&pair[0]).map(|name| name.to_ascii_lowercase()) else {
+            continue;
+        };
+        let value = &pair[1];
+        match name.as_str() {
+            "iterationlimit" => ensure_integer_option(value, &INTEGER_CONTROL_EXTENSION)?,
+            "weights" | "tolerance" => ensure_integer_option(value, &INTEGER_PARAMETER_EXTENSION)?,
+            "maxiter" | "tolx" | "options" | "constant" | "display" => {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &LEGACY_OPTIONS_EXTENSION,
+                    NAME,
+                )?;
+                if name == "maxiter" {
+                    ensure_integer_option(value, &INTEGER_CONTROL_EXTENSION)?;
+                } else if name == "tolx" {
+                    ensure_integer_option(value, &INTEGER_PARAMETER_EXTENSION)?;
+                } else if name == "options" {
+                    ensure_nested_option_integers(value)?;
+                }
+            }
+            _ => {}
+        }
+    }
+    if contains_explicit_gpu(x)
+        || contains_explicit_gpu(y)
+        || rest.iter().any(contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(&RESIDENT_INPUT_EXTENSION, NAME)?;
+    }
+    Ok(())
+}
+
+fn ensure_integer_option(
+    value: &Value,
+    extension: &'static BuiltinExtensionDescriptor,
+) -> BuiltinResult<()> {
+    if is_typed_integer(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(extension, NAME)?;
+    }
+    Ok(())
+}
+
+fn ensure_nested_option_integers(value: &Value) -> BuiltinResult<()> {
+    let Value::Struct(st) = value else {
+        return Ok(());
+    };
+    for field in ["MaxIter", "IterationLimit"] {
+        if let Some(value) = st.fields.get(field) {
+            ensure_integer_option(value, &INTEGER_CONTROL_EXTENSION)?;
+        }
+    }
+    for field in ["TolX", "Tolerance"] {
+        if let Some(value) = st.fields.get(field) {
+            ensure_integer_option(value, &INTEGER_PARAMETER_EXTENSION)?;
+        }
+    }
+    Ok(())
+}
+
+fn is_typed_integer(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn is_logical(value: &Value) -> bool {
+    matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+}
+
+fn contains_explicit_gpu(value: &Value) -> bool {
+    match value {
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_explicit(handle),
+        Value::Struct(st) => st.fields.values().any(contains_explicit_gpu),
+        Value::Cell(cell) => cell.data.iter().any(contains_explicit_gpu),
+        _ => false,
     }
 }
 
@@ -519,9 +735,10 @@ fn design_matrix(x: &Tensor, constant: bool) -> BuiltinResult<Vec<f64>> {
         }
         out_col = 1;
     }
+    let values = tensor::tensor_values_f64_cow(x);
     for col in 0..x_cols {
         for row in 0..rows {
-            design[row + (out_col + col) * rows] = x.data[row + col * rows];
+            design[row + (out_col + col) * rows] = values[row + col * rows];
         }
     }
     Ok(design)
@@ -535,9 +752,10 @@ fn compact_complete_cases(
     weights: &mut Vec<f64>,
 ) -> BuiltinResult<usize> {
     let rows = x.rows();
+    let values = tensor::tensor_values_f64_cow(x);
     let keep = (0..rows)
         .filter(|row| {
-            let x_complete = (0..x.cols()).all(|col| x.data[row + col * rows].is_finite());
+            let x_complete = (0..x.cols()).all(|col| values[*row + col * rows].is_finite());
             let y_complete = weights[*row].is_finite()
                 && weights[*row] > 0.0
                 && outcomes.iter().all(|outcome| outcome[*row].is_finite());
@@ -567,8 +785,15 @@ fn compact_complete_cases(
 
 fn response_outcomes(value: Value, rows: usize) -> BuiltinResult<ResponseOutcomes> {
     match value {
-        Value::Tensor(tensor) if tensor.cols() >= 2 && tensor.rows() == rows => count_outcomes(&tensor),
-        Value::Tensor(tensor) => numeric_outcomes(tensor.data, tensor.shape, rows),
+        Value::Tensor(tensor) if tensor.cols() >= 2 && tensor.rows() == rows => {
+            ensure_exact_integer_tensor(&tensor, "Y")?;
+            count_outcomes(&tensor)
+        }
+        Value::Tensor(tensor) => {
+            ensure_exact_integer_tensor(&tensor, "Y")?;
+            let shape = tensor.shape.clone();
+            numeric_outcomes(tensor::tensor_values_f64(&tensor), shape, rows)
+        }
         Value::LogicalArray(logical) => categorical_outcomes(
             logical.data.iter().map(|value| f64::from(*value != 0)).collect(),
             logical.shape,
@@ -598,6 +823,7 @@ fn response_outcomes(value: Value, rows: usize) -> BuiltinResult<ResponseOutcome
 fn count_outcomes(tensor: &Tensor) -> BuiltinResult<ResponseOutcomes> {
     let rows = tensor.rows();
     let cols = tensor.cols();
+    let data = tensor::tensor_values_f64(tensor);
     let logits = cols - 1;
     let mut outcomes = vec![vec![0.0; rows]; logits];
     let mut weights = Vec::with_capacity(rows);
@@ -606,7 +832,7 @@ fn count_outcomes(tensor: &Tensor) -> BuiltinResult<ResponseOutcomes> {
         let mut total = 0.0;
         let mut missing = false;
         for col in 0..cols {
-            let count = tensor.data[row + col * rows];
+            let count = data[row + col * rows];
             if count.is_nan() {
                 missing = true;
                 break;
@@ -622,7 +848,7 @@ fn count_outcomes(tensor: &Tensor) -> BuiltinResult<ResponseOutcomes> {
             weights.push(0.0);
         } else {
             for (col, outcome) in outcomes.iter_mut().enumerate().take(logits) {
-                outcome[row] = tensor.data[row + col * rows] / total;
+                outcome[row] = data[row + col * rows] / total;
             }
             weights.push(total);
             observations += total;
@@ -882,8 +1108,10 @@ fn scalar_text(value: &Value) -> Option<String> {
 }
 
 fn numeric_tensor(label: &str, value: Value) -> BuiltinResult<Tensor> {
-    tensor::value_into_tensor_for(label, value)
-        .map_err(|_| invalid(format!("mnrfit: {label} must be numeric")))
+    let tensor = tensor::value_into_tensor_for(label, value)
+        .map_err(|_| invalid(format!("mnrfit: {label} must be numeric")))?;
+    ensure_exact_integer_tensor(&tensor, label)?;
+    Ok(tensor)
 }
 
 fn numeric_vector(value: Value, label: &str) -> BuiltinResult<Vec<f64>> {
@@ -891,24 +1119,72 @@ fn numeric_vector(value: Value, label: &str) -> BuiltinResult<Vec<f64>> {
     if tensor.shape.iter().copied().filter(|dim| *dim > 1).count() > 1 {
         return Err(invalid(format!("mnrfit: {label} must be a vector")));
     }
-    if tensor.data.iter().any(|value| !value.is_finite()) {
+    let values = tensor::tensor_values_f64(&tensor);
+    if values.iter().any(|value| !value.is_finite()) {
         return Err(invalid(format!(
             "mnrfit: {label} must contain finite values"
         )));
     }
-    Ok(tensor.data)
+    Ok(values)
 }
 
 fn numeric_scalar(value: &Value, label: &str) -> BuiltinResult<f64> {
     match value {
         Value::Num(value) => Ok(*value),
+        Value::Int(value) => exact_integer_as_f64(value, label),
         Value::Bool(value) => Ok(f64::from(*value)),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            ensure_exact_integer_tensor(tensor, label)?;
+            Ok(tensor::tensor_values_f64(tensor)[0])
+        }
         Value::LogicalArray(LogicalArray { data, .. }) if data.len() == 1 => {
             Ok(f64::from(data[0] != 0))
         }
         _ => Err(invalid(format!("mnrfit: {label} must be a scalar"))),
     }
+}
+
+fn exact_integer_as_f64(value: &IntValue, label: &str) -> BuiltinResult<f64> {
+    const MAX_EXACT_INTEGER: u64 = 1 << 53;
+    match value {
+        IntValue::I8(value) => Ok(*value as f64),
+        IntValue::I16(value) => Ok(*value as f64),
+        IntValue::I32(value) => Ok(*value as f64),
+        IntValue::I64(value) if value.unsigned_abs() <= MAX_EXACT_INTEGER => Ok(*value as f64),
+        IntValue::U8(value) => Ok(*value as f64),
+        IntValue::U16(value) => Ok(*value as f64),
+        IntValue::U32(value) => Ok(*value as f64),
+        IntValue::U64(value) if *value <= MAX_EXACT_INTEGER => Ok(*value as f64),
+        _ => Err(invalid(format!(
+            "mnrfit: integer {label} values must be exactly representable as double"
+        ))),
+    }
+}
+
+fn ensure_exact_integer_tensor(tensor: &Tensor, label: &str) -> BuiltinResult<()> {
+    if tensor.integer_storage().is_none() {
+        return Ok(());
+    }
+    const MAX_EXACT_INTEGER: i128 = 1_i128 << 53;
+    for index in 0..tensor.len() {
+        let exact = match tensor.numeric_value_at(index) {
+            Some(NumericScalar::I8(value)) => i128::from(value),
+            Some(NumericScalar::I16(value)) => i128::from(value),
+            Some(NumericScalar::I32(value)) => i128::from(value),
+            Some(NumericScalar::I64(value)) => i128::from(value),
+            Some(NumericScalar::U8(value)) => i128::from(value),
+            Some(NumericScalar::U16(value)) => i128::from(value),
+            Some(NumericScalar::U32(value)) => i128::from(value),
+            Some(NumericScalar::U64(value)) => i128::from(value),
+            _ => continue,
+        };
+        if !(-MAX_EXACT_INTEGER..=MAX_EXACT_INTEGER).contains(&exact) {
+            return Err(invalid(format!(
+                "mnrfit: integer {label} values must be exactly representable as double"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn positive_scalar(value: &Value, label: &str) -> BuiltinResult<f64> {
@@ -923,7 +1199,10 @@ fn positive_scalar(value: &Value, label: &str) -> BuiltinResult<f64> {
 
 fn positive_integer(value: &Value, label: &str) -> BuiltinResult<usize> {
     let scalar = positive_scalar(value, label)?;
-    if scalar.fract() != 0.0 || scalar > usize::MAX as f64 {
+    if scalar.fract() != 0.0
+        || scalar > usize::MAX as f64
+        || (usize::BITS == 64 && scalar == usize::MAX as f64)
+    {
         return Err(invalid(format!(
             "mnrfit: {label} must be a positive integer"
         )));
@@ -1066,9 +1345,15 @@ fn invert_matrix(a: Vec<f64>, n: usize) -> BuiltinResult<Vec<f64>> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_value::IntegerStorage;
 
     fn tensor_value(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
+        Value::Tensor(tensor)
     }
 
     fn output_list(value: Value) -> Vec<Value> {
@@ -1080,6 +1365,7 @@ mod tests {
 
     #[test]
     fn mnrfit_binary_logistic_returns_coefficients_stats() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = crate::output_count::push_output_count(Some(3));
         let out = block_on(mnrfit_builtin(
             tensor_value(vec![0.0, 1.0, 2.0, 3.0, 4.0], 5, 1),
@@ -1097,13 +1383,25 @@ mod tests {
             panic!("expected B tensor");
         };
         assert_eq!(b.shape, vec![2, 1]);
-        assert!(b.data[1] < 0.0);
+        assert!(b.materialize_f64()[1] < 0.0);
         assert!(matches!(&values[1], Value::Num(value) if value.is_finite()));
         let Value::Struct(stats) = &values[2] else {
             panic!("expected stats struct");
         };
         assert!(stats.fields.contains_key("se"));
         assert!(stats.fields.contains_key("covb"));
+    }
+
+    #[test]
+    fn mnrfit_positive_integer_rejects_unrepresentable_double_bounds() {
+        assert_eq!(positive_integer(&Value::Num(5.0), "MaxIter").unwrap(), 5);
+        let boundary = positive_integer(&Value::Num(usize::MAX as f64), "MaxIter");
+        if usize::BITS == 64 {
+            assert!(boundary.is_err());
+        } else {
+            assert_eq!(boundary.unwrap(), usize::MAX);
+        }
+        assert!(positive_integer(&Value::Num((usize::MAX as f64) + 1.0), "MaxIter").is_err());
     }
 
     #[test]
@@ -1123,11 +1421,12 @@ mod tests {
             panic!("expected B tensor");
         };
         assert_eq!(b.shape, vec![2, 2]);
-        assert!(b.data.iter().all(|value| value.is_finite()));
+        assert!(b.materialize_f64().iter().all(|value| value.is_finite()));
     }
 
     #[test]
     fn mnrfit_binomial_counts_and_weights() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let out = block_on(mnrfit_builtin(
             tensor_value(vec![0.0, 1.0, 2.0, 3.0], 4, 1),
             tensor_value(vec![0.0, 1.0, 3.0, 5.0, 5.0, 4.0, 2.0, 1.0], 4, 2),
@@ -1143,7 +1442,7 @@ mod tests {
             panic!("expected B tensor");
         };
         assert_eq!(b.shape, vec![2, 1]);
-        assert!(b.data.iter().all(|value| value.is_finite()));
+        assert!(b.materialize_f64().iter().all(|value| value.is_finite()));
     }
 
     #[test]
@@ -1176,11 +1475,12 @@ mod tests {
         let Value::Tensor(class_names) = stats.fields.get("classNames").unwrap() else {
             panic!("expected numeric class names");
         };
-        assert_eq!(class_names.data, vec![1.0, 2.0, 3.0]);
+        assert_eq!(class_names.materialize_f64(), vec![1.0, 2.0, 3.0]);
     }
 
     #[test]
     fn mnrfit_accepts_text_labels_and_omits_missing_rows() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = crate::output_count::push_output_count(Some(3));
         let out = block_on(mnrfit_builtin(
             tensor_value(vec![0.0, 1.0, f64::NAN, 2.0, 3.0, 4.0], 6, 1),
@@ -1234,5 +1534,92 @@ mod tests {
         ))
         .unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:mnrfit:InvalidArgument"));
+    }
+
+    #[test]
+    fn mnrfit_reads_typed_integer_class_vectors_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let _guard = crate::output_count::push_output_count(Some(3));
+        let out = block_on(mnrfit_builtin(
+            poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3, 4]), 5, 1),
+            poisoned_int_tensor(IntegerStorage::U8(vec![1, 1, 2, 2, 2]), 5, 1),
+            vec![
+                Value::String("Weights".into()),
+                poisoned_int_tensor(IntegerStorage::U16(vec![1, 1, 2, 2, 1]), 5, 1),
+                Value::String("IterationLimit".into()),
+                poisoned_int_tensor(IntegerStorage::U16(vec![200]), 1, 1),
+                Value::String("Options".into()),
+                Value::Struct({
+                    let mut st = StructValue::new();
+                    st.insert(
+                        "Tolerance",
+                        poisoned_int_tensor(IntegerStorage::U8(vec![1]), 1, 1),
+                    );
+                    st
+                }),
+            ],
+        ))
+        .unwrap();
+        let values = output_list(out);
+        let Value::Tensor(b) = &values[0] else {
+            panic!("expected B tensor");
+        };
+        assert_eq!(b.shape, vec![2, 1]);
+        assert!(b.materialize_f64().iter().all(|value| value.is_finite()));
+        assert!(matches!(&values[1], Value::Num(value) if value.is_finite()));
+    }
+
+    #[test]
+    fn mnrfit_reads_typed_integer_grouped_counts_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let out = block_on(mnrfit_builtin(
+            poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3]), 4, 1),
+            poisoned_int_tensor(IntegerStorage::U16(vec![0, 1, 3, 5, 5, 4, 2, 1]), 4, 2),
+            vec![
+                Value::String("MaxIter".into()),
+                poisoned_int_tensor(IntegerStorage::U16(vec![200]), 1, 1),
+            ],
+        ))
+        .unwrap();
+        let Value::Tensor(b) = out else {
+            panic!("expected B tensor");
+        };
+        assert_eq!(b.shape, vec![2, 1]);
+        assert!(b.materialize_f64().iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn mnrfit_integer_roles_and_legacy_options_are_gated() {
+        let x = poisoned_int_tensor(IntegerStorage::I16(vec![0, 1]), 2, 1);
+        let y = tensor_value(vec![1.0, 2.0], 2, 1);
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(mnrfit_builtin(x, y.clone(), Vec::new())).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:MnrfitIntegerXExtension")
+        );
+        let error = block_on(mnrfit_builtin(
+            tensor_value(vec![0.0, 1.0], 2, 1),
+            y,
+            vec![Value::String("MaxIter".into()), Value::Num(10.0)],
+        ))
+        .unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:MnrfitLegacyOptionsExtension")
+        );
+    }
+
+    #[test]
+    fn mnrfit_rejects_lossy_integer_solver_values() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let x = poisoned_int_tensor(IntegerStorage::U64(vec![0, (1_u64 << 53) + 1]), 2, 1);
+        let error = block_on(mnrfit_builtin(
+            x,
+            tensor_value(vec![1.0, 2.0], 2, 1),
+            Vec::new(),
+        ))
+        .unwrap_err();
+        assert!(error.message.contains("exactly representable"));
     }
 }

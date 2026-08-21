@@ -41,8 +41,8 @@
     "Implicit expansion works across any dimension, provided the non-singleton extents match. Size mismatches raise the standard MATLAB-compatible error.",
     "Complex operands follow the analytic rule `(a + ib) ./ (c + id) = ((ac + bd) + i(bc - ad)) / (c^2 + d^2)`, matching MATLAB's behaviour for infinities and NaNs.",
     "Empty dimensions propagate naturally—if the broadcasted shape contains a zero extent, the result is empty with that shape.",
-    "Integer inputs promote to double precision, mirroring the behaviour of other RunMat arithmetic builtins.",
-    "The optional `'like'` prototype makes the output adopt the residency (host or GPU) and complexity characteristics of the prototype, letting you keep implicit-expansion expressions on the device without manual `gpuArray` calls. When the prototype is complex, the result remains a complex host array (complex gpuArray prototypes are not yet supported)."
+    "Integer division preserves the integer class. The other operand must use the same integer class or be scalar double; quotients round to the nearest integer with half ties away from zero, overflow saturates, and 64-bit integer/scalar-double arithmetic uses the extended-precision compatibility path.",
+    "In RunMat compatibility mode, the RunMat-only optional `'like'` prototype adopts the prototype's residency and complexity. MATLAB-compatible mode rejects this extension before dispatch; complex gpuArray prototypes are not yet supported."
   ],
   "examples": [
     {
@@ -88,7 +88,7 @@
     },
     {
       "question": "What numeric type does `rdivide` return?",
-      "answer": "Results are double precision for real inputs and complex double when either operand is complex. Logical and character inputs are promoted to double before division."
+      "answer": "Ordinary real inputs produce double and complex inputs produce complex double. Integer arithmetic preserves the integer class under MATLAB's same-class-or-scalar-double rules. Logical and character inputs are promoted to double."
     },
     {
       "question": "How does `rdivide` handle division by zero?",
@@ -112,7 +112,7 @@
     },
     {
       "question": "Are integer inputs supported?",
-      "answer": "Yes. Integers promote to double precision during the division, matching other RunMat arithmetic builtins."
+      "answer": "Yes. Integer quotients preserve the integer class, round to the nearest integer with half ties away from zero, and saturate. Inputs must use the same integer class or pair one integer operand with scalar double."
     },
     {
       "question": "Can I mix complex and real operands?",

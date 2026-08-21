@@ -6,16 +6,16 @@
     "cell array",
     "containers",
     "empty",
-    "like",
-    "gpu fallback"
+    "integer size",
+    "preallocation"
   ],
-  "summary": "Create empty cell arrays in MATLAB and RunMat.",
+  "summary": "Create preallocated cell arrays whose elements contain empty double arrays.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Cell arrays are allocated on the host. Size inputs that reside on the GPU are gathered, and `'like'` prototypes backed by gpuArray currently fall back to host storage until device-side cells are implemented."
+    "notes": "The documented constructor is host-only. RunMat can gather resident size controls only when its separately registered GPU-size extension is enabled; the result remains a host cell array."
   },
   "fusion": {
     "elementwise": false,
@@ -26,16 +26,16 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::cells::core::cell::tests",
-    "integration": "builtins::cells::core::cell::tests::cell_like_gpu_prototype_falls_back_to_host"
+    "integration": "runmat-vm/tests/logic.rs::cell_accepts_all_integer_size_classes_through_compiled_dispatch"
   },
-  "description": "`cell` constructs heterogeneous containers where each element starts as empty (`[]` by default). It supports scalar, multi-dimension, size-vector, and `size(A)` forms, plus `'like'` prototypes, with behavior aligned to MATLAB and RunMat.",
+  "description": "`cell` preallocates a host cell array of a requested size. Every cell created by a documented form contains a `0×0` double array. RunMat accepts exact size controls in all eight integer classes without converting them through binary64.",
   "behaviors": [
-    "`cell` (with no arguments) returns a `0×0` empty cell array.",
-    "`cell(n)` returns an `n×n` cell array whose elements default to the empty value.",
-    "`cell(m, n, p, ...)` accepts any number of size scalars and returns an N-D cell array whose dimensions match the arguments.",
-    "`cell(sz)` or `cell(size(A))` accepts a numeric size vector of any length. A single-element vector produces an `m×1` cell array; longer vectors create higher-dimensional cell arrays matching the provided extents.",
-    "`cell(___, 'like', prototype)` copies the prototype's size when no explicit dimensions are supplied and fills each element with the empty value that matches the prototype's class (for example logical empty arrays, complex empties, or empty strings). When the prototype is a `gpuArray`, RunMat keeps the host-empty double fallback until GPU-resident cell storage ships.",
-    "Size arguments must be finite, non-negative integers that are representable in double precision."
+    "RunMat accepts `cell()` as a nonconflicting shorthand for a `0×0` empty cell array; this form is not listed in the current public syntax and is not speculatively mode-gated from documentation silence.",
+    "`cell(n)` returns an `n×n` cell array of `0×0` double arrays.",
+    "`cell(sz1, ..., szN)` returns an N-D cell array with the requested dimensions and ignores trailing singleton dimensions after dimension two.",
+    "`cell(sz)` or `cell(size(A))` accepts a row size vector. A one-element size input follows the square `n×n` form; a column size vector is not a documented input.",
+    "Size controls accept single, double, `int8`, `int16`, `int32`, `int64`, `uint8`, `uint16`, `uint32`, or `uint64`. Integer storage is decoded exactly, finite fractional values reject, and signed negative values are treated as zero.",
+    "The `'like'` prototype selector and resident GPU size controls are separately registered RunMat extensions and reject in MATLAB-compatible mode."
   ],
   "examples": [
     {
@@ -59,13 +59,8 @@
       "output": "ans =\n     5     2"
     },
     {
-      "description": "Creating a cell array using a `'like'` prototype",
-      "input": "proto = logical.empty(0, 0);\nC = cell(2, 3, 'like', proto);\ncellfun(@isempty, C)",
-      "output": "ans =\n     1     1     1\n     1     1     1"
-    },
-    {
-      "description": "Using a column size vector",
-      "input": "sz = [4; 1];\nC = cell(sz);\nsize(C)",
+      "description": "Using an exact typed-integer row size vector",
+      "input": "sz = uint64([4 1]);\nC = cell(sz);\nsize(C)",
       "output": "ans =\n     4     1"
     },
     {
@@ -77,23 +72,23 @@
   "faqs": [
     {
       "question": "What values do new cells contain?",
-      "answer": "Each cell starts with an empty value. By default that is the empty double array `[]`. When you supply a `'like'` prototype, RunMat chooses the matching empty logical, complex, string, character, or cell value instead. GPU-backed prototypes currently fall back to empty double arrays on the host until device-resident cell elements are supported."
+      "answer": "Every cell created by a documented constructor form contains the empty `0×0` double array `[]`. RunMat's separately mode-gated `'like'` extension can choose another empty value, but that is not part of the compatibility contract."
     },
     {
       "question": "Are negative or fractional sizes allowed?",
-      "answer": "No. Every size argument must be a finite, non-negative integer that can be represented exactly in double precision."
+      "answer": "Finite fractional sizes are invalid. A signed negative integer size is treated as zero. All eight integer classes are parsed exactly; allocation still fails if the resulting element count exceeds platform limits."
     },
     {
       "question": "Can I create zero-sized cell arrays?",
       "answer": "Yes. You can use `cell(0)`, `cell(0, n)`, or supply a size vector containing zeros. RunMat returns an empty cell array with the requested shape."
     },
     {
-      "question": "Do GPU prototypes change how `cell` behaves?",
-      "answer": "A `'like'` prototype that resides on the GPU is gathered automatically. Shape inference follows the prototype, and each cell receives an empty double array on the host while GPU cell storage is still under development."
+      "question": "Can size controls reside on the GPU?",
+      "answer": "The documented constructor has no interactive gpuArray surface. RunMat can gather a resident size vector and allocate the host cell array when its named GPU-size extension is enabled; MATLAB-compatible mode rejects before provider access."
     },
     {
       "question": "What about N-dimensional cell arrays?",
-      "answer": "RunMat supports N-dimensional cell arrays. Supply as many scalar dimensions or size-vector entries as you need and the builtin constructs a cell array with that exact shape. Trailing singleton dimensions are preserved so downstream code can introspect the full size vector."
+      "answer": "RunMat supports N-dimensional cell arrays. Supply scalar dimensions or a row size vector; trailing dimensions whose size is one are ignored after the second dimension."
     },
     {
       "question": "Does `cell` copy data from existing containers?",
@@ -134,8 +129,8 @@
     "label": "`crates/runmat-runtime/src/builtins/cells/core/cell.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/cells/core/cell.rs"
   },
-  "gpu_residency": "No. Cell arrays are created on the host regardless of the residency of the size arguments. If the inputs happen to live on the GPU (for example, a `gpuArray` size vector), RunMat gathers those values before allocating the cell array. The result is always a host cell array; downstream code can still place tensors or gpuArrays inside individual cells as needed.",
+  "gpu_residency": "No. The result is always a host cell array. The public constructor does not document interactive gpuArray input; RunMat's named GPU-size extension can gather an exact resident size control before host allocation when extension mode is enabled.",
   "gpu_behavior": [
-    "Cell arrays live on the CPU heap because each element can contain arbitrarily typed values that may require garbage-collected storage. When `cell` is invoked inside a fused GPU expression RunMat terminates the fusion group, gathers any GPU-resident size inputs, and creates the cell array on the host. `'Like'` prototypes that refer to gpuArray inputs are honoured for shape inference. Each cell currently receives an empty double array even if the prototype itself is a `gpuArray`; this fallback will disappear once device-side cell residency lands. Once the acceleration layer adds true GPU cells, providers can register hooks without changing user code."
+    "Cell construction terminates GPU fusion because the heterogeneous container lives on the host heap. In RunMat extension mode, a resident size control is gathered from its owning provider without floating reinterpretation and the host cell array is allocated from the decoded dimensions. MATLAB-compatible mode rejects that extension before provider dispatch or gather."
   ]
 }

@@ -1,4 +1,5 @@
 use super::*;
+use anyhow::bail;
 
 impl WgpuProvider {
     pub(crate) async fn fft_dim_exec(
@@ -7,6 +8,11 @@ impl WgpuProvider {
         len: Option<usize>,
         dim: usize,
     ) -> Result<GpuTensorHandle> {
+        if self.get_entry(handle)?.integer_type().is_some()
+            || runmat_accelerate_api::handle_is_logical(handle)
+        {
+            bail!("fft_dim: nonfloating handles require the runtime typed fallback");
+        }
         if let Some(native) = self.try_fft_dim_exec_native(handle, len, dim, false)? {
             return Ok(native);
         }
@@ -20,6 +26,11 @@ impl WgpuProvider {
         len: Option<usize>,
         dim: usize,
     ) -> Result<GpuTensorHandle> {
+        if self.get_entry(handle)?.integer_type().is_some()
+            || runmat_accelerate_api::handle_is_logical(handle)
+        {
+            bail!("ifft_dim: nonfloating handles require the runtime typed fallback");
+        }
         if let Some(native) = self.try_fft_dim_exec_native(handle, len, dim, true)? {
             return Ok(native);
         }

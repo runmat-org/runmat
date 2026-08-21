@@ -3,7 +3,9 @@ use std::fs;
 use std::path::PathBuf;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinErrorDescriptor, BuiltinOutputMode, BuiltinSignatureDescriptor,
+    BuiltinCompletionPolicy, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerCapabilityDescriptor, BuiltinOutputMode,
+    BuiltinSignatureDescriptor,
 };
 use serde::Serialize;
 
@@ -14,6 +16,12 @@ struct BuiltinDescriptorExport<'a> {
     completion_policy: BuiltinCompletionPolicy,
     signatures: &'a [BuiltinSignatureDescriptor],
     errors: &'a [BuiltinErrorDescriptor],
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    extensions: &'a [BuiltinExtensionDescriptor],
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    integer_capabilities: &'a [BuiltinIntegerCapabilityDescriptor],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    integer_audit: Option<&'a BuiltinIntegerAuditDescriptor>,
 }
 
 #[derive(Serialize)]
@@ -40,23 +48,48 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // are linked before we read runmat-builtins' global registry.
     let _ = runmat_runtime::object_property_getter_name("__descriptor_export_probe");
 
-    let mut builtins = runmat_builtins::builtin_functions()
-        .into_iter()
-        .filter_map(|builtin| {
-            let descriptor = builtin.descriptor?;
+    let mut builtins = runmat_builtins::builtin_catalog_entries()
+        .iter()
+        .filter_map(|entry| {
+            let descriptor = entry.descriptor;
             if !include_non_public
                 && descriptor.completion_policy != BuiltinCompletionPolicy::Public
             {
                 return None;
             }
             Some(BuiltinDescriptorExport {
-                name: builtin.name,
+                name: entry.identity.name,
                 output_mode: descriptor.output_mode,
                 completion_policy: descriptor.completion_policy,
                 signatures: descriptor.signatures,
                 errors: descriptor.errors,
+                extensions: entry.extensions,
+                integer_capabilities: entry.integer_capabilities,
+                integer_audit: entry.integer_audit,
             })
         })
+        .chain(
+            runmat_builtins::builtin_functions()
+                .into_iter()
+                .filter_map(|builtin| {
+                    let descriptor = builtin.descriptor?;
+                    if !include_non_public
+                        && descriptor.completion_policy != BuiltinCompletionPolicy::Public
+                    {
+                        return None;
+                    }
+                    Some(BuiltinDescriptorExport {
+                        name: builtin.name,
+                        output_mode: descriptor.output_mode,
+                        completion_policy: descriptor.completion_policy,
+                        signatures: descriptor.signatures,
+                        errors: descriptor.errors,
+                        extensions: builtin.extensions,
+                        integer_capabilities: builtin.integer_capabilities,
+                        integer_audit: builtin.integer_audit,
+                    })
+                }),
+        )
         .collect::<Vec<_>>();
 
     builtins.sort_by(|a, b| a.name.cmp(b.name));

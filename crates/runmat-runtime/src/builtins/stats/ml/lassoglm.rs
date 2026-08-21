@@ -1,11 +1,16 @@
 //! Lasso and elastic-net regularized generalized linear models.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, LogicalArray, ResolveContext, StructValue, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, LogicalArray, StructValue, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -14,6 +19,70 @@ const NAME: &str = "lassoglm";
 const EPS: f64 = 1.0e-12;
 const MAX_NUM_LAMBDA: usize = 10_000;
 const MAX_ITERATIONS: usize = 1_000_000;
+
+const INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "lassoglm-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "lassoglm with native-class integer predictor or response data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LassoglmIntegerDataExtension"),
+};
+const INTEGER_PARAMETER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "lassoglm-integer-parameter",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "lassoglm with native-class integer floating parameters is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LassoglmIntegerParameterExtension"),
+};
+const INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "lassoglm-integer-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "lassoglm with native-class integer structural controls is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LassoglmIntegerControlExtension"),
+};
+const INTEGER_BOOLEAN_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "lassoglm-integer-boolean",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "lassoglm with native-class integer logical controls is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LassoglmIntegerBooleanExtension"),
+};
+const RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "lassoglm-resident-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "lassoglm host fallback for explicit gpuArray inputs is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LassoglmResidentInputExtension"),
+};
+pub const LASSOGLM_EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
+    INTEGER_DATA_EXTENSION,
+    INTEGER_PARAMETER_EXTENSION,
+    INTEGER_CONTROL_EXTENSION,
+    INTEGER_BOOLEAN_EXTENSION,
+    RESIDENT_INPUT_EXTENSION,
+];
+
+const INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "X or Y", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Native integer predictor or response data is gated before gather and checked at the binary64 solver boundary." }];
+const INTEGER_PARAMETER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "Alpha, BinomialSize, Lambda, LambdaRatio, Offset, RelTol/TolX/TolFun, Weights, or Options.TolX/TolFun", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Native integer floating parameters are gated and require exact binary64 representation." }];
+const INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "CV, MaxIter, MCReps, NumLambda, or Options.MaxIter",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Native integer structural controls are gated and decoded exactly.",
+    }];
+const INTEGER_BOOLEAN_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Constant/Intercept, Standardize, or Options.UseParallel",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Native integer logical controls accept only scalar zero or one, including scalar integer tensors.",
+    }];
+pub const LASSOGLM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor { form: "B = lassoglm(integer_X, integer_Y, distr, ___)", inputs: &INTEGER_DATA_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "RunMat-only integer data crosses a checked binary64 solver boundary." },
+    BuiltinIntegerCapabilityDescriptor { form: "B = lassoglm(X, Y, distr, Name, integer_value)", inputs: &INTEGER_PARAMETER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Floating parameters reject lossy integer conversion." },
+    BuiltinIntegerCapabilityDescriptor { form: "B = lassoglm(X, Y, distr, Name, integer_control)", inputs: &INTEGER_CONTROL_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Structural controls are parsed exactly; ordinary integer-valued doubles remain documented." },
+    BuiltinIntegerCapabilityDescriptor { form: "B = lassoglm(X, Y, distr, Name, integer_boolean)", inputs: &INTEGER_BOOLEAN_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Logical controls accept native integer scalar zero or one as a RunMat extension." },
+];
 
 const OUTPUT_B: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "B",
@@ -277,6 +346,8 @@ struct FitResult {
     keywords = "lassoglm,lasso,elastic net,generalized linear model,glm,binomial,poisson,statistics,machine learning",
     type_resolver(lassoglm_type),
     descriptor(crate::builtins::stats::ml::lassoglm::LASSOGLM_DESCRIPTOR),
+    extensions(crate::builtins::stats::ml::lassoglm::LASSOGLM_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::ml::lassoglm::LASSOGLM_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::ml::lassoglm"
 )]
 pub(crate) async fn lassoglm_builtin(
@@ -285,11 +356,12 @@ pub(crate) async fn lassoglm_builtin(
     distr: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    let distribution = Distribution::parse(&distr)?;
+    validate_option_surface(&rest)?;
+    ensure_extensions(&x, &y, &distr, &rest)?;
     let x = gathered(x).await?;
     let y = gathered(y).await?;
-    let distr = gathered(distr).await?;
     let rest = gather_values(rest).await?;
-    let distribution = Distribution::parse(&distr)?;
     let options = parse_options(rest)?;
     let result = lassoglm_compute(x, y, distribution, options)?;
     match crate::output_count::current_output_count() {
@@ -301,6 +373,131 @@ pub(crate) async fn lassoglm_builtin(
         )),
         None => Ok(result.b),
     }
+}
+
+fn is_typed_integer(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn contains_explicit_gpu(value: &Value) -> bool {
+    match value {
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_explicit(handle),
+        Value::Cell(cell) => cell.data.iter().any(contains_explicit_gpu),
+        Value::Struct(value) => value.fields.values().any(contains_explicit_gpu),
+        Value::Object(value) => value.properties.values().any(contains_explicit_gpu),
+        Value::Closure(value) => value.captures.iter().any(contains_explicit_gpu),
+        Value::OutputList(values) => values.iter().any(contains_explicit_gpu),
+        _ => false,
+    }
+}
+
+fn validate_option_surface(rest: &[Value]) -> BuiltinResult<()> {
+    if !rest.len().is_multiple_of(2) {
+        return Err(invalid(
+            "lassoglm: name-value options must be supplied in pairs",
+        ));
+    }
+    for pair in rest.chunks_exact(2) {
+        let name = scalar_text(&pair[0], "option name")?;
+        let canonical = canonical_name(&name);
+        if !matches!(
+            canonical.as_str(),
+            "alpha"
+                | "lambda"
+                | "lambdaratio"
+                | "numlambda"
+                | "standardize"
+                | "intercept"
+                | "constant"
+                | "weights"
+                | "offset"
+                | "binomialsize"
+                | "reltol"
+                | "tolx"
+                | "tolfun"
+                | "maxiter"
+                | "cv"
+                | "predictornames"
+                | "options"
+                | "link"
+                | "estdisp"
+                | "mcreps"
+        ) {
+            return Err(invalid(format!(
+                "lassoglm: unsupported option '{canonical}'"
+            )));
+        }
+        match canonical.as_str() {
+            "link" => {
+                scalar_text(&pair[1], "Link")?;
+            }
+            "estdisp" => {
+                scalar_text(&pair[1], "EstDisp")?;
+            }
+            "predictornames" => {
+                string_list(&pair[1], "PredictorNames")?;
+            }
+            "options" if !matches!(&pair[1], Value::Struct(_)) && !is_empty_numeric(&pair[1]) => {
+                return Err(invalid("lassoglm: Options must be [] or a statset struct"));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn ensure_integer_extension(
+    value: &Value,
+    extension: &'static BuiltinExtensionDescriptor,
+) -> BuiltinResult<()> {
+    if is_typed_integer(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(extension, NAME)?;
+    }
+    Ok(())
+}
+
+fn ensure_extensions(x: &Value, y: &Value, distr: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    if is_typed_integer(x) || is_typed_integer(y) {
+        crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_DATA_EXTENSION, NAME)?;
+    }
+    for pair in rest.chunks_exact(2) {
+        let name = canonical_name(&scalar_text(&pair[0], "option name")?);
+        let value = &pair[1];
+        match name.as_str() {
+            "cv" | "maxiter" | "mcreps" | "numlambda" => {
+                ensure_integer_extension(value, &INTEGER_CONTROL_EXTENSION)?;
+            }
+            "constant" | "intercept" | "standardize" => {
+                ensure_integer_extension(value, &INTEGER_BOOLEAN_EXTENSION)?;
+            }
+            "options" => {
+                if let Value::Struct(st) = value {
+                    if let Some(value) = nonempty_field(st, "MaxIter") {
+                        ensure_integer_extension(value, &INTEGER_CONTROL_EXTENSION)?;
+                    }
+                    if let Some(value) =
+                        nonempty_field(st, "TolX").or_else(|| nonempty_field(st, "TolFun"))
+                    {
+                        ensure_integer_extension(value, &INTEGER_PARAMETER_EXTENSION)?;
+                    }
+                    if let Some(value) = nonempty_field(st, "UseParallel") {
+                        ensure_integer_extension(value, &INTEGER_BOOLEAN_EXTENSION)?;
+                    }
+                }
+            }
+            _ => ensure_integer_extension(value, &INTEGER_PARAMETER_EXTENSION)?,
+        }
+    }
+    if contains_explicit_gpu(x)
+        || contains_explicit_gpu(y)
+        || contains_explicit_gpu(distr)
+        || rest.iter().any(contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(&RESIDENT_INPUT_EXTENSION, NAME)?;
+    }
+    Ok(())
 }
 
 async fn gathered(value: Value) -> BuiltinResult<Value> {
@@ -337,7 +534,10 @@ fn lassoglm_compute(
             response.0.len()
         )));
     }
-    if x.data.iter().any(|value| !value.is_finite()) {
+    if tensor::tensor_values_f64_cow(&x)
+        .iter()
+        .any(|value| !value.is_finite())
+    {
         return Err(invalid("lassoglm: X must contain finite real values"));
     }
     if options
@@ -518,7 +718,7 @@ fn nonempty_field<'a>(st: &'a StructValue, name: &str) -> Option<&'a Value> {
 }
 
 fn is_empty_numeric(value: &Value) -> bool {
-    matches!(value, Value::Tensor(tensor) if tensor.data.is_empty())
+    matches!(value, Value::Tensor(tensor) if tensor::tensor_element_len(tensor) == 0)
 }
 
 fn canonical_name(name: &str) -> String {
@@ -530,7 +730,11 @@ fn canonical_name(name: &str) -> String {
 
 fn value_to_real_tensor(label: &str, value: Value) -> BuiltinResult<Tensor> {
     match value {
-        Value::Tensor(tensor) => Ok(tensor),
+        Value::Tensor(tensor) => {
+            ensure_exact_integer_tensor(&tensor, label)?;
+            tensor::integer_tensor_to_f64(tensor)
+                .map_err(|err| invalid(format!("lassoglm: {label}: {err}")))
+        }
         Value::LogicalArray(array) => {
             let shape = tensor::default_shape_for(&array.shape, array.data.len());
             Tensor::new(
@@ -545,12 +749,34 @@ fn value_to_real_tensor(label: &str, value: Value) -> BuiltinResult<Tensor> {
         }
         Value::Num(n) => Tensor::new(vec![n], vec![1, 1])
             .map_err(|err| invalid(format!("lassoglm: {label}: {err}"))),
-        Value::Int(i) => Tensor::new(vec![i.to_f64()], vec![1, 1])
-            .map_err(|err| invalid(format!("lassoglm: {label}: {err}"))),
+        Value::Int(i) => {
+            ensure_exact_integer_value(&i, label)?;
+            Tensor::new(vec![i.to_f64()], vec![1, 1])
+                .map_err(|err| invalid(format!("lassoglm: {label}: {err}")))
+        }
         other => Err(invalid(format!(
             "lassoglm: {label} must be real numeric, got {other:?}"
         ))),
     }
+}
+
+fn ensure_exact_integer_value(value: &runmat_value::IntValue, label: &str) -> BuiltinResult<()> {
+    if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(value) {
+        Ok(())
+    } else {
+        Err(invalid(format!(
+            "lassoglm: integer {label} values must be exactly representable as double"
+        )))
+    }
+}
+
+fn ensure_exact_integer_tensor(value: &Tensor, label: &str) -> BuiltinResult<()> {
+    if let Some(storage) = value.integer_storage() {
+        for integer in storage.exact_values() {
+            ensure_exact_integer_value(&integer, label)?;
+        }
+    }
+    Ok(())
 }
 
 fn response_values(
@@ -560,7 +786,8 @@ fn response_values(
     options: &Options,
 ) -> BuiltinResult<(Vec<f64>, Vec<f64>)> {
     let tensor = value_to_real_tensor("Y", value)?;
-    if tensor.data.iter().any(|value| !value.is_finite()) {
+    let values = tensor::tensor_values_f64(&tensor);
+    if values.iter().any(|value| !value.is_finite()) {
         return Err(invalid("lassoglm: Y must contain finite real values"));
     }
     match distribution {
@@ -568,16 +795,16 @@ fn response_values(
             if !is_vector_shape(&tensor.shape) {
                 return Err(invalid("lassoglm: normal Y must be a vector"));
             }
-            Ok((tensor.data, Vec::new()))
+            Ok((values, Vec::new()))
         }
         Distribution::Poisson => {
             if !is_vector_shape(&tensor.shape) {
                 return Err(invalid("lassoglm: poisson Y must be a vector"));
             }
-            if tensor.data.iter().any(|value| *value < 0.0) {
+            if values.iter().any(|value| *value < 0.0) {
                 return Err(invalid("lassoglm: poisson Y must be nonnegative"));
             }
-            Ok((tensor.data, Vec::new()))
+            Ok((values, Vec::new()))
         }
         Distribution::Binomial => {
             if tensor.cols() == 2 && tensor.rows() == expected_rows {
@@ -589,8 +816,8 @@ fn response_values(
                 let mut successes = Vec::with_capacity(tensor.rows());
                 let mut trials = Vec::with_capacity(tensor.rows());
                 for row in 0..tensor.rows() {
-                    let y = tensor.get2(row, 0).unwrap_or(0.0);
-                    let n = tensor.get2(row, 1).unwrap_or(0.0);
+                    let y = values[row];
+                    let n = values[row + tensor.rows()];
                     if y < 0.0 || n <= 0.0 || y > n {
                         return Err(invalid(
                             "lassoglm: binomial count response must satisfy 0 <= successes <= trials",
@@ -606,7 +833,7 @@ fn response_values(
                         "lassoglm: binomial Y must be a vector or two-column count matrix",
                     ));
                 }
-                if tensor.data.iter().any(|value| *value < 0.0 || *value > 1.0) {
+                if values.iter().any(|value| *value < 0.0 || *value > 1.0) {
                     return Err(invalid(
                         "lassoglm: binomial vector Y must contain probabilities in [0,1]",
                     ));
@@ -615,7 +842,7 @@ fn response_values(
                     Some(values) => expand_binomial_size(values, expected_rows)?,
                     None => Vec::new(),
                 };
-                Ok((tensor.data, trials))
+                Ok((values, trials))
             }
         }
     }
@@ -647,7 +874,10 @@ fn scalar_text(value: &Value, label: &str) -> BuiltinResult<String> {
 fn scalar_f64(value: &Value, label: &str) -> BuiltinResult<f64> {
     let number = match value {
         Value::Num(n) => *n,
-        Value::Int(i) => i.to_f64(),
+        Value::Int(i) => {
+            ensure_exact_integer_value(i, label)?;
+            i.to_f64()
+        }
         Value::Bool(flag) => {
             if *flag {
                 1.0
@@ -655,7 +885,10 @@ fn scalar_f64(value: &Value, label: &str) -> BuiltinResult<f64> {
                 0.0
             }
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            ensure_exact_integer_tensor(tensor, label)?;
+            tensor::tensor_value_f64(tensor, 0)
+        }
         Value::LogicalArray(array) if array.data.len() == 1 => {
             if array.data[0] == 0 {
                 0.0
@@ -676,11 +909,17 @@ fn scalar_f64(value: &Value, label: &str) -> BuiltinResult<f64> {
 }
 
 fn scalar_bool(value: &Value, label: &str) -> BuiltinResult<bool> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return match integer.try_to_usize() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(invalid(format!("lassoglm: {label} must be logical scalar"))),
+        };
+    }
     match value {
         Value::Bool(flag) => Ok(*flag),
         Value::LogicalArray(array) if array.data.len() == 1 => Ok(array.data[0] != 0),
         Value::Num(n) if *n == 0.0 || *n == 1.0 => Ok(*n != 0.0),
-        Value::Int(i) if i.to_f64() == 0.0 || i.to_f64() == 1.0 => Ok(i.to_f64() != 0.0),
         Value::String(text)
             if text.eq_ignore_ascii_case("true")
                 || text.eq_ignore_ascii_case("false")
@@ -706,8 +945,22 @@ fn scalar_bool(value: &Value, label: &str) -> BuiltinResult<bool> {
 }
 
 fn positive_usize(value: &Value, label: &str) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer
+            .try_to_usize()
+            .filter(|value| *value > 0)
+            .ok_or_else(|| {
+                invalid(format!(
+                    "lassoglm: {label} must be a positive integer scalar"
+                ))
+            });
+    }
     let raw = scalar_f64(value, label)?;
-    if raw < 1.0 || raw.fract() != 0.0 || raw > usize::MAX as f64 {
+    if raw < 1.0
+        || raw.fract() != 0.0
+        || raw > usize::MAX as f64
+        || (usize::BITS == 64 && raw == usize::MAX as f64)
+    {
         return Err(invalid(format!(
             "lassoglm: {label} must be a positive integer scalar"
         )));
@@ -733,7 +986,8 @@ fn numeric_vector(value: &Value, label: &str) -> BuiltinResult<Vec<f64>> {
                     "lassoglm: {label} must be a numeric vector"
                 )));
             }
-            tensor.data.clone()
+            ensure_exact_integer_tensor(tensor, label)?;
+            tensor::tensor_values_f64(tensor)
         }
         Value::LogicalArray(array) => {
             let shape = tensor::default_shape_for(&array.shape, array.data.len());
@@ -749,7 +1003,10 @@ fn numeric_vector(value: &Value, label: &str) -> BuiltinResult<Vec<f64>> {
                 .collect()
         }
         Value::Num(n) => vec![*n],
-        Value::Int(i) => vec![i.to_f64()],
+        Value::Int(i) => {
+            ensure_exact_integer_value(i, label)?;
+            vec![i.to_f64()]
+        }
         other => {
             return Err(invalid(format!(
                 "lassoglm: {label} must be a numeric vector, got {other:?}"
@@ -869,10 +1126,11 @@ fn prepare_data(
 
     let mut x_means = vec![0.0; cols];
     let mut x_scales = vec![1.0; cols];
-    let mut x_work = vec![0.0; x.data.len()];
+    let x_values = tensor::tensor_values_f64_cow(x);
+    let mut x_work = vec![0.0; x_values.len()];
     for col in 0..cols {
         let mean = if options.intercept {
-            weighted_column_mean(x, &weights, col)
+            weighted_column_mean(x_values.as_ref(), rows, &weights, col)
         } else {
             0.0
         };
@@ -880,7 +1138,7 @@ fn prepare_data(
         if options.intercept && options.standardize {
             let variance = (0..rows)
                 .map(|row| {
-                    let centered = x.get2(row, col).unwrap_or(0.0) - mean;
+                    let centered = matrix_value(x_values.as_ref(), rows, row, col) - mean;
                     weights[row] * centered * centered
                 })
                 .sum::<f64>();
@@ -893,12 +1151,12 @@ fn prepare_data(
         x_scales[col] = scale;
         for row in 0..rows {
             let idx = row + col * rows;
-            x_work[idx] = (x.data[idx] - mean) / scale;
+            x_work[idx] = (x_values[idx] - mean) / scale;
         }
     }
 
     Ok(PreparedData {
-        x_original: x.data.clone(),
+        x_original: x_values.into_owned(),
         x_work,
         y: response.0,
         trials,
@@ -911,10 +1169,14 @@ fn prepare_data(
     })
 }
 
-fn weighted_column_mean(x: &Tensor, weights: &[f64], col: usize) -> f64 {
-    (0..x.rows())
-        .map(|row| x.get2(row, col).unwrap_or(0.0) * weights[row])
+fn weighted_column_mean(x: &[f64], rows: usize, weights: &[f64], col: usize) -> f64 {
+    (0..rows)
+        .map(|row| matrix_value(x, rows, row, col) * weights[row])
         .sum()
+}
+
+fn matrix_value(values: &[f64], rows: usize, row: usize, col: usize) -> f64 {
+    values[row + col * rows]
 }
 
 fn default_lambda_sequence(
@@ -1556,10 +1818,20 @@ fn predictor_names_value(options: &Options) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::StringArray;
+    use runmat_value::{IntValue, IntegerStorage, StringArray};
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
+        Value::Tensor(tensor)
+    }
+
+    fn cleared_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
+        Value::Tensor(tensor)
     }
 
     fn output_pair(value: Value) -> (Value, Value) {
@@ -1596,12 +1868,12 @@ mod tests {
             panic!("expected B tensor");
         };
         assert_eq!(coeffs.shape, vec![1, 1]);
-        assert!((coeffs.data[0] - 2.0).abs() < 1.0e-3);
+        assert!((coeffs.materialize_f64()[0] - 2.0).abs() < 1.0e-3);
         let Value::Struct(info) = fit_info else {
             panic!("expected FitInfo");
         };
         let intercept = row_field(&info, "Intercept");
-        assert!((intercept.data[0] - 1.0).abs() < 1.0e-3);
+        assert!((intercept.materialize_f64()[0] - 1.0).abs() < 1.0e-3);
         assert!(info.fields.contains_key("Deviance"));
         assert!(info.fields.contains_key("Distribution"));
     }
@@ -1656,7 +1928,7 @@ mod tests {
             panic!("expected B tensor");
         };
         assert_eq!(coeffs.shape, vec![1, 1]);
-        assert!(coeffs.data[0].is_finite());
+        assert!(coeffs.materialize_f64()[0].is_finite());
     }
 
     #[test]
@@ -1687,8 +1959,11 @@ mod tests {
             panic!("expected FitInfo");
         };
         let deviance = row_field(&info, "Deviance");
-        assert_eq!(deviance.data.len(), 2);
-        assert!(deviance.data.iter().all(|value| value.is_finite()));
+        assert_eq!(deviance.materialize_f64().len(), 2);
+        assert!(deviance
+            .materialize_f64()
+            .iter()
+            .all(|value| value.is_finite()));
 
         let out = block_on(lassoglm_builtin(
             tensor(vec![1.0], vec![1, 1]),
@@ -1756,5 +2031,226 @@ mod tests {
         ))
         .unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:lassoglm:InvalidArgument"));
+    }
+
+    #[test]
+    fn lassoglm_reads_typed_integer_storage_exactly() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let _guard = crate::output_count::push_output_count(Some(2));
+        let out = block_on(lassoglm_builtin(
+            poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3, 4]), 5, 1),
+            poisoned_int_tensor(IntegerStorage::I16(vec![1, 3, 5, 7, 9]), 5, 1),
+            Value::String("normal".to_string()),
+            vec![
+                Value::CharArray(CharArray::new_row("Lambda")),
+                cleared_int_tensor(IntegerStorage::U8(vec![0]), 1, 1),
+                Value::CharArray(CharArray::new_row("Weights")),
+                poisoned_int_tensor(IntegerStorage::U16(vec![1, 1, 2, 2, 1]), 5, 1),
+                Value::CharArray(CharArray::new_row("MaxIter")),
+                cleared_int_tensor(IntegerStorage::U16(vec![300]), 1, 1),
+                Value::CharArray(CharArray::new_row("Standardize")),
+                Value::Bool(false),
+            ],
+        ))
+        .unwrap();
+        let (b, fit_info) = output_pair(out);
+        let Value::Tensor(coeffs) = b else {
+            panic!("expected B tensor");
+        };
+        assert_eq!(coeffs.shape, vec![1, 1]);
+        assert!((coeffs.materialize_f64()[0] - 2.0).abs() < 1.0e-3);
+        let Value::Struct(info) = fit_info else {
+            panic!("expected FitInfo");
+        };
+        assert!(info.fields.contains_key("Lambda"));
+    }
+
+    #[test]
+    fn lassoglm_gates_integer_roles_before_gather_and_rejects_lossy_data() {
+        let integer_data = cleared_int_tensor(IntegerStorage::U8(vec![1, 2]), 2, 1);
+        let floating = tensor(vec![1.0, 2.0], vec![2, 1]);
+        let distr = Value::from("normal");
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let err = ensure_extensions(&integer_data, &floating, &distr, &[])
+            .expect_err("strict mode must reject integer data before gather");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:compatibility:LassoglmIntegerDataExtension")
+        );
+        let err = ensure_extensions(
+            &floating,
+            &tensor(vec![1.0, 2.0], vec![2, 1]),
+            &distr,
+            &[Value::from("NumLambda"), Value::Int(IntValue::U16(20))],
+        )
+        .expect_err("strict mode must reject integer controls before gather");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:compatibility:LassoglmIntegerControlExtension")
+        );
+        drop(_strict);
+
+        let wide = cleared_int_tensor(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), 1, 1);
+        let err = value_to_real_tensor("X", wide).expect_err("lossy integer must reject");
+        assert!(err.message.contains("exactly representable"));
+    }
+
+    #[test]
+    fn lassoglm_positive_usize_parses_integer_bounds_exactly() {
+        assert_eq!(
+            positive_usize(&Value::Int(IntValue::U16(3)), "NumLambda").unwrap(),
+            3
+        );
+        assert_eq!(
+            positive_usize(
+                &cleared_int_tensor(IntegerStorage::U64(vec![3]), 1, 1),
+                "NumLambda"
+            )
+            .unwrap(),
+            3
+        );
+        assert_eq!(
+            positive_usize(
+                &cleared_int_tensor(IntegerStorage::U64(vec![usize::MAX as u64]), 1, 1),
+                "NumLambda"
+            )
+            .unwrap(),
+            usize::MAX
+        );
+
+        for value in [
+            Value::Int(IntValue::I8(-1)),
+            Value::Num(1.5),
+            Value::Num(usize::MAX as f64),
+            Value::Num(usize::MAX as f64 + 1.0),
+        ] {
+            assert!(positive_usize(&value, "NumLambda").is_err());
+        }
+    }
+
+    #[test]
+    fn lassoglm_reads_typed_integer_binomial_counts_exactly() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let out = block_on(lassoglm_builtin(
+            poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3, 4, 5]), 6, 1),
+            poisoned_int_tensor(
+                IntegerStorage::U16(vec![1, 1, 2, 2, 3, 3, 5, 5, 5, 5, 5, 5]),
+                6,
+                2,
+            ),
+            Value::String("binomial".to_string()),
+            vec![
+                Value::CharArray(CharArray::new_row("Lambda")),
+                poisoned_int_tensor(IntegerStorage::U8(vec![0]), 1, 1),
+            ],
+        ))
+        .unwrap();
+        let Value::Tensor(coeffs) = out else {
+            panic!("expected B tensor");
+        };
+        assert_eq!(coeffs.shape, vec![1, 1]);
+        assert!(coeffs.materialize_f64()[0].is_finite());
+    }
+
+    #[test]
+    fn lassoglm_empty_numeric_helper_uses_typed_integer_storage_len() {
+        let empty = Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 1]).unwrap();
+
+        assert!(is_empty_numeric(&Value::Tensor(empty)));
+    }
+
+    #[test]
+    fn residency_policy_distinguishes_automatic_and_explicit_handles() {
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: 42_001,
+            descriptor: Default::default(),
+        };
+        let host = tensor(vec![1.0], vec![1, 1]);
+        let distr = Value::from("normal");
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+
+        let automatic = Value::GpuTensor(
+            handle
+                .clone()
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic),
+        );
+        ensure_extensions(&automatic, &host, &distr, &[])
+            .expect("automatic residency must remain transparent to compatibility policy");
+
+        let explicit = Value::GpuTensor(
+            handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit),
+        );
+        let err = ensure_extensions(&explicit, &host, &distr, &[])
+            .expect_err("an explicit gpuArray must require the resident-input extension");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:compatibility:LassoglmResidentInputExtension")
+        );
+    }
+
+    #[test]
+    fn call_surface_validation_precedes_residency_policy() {
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: 42_002,
+            descriptor: Default::default(),
+        }
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let err = block_on(lassoglm_builtin(
+            Value::GpuTensor(handle.clone()),
+            tensor(vec![1.0], vec![1, 1]),
+            Value::Num(1.0),
+            vec![Value::from("Lambda")],
+        ))
+        .expect_err("invalid distribution text must fail without provider access");
+        assert_eq!(err.identifier(), Some("RunMat:lassoglm:InvalidArgument"));
+    }
+
+    #[test]
+    fn nested_options_integer_roles_are_gated_by_semantic_role() {
+        let host = tensor(vec![1.0], vec![1, 1]);
+        let distr = Value::from("normal");
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+
+        for (field, expected) in [
+            (
+                "MaxIter",
+                "RunMat:compatibility:LassoglmIntegerControlExtension",
+            ),
+            (
+                "TolX",
+                "RunMat:compatibility:LassoglmIntegerParameterExtension",
+            ),
+            (
+                "UseParallel",
+                "RunMat:compatibility:LassoglmIntegerBooleanExtension",
+            ),
+        ] {
+            let mut options = StructValue::new();
+            options.insert(field, Value::Int(IntValue::U8(1)));
+            let rest = [Value::from("Options"), Value::Struct(options)];
+            validate_option_surface(&rest).unwrap();
+            let err = ensure_extensions(&host, &host, &distr, &rest)
+                .expect_err("nested native integer option must be gated");
+            assert_eq!(err.identifier(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn integer_boolean_tensor_matches_declared_role() {
+        assert!(scalar_bool(
+            &cleared_int_tensor(IntegerStorage::U16(vec![1]), 1, 1),
+            "Standardize"
+        )
+        .unwrap());
+        assert!(scalar_bool(
+            &cleared_int_tensor(IntegerStorage::I8(vec![2]), 1, 1),
+            "Standardize"
+        )
+        .is_err());
     }
 }

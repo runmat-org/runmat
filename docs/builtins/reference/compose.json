@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Formatting runs on the CPU. GPU inputs are gathered to host memory before substitution."
+    "notes": "Formatting runs on the CPU. Resident inputs are a mode-gated RunMat extension and gather through the owning provider before substitution. A string format specification returns a host string array, while a character format specification returns a host cell array of character vectors."
   },
   "fusion": {
     "elementwise": false,
@@ -27,13 +27,15 @@
     "unit": "builtins::strings::core::compose::tests",
     "integration": "builtins::strings::core::compose::tests::compose_gpu_argument"
   },
-  "description": "`compose(formatSpec, A1, ..., An)` substitutes data into `%` placeholders and returns a string array. It combines `sprintf`-style formatting with string-array expansion behavior matching MATLAB and RunMat.",
+  "description": "`compose(formatSpec, A1, ..., An)` substitutes data into `%` placeholders. A string format specification returns a string array and a character format specification returns a cell array of character vectors. Integer arguments are read from exact native storage, including int64 and uint64 values above `flintmax`.",
   "behaviors": [
-    "`formatSpec` must be text: a string scalar, string array, character vector, character array, or cell array of character vectors.",
+    "`formatSpec` must be a string or character format for substitution. A cell array of character vectors is supported only by unary `compose(formatSpec)`, which converts it to cellstr output.",
     "If `formatSpec` is scalar and any argument array has more than one element, RunMat broadcasts the scalar specification over the array dimensions.",
     "When `formatSpec` is a string or character array with multiple elements, the output has the same shape as the specification. Each element uses the corresponding row or cell during formatting.",
-    "Arguments can be numeric, logical, string, or text-like cell arrays. Non-text arguments are converted using MATLAB-compatible rules (logical values become `1` or `0`, complex numbers use the `a + bi` form).",
-    "When you omit additional arguments, `compose(formatSpec)` simply converts the specification into a string array, preserving the original structure.",
+    "Arguments can be numeric, logical, string, or character data. Cell-array data arguments are rejected because they are outside the documented domain. All eight integer classes are formatted directly from native values, so `%d` and `%i` preserve exact decimal text above `flintmax`.",
+    "Resident arguments are a RunMat-only extension because MATLAB does not document GPU-array support for compose. RunMat mode gathers them through the owning provider before formatting and returns host text in the class selected by formatSpec.",
+    "When you omit additional arguments, string formatSpec returns a string array, while character and cellstr formatSpec return a cell array of character vectors.",
+    "General nonscalar row-wise formatting geometry remains a known gap: scalar expansion and equal-element-count forms are covered, but every higher-dimensional MATLAB format cycling case has not yet been modeled.",
     "Errors are raised if argument shapes are incompatible with the specification or if format specifiers are incomplete."
   ],
   "examples": [
@@ -53,19 +55,14 @@
       "output": "values = 1×2 string\n    \"max: 3.14\"    \"min: 0.12\""
     },
     {
-      "description": "Formatting Each Row Of A Character Array",
-      "input": "C = ['Row %02d'; 'Row %02d'; 'Row %02d'];\nidx = compose(C, (1:3).')",
-      "output": "idx = 3×1 string\n    \"Row 01\"\n    \"Row 02\"\n    \"Row 03\""
+      "description": "Using A Character Format Vector",
+      "input": "idx = compose('Row %02d', (1:3).')",
+      "output": "idx = 3×1 cell\n    {'Row 01'}\n    {'Row 02'}\n    {'Row 03'}"
     },
     {
       "description": "Combining Real And Imaginary Parts",
       "input": "Z = [1+2i, 3-4i];\ntxt = compose(\"z = %s\", Z)",
       "output": "txt = 1×2 string\n    \"z = 1+2i\"    \"z = 3-4i\""
-    },
-    {
-      "description": "Using A Cell Array Of Format Specs",
-      "input": "specs = {'%0.1f volts', '%0.1f amps'};\nreadings = compose(specs, {12.6, 3.4})",
-      "output": "readings = 2×1 string\n    \"12.6 volts\"\n    \"3.4 amps\""
     },
     {
       "description": "Formatting GPU-Resident Data",
@@ -92,7 +89,7 @@
     },
     {
       "question": "What if I pass GPU arrays?",
-      "answer": "Inputs that reside on the GPU are automatically gathered to host memory before formatting. The resulting string array always lives on the CPU."
+      "answer": "In RunMat mode, resident inputs are gathered before formatting and the text result lives on the host. Compatibility mode rejects this explicitly classified extension."
     },
     {
       "question": "How do I emit literal percent signs?",
@@ -104,7 +101,7 @@
     },
     {
       "question": "What happens when `formatSpec` is empty?",
-      "answer": "`compose(formatSpec)` returns an empty string array with the same shape as `formatSpec`. When `formatSpec` and arguments have zero elements, the output is `0×0`."
+      "answer": "An empty string formatSpec returns an empty string array. Empty character or cellstr formatSpec returns empty cellstr-compatible output with the corresponding shape."
     }
   ],
   "links": [
@@ -166,6 +163,6 @@
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/compose.rs"
   },
   "gpu_behavior": [
-    "`compose` is a residency sink. When inputs include GPU-resident tensors, RunMat gathers the data back to host memory using the active acceleration provider before performing the formatting logic. All formatted strings live in host memory, so acceleration providers do not need compose-specific kernels."
+    "`compose` is a residency sink. In RunMat mode, resident tensors gather through their owning provider before formatting. All formatted text lives in host memory, so providers do not need compose-specific kernels."
   ]
 }

@@ -1,9 +1,11 @@
 use runmat_builtins::{
     builtin_function_by_name, builtin_functions, AccelTag, BuiltinCompletionPolicy,
-    BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CellArray, Tensor, Value,
+    BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor, BuiltinExtensionMode,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, Tensor, Value};
 
 const TEST_ERRORS: [BuiltinErrorDescriptor; 0] = [];
 const OUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -89,6 +91,12 @@ const ADD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::HiddenInternal,
     errors: &TEST_ERRORS,
 };
+const ADD_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [BuiltinExtensionDescriptor {
+    id: "test-add-extension",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "test-only add extension",
+    error_identifier: None,
+}];
 const SUB_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SUB_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -117,6 +125,7 @@ const MUL_ADD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "add",
     descriptor(crate::ADD_DESCRIPTOR),
+    extensions(crate::ADD_EXTENSIONS),
     builtin_path = "tests::add"
 )]
 fn add(x: i32, y: i32) -> Result<i32, String> {
@@ -138,7 +147,7 @@ fn sub(x: i32, y: i32) -> Result<i32, String> {
     builtin_path = "tests::matrix_sum"
 )]
 fn matrix_sum(m: Tensor) -> Result<f64, String> {
-    Ok(m.data.iter().sum())
+    Ok(m.materialize_f64().iter().sum())
 }
 
 #[runtime_builtin(
@@ -177,9 +186,17 @@ fn binary_accel_metadata_maps_to_elementwise_tag() {
 }
 
 #[test]
+fn extension_metadata_is_registered_declaratively() {
+    let add = builtin_function_by_name("add").expect("registered builtin");
+    assert_eq!(add.extensions, &ADD_EXTENSIONS);
+    let sub = builtin_function_by_name("sub").expect("registered builtin");
+    assert!(sub.extensions.is_empty());
+}
+
+#[test]
 fn test_value_conversions() {
     // Test basic types
-    let int_val = Value::Int(runmat_builtins::IntValue::I32(42));
+    let int_val = Value::Int(runmat_value::IntValue::I32(42));
     let num_val = Value::Num(3.15);
     let bool_val = Value::Bool(true);
     let str_val = Value::String("hello".to_string());
@@ -203,7 +220,7 @@ fn test_matrix_operations() {
     let mut matrix = Tensor::zeros2(2, 3);
     assert_eq!(matrix.rows(), 2);
     assert_eq!(matrix.cols(), 3);
-    assert_eq!(matrix.data.len(), 6);
+    assert_eq!(matrix.len(), 6);
 
     // Test setting and getting values (0-based helpers)
     matrix.set2(1, 2, 5.0).unwrap();
@@ -229,7 +246,7 @@ fn test_cell_arrays() {
     let cell = Value::Cell(
         CellArray::new(
             vec![
-                Value::Int(runmat_builtins::IntValue::I32(1)),
+                Value::Int(runmat_value::IntValue::I32(1)),
                 Value::String("test".to_string()),
                 Value::Bool(false),
             ],
@@ -243,7 +260,7 @@ fn test_cell_arrays() {
         assert_eq!(contents.data.len(), 3);
         assert_eq!(
             &contents.data[0],
-            &Value::Int(runmat_builtins::IntValue::I32(1))
+            &Value::Int(runmat_value::IntValue::I32(1))
         );
         assert_eq!(&contents.data[1], &Value::String("test".to_string()));
         assert_eq!(&contents.data[2], &Value::Bool(false));

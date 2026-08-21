@@ -31,7 +31,8 @@
     "`rethrow(message)` raises a fresh error using the supplied string as the message.",
     "Other value types produce a generic `RunMat:error`-style failure describing the value.",
     "`rethrow` never returns normally; it immediately transfers control outward to the next enclosing error handler.",
-    "In Ignition `catch` blocks, `rethrow()` with no argument uses the most recently caught exception."
+    "In Ignition `catch` blocks, `rethrow()` with no argument uses the most recently caught exception.",
+    "Integer semantics: `rethrow` consumes an exception object and has no numeric data, control, output-class, or provider role; numeric and resident values fail directly without gather or provider access."
   ],
   "examples": [
     {

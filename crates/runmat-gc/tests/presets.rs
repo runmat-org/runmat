@@ -1,6 +1,6 @@
-use runmat_builtins::Value;
 use runmat_gc::{gc_allocate, gc_collect_major, gc_collect_minor};
 use runmat_gc::{gc_configure, gc_stats, gc_test_context, GcConfig};
+use runmat_value::Value;
 
 #[test]
 fn test_default_gc_config() {
@@ -331,7 +331,7 @@ fn test_write_barriers_config() {
         assert!(result.is_ok());
 
         // Test allocation with write barriers enabled
-        let tensor = runmat_builtins::Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
+        let tensor = runmat_value::Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
         let value = Value::Tensor(tensor);
         let ptr = gc_allocate(value);
         assert!(ptr.is_ok());

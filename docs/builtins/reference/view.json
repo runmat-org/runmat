@@ -19,7 +19,9 @@
     "`view(2)` selects the standard top-down 2-D camera and `view(3)` restores the standard 3-D camera preset.",
     "Explicit azimuth/elevation values can be passed as two scalars or as a two-element vector.",
     "View state is subplot-local and does not leak across different axes in a subplot grid.",
-    "Axes handles can be passed explicitly so camera changes target a specific subplot rather than whichever axes happens to be current."
+    "Axes handles can be passed explicitly so camera changes target a specific subplot rather than whichever axes happens to be current.",
+    "Typed-integer angles and numeric axes aliases are independently gated RunMat extensions. Integer angles must be exactly representable in the renderer's single-precision camera state before any plot mutation.",
+    "Three-element line-of-sight vectors, axes arrays, and the documented two-output query form are not implemented."
   ],
   "examples": [
     {

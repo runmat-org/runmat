@@ -1,23 +1,24 @@
 //! MATLAB-compatible Communications Toolbox `scatterplot` builtin.
 
 use runmat_accelerate_api::GpuTensorHandle;
-#[cfg(test)]
-use runmat_builtins::ComplexTensor;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::plotting::state::{
-    axes_handle_exists, decode_axes_handle, figure_handle_exists,
-};
+use crate::builtins::common::tensor as tensor_utils;
+use crate::builtins::plotting::state::{figure_handle_exists, select_figure, FigureHandle};
 use crate::builtins::plotting::state::{set_axis_equal, set_axis_limits, set_grid_enabled};
 use crate::builtins::plotting::style::{parse_line_style_args, LineStyleParseOptions};
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
@@ -117,7 +118,7 @@ const SCATTERPLOT_INPUTS_X_N_OFFSET_MARKER: [BuiltinParamDescriptor; 4] = [
     },
 ];
 
-const SCATTERPLOT_INPUTS_X_N_OFFSET_MARKER_AX: [BuiltinParamDescriptor; 5] = [
+const SCATTERPLOT_INPUTS_X_N_OFFSET_MARKER_FIG: [BuiltinParamDescriptor; 5] = [
     BuiltinParamDescriptor {
         name: "x",
         ty: BuiltinParamType::NumericArray,
@@ -147,11 +148,11 @@ const SCATTERPLOT_INPUTS_X_N_OFFSET_MARKER_AX: [BuiltinParamDescriptor; 5] = [
         description: "Marker LineSpec forwarded to scatter.",
     },
     BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
+        name: "scatfig",
+        ty: BuiltinParamType::NumericScalar,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Target axes handle.",
+        description: "Existing figure handle used for the scatter plot.",
     },
 ];
 
@@ -177,8 +178,8 @@ const SCATTERPLOT_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
         outputs: &SCATTERPLOT_OUTPUT_HANDLE,
     },
     BuiltinSignatureDescriptor {
-        label: "h = scatterplot(x, n, offset, marker, ax)",
-        inputs: &SCATTERPLOT_INPUTS_X_N_OFFSET_MARKER_AX,
+        label: "h = scatterplot(x, n, offset, marker, scatfig)",
+        inputs: &SCATTERPLOT_INPUTS_X_N_OFFSET_MARKER_FIG,
         outputs: &SCATTERPLOT_OUTPUT_HANDLE,
     },
 ];
@@ -186,7 +187,7 @@ const SCATTERPLOT_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
 const SCATTERPLOT_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.SCATTERPLOT.INVALID_ARGUMENT",
     identifier: Some("RunMat:scatterplot:InvalidArgument"),
-    when: "The input samples, decimation factor, offset, marker, or axes handle is invalid.",
+    when: "The input samples, decimation factor, offset, marker, or existing Figure handle is invalid.",
     message: "scatterplot: invalid argument",
 };
 
@@ -208,6 +209,71 @@ pub const SCATTERPLOT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &SCATTERPLOT_ERRORS,
 };
+
+const SCATTERPLOT_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "scatterplot-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "scatterplot accepts typed-integer sample data as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ScatterplotIntegerDataExtension"),
+};
+const SCATTERPLOT_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "scatterplot-integer-control",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "scatterplot accepts typed-integer n and offset controls as a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:ScatterplotIntegerControlExtension"),
+    };
+pub const SCATTERPLOT_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    SCATTERPLOT_INTEGER_DATA_EXTENSION,
+    SCATTERPLOT_INTEGER_CONTROL_EXTENSION,
+];
+const SCATTERPLOT_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "x",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double samples; typed integer values require exact binary64 representation before constellation geometry is computed.",
+    }];
+const SCATTERPLOT_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "n",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target specifies a double positive-integer decimation factor; RunMat mode validates typed integer storage exactly.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "offset",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target specifies a double nonnegative-integer offset; RunMat mode validates it exactly and requires offset < n.",
+    },
+];
+pub const SCATTERPLOT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = scatterplot(integer_x, ...)",
+        inputs: &SCATTERPLOT_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The RunMat-only sample extension crosses into floating plotting coordinates only after exactness checks; the output is a double graphics handle.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = scatterplot(x, integer_n [, integer_offset], ...)",
+        inputs: &SCATTERPLOT_INTEGER_CONTROL_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "Decimation controls remain exact usize-bounded integers and are never routed through binary64.",
+    },
+];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::scatterplot")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -245,21 +311,39 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::scatterplot::SCATTERPLOT_DESCRIPTOR),
+    extensions(crate::builtins::plotting::scatterplot::SCATTERPLOT_EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::scatterplot::SCATTERPLOT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::scatterplot"
 )]
 pub async fn scatterplot_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<f64> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&x, BUILTIN_NAME)?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &x,
+        &SCATTERPLOT_INTEGER_DATA_EXTENSION,
+        BUILTIN_NAME,
+        "sample",
+    )
+    .await?;
+    for control in rest.iter().take(2) {
+        if crate::builtins::common::validation::value_has_native_integer_class(control) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &SCATTERPLOT_INTEGER_CONTROL_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
+    }
     let options = ScatterplotOptions::parse(rest)?;
     let (x_value, y_value, limits) = extract_scatter_values(x, options.n, options.offset).await?;
     let marker = options
         .marker
         .unwrap_or_else(|| Value::String(DEFAULT_MARKER.to_string()));
 
-    let handle = if let Some(ax) = options.axes {
-        scatter_builtin(Value::Num(ax), x_value, vec![y_value, marker]).await
-    } else {
-        scatter_builtin(x_value, y_value, vec![marker]).await
+    if let Some(figure) = options.figure {
+        select_figure(figure);
     }
-    .map_err(scatterplot_map_plot_error)?;
+    let handle = scatter_builtin(x_value, y_value, vec![marker])
+        .await
+        .map_err(scatterplot_map_plot_error)?;
     set_axis_equal(true);
     set_grid_enabled(true);
     if let Some(limit) = limits {
@@ -273,7 +357,7 @@ struct ScatterplotOptions {
     n: usize,
     offset: usize,
     marker: Option<Value>,
-    axes: Option<f64>,
+    figure: Option<FigureHandle>,
 }
 
 impl ScatterplotOptions {
@@ -312,15 +396,15 @@ impl ScatterplotOptions {
             Some(value) => Some(parse_marker(value)?),
             None => None,
         };
-        let axes = match rest.get(3) {
-            Some(value) => Some(parse_axes_handle(value)?),
+        let figure = match rest.get(3) {
+            Some(value) => Some(parse_figure_handle(value)?),
             None => None,
         };
         Ok(Self {
             n,
             offset,
             marker,
-            axes,
+            figure,
         })
     }
 }
@@ -358,44 +442,29 @@ fn parse_marker(value: &Value) -> BuiltinResult<Value> {
     Ok(value.clone())
 }
 
-fn parse_axes_handle(value: &Value) -> BuiltinResult<f64> {
-    let scalar = match value {
-        Value::Num(v) => *v,
-        Value::Int(v) => v.to_f64(),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
-        Value::Tensor(_) => {
-            return Err(scatterplot_error(
-                "scatterplot: ax must be a scalar axes handle",
-                &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
-            ));
-        }
-        other => {
-            return Err(scatterplot_error(
-                format!("scatterplot: ax must be a scalar axes handle, got {other:?}"),
-                &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
-            ));
-        }
-    };
-    if !scalar.is_finite() || scalar <= 0.0 || scalar.fract() != 0.0 || scalar > (u64::MAX as f64) {
+fn parse_figure_handle(value: &Value) -> BuiltinResult<FigureHandle> {
+    if crate::builtins::common::validation::value_has_native_integer_class(value) {
         return Err(scatterplot_error(
-            "scatterplot: ax must be a valid axes handle",
+            "scatterplot: scatfig must be a double Figure handle",
             &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
         ));
     }
-
-    let (figure, axes_index) = decode_axes_handle(scalar).map_err(|err| {
-        scatterplot_error(
-            format!("scatterplot: invalid axes handle: {err}"),
-            &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
-        )
-    })?;
-    if !figure_handle_exists(figure) || !axes_handle_exists(figure, axes_index) {
+    let scalar = parse_numeric_scalar(value, "scatfig")?;
+    if !scalar.is_finite() || scalar <= 0.0 || scalar.fract() != 0.0 || scalar > f64::from(u32::MAX)
+    {
         return Err(scatterplot_error(
-            "scatterplot: ax must be an existing axes handle",
+            "scatterplot: scatfig must be a valid Figure handle",
             &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
         ));
     }
-    Ok(scalar)
+    let figure = FigureHandle::from(scalar as u32);
+    if !figure_handle_exists(figure) {
+        return Err(scatterplot_error(
+            "scatterplot: scatfig must identify an existing Figure",
+            &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
+        ));
+    }
+    Ok(figure)
 }
 
 async fn extract_scatter_values(
@@ -410,19 +479,16 @@ async fn extract_scatter_values(
                 return Ok((Value::GpuTensor(real), Value::GpuTensor(imag), limits));
             }
             let gathered = gather_gpu_value(handle).await?;
-            let (real, imag) = extract_host_points(gathered, n, offset)?;
-            let limits = symmetric_limits(&real.data, &imag.data);
+            let (real, imag, limits) = extract_host_points(gathered, n, offset)?;
             Ok((Value::Tensor(real), Value::Tensor(imag), limits))
         }
         Value::GpuTensor(handle) => {
             let gathered = gather_gpu_value(handle).await?;
-            let (real, imag) = extract_host_points(gathered, n, offset)?;
-            let limits = symmetric_limits(&real.data, &imag.data);
+            let (real, imag, limits) = extract_host_points(gathered, n, offset)?;
             Ok((Value::Tensor(real), Value::Tensor(imag), limits))
         }
         other => {
-            let (real, imag) = extract_host_points(other, n, offset)?;
-            let limits = symmetric_limits(&real.data, &imag.data);
+            let (real, imag, limits) = extract_host_points(other, n, offset)?;
             Ok((Value::Tensor(real), Value::Tensor(imag), limits))
         }
     }
@@ -431,7 +497,7 @@ async fn extract_scatter_values(
 async fn gpu_real_imag_handles(
     handle: &GpuTensorHandle,
 ) -> Option<(GpuTensorHandle, GpuTensorHandle)> {
-    let provider = runmat_accelerate_api::provider_for_handle(handle)?;
+    let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)?;
     let real = provider.unary_real(handle).await.ok()?;
     let imag = provider.unary_imag(handle).await.ok()?;
     Some((real, imag))
@@ -444,7 +510,9 @@ async fn gather_gpu_value(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))
 }
 
-fn extract_host_points(value: Value, n: usize, offset: usize) -> BuiltinResult<(Tensor, Tensor)> {
+type HostPointTensors = (Tensor, Tensor, Option<(f64, f64)>);
+
+fn extract_host_points(value: Value, n: usize, offset: usize) -> BuiltinResult<HostPointTensors> {
     let samples = complex_samples(value)?;
     if samples.is_empty() {
         return Err(scatterplot_error(
@@ -465,6 +533,7 @@ fn extract_host_points(value: Value, n: usize, offset: usize) -> BuiltinResult<(
         real.push(re);
         imag.push(im);
     }
+    let limits = symmetric_limits(&real, &imag);
     let shape = vec![real.len(), 1];
     let x = Tensor::new(real, shape.clone()).map_err(|err| {
         scatterplot_error(
@@ -478,17 +547,20 @@ fn extract_host_points(value: Value, n: usize, offset: usize) -> BuiltinResult<(
             &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
         )
     })?;
-    Ok((x, y))
+    Ok((x, y, limits))
 }
 
 fn complex_samples(value: Value) -> BuiltinResult<Vec<(f64, f64)>> {
     match value {
         Value::Complex(re, im) => Ok(vec![(re, im)]),
-        Value::ComplexTensor(tensor) => Ok(tensor.data),
+        Value::ComplexTensor(tensor) => Ok(tensor.materialize_f64()),
         Value::Num(v) => Ok(vec![(v, 0.0)]),
         Value::Int(v) => Ok(vec![(v.to_f64(), 0.0)]),
         Value::Bool(v) => Ok(vec![(if v { 1.0 } else { 0.0 }, 0.0)]),
-        Value::Tensor(tensor) => Ok(tensor.data.into_iter().map(|v| (v, 0.0)).collect()),
+        Value::Tensor(tensor) => Ok(tensor_utils::tensor_values_f64(&tensor)
+            .into_iter()
+            .map(|v| (v, 0.0))
+            .collect()),
         Value::LogicalArray(logical) => Ok(logical
             .data
             .into_iter()
@@ -502,6 +574,14 @@ fn complex_samples(value: Value) -> BuiltinResult<Vec<(f64, f64)>> {
 }
 
 fn parse_nonnegative_integer(value: &Value, name: &str) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor_utils::scalar_integer_value(value) {
+        return integer.try_to_usize().ok_or_else(|| {
+            scatterplot_error(
+                format!("scatterplot: {name} is too large"),
+                &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
+            )
+        });
+    }
     let scalar = parse_numeric_scalar(value, name)?;
     if !scalar.is_finite() || scalar < 0.0 || scalar.fract() != 0.0 {
         return Err(scatterplot_error(
@@ -509,7 +589,7 @@ fn parse_nonnegative_integer(value: &Value, name: &str) -> BuiltinResult<usize> 
             &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
         ));
     }
-    if scalar > (usize::MAX as f64) {
+    if scalar > usize::MAX as f64 || (usize::BITS == 64 && scalar == usize::MAX as f64) {
         return Err(scatterplot_error(
             format!("scatterplot: {name} is too large"),
             &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
@@ -523,7 +603,9 @@ fn parse_numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
         Value::Num(v) => Ok(*v),
         Value::Int(v) => Ok(v.to_f64()),
         Value::Bool(v) => Ok(if *v { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            Ok(tensor_utils::tensor_value_f64(tensor, 0))
+        }
         other => Err(scatterplot_error(
             format!("scatterplot: {name} must be a numeric scalar, got {other:?}"),
             &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
@@ -585,14 +667,14 @@ fn scatterplot_map_plot_error(err: RuntimeError) -> RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::builtins::plotting::state::current_axes_handle_for_figure;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{
-        clear_figure, clone_figure, configure_subplot, current_figure_handle,
-        reset_hold_state_for_run,
+        clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
     };
     use futures::executor::block_on;
     use runmat_plot::plots::{scatter::MarkerStyle, PlotElement};
+    use runmat_value::ComplexTensor;
+    use runmat_value::{IntegerStorage, NumericStorage};
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -608,13 +690,73 @@ mod tests {
         ComplexTensor::new(data.to_vec(), vec![data.len(), 1]).expect("complex tensor")
     }
 
+    fn poisoned_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        Tensor::new_integer(storage, shape).expect("integer tensor")
+    }
+
+    fn all_integer_scalar_storages(value: u8) -> [IntegerStorage; 8] {
+        [
+            IntegerStorage::I8(vec![value as i8]),
+            IntegerStorage::I16(vec![value as i16]),
+            IntegerStorage::I32(vec![value as i32]),
+            IntegerStorage::I64(vec![value as i64]),
+            IntegerStorage::U8(vec![value]),
+            IntegerStorage::U16(vec![value as u16]),
+            IntegerStorage::U32(vec![value as u32]),
+            IntegerStorage::U64(vec![value as u64]),
+        ]
+    }
+
     #[test]
     fn scatterplot_decimates_from_zero_based_offset() {
         let data = complex_tensor(&[(1.0, 10.0), (2.0, 20.0), (3.0, 30.0), (4.0, 40.0)]);
-        let (x, y) =
+        let (x, y, limits) =
             extract_host_points(Value::ComplexTensor(data), 2, 1).expect("decimated points");
-        assert_eq!(x.data, vec![2.0, 4.0]);
-        assert_eq!(y.data, vec![20.0, 40.0]);
+        assert_eq!(x.as_f64_slice(), Some(&[2.0, 4.0][..]));
+        assert_eq!(y.as_f64_slice(), Some(&[20.0, 40.0][..]));
+        assert_eq!(limits, Some((-42.0, 42.0)));
+    }
+
+    #[test]
+    fn scatterplot_samples_and_scalars_read_typed_integer_storage() {
+        let samples = poisoned_integer_tensor(IntegerStorage::I16(vec![1, -2, 3]), vec![3, 1]);
+        let (x, y, _) = extract_host_points(Value::Tensor(samples), 1, 0).expect("integer samples");
+        assert_eq!(x.as_f64_slice(), Some(&[1.0, -2.0, 3.0][..]));
+        assert_eq!(y.as_f64_slice(), Some(&[0.0, 0.0, 0.0][..]));
+
+        let decimation = poisoned_integer_tensor(IntegerStorage::U16(vec![2]), vec![1, 1]);
+        assert_eq!(
+            parse_nonnegative_integer(&Value::Tensor(decimation), "n").expect("decimation"),
+            2
+        );
+    }
+
+    #[test]
+    fn scatterplot_materializes_native_single_at_the_plotting_boundary() {
+        let samples =
+            Tensor::from_numeric_storage(NumericStorage::F32(vec![1.25, -2.5]), vec![2, 1])
+                .expect("single samples");
+        let (x, y, limits) =
+            extract_host_points(Value::Tensor(samples), 1, 0).expect("single samples");
+        assert_eq!(x.as_f64_slice(), Some(&[1.25, -2.5][..]));
+        assert_eq!(y.as_f64_slice(), Some(&[0.0, 0.0][..]));
+        assert_eq!(limits, Some((-2.625, 2.625)));
+    }
+
+    #[test]
+    fn scatterplot_count_parser_reads_all_integer_storages_without_mirrors() {
+        for storage in all_integer_scalar_storages(2) {
+            let value = Value::Tensor(poisoned_integer_tensor(storage, vec![1, 1]));
+            assert_eq!(parse_nonnegative_integer(&value, "n").unwrap(), 2);
+        }
+    }
+
+    #[test]
+    fn scatterplot_figure_parser_rejects_all_integer_storages_without_mirrors() {
+        for storage in all_integer_scalar_storages(1) {
+            let value = Value::Tensor(poisoned_integer_tensor(storage, vec![1, 1]));
+            assert!(parse_figure_handle(&value).is_err());
+        }
     }
 
     #[test]
@@ -633,12 +775,12 @@ mod tests {
     }
 
     #[test]
-    fn scatterplot_rejects_invalid_axes_at_parse_time() {
+    fn scatterplot_rejects_unknown_figure_at_parse_time() {
         let err = ScatterplotOptions::parse(vec![
             Value::Num(1.0),
             Value::Num(0.0),
             Value::String("x".into()),
-            Value::Num(1.0),
+            Value::Num(f64::from(u32::MAX)),
         ])
         .unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:scatterplot:InvalidArgument"));
@@ -646,17 +788,27 @@ mod tests {
     }
 
     #[test]
-    fn scatterplot_rejects_nonscalar_axes_at_parse_time() {
-        let ax = Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("tensor");
+    fn scatterplot_rejects_nonscalar_figure_at_parse_time() {
+        let figure = Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("tensor");
         let err = ScatterplotOptions::parse(vec![
             Value::Num(1.0),
             Value::Num(0.0),
             Value::String("x".into()),
-            Value::Tensor(ax),
+            Value::Tensor(figure),
         ])
         .unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:scatterplot:InvalidArgument"));
         assert!(!err.to_string().contains("PlotFailed"));
+    }
+
+    #[test]
+    fn scatterplot_rejects_unrepresentable_integer_options_before_cast() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        assert!(parse_nonnegative_integer(&Value::Num(boundary), "n").is_err());
     }
 
     #[test]
@@ -669,8 +821,9 @@ mod tests {
         let PlotElement::Scatter(plot) = fig.plots().next().unwrap() else {
             panic!("expected scatter plot")
         };
-        assert_eq!(plot.x_data, vec![1.0, 0.5, -1.0]);
-        assert_eq!(plot.y_data, vec![-1.0, 0.5, 1.0]);
+        let (x, y) = plot.host_xy_f64().unwrap().unwrap();
+        assert_eq!(x, vec![1.0, 0.5, -1.0]);
+        assert_eq!(y, vec![-1.0, 0.5, 1.0]);
         assert!(fig.axis_equal);
         assert!(fig.grid_enabled);
     }
@@ -693,13 +846,11 @@ mod tests {
     }
 
     #[test]
-    fn scatterplot_accepts_trailing_axes_handle() {
+    fn scatterplot_accepts_trailing_existing_figure_handle() {
         let _guard = lock_plot_registry();
         setup_plot_tests();
-        configure_subplot(1, 2, 1).unwrap();
         let fig_handle = current_figure_handle();
-        let ax = current_axes_handle_for_figure(fig_handle).unwrap();
-        configure_subplot(1, 2, 0).unwrap();
+        select_figure(fig_handle);
         let data = complex_tensor(&[(1.0, 2.0), (3.0, 4.0)]);
         let _ = run_scatterplot(
             Value::ComplexTensor(data),
@@ -707,12 +858,12 @@ mod tests {
                 Value::Num(1.0),
                 Value::Num(0.0),
                 Value::String("x".into()),
-                Value::Num(ax),
+                Value::Num(f64::from(fig_handle.as_u32())),
             ],
         )
         .unwrap();
         let fig = clone_figure(fig_handle).unwrap();
-        assert_eq!(fig.plot_axes_indices(), &[1]);
+        assert_eq!(fig.plot_axes_indices(), &[0]);
     }
 
     #[test]
@@ -726,7 +877,7 @@ mod tests {
         assert!(labels.contains(&"h = scatterplot(x, n)"));
         assert!(labels.contains(&"h = scatterplot(x, n, offset)"));
         assert!(labels.contains(&"h = scatterplot(x, n, offset, marker)"));
-        assert!(labels.contains(&"h = scatterplot(x, n, offset, marker, ax)"));
+        assert!(labels.contains(&"h = scatterplot(x, n, offset, marker, scatfig)"));
     }
 
     #[test]

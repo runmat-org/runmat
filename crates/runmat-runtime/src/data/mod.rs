@@ -1,3 +1,4 @@
+use runmat_value::{ComplexStorage, ComplexTensor, IntegerComplexStorage};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
@@ -5,10 +6,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use chrono::Utc;
-use runmat_builtins::{IntValue, IntegerStorage, ObjectInstance, Tensor, Value};
 use runmat_filesystem as fs;
 use runmat_filesystem::data_contract::{
     DataChunkDescriptor, DataChunkUploadRequest, DataChunkUploadTarget,
+};
+use runmat_value::{
+    IntValue, IntegerStorage, NumericScalar, NumericStorage, ObjectInstance, Tensor, Value,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -51,6 +54,8 @@ pub struct DataArrayPayload {
     pub dtype: String,
     pub shape: Vec<usize>,
     pub values: DataArrayValues,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imaginary_values: Option<DataArrayValues>,
 }
 
 /// The persisted backing values of a data-array payload.
@@ -61,6 +66,7 @@ pub struct DataArrayPayload {
 #[derive(Debug, Clone, PartialEq)]
 pub enum DataArrayValues {
     F64(Vec<f64>),
+    F32(Vec<f32>),
     I8(Vec<i8>),
     I16(Vec<i16>),
     I32(Vec<i32>),
@@ -75,6 +81,7 @@ pub enum DataArrayValues {
 #[serde(tag = "encoding", content = "data", rename_all = "snake_case")]
 enum TaggedDataArrayValues {
     F64(Vec<f64>),
+    F32(Vec<f32>),
     I8(Vec<i8>),
     I16(Vec<i16>),
     I32(Vec<i32>),
@@ -89,6 +96,7 @@ enum TaggedDataArrayValues {
 #[serde(tag = "encoding", content = "data", rename_all = "snake_case")]
 enum TaggedDataArrayValuesRef<'a> {
     F64(&'a [f64]),
+    F32(&'a [f32]),
     I8(&'a [i8]),
     I16(&'a [i16]),
     I32(&'a [i32]),
@@ -113,6 +121,7 @@ impl Serialize for DataArrayValues {
     {
         let tagged = match self {
             Self::F64(values) => TaggedDataArrayValuesRef::F64(values),
+            Self::F32(values) => TaggedDataArrayValuesRef::F32(values),
             Self::I8(values) => TaggedDataArrayValuesRef::I8(values),
             Self::I16(values) => TaggedDataArrayValuesRef::I16(values),
             Self::I32(values) => TaggedDataArrayValuesRef::I32(values),
@@ -135,6 +144,7 @@ impl<'de> Deserialize<'de> for DataArrayValues {
             DataArrayValuesWire::Legacy(values) => Self::F64(values),
             DataArrayValuesWire::Tagged(tagged) => match tagged {
                 TaggedDataArrayValues::F64(values) => Self::F64(values),
+                TaggedDataArrayValues::F32(values) => Self::F32(values),
                 TaggedDataArrayValues::I8(values) => Self::I8(values),
                 TaggedDataArrayValues::I16(values) => Self::I16(values),
                 TaggedDataArrayValues::I32(values) => Self::I32(values),
@@ -149,8 +159,11 @@ impl<'de> Deserialize<'de> for DataArrayValues {
 }
 
 impl DataArrayValues {
-    pub fn zeros(dtype: &str, len: usize) -> Self {
-        match integer_dtype(dtype) {
+    pub fn zeros(dtype: &str, len: usize) -> BuiltinResult<Self> {
+        if is_single_dtype(dtype) {
+            return Ok(Self::F32(vec![0.0; len]));
+        }
+        Ok(match integer_dtype(dtype) {
             Some("int8") => Self::I8(vec![0; len]),
             Some("int16") => Self::I16(vec![0; len]),
             Some("int32") => Self::I32(vec![0; len]),
@@ -159,13 +172,15 @@ impl DataArrayValues {
             Some("uint16") => Self::U16(vec![0; len]),
             Some("uint32") => Self::U32(vec![0; len]),
             Some("uint64") => Self::U64(vec![0; len]),
-            _ => Self::F64(vec![0.0; len]),
-        }
+            None if is_double_dtype(dtype) => Self::F64(vec![0.0; len]),
+            _ => return Err(unsupported_data_dtype(dtype)),
+        })
     }
 
     pub fn len(&self) -> usize {
         match self {
             Self::F64(values) => values.len(),
+            Self::F32(values) => values.len(),
             Self::I8(values) => values.len(),
             Self::I16(values) => values.len(),
             Self::I32(values) => values.len(),
@@ -184,6 +199,7 @@ impl DataArrayValues {
     pub fn into_tensor(self, shape: Vec<usize>) -> Result<Tensor, String> {
         match self {
             Self::F64(values) => Tensor::new(values, shape),
+            Self::F32(values) => Tensor::from_f32(values, shape),
             Self::I8(values) => Tensor::new_integer(IntegerStorage::I8(values), shape),
             Self::I16(values) => Tensor::new_integer(IntegerStorage::I16(values), shape),
             Self::I32(values) => Tensor::new_integer(IntegerStorage::I32(values), shape),
@@ -198,6 +214,7 @@ impl DataArrayValues {
     pub fn to_f64_vec(&self) -> Vec<f64> {
         match self {
             Self::F64(values) => values.clone(),
+            Self::F32(values) => values.iter().map(|&value| f64::from(value)).collect(),
             Self::I8(values) => values.iter().map(|&value| value as f64).collect(),
             Self::I16(values) => values.iter().map(|&value| value as f64).collect(),
             Self::I32(values) => values.iter().map(|&value| value as f64).collect(),
@@ -218,6 +235,11 @@ impl DataArrayValues {
     pub fn preview_f64(&self, limit: usize) -> Vec<f64> {
         match self {
             Self::F64(values) => values.iter().take(limit).copied().collect(),
+            Self::F32(values) => values
+                .iter()
+                .take(limit)
+                .map(|&value| f64::from(value))
+                .collect(),
             Self::I8(values) => values
                 .iter()
                 .take(limit)
@@ -264,6 +286,7 @@ impl DataArrayValues {
     pub fn get(&self, index: usize) -> BuiltinResult<DataScalar> {
         match self {
             Self::F64(values) => values.get(index).copied().map(DataScalar::F64),
+            Self::F32(values) => values.get(index).copied().map(DataScalar::F32),
             Self::I8(values) => values.get(index).copied().map(|v| DataScalar::I8(v)),
             Self::I16(values) => values.get(index).copied().map(|v| DataScalar::I16(v)),
             Self::I32(values) => values.get(index).copied().map(|v| DataScalar::I32(v)),
@@ -279,6 +302,7 @@ impl DataArrayValues {
     pub fn push(&mut self, value: DataScalar) -> BuiltinResult<()> {
         match (self, value) {
             (Self::F64(values), DataScalar::F64(value)) => values.push(value),
+            (Self::F32(values), DataScalar::F32(value)) => values.push(value),
             (Self::I8(values), DataScalar::I8(value)) => values.push(value),
             (Self::I16(values), DataScalar::I16(value)) => values.push(value),
             (Self::I32(values), DataScalar::I32(value)) => values.push(value),
@@ -295,6 +319,7 @@ impl DataArrayValues {
     pub fn set(&mut self, index: usize, value: DataScalar) -> BuiltinResult<()> {
         match (self, value) {
             (Self::F64(values), DataScalar::F64(value)) => set_at(values, index, value),
+            (Self::F32(values), DataScalar::F32(value)) => set_at(values, index, value),
             (Self::I8(values), DataScalar::I8(value)) => set_at(values, index, value),
             (Self::I16(values), DataScalar::I16(value)) => set_at(values, index, value),
             (Self::I32(values), DataScalar::I32(value)) => set_at(values, index, value),
@@ -309,14 +334,26 @@ impl DataArrayValues {
     }
 
     fn cast_to_dtype(self, dtype: &str) -> BuiltinResult<Self> {
-        let Some(target) = integer_target(dtype) else {
+        if is_single_dtype(dtype) {
+            return Ok(Self::F32(
+                self.to_f64_vec()
+                    .into_iter()
+                    .map(|value| value as f32)
+                    .collect(),
+            ));
+        }
+        if is_double_dtype(dtype) {
             return Ok(Self::F64(self.to_f64_vec()));
+        }
+        let Some(target) = integer_target(dtype) else {
+            return Err(unsupported_data_dtype(dtype));
         };
         let mut values = Vec::with_capacity(self.len());
         for index in 0..self.len() {
             let value = self.get(index)?;
             values.push(match value {
                 DataScalar::F64(value) => target.cast_scalar(value),
+                DataScalar::F32(value) => target.cast_scalar(f64::from(value)),
                 value => target.cast_int(&value.to_int_value()),
             });
         }
@@ -335,11 +372,42 @@ impl DataArrayValues {
             IntegerStorage::U64(values) => Self::U64(values),
         }
     }
+
+    fn from_numeric_storage(storage: NumericStorage) -> Self {
+        match storage {
+            NumericStorage::F64(values) => Self::F64(values),
+            NumericStorage::F32(values) => Self::F32(values),
+            NumericStorage::I8(values) => Self::I8(values),
+            NumericStorage::I16(values) => Self::I16(values),
+            NumericStorage::I32(values) => Self::I32(values),
+            NumericStorage::I64(values) => Self::I64(values),
+            NumericStorage::U8(values) => Self::U8(values),
+            NumericStorage::U16(values) => Self::U16(values),
+            NumericStorage::U32(values) => Self::U32(values),
+            NumericStorage::U64(values) => Self::U64(values),
+        }
+    }
+
+    fn into_numeric_storage(self) -> NumericStorage {
+        match self {
+            Self::F64(values) => NumericStorage::F64(values),
+            Self::F32(values) => NumericStorage::F32(values),
+            Self::I8(values) => NumericStorage::I8(values),
+            Self::I16(values) => NumericStorage::I16(values),
+            Self::I32(values) => NumericStorage::I32(values),
+            Self::I64(values) => NumericStorage::I64(values),
+            Self::U8(values) => NumericStorage::U8(values),
+            Self::U16(values) => NumericStorage::U16(values),
+            Self::U32(values) => NumericStorage::U32(values),
+            Self::U64(values) => NumericStorage::U64(values),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum DataScalar {
     F64(f64),
+    F32(f32),
     I8(i8),
     I16(i16),
     I32(i32),
@@ -354,6 +422,7 @@ impl DataScalar {
     fn to_int_value(self) -> IntValue {
         match self {
             Self::F64(value) => IntValue::I64(value as i64),
+            Self::F32(value) => IntValue::I64(value as i64),
             Self::I8(value) => IntValue::I8(value),
             Self::I16(value) => IntValue::I16(value),
             Self::I32(value) => IntValue::I32(value),
@@ -388,6 +457,26 @@ fn integer_dtype(dtype: &str) -> Option<&'static str> {
     }
 }
 
+fn is_single_dtype(dtype: &str) -> bool {
+    matches!(
+        dtype.to_ascii_lowercase().as_str(),
+        "single" | "f32" | "float32"
+    )
+}
+
+fn is_double_dtype(dtype: &str) -> bool {
+    matches!(
+        dtype.to_ascii_lowercase().as_str(),
+        "double" | "f64" | "float64"
+    )
+}
+
+fn unsupported_data_dtype(dtype: &str) -> RuntimeError {
+    data_error(format!(
+        "unsupported data array dtype '{dtype}'; expected f64, f32, or a built-in integer class"
+    ))
+}
+
 fn integer_target(dtype: &str) -> Option<IntegerTarget> {
     match integer_dtype(dtype) {
         Some("int8") => Some(IntegerTarget::I8),
@@ -403,21 +492,25 @@ fn integer_target(dtype: &str) -> Option<IntegerTarget> {
 }
 
 impl DataArrayPayload {
-    pub fn zeros(dtype: String, shape: Vec<usize>) -> Self {
-        let values = DataArrayValues::zeros(&dtype, shape.iter().copied().product());
-        Self {
+    pub fn zeros(dtype: String, shape: Vec<usize>) -> BuiltinResult<Self> {
+        let values = DataArrayValues::zeros(&dtype, checked_shape_element_count(&shape)?)?;
+        Ok(Self {
             dtype,
             shape,
             values,
-        }
+            imaginary_values: None,
+        })
     }
 
     pub fn from_value(dtype: String, value: &Value) -> BuiltinResult<Self> {
-        let (shape, values) = data_values_from_value(value)?;
+        let (shape, values, imaginary_values) = data_values_from_value(value)?;
         Ok(Self {
             dtype: dtype.clone(),
             shape,
             values: values.cast_to_dtype(&dtype)?,
+            imaginary_values: imaginary_values
+                .map(|values| values.cast_to_dtype(&dtype))
+                .transpose()?,
         })
     }
 
@@ -426,58 +519,147 @@ impl DataArrayPayload {
         if scalar.values.len() != 1 {
             return Err(data_error("expected numeric scalar"));
         }
+        let imaginary_scalar = scalar
+            .imaginary_values
+            .as_ref()
+            .map(|values| values.get(0))
+            .transpose()?;
         let scalar = scalar.values.get(0)?;
-        let len = shape.iter().copied().product();
-        let mut values = DataArrayValues::zeros(&dtype, len);
+        let len = checked_shape_element_count(&shape)?;
+        let mut values = DataArrayValues::zeros(&dtype, len)?;
+        let mut imaginary_values = imaginary_scalar
+            .map(|_| DataArrayValues::zeros(&dtype, len))
+            .transpose()?;
         for index in 0..len {
             values.set(index, scalar)?;
+            if let (Some(values), Some(scalar)) = (&mut imaginary_values, imaginary_scalar) {
+                values.set(index, scalar)?;
+            }
         }
         Ok(Self {
             dtype,
             shape,
             values,
+            imaginary_values,
         })
     }
 
     pub fn normalize_for_dtype(mut self, dtype: &str) -> BuiltinResult<Self> {
         self.values = self.values.cast_to_dtype(dtype)?;
+        self.imaginary_values = self
+            .imaginary_values
+            .map(|values| values.cast_to_dtype(dtype))
+            .transpose()?;
         self.dtype = dtype.to_string();
         Ok(self)
     }
 
     pub fn into_value(self) -> BuiltinResult<Value> {
-        self.values
-            .into_tensor(self.shape)
-            .map(Value::Tensor)
-            .map_err(|err| data_error(format!("invalid data payload: {err}")))
+        let Some(imaginary_values) = self.imaginary_values else {
+            return self
+                .values
+                .into_tensor(self.shape)
+                .map(Value::Tensor)
+                .map_err(|err| data_error(format!("invalid data payload: {err}")));
+        };
+        let real = self.values.into_numeric_storage();
+        let imag = imaginary_values.into_numeric_storage();
+        let storage = match (real, imag) {
+            (NumericStorage::F64(real), NumericStorage::F64(imag)) => {
+                ComplexStorage::F64(real.into_iter().zip(imag).collect())
+            }
+            (NumericStorage::F32(real), NumericStorage::F32(imag)) => {
+                ComplexStorage::F32(real.into_iter().zip(imag).collect())
+            }
+            (real, imag) => {
+                let real = real.into_integer_storage().map_err(|_| {
+                    data_error("complex data payload components have mismatched storage classes")
+                })?;
+                let imag = imag.into_integer_storage().map_err(|_| {
+                    data_error("complex data payload components have mismatched storage classes")
+                })?;
+                ComplexStorage::Integer(IntegerComplexStorage::new(real, imag).map_err(
+                    |error| data_error(format!("invalid complex data payload: {error}")),
+                )?)
+            }
+        };
+        ComplexTensor::from_complex_storage(storage, self.shape)
+            .map(Value::ComplexTensor)
+            .map_err(|error| data_error(format!("invalid complex data payload: {error}")))
     }
 }
 
-fn data_values_from_value(value: &Value) -> BuiltinResult<(Vec<usize>, DataArrayValues)> {
+fn checked_shape_element_count(shape: &[usize]) -> BuiltinResult<usize> {
+    if shape.contains(&0) {
+        return Ok(0);
+    }
+    shape.iter().try_fold(1usize, |count, dimension| {
+        count
+            .checked_mul(*dimension)
+            .ok_or_else(|| data_error("data array shape exceeds platform element-count limits"))
+    })
+}
+
+fn data_values_from_value(
+    value: &Value,
+) -> BuiltinResult<(Vec<usize>, DataArrayValues, Option<DataArrayValues>)> {
     match value {
         Value::Tensor(tensor) => {
-            let values = match tensor.integer_storage() {
-                Some(IntegerStorage::I8(values)) => DataArrayValues::I8(values.clone()),
-                Some(IntegerStorage::I16(values)) => DataArrayValues::I16(values.clone()),
-                Some(IntegerStorage::I32(values)) => DataArrayValues::I32(values.clone()),
-                Some(IntegerStorage::I64(values)) => DataArrayValues::I64(values.clone()),
-                Some(IntegerStorage::U8(values)) => DataArrayValues::U8(values.clone()),
-                Some(IntegerStorage::U16(values)) => DataArrayValues::U16(values.clone()),
-                Some(IntegerStorage::U32(values)) => DataArrayValues::U32(values.clone()),
-                Some(IntegerStorage::U64(values)) => DataArrayValues::U64(values.clone()),
-                None => DataArrayValues::F64(tensor.data.clone()),
-            };
-            Ok((tensor.shape.clone(), values))
+            let storage = tensor
+                .clone()
+                .into_numeric_storage()
+                .map_err(|error| data_error(format!("invalid numeric tensor storage: {error}")))?;
+            let values = DataArrayValues::from_numeric_storage(storage);
+            Ok((tensor.shape.clone(), values, None))
         }
-        Value::Num(value) => Ok((vec![1, 1], DataArrayValues::F64(vec![*value]))),
-        Value::Int(IntValue::I8(value)) => Ok((vec![1, 1], DataArrayValues::I8(vec![*value]))),
-        Value::Int(IntValue::I16(value)) => Ok((vec![1, 1], DataArrayValues::I16(vec![*value]))),
-        Value::Int(IntValue::I32(value)) => Ok((vec![1, 1], DataArrayValues::I32(vec![*value]))),
-        Value::Int(IntValue::I64(value)) => Ok((vec![1, 1], DataArrayValues::I64(vec![*value]))),
-        Value::Int(IntValue::U8(value)) => Ok((vec![1, 1], DataArrayValues::U8(vec![*value]))),
-        Value::Int(IntValue::U16(value)) => Ok((vec![1, 1], DataArrayValues::U16(vec![*value]))),
-        Value::Int(IntValue::U32(value)) => Ok((vec![1, 1], DataArrayValues::U32(vec![*value]))),
-        Value::Int(IntValue::U64(value)) => Ok((vec![1, 1], DataArrayValues::U64(vec![*value]))),
+        Value::Num(value) => Ok((vec![1, 1], DataArrayValues::F64(vec![*value]), None)),
+        Value::Int(IntValue::I8(value)) => {
+            Ok((vec![1, 1], DataArrayValues::I8(vec![*value]), None))
+        }
+        Value::Int(IntValue::I16(value)) => {
+            Ok((vec![1, 1], DataArrayValues::I16(vec![*value]), None))
+        }
+        Value::Int(IntValue::I32(value)) => {
+            Ok((vec![1, 1], DataArrayValues::I32(vec![*value]), None))
+        }
+        Value::Int(IntValue::I64(value)) => {
+            Ok((vec![1, 1], DataArrayValues::I64(vec![*value]), None))
+        }
+        Value::Int(IntValue::U8(value)) => {
+            Ok((vec![1, 1], DataArrayValues::U8(vec![*value]), None))
+        }
+        Value::Int(IntValue::U16(value)) => {
+            Ok((vec![1, 1], DataArrayValues::U16(vec![*value]), None))
+        }
+        Value::Int(IntValue::U32(value)) => {
+            Ok((vec![1, 1], DataArrayValues::U32(vec![*value]), None))
+        }
+        Value::Int(IntValue::U64(value)) => {
+            Ok((vec![1, 1], DataArrayValues::U64(vec![*value]), None))
+        }
+        Value::Complex(real, imag) => Ok((
+            vec![1, 1],
+            DataArrayValues::F64(vec![*real]),
+            Some(DataArrayValues::F64(vec![*imag])),
+        )),
+        Value::ComplexTensor(tensor) => {
+            let shape = tensor.shape.clone();
+            let (real, imag) = match tensor.clone().into_complex_storage() {
+                ComplexStorage::F64(values) => {
+                    let (real, imag): (Vec<_>, Vec<_>) = values.into_iter().unzip();
+                    (DataArrayValues::F64(real), DataArrayValues::F64(imag))
+                }
+                ComplexStorage::F32(values) => {
+                    let (real, imag): (Vec<_>, Vec<_>) = values.into_iter().unzip();
+                    (DataArrayValues::F32(real), DataArrayValues::F32(imag))
+                }
+                ComplexStorage::Integer(storage) => (
+                    DataArrayValues::from_integer_storage(storage.real),
+                    DataArrayValues::from_integer_storage(storage.imag),
+                ),
+            };
+            Ok((shape, real, Some(imag)))
+        }
         _ => Err(data_error(
             "DataArray.write supports tensor or numeric scalar values",
         )),
@@ -732,6 +914,19 @@ pub async fn write_array_payload_async(
             dtype: payload.dtype.clone(),
             shape: chunk_extent.clone(),
             values: collect_chunk_values(payload, &chunk_start, &chunk_extent)?,
+            imaginary_values: payload
+                .imaginary_values
+                .as_ref()
+                .map(|values| {
+                    collect_chunk_component_values(
+                        values,
+                        &payload.dtype,
+                        &payload.shape,
+                        &chunk_start,
+                        &chunk_extent,
+                    )
+                })
+                .transpose()?,
         };
         let key = chunk_key(&coords);
         let object_id = format!("obj_{}", key.replace('.', "_"));
@@ -873,7 +1068,9 @@ async fn read_array_payload_chunked_slice_async(
         ))
     })?;
 
-    let mut values = DataArrayValues::zeros(&meta.dtype, slice_shape.iter().copied().product());
+    let mut values =
+        DataArrayValues::zeros(&meta.dtype, checked_shape_element_count(slice_shape)?)?;
+    let mut imaginary_values: Option<DataArrayValues> = None;
     for chunk in index.chunks {
         let coords = chunk_coords_from_entry(&chunk, meta.shape.len())?;
         let chunk_start = chunk_start_for_coords(&coords, &meta.chunk_shape);
@@ -922,6 +1119,16 @@ async fn read_array_payload_chunked_slice_async(
                 }
                 let dst_linear = linear_index_column_major(&dst, slice_shape)?;
                 values.set(dst_linear, payload.values.get(src_linear)?)?;
+                if let Some(payload_imaginary) = &payload.imaginary_values {
+                    let target = match &mut imaginary_values {
+                        Some(values) => values,
+                        None => imaginary_values.insert(DataArrayValues::zeros(
+                            &meta.dtype,
+                            checked_shape_element_count(slice_shape)?,
+                        )?),
+                    };
+                    target.set(dst_linear, payload_imaginary.get(src_linear)?)?;
+                }
             }
             if !advance_index(&mut local, &chunk_extent) {
                 break;
@@ -933,6 +1140,7 @@ async fn read_array_payload_chunked_slice_async(
         dtype: meta.dtype.clone(),
         shape: slice_shape.to_vec(),
         values,
+        imaginary_values,
     })
 }
 
@@ -953,7 +1161,9 @@ async fn read_array_payload_chunked_async(
             index_path.display()
         ))
     })?;
-    let mut values = DataArrayValues::zeros(&meta.dtype, meta.shape.iter().copied().product());
+    let mut values =
+        DataArrayValues::zeros(&meta.dtype, checked_shape_element_count(&meta.shape)?)?;
+    let mut imaginary_values: Option<DataArrayValues> = None;
     for chunk in index.chunks {
         let chunk_path = root.join(&chunk.data_path);
         let bytes = fs::read_async(&chunk_path).await.map_err(|err| {
@@ -992,6 +1202,16 @@ async fn read_array_payload_chunked_async(
             let src_linear = linear_index_column_major(&local, &chunk_extent)?;
             let dst_linear = linear_index_column_major(&global, &meta.shape)?;
             values.set(dst_linear, payload.values.get(src_linear)?)?;
+            if let Some(payload_imaginary) = &payload.imaginary_values {
+                let target = match &mut imaginary_values {
+                    Some(values) => values,
+                    None => imaginary_values.insert(DataArrayValues::zeros(
+                        &meta.dtype,
+                        checked_shape_element_count(&meta.shape)?,
+                    )?),
+                };
+                target.set(dst_linear, payload_imaginary.get(src_linear)?)?;
+            }
             if !advance_index(&mut local, &chunk_extent) {
                 break;
             }
@@ -1001,6 +1221,7 @@ async fn read_array_payload_chunked_async(
         dtype: meta.dtype.clone(),
         shape: meta.shape.clone(),
         values,
+        imaginary_values,
     })
 }
 
@@ -1113,15 +1334,31 @@ fn collect_chunk_values(
     chunk_start: &[usize],
     chunk_extent: &[usize],
 ) -> BuiltinResult<DataArrayValues> {
+    collect_chunk_component_values(
+        &payload.values,
+        &payload.dtype,
+        &payload.shape,
+        chunk_start,
+        chunk_extent,
+    )
+}
+
+fn collect_chunk_component_values(
+    source: &DataArrayValues,
+    dtype: &str,
+    full_shape: &[usize],
+    chunk_start: &[usize],
+    chunk_extent: &[usize],
+) -> BuiltinResult<DataArrayValues> {
     let mut local = vec![0usize; chunk_extent.len()];
-    let mut values = DataArrayValues::zeros(&payload.dtype, 0);
+    let mut values = DataArrayValues::zeros(dtype, 0)?;
     loop {
         let mut global = Vec::with_capacity(chunk_extent.len());
         for dim in 0..chunk_extent.len() {
             global.push(chunk_start[dim] + local[dim]);
         }
-        let linear = linear_index_column_major(&global, &payload.shape)?;
-        values.push(payload.values.get(linear)?)?;
+        let linear = linear_index_column_major(&global, full_shape)?;
+        values.push(source.get(linear)?)?;
         if !advance_index(&mut local, chunk_extent) {
             break;
         }
@@ -1219,12 +1456,18 @@ fn extract_slice_payload(
     start: &[usize],
     shape: &[usize],
 ) -> BuiltinResult<DataArrayPayload> {
-    let mut values = DataArrayValues::zeros(&payload.dtype, 0);
+    let mut values = DataArrayValues::zeros(&payload.dtype, 0)?;
+    let mut imaginary_values = payload
+        .imaginary_values
+        .as_ref()
+        .map(|_| DataArrayValues::zeros(&payload.dtype, 0))
+        .transpose()?;
     if shape.is_empty() {
         return Ok(DataArrayPayload {
             dtype: payload.dtype.clone(),
             shape: Vec::new(),
             values,
+            imaginary_values,
         });
     }
     let mut local = vec![0usize; shape.len()];
@@ -1235,6 +1478,9 @@ fn extract_slice_payload(
         }
         let linear = linear_index_column_major(&global, &payload.shape)?;
         values.push(payload.values.get(linear)?)?;
+        if let (Some(source), Some(target)) = (&payload.imaginary_values, &mut imaginary_values) {
+            target.push(source.get(linear)?)?;
+        }
         if !advance_index(&mut local, shape) {
             break;
         }
@@ -1243,6 +1489,7 @@ fn extract_slice_payload(
         dtype: payload.dtype.clone(),
         shape: shape.to_vec(),
         values,
+        imaginary_values,
     })
 }
 
@@ -1313,6 +1560,7 @@ pub fn parse_schema(schema: &Value) -> BuiltinResult<DataSchema> {
             .map(parse_usize_vector)
             .transpose()?
             .unwrap_or_else(|| default_chunk_shape(&shape));
+        validate_chunk_shape(&shape, &chunk_shape)?;
         let codec = meta_struct
             .fields
             .get("codec")
@@ -1340,7 +1588,7 @@ pub fn parse_schema(schema: &Value) -> BuiltinResult<DataSchema> {
 
 fn default_chunk_shape(shape: &[usize]) -> Vec<usize> {
     if shape.is_empty() {
-        return vec![1024];
+        return Vec::new();
     }
     let mut out = shape.to_vec();
     if out.len() == 1 {
@@ -1355,39 +1603,64 @@ fn default_chunk_shape(shape: &[usize]) -> Vec<usize> {
     out
 }
 
+pub fn validate_chunk_shape(shape: &[usize], chunk_shape: &[usize]) -> BuiltinResult<()> {
+    if chunk_shape.len() != shape.len() {
+        return Err(data_error(
+            "data array chunk shape must have the same rank as its array shape",
+        ));
+    }
+    if chunk_shape.contains(&0) {
+        return Err(data_error(
+            "data array chunk dimensions must be strictly positive",
+        ));
+    }
+    Ok(())
+}
+
 fn parse_usize_vector(value: &Value) -> BuiltinResult<Vec<usize>> {
     match value {
         Value::Tensor(t) => tensor_to_usize_vector(t),
-        Value::Num(n) => {
-            if *n < 0.0 || !n.is_finite() {
-                return Err(data_error(
-                    "data schema dimensions must be non-negative finite numbers",
-                ));
-            }
-            Ok(vec![*n as usize])
-        }
-        Value::Int(i) => {
-            let n = i.to_i64();
-            if n < 0 {
-                return Err(data_error("data schema dimensions must be non-negative"));
-            }
-            Ok(vec![n as usize])
-        }
+        Value::Num(n) => floating_dimension_to_usize(*n).map(|value| vec![value]),
+        Value::Int(i) => i
+            .try_to_usize()
+            .map(|n| vec![n])
+            .ok_or_else(|| data_error("data schema dimensions must be non-negative integers")),
         _ => Err(data_error(
             "data schema dimension field must be numeric tensor/vector",
         )),
     }
 }
 
+fn floating_dimension_to_usize(value: f64) -> BuiltinResult<usize> {
+    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 {
+        return Err(data_error(
+            "data schema dimensions must be non-negative finite integers",
+        ));
+    }
+    let integer = value as u128;
+    if integer > usize::MAX as u128 || integer as f64 != value {
+        return Err(data_error("data schema dimensions exceed platform limits"));
+    }
+    usize::try_from(integer)
+        .map_err(|_| data_error("data schema dimensions exceed platform limits"))
+}
+
 fn tensor_to_usize_vector(t: &Tensor) -> BuiltinResult<Vec<usize>> {
-    let mut out = Vec::with_capacity(t.data.len());
-    for value in &t.data {
-        if !value.is_finite() || *value < 0.0 {
-            return Err(data_error(
-                "data schema dimensions must be non-negative finite numbers",
-            ));
-        }
-        out.push(*value as usize);
+    let mut out = Vec::with_capacity(t.len());
+    for index in 0..t.len() {
+        let value = t
+            .numeric_value_at(index)
+            .ok_or_else(|| data_error("data schema dimensions require valid numeric storage"))?;
+        out.push(match value {
+            NumericScalar::F64(value) => floating_dimension_to_usize(value)?,
+            NumericScalar::F32(value) => floating_dimension_to_usize(f64::from(value))?,
+            value => value
+                .into_int_value()
+                .and_then(|value| value.try_to_usize())
+                .ok_or_else(|| {
+                    data_error("data schema dimensions must be non-negative integers")
+                })?,
+        });
     }
     Ok(out)
 }
@@ -1554,6 +1827,123 @@ mod tests {
     use super::*;
 
     #[test]
+    fn schema_dimensions_preserve_large_typed_unsigned_values() {
+        let expected = usize::try_from(u64::MAX).ok();
+        let parsed = parse_usize_vector(&Value::Int(IntValue::U64(u64::MAX)));
+        match expected {
+            Some(value) => assert_eq!(parsed.expect("representable dimension"), vec![value]),
+            None => assert!(parsed.is_err()),
+        }
+        assert!(parse_usize_vector(&Value::Int(IntValue::I64(-1))).is_err());
+    }
+
+    #[test]
+    fn schema_dimension_tensors_preserve_exact_integer_storage() {
+        let cases = [
+            IntegerStorage::I8(vec![2, 3]),
+            IntegerStorage::I16(vec![2, 3]),
+            IntegerStorage::I32(vec![2, 3]),
+            IntegerStorage::I64(vec![2, 3]),
+            IntegerStorage::U8(vec![2, 3]),
+            IntegerStorage::U16(vec![2, 3]),
+            IntegerStorage::U32(vec![2, 3]),
+            IntegerStorage::U64(vec![2, 3]),
+        ];
+
+        for storage in cases {
+            let input = Tensor::new_integer(storage, vec![1, 2]).expect("dimension tensor");
+            assert_eq!(
+                parse_usize_vector(&Value::Tensor(input)).expect("typed dimensions"),
+                vec![2, 3]
+            );
+        }
+
+        #[cfg(target_pointer_width = "64")]
+        {
+            let input = Tensor::new_integer(
+                IntegerStorage::U64(vec![1_u64 << 53, (1_u64 << 53) + 1]),
+                vec![1, 2],
+            )
+            .expect("uint64 dimension tensor");
+            assert_eq!(
+                parse_usize_vector(&Value::Tensor(input)).expect("wide typed dimensions"),
+                vec![
+                    usize::try_from(1_u64 << 53).expect("representable first dimension"),
+                    usize::try_from((1_u64 << 53) + 1).expect("representable second dimension"),
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn schema_dimension_tensors_accept_native_single_and_reject_fractional_floats() {
+        let input = Tensor::from_f32(vec![2.0, 3.0], vec![1, 2]).expect("single dimensions");
+        assert_eq!(
+            parse_usize_vector(&Value::Tensor(input)).expect("single dimensions"),
+            vec![2, 3]
+        );
+
+        let fractional =
+            Tensor::from_f32(vec![2.0, 3.5], vec![1, 2]).expect("fractional dimensions");
+        assert!(parse_usize_vector(&Value::Tensor(fractional)).is_err());
+        assert!(parse_usize_vector(&Value::Num(1.5)).is_err());
+        assert!(parse_usize_vector(&Value::Num(f64::INFINITY)).is_err());
+    }
+
+    #[test]
+    fn schema_dimension_tensors_reject_negative_integer_storage() {
+        let input =
+            Tensor::new_integer(IntegerStorage::I16(vec![2, -1]), vec![1, 2]).expect("int16 dims");
+        assert!(parse_usize_vector(&Value::Tensor(input)).is_err());
+    }
+
+    #[test]
+    fn payload_allocation_rejects_shape_product_overflow() {
+        let error = DataArrayPayload::zeros("uint64".to_string(), vec![usize::MAX, 2])
+            .expect_err("overflowing shape must reject before allocation");
+        assert!(error
+            .message()
+            .contains("shape exceeds platform element-count limits"));
+        let error = DataArrayPayload::filled(
+            "uint64".to_string(),
+            vec![usize::MAX, 2],
+            &Value::Int(IntValue::U64(1)),
+        )
+        .expect_err("overflowing filled shape must reject before allocation");
+        assert!(error
+            .message()
+            .contains("shape exceeds platform element-count limits"));
+        for shape in [
+            vec![0, usize::MAX, 2],
+            vec![usize::MAX, 0, 2],
+            vec![usize::MAX, 2, 0],
+        ] {
+            let payload = DataArrayPayload::zeros("uint64".to_string(), shape.clone())
+                .expect("a zero dimension makes the total element count zero");
+            assert_eq!(payload.shape, shape);
+            assert_eq!(payload.values.len(), 0);
+        }
+    }
+
+    #[test]
+    fn chunk_shape_requires_positive_rank_matched_dimensions() {
+        validate_chunk_shape(&[4, 5], &[2, 5]).expect("valid chunk shape");
+        assert!(validate_chunk_shape(&[4, 5], &[2]).is_err());
+        assert!(validate_chunk_shape(&[4, 5], &[2, 0]).is_err());
+        validate_chunk_shape(&[], &[]).expect("rank-zero metadata remains self-consistent");
+    }
+
+    #[test]
+    fn payload_rejects_unknown_dtype_instead_of_falling_back_to_f64() {
+        let error = DataArrayPayload::zeros("mystery".to_string(), vec![1, 1])
+            .expect_err("unknown dtype must reject");
+        assert!(error.message().contains("unsupported data array dtype"));
+        let error = DataArrayPayload::from_value("mystery".to_string(), &Value::Num(1.0))
+            .expect_err("unknown cast target must reject");
+        assert!(error.message().contains("unsupported data array dtype"));
+    }
+
+    #[test]
     fn payload_roundtrips_every_native_integer_storage_class() {
         let cases = vec![
             DataArrayValues::I8(vec![i8::MIN, i8::MAX]),
@@ -1576,12 +1966,13 @@ mod tests {
                 DataArrayValues::U16(_) => "uint16",
                 DataArrayValues::U32(_) => "uint32",
                 DataArrayValues::U64(_) => "uint64",
-                DataArrayValues::F64(_) => unreachable!(),
+                DataArrayValues::F64(_) | DataArrayValues::F32(_) => unreachable!(),
             };
             let payload = DataArrayPayload {
                 dtype: dtype.to_string(),
                 shape: vec![1, 2],
                 values: values.clone(),
+                imaginary_values: None,
             };
             let bytes = serde_json::to_vec(&payload).expect("encode typed payload");
             let decoded: DataArrayPayload = serde_json::from_slice(&bytes).expect("decode payload");
@@ -1594,6 +1985,38 @@ mod tests {
                 Some(dtype)
             );
         }
+    }
+
+    #[test]
+    fn payload_roundtrips_native_single_storage() {
+        let values = DataArrayValues::F32(vec![f32::MIN, 0.1, f32::MAX]);
+        let payload = DataArrayPayload {
+            dtype: "f32".to_string(),
+            shape: vec![1, 3],
+            values: values.clone(),
+            imaginary_values: None,
+        };
+        let bytes = serde_json::to_vec(&payload).expect("encode single payload");
+        let decoded: DataArrayPayload =
+            serde_json::from_slice(&bytes).expect("decode single payload");
+        assert_eq!(decoded.values, values);
+
+        let Value::Tensor(tensor) = decoded.into_value().expect("single tensor value") else {
+            panic!("expected tensor");
+        };
+        assert_eq!(tensor.numeric_dtype(), runmat_value::NumericDType::F32);
+        assert_eq!(
+            tensor.materialize_f64(),
+            vec![f64::from(f32::MIN), f64::from(0.1_f32), f64::from(f32::MAX)]
+        );
+    }
+
+    #[test]
+    fn payload_construction_preserves_native_single_tensor() {
+        let input = Tensor::from_f32(vec![0.1, -2.5], vec![1, 2]).expect("single tensor");
+        let payload = DataArrayPayload::from_value("f32".to_string(), &Value::Tensor(input))
+            .expect("single payload");
+        assert_eq!(payload.values, DataArrayValues::F32(vec![0.1, -2.5]));
     }
 
     #[test]
@@ -1628,6 +2051,33 @@ mod tests {
             payload.values,
             DataArrayValues::U64(vec![1_u64 << 63, u64::MAX])
         );
+    }
+
+    #[test]
+    fn payload_rejects_typed_complex_integers_without_float_coercion() {
+        let storage = runmat_value::IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
+            IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]),
+        )
+        .expect("matching typed complex components");
+        let complex = runmat_value::ComplexTensor::new_integer(storage.clone(), vec![1, 2])
+            .expect("typed complex tensor");
+
+        let payload =
+            DataArrayPayload::from_value("uint64".to_string(), &Value::ComplexTensor(complex))
+                .expect("encode paired integer payload");
+        assert_eq!(
+            payload.imaginary_values,
+            Some(DataArrayValues::U64(vec![u64::MAX, 1_u64 << 63]))
+        );
+        let bytes = serde_json::to_vec(&payload).expect("serialize paired payload");
+        let decoded: DataArrayPayload =
+            serde_json::from_slice(&bytes).expect("deserialize paired payload");
+        let Value::ComplexTensor(decoded) = decoded.into_value().expect("decode paired payload")
+        else {
+            panic!("expected paired complex tensor");
+        };
+        assert_eq!(decoded.integer_storage(), Some(&storage));
     }
 
     #[test]

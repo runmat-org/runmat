@@ -1,9 +1,10 @@
-use runmat_builtins::Value;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use super::op_common::parse_legend_command;
 use super::state::{set_legend_for_axes, FigureError};
@@ -11,6 +12,12 @@ use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "legend";
+
+pub const LEGEND_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "Legend labels, commands, and style properties have no integer numeric-data role; graphics-object targets are opaque handles rather than integer values.",
+};
 
 const LEGEND_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "h",
@@ -184,6 +191,7 @@ fn map_legend_figure_error(err: FigureError) -> RuntimeError {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::legend::LEGEND_DESCRIPTOR),
+    integer_audit(crate::builtins::plotting::legend::LEGEND_INTEGER_AUDIT),
     builtin_path = "crate::builtins::plotting::legend"
 )]
 pub fn legend_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
@@ -216,8 +224,8 @@ mod tests {
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, clone_figure, reset_hold_state_for_run};
     use glam::Vec4;
-    use runmat_builtins::{CellArray, StringArray, Value};
     use runmat_plot::plots::{Figure, LinePlot};
+    use runmat_value::{CellArray, StringArray, Value};
 
     fn setup_plot_tests() -> PlotTestLockGuard {
         let guard = lock_plot_registry();

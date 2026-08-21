@@ -35,3 +35,21 @@ fn json_round_trip() {
     );
     assert!(!loaded.accelerate.enabled);
 }
+
+#[test]
+fn save_preserves_unowned_sections() {
+    let temp_dir = TempDir::new().unwrap();
+    let path = temp_dir.path().join("runmat.toml");
+    std::fs::write(
+        &path,
+        "# keep\n[package]\nname = \"demo\"\n\n[desktop.artifacts]\nroot = \".cache\"\n",
+    )
+    .unwrap();
+    let mut config = RunMatRuntimeConfig::default();
+    config.runtime.callstack_limit = 777;
+    ConfigLoader::save_to_file(&config, &path).unwrap();
+    let source = std::fs::read_to_string(path).unwrap();
+    assert!(source.contains("# keep\n"));
+    assert!(source.contains("[package]\nname = \"demo\""));
+    assert!(source.contains("[desktop.artifacts]\nroot = \".cache\""));
+}

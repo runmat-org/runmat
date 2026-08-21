@@ -30,6 +30,7 @@
   "description": "`memoizedFcn = memoize(fh)` returns a `MemoizedFunction` handle object for function handle `fh`. Calling the object reuses cached outputs when the input values and requested output count match a previous call. Repeated `memoize` calls for the same function handle share the same object state within the current runtime thread.",
   "behaviors": [
     "`fh` must be a function handle or anonymous-function closure.",
+    "The `memoize` constructor itself has no integer argument or result role and is explicitly integer-inapplicable. Integer values supplied later to the returned callable remain exact cache-key and cached-result payloads.",
     "The returned object is callable like the original function through normal function-call syntax or `feval`.",
     "Cache entries are keyed by the input values and the number of requested outputs.",
     "Numeric `NaN` values compare equal for cache lookup.",

@@ -7,9 +7,9 @@
   "fusion": {"elementwise": false, "reduction": false, "max_inputs": 3, "constants": "inline"},
   "requires_feature": null,
   "tested": {"unit": "builtins::table::tests", "integration": "crates/runmat-vm/tests/tables_timetables.rs"},
-  "description": "`timetable(rowTimes, variables..., 'VariableNames', names)` creates a timetable object using the existing table storage model plus `RowTimes` metadata.",
-  "behaviors": ["Variables must have the same number of rows as row times.", "If row times are omitted, sequential numeric row times are generated.", "Table indexing methods are shared with table objects."],
-  "examples": [{"description": "Create a timetable", "input": "TT = timetable([1;2], [10;20], 'VariableNames', {'X'})", "output": "TT = timetable object"}],
+  "description": "`timetable` groups same-height data variables with a datetime or duration row-time vector. Row times can be supplied directly or generated from `SampleRate` or `TimeStep`.",
+  "behaviors": ["Variables must have the same number of rows as the row-time vector. Integer variables retain their native class and payload.", "Use `RowTimes`, `SampleRate`, or `TimeStep` to choose one timing source. `StartTime` can accompany `SampleRate` or `TimeStep`.", "Preallocation accepts `Size`, `VariableTypes`, and a timing source. Integer variable types allocate native integer columns directly.", "Numeric row times and generated sequential row times without a timing source are available only in `runmat` compatibility mode.", "Table indexing methods are shared with table objects."],
+  "examples": [{"description": "Create A Timetable", "input": "times = datetime(2026, 7, [1; 2]);\ncounts = uint64([10; 20]);\nTT = timetable(times, counts, 'VariableNames', {'Count'})", "output": "TT = timetable object"}],
   "links": [{"label": "table2timetable", "url": "./table2timetable"}, {"label": "istimetable", "url": "./istimetable"}],
   "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}
 }

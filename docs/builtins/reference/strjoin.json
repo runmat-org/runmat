@@ -13,7 +13,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Text processing runs on the CPU; GPU-resident inputs are gathered before joining."
+    "notes": "Text processing runs on the CPU. Integer, numeric, and provider-resident inputs are unsupported and reject without provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -32,7 +32,8 @@
     "Character arrays are first interpreted row-by-row and then joined the same way.",
     "The return type is always a string array.",
     "Empty inputs with zero rows or zero columns currently return an empty `0x0` string array.",
-    "Cell arrays of character vectors are not currently accepted by this implementation."
+    "Cell arrays of character vectors are not currently accepted by this implementation.",
+    "Numeric arrays are not implicitly formatted as text. Convert them with `string` before joining when that conversion is intentional."
   ],
   "examples": [
     {
@@ -87,8 +88,8 @@
     "label": "`crates/runmat-runtime/src/lib.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/lib.rs"
   },
-  "gpu_residency": "No. `strjoin` gathers text to host memory and returns a host-side string array.",
+  "gpu_residency": "No. `strjoin` accepts host text and returns a host-side string array; provider-resident numeric values are not text inputs.",
   "gpu_behavior": [
-    "`strjoin` performs no provider dispatch. GPU-resident text inputs are gathered before the join is computed on the CPU."
+    "`strjoin` performs no provider dispatch. Unsupported provider-resident numeric values reject instead of being gathered and implicitly formatted."
   ]
 }

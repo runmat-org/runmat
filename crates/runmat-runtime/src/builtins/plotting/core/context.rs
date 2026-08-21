@@ -133,7 +133,7 @@ fn propagate_to_plot_crate(context: &WgpuContextHandle) {
     }
 }
 
-#[cfg(all(test, feature = "plot-core"))]
+#[cfg(all(test, feature = "plot-core", not(target_arch = "wasm32")))]
 pub(crate) mod tests {
     use super::*;
     use pollster::FutureExt;

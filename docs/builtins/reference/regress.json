@@ -30,6 +30,7 @@
   "description": "`regress(y,X)` estimates coefficients for the linear model `y = X*b`. Include a column of ones in `X` when an intercept is required.",
   "behaviors": [
     "`y` must be a numeric vector with one element per row of `X`; `X` must be a 2-D numeric design matrix.",
+    "The documented computation domain is single or double. Native typed-integer `y`, `X`, and `alpha` are separately declared RunMat extensions; admitted values must be exactly representable at the explicit double regression boundary and MATLAB compatibility mode rejects them before gathering.",
     "Rows containing `NaN` in `y` or any predictor are omitted before fitting.",
     "`alpha` is optional and defaults to `0.05`; it controls coefficient and residual confidence intervals.",
     "Requested outputs follow MATLAB's `[b,bint,r,rint,stats]` form, including partial forms such as `[b,bint]` and `[b,bint,r]`. `stats` is `[R2 F p errorVariance]`.",

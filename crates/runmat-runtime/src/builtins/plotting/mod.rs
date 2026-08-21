@@ -84,6 +84,8 @@ pub(crate) mod fcontour;
 pub(crate) mod figure;
 #[path = "ops/figure_persistence.rs"]
 pub(crate) mod figure_persistence;
+#[path = "ops/fill.rs"]
+pub(crate) mod fill;
 #[path = "ops/fill3.rs"]
 pub(crate) mod fill3;
 #[path = "ops/findobj.rs"]

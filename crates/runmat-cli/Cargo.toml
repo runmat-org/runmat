@@ -1,6 +1,6 @@
 [package]
 name = "runmat"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2021"
 description = "High-performance MATLAB/Octave syntax mathematical runtime"
 authors = ["Dystr Team"]
@@ -16,7 +16,9 @@ name = "runmat"
 path = "src/main.rs"
 
 [dependencies]
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
+runmat-value = { workspace = true }
+tokio = { workspace = true, features = ["io-std", "io-util", "macros", "rt-multi-thread", "signal"] }
+futures = "0.3"
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -27,6 +29,9 @@ atty = "0.2"
 env_logger = { workspace = true }
 log = { workspace = true }
 anyhow = { workspace = true }
+base64 = "0.22"
+rand = "0.8"
+keyring = "2.3"
 miette = { workspace = true }
 uuid = { workspace = true, features = ["serde"] }
 crossbeam-channel = "0.5"
@@ -37,29 +42,47 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 owo-colors = "4.3.0"
 supports-color = "3.0.2"
 libc = "0.2"
+target-lexicon = { workspace = true }
+tempfile = "3.12"
+zeroize = "1"
 
 # Ensure vendored OpenSSL can be enabled for cross targets (feature unification)
 openssl = { version = "0.10", optional = true }
 openssl-sys = { version = "0.9.109", optional = true }
 
 # RunMat crates
-runmat-core = { version = "=0.6.0", path = "../runmat-core" }
-runmat-parser = { version = "=0.6.0", path = "../runmat-parser" }
-runmat-hir = { version = "=0.6.0", path = "../runmat-hir" }
-runmat-mir = { version = "=0.6.0", path = "../runmat-mir" }
-runmat-vm = { version = "=0.6.0", path = "../runmat-vm" }
-runmat-runtime = { version = "=0.6.0", path = "../runmat-runtime" }
-runmat-gc = { version = "=0.6.0", path = "../runmat-gc" }
-runmat-builtins = { version = "=0.6.0", path = "../runmat-builtins" }
-runmat-plot = { version = "=0.6.0", path = "../runmat-plot" }
-runmat-accelerate = { version = "=0.6.0", path = "../runmat-accelerate" }
-runmat-accelerate-api = { version = "=0.6.0", path = "../runmat-accelerate-api" }
-runmat-config = { version = "=0.6.0", path = "../runmat-config", features = ["accelerate"] }
-runmat-time = { version = "=0.6.0", path = "../runmat-time" }
-runmat-filesystem = { version = "=0.6.0", path = "../runmat-filesystem" }
-runmat-telemetry = { version = "=0.6.0", path = "../runmat-telemetry" }
-runmat-static-analysis = { version = "=0.6.0", path = "../runmat-static-analysis" }
+runmat-core = { version = "=0.6.1", path = "../runmat-core" }
+runmat-aot = { workspace = true }
+runmat-native-codegen = { workspace = true, features = ["compiler"] }
+runmat-execution = { workspace = true }
+runmat-execution-artifact = { workspace = true }
+runmat-execution-runner-native = { workspace = true }
+runmat-process-host = { workspace = true }
+runmat-parser = { version = "=0.6.1", path = "../runmat-parser" }
+runmat-hir = { version = "=0.6.1", path = "../runmat-hir" }
+runmat-mir = { version = "=0.6.1", path = "../runmat-mir" }
+runmat-vm = { version = "=0.6.1", path = "../runmat-vm" }
+runmat-runtime = { version = "=0.6.1", path = "../runmat-runtime" }
+runmat-gc = { version = "=0.6.1", path = "../runmat-gc" }
+runmat-builtins = { version = "=0.6.1", path = "../runmat-builtins" }
+runmat-plot = { version = "=0.6.1", path = "../runmat-plot" }
+runmat-accelerate = { version = "=0.6.1", path = "../runmat-accelerate" }
+runmat-accelerate-api = { version = "=0.6.1", path = "../runmat-accelerate-api" }
+runmat-config = { version = "=0.6.1", path = "../runmat-config", features = ["accelerate"] }
+runmat-package = { workspace = true }
+runmat-package-cache = { workspace = true }
+runmat-package-cache-native = { workspace = true }
+runmat-time = { version = "=0.6.1", path = "../runmat-time" }
+runmat-filesystem = { version = "=0.6.1", path = "../runmat-filesystem" }
+runmat-telemetry = { version = "=0.6.1", path = "../runmat-telemetry" }
+runmat-static-analysis = { version = "=0.6.1", path = "../runmat-static-analysis" }
 runmat-server-client = { workspace = true }
+runmat-node-agent = { workspace = true }
+runmat-test = { workspace = true }
+runmat-test-runner = { workspace = true }
+runmat-test-runner-execution = { workspace = true }
+runmat-test-runner-native = { workspace = true }
+sha2 = { workspace = true }
 
 [features]
 # High-level feature toggles (default build keeps everything enabled)
@@ -74,6 +97,7 @@ occt-native = ["runmat-core/occt-native", "runmat-runtime/occt-native"]
 
 [dev-dependencies]
 tempfile = "3.12" 
+git2 = { version = "0.20", default-features = false }
 serde_json = { workspace = true }
 openapiv3 = "2.0"
 serde_yaml = "0.9"

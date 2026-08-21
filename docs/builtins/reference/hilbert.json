@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "Providers can execute real GPU inputs through the resident `signal_hilbert` hook. Unsupported providers gather to host, compute the FFT-domain analytic signal, and return a complex host tensor."
+    "notes": "Providers can execute real GPU inputs through the resident `signal_hilbert` hook. An explicitly unsupported hook falls back through the input's owning provider and restores the complex result to that provider; provider execution and contract failures are terminal."
   },
   "fusion": {
     "elementwise": false,
@@ -30,14 +30,14 @@
     "unit": "builtins::math::signal::hilbert::tests",
     "integration": "runmat-vm basics hilbert_builtin_executes_for_fm_demod_shape"
   },
-  "description": "`z = hilbert(x)` returns the analytic signal associated with a real signal `x`. The real part of `z` is the original signal, and the imaginary part is the Hilbert transform of `x`.",
+  "description": "`z = hilbert(x)` returns the analytic signal associated with `x`. For complex single/double input, the imaginary part is ignored before the transform. Integer/logical signal data, typed or logical lengths, zero or empty lengths, and inputs beyond matrices are RunMat extensions.",
   "behaviors": [
-    "Accepts real numeric, logical, integer, vector, matrix, and N-D tensor inputs.",
+    "Accepts documented single/double vectors and matrices; integer, logical, and N-D inputs require RunMat extension mode.",
     "Operates along the first non-singleton dimension, matching MATLAB's column-wise behavior for matrices and row-wise behavior for row vectors.",
     "`hilbert(x, N)` pads with zeros or truncates along the transform dimension before constructing the analytic signal.",
     "Returns complex scalar or complex tensor output; output shape follows the input shape except that the transform dimension becomes `N` when supplied.",
     "The FFT-domain multiplier preserves DC and, for even lengths, Nyquist bins; positive-frequency bins are doubled and negative-frequency bins are zeroed.",
-    "Complex inputs are rejected because MATLAB's `hilbert` expects a real signal."
+    "For complex single/double input, the imaginary component is ignored and the real component is transformed."
   ],
   "examples": [
     {
@@ -74,11 +74,11 @@
     },
     {
       "question": "Can I pass complex input?",
-      "answer": "No. `hilbert` is defined for real input signals and returns a complex analytic signal."
+      "answer": "Yes for single and double input. MATLAB-compatible behavior ignores the input's imaginary component, transforms its real component, and returns the complex analytic signal. Typed complex-integer input is not supported."
     },
     {
       "question": "Does `hilbert` run on GPU tensors?",
-      "answer": "Yes. Providers with `signal_hilbert` support keep real GPU tensor inputs resident and return a complex GPU tensor. Providers without that hook fall back to the host FFT path."
+      "answer": "Yes. Providers with `signal_hilbert` support keep real GPU tensor inputs resident and return a complex GPU tensor. An explicitly unsupported hook downloads non-destructively through the input owner, computes on the host, and restores the result to that owner when its precision can be preserved."
     }
   ],
   "links": [
@@ -111,7 +111,7 @@
     "label": "`crates/runmat-runtime/src/builtins/math/signal/hilbert.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/hilbert.rs"
   },
-  "gpu_residency": "`hilbert` keeps real GPU tensors resident when the active provider implements `signal_hilbert`, returning a complex-interleaved GPU tensor. Unsupported providers retain the host fallback path.",
+  "gpu_residency": "`hilbert` keeps real GPU tensors resident when the active provider implements `signal_hilbert`, returning a complex-interleaved GPU tensor. An explicitly unsupported hook uses a non-destructive owner download and restores the complex result when the owner can preserve its precision; the source handle remains resident.",
   "gpu_behavior": [
     "The WGPU provider computes FFT, analytic-signal weighting, and inverse FFT without gathering the source tensor to host.",
     "The output handle is marked as complex-interleaved GPU storage for downstream resident complex operations.",

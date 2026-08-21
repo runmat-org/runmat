@@ -1,0 +1,39 @@
+{
+  "title": "uint16",
+  "category": "math/elementwise",
+  "keywords": ["uint16", "cast", "integer", "conversion", "numeric", "gpuArray"],
+  "summary": "Convert values to unsigned 16-bit integer class.",
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": ["f32", "f64"],
+    "broadcasting": "none",
+    "notes": "Real gpuArray inputs use the provider's native integer-cast operation and return resident uint16 storage."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 1, "constants": "inline" },
+  "requires_feature": null,
+  "tested": { "unit": "builtins::math::elementwise::uint16::tests", "integration": null },
+  "description": "`uint16(X)` converts numeric, logical, character, symbolic-constant, and real gpuArray inputs to unsigned 16-bit integer values using saturating rounded conversion.",
+  "behaviors": [
+    "Rounds fractional floating-point values to the nearest integer and clamps the result to the uint16 range.",
+    "Converts all eight integer classes directly from native storage without a floating-point intermediate.",
+    "Clamps negative values and `NaN` to `0`, and clamps values above `65535` to `65535`.",
+    "Preserves array shape. A complex host input remains complex when its converted imaginary component is zero.",
+    "Real gpuArray inputs return provider-owned native uint16 storage; complex gpuArray conversion requires provider support for paired complex-integer storage."
+  ],
+  "examples": [
+    { "description": "Saturating conversion", "input": "uint16([-1 3.5 65536])", "output": "ans =\n  1x3 uint16 array\n      0      4  65535" }
+  ],
+  "faqs": [
+    { "question": "Does `uint16` preserve array shape?", "answer": "Yes. Scalar and array inputs retain their dimensions while the numeric class changes to uint16." }
+  ],
+  "links": [
+    { "label": "uint8", "url": "./uint8" },
+    { "label": "uint32", "url": "./uint32" },
+    { "label": "intmax", "url": "./intmax" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/elementwise/uint16.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/uint16.rs"
+  }
+}

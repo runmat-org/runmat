@@ -2450,6 +2450,41 @@ fn map_geometry_load_error(
             OperationErrorType::Capacity,
             false,
         ),
+        GeometryImportError::ExactRepresentationCapacityExceeded { .. } => (
+            "RM.GEOMETRY.LOAD.EXACT_REPRESENTATION_LIMIT_EXCEEDED",
+            OperationErrorType::Capacity,
+            false,
+        ),
+        GeometryImportError::ExactEntityCapacityExceeded { .. } => (
+            "RM.GEOMETRY.LOAD.EXACT_ENTITY_LIMIT_EXCEEDED",
+            OperationErrorType::Capacity,
+            false,
+        ),
+        GeometryImportError::ExactValidationBudgetExceeded(_) => (
+            "RM.GEOMETRY.LOAD.EXACT_VALIDATION_BUDGET_EXCEEDED",
+            OperationErrorType::Capacity,
+            false,
+        ),
+        GeometryImportError::HealingLimitExceeded { .. } => (
+            "RM.GEOMETRY.LOAD.HEALING_LIMIT_EXCEEDED",
+            OperationErrorType::Validation,
+            false,
+        ),
+        GeometryImportError::RevisionConflict { .. } => (
+            "RM.GEOMETRY.LOAD.REVISION_CONFLICT",
+            OperationErrorType::Validation,
+            false,
+        ),
+        GeometryImportError::InvalidGeometry(_) => (
+            "RM.GEOMETRY.LOAD.INVALID_GEOMETRY",
+            OperationErrorType::Validation,
+            false,
+        ),
+        GeometryImportError::InvalidOptions(_) => (
+            "RM.GEOMETRY.LOAD.INVALID_OPTIONS",
+            OperationErrorType::Input,
+            false,
+        ),
         GeometryImportError::BackendUnavailable(_) => (
             "RM.GEOMETRY.LOAD.BACKEND_UNAVAILABLE",
             OperationErrorType::Backend,

@@ -1,7 +1,7 @@
 error: custom attribute panicked
-  --> tests/ui/fail_non_string.rs:16:1
+  --> tests/ui/fail_non_string.rs:13:1
    |
-16 | #[runtime_builtin(name = 123, descriptor(crate::NOOP_DESCRIPTOR))]
+13 | #[runtime_builtin(name = 123, descriptor(crate::NOOP_DESCRIPTOR))]
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    |
    = help: message: name must be a string literal

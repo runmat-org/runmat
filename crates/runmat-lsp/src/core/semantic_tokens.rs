@@ -57,81 +57,84 @@ pub fn full(text: &str, tokens: &[SpannedToken], hints: &[SemanticHint]) -> Opti
     let mut first = true;
 
     for tok in tokens {
-        let (token_type, token_modifiers_bitset) =
-            if let Some(hint) = hint_map.get(&(tok.start, tok.end)) {
-                let token_type = match hint.role {
-                    IdentifierRole::Function => SemanticTokenType::FUNCTION,
-                    IdentifierRole::Parameter => SemanticTokenType::PARAMETER,
-                    IdentifierRole::Variable => SemanticTokenType::VARIABLE,
-                    IdentifierRole::Namespace => SemanticTokenType::NAMESPACE,
-                };
-                let mut bitset = 0u32;
-                if hint.declaration {
-                    bitset |= 1 << 0;
-                }
-                if hint.default_library {
-                    bitset |= 1 << 1;
-                }
-                (token_type, bitset)
-            } else {
-                let token_type = match tok.token {
-                    Token::Function
-                    | Token::If
-                    | Token::Else
-                    | Token::ElseIf
-                    | Token::For
-                    | Token::While
-                    | Token::Break
-                    | Token::Continue
-                    | Token::Return
-                    | Token::End
-                    | Token::ClassDef
-                    | Token::Properties
-                    | Token::Methods
-                    | Token::Events
-                    | Token::Enumeration
-                    | Token::Arguments
-                    | Token::Import
-                    | Token::Switch
-                    | Token::Case
-                    | Token::Otherwise
-                    | Token::Try
-                    | Token::Catch
-                    | Token::Global
-                    | Token::Persistent
-                    | Token::True
-                    | Token::False => SemanticTokenType::KEYWORD,
-                    Token::Ident => SemanticTokenType::VARIABLE,
-                    Token::Float | Token::Integer => SemanticTokenType::NUMBER,
-                    Token::Str => SemanticTokenType::STRING,
-                    Token::Section | Token::BlockComment | Token::LineComment => {
-                        SemanticTokenType::COMMENT
-                    }
-                    Token::AndAnd
-                    | Token::OrOr
-                    | Token::Equal
-                    | Token::NotEqual
-                    | Token::LessEqual
-                    | Token::GreaterEqual
-                    | Token::Less
-                    | Token::Greater
-                    | Token::Plus
-                    | Token::Minus
-                    | Token::Star
-                    | Token::Slash
-                    | Token::Backslash
-                    | Token::Caret
-                    | Token::DotStar
-                    | Token::DotSlash
-                    | Token::DotBackslash
-                    | Token::DotCaret
-                    | Token::And
-                    | Token::Or
-                    | Token::Colon => SemanticTokenType::OPERATOR,
-                    _ => continue,
-                };
-                (token_type, 0)
+        let (token_type, token_modifiers_bitset) = if let Some(hint) =
+            hint_map.get(&(tok.start, tok.end))
+        {
+            let token_type = match hint.role {
+                IdentifierRole::Function => SemanticTokenType::FUNCTION,
+                IdentifierRole::Parameter => SemanticTokenType::PARAMETER,
+                IdentifierRole::Variable => SemanticTokenType::VARIABLE,
+                IdentifierRole::Namespace => SemanticTokenType::NAMESPACE,
             };
+            let mut bitset = 0u32;
+            if hint.declaration {
+                bitset |= 1 << 0;
+            }
+            if hint.default_library {
+                bitset |= 1 << 1;
+            }
+            (token_type, bitset)
+        } else {
+            let token_type = match tok.token {
+                Token::Function
+                | Token::If
+                | Token::Else
+                | Token::ElseIf
+                | Token::For
+                | Token::ParFor
+                | Token::Spmd
+                | Token::While
+                | Token::Break
+                | Token::Continue
+                | Token::Return
+                | Token::End
+                | Token::ClassDef
+                | Token::Properties
+                | Token::Methods
+                | Token::Events
+                | Token::Enumeration
+                | Token::Arguments
+                | Token::Import
+                | Token::Switch
+                | Token::Case
+                | Token::Otherwise
+                | Token::Try
+                | Token::Catch
+                | Token::Global
+                | Token::Persistent
+                | Token::True
+                | Token::False => SemanticTokenType::KEYWORD,
+                Token::Ident => SemanticTokenType::VARIABLE,
+                Token::Float | Token::Integer | Token::RadixInteger => SemanticTokenType::NUMBER,
+                Token::Str => SemanticTokenType::STRING,
+                Token::Section | Token::BlockComment | Token::LineComment => {
+                    SemanticTokenType::COMMENT
+                }
+                Token::AndAnd
+                | Token::OrOr
+                | Token::Equal
+                | Token::NotEqual
+                | Token::LessEqual
+                | Token::GreaterEqual
+                | Token::Less
+                | Token::Greater
+                | Token::Plus
+                | Token::Minus
+                | Token::Star
+                | Token::Slash
+                | Token::Backslash
+                | Token::Caret
+                | Token::DotStar
+                | Token::DotSlash
+                | Token::DotBackslash
+                | Token::DotCaret
+                | Token::And
+                | Token::Or
+                | Token::Colon => SemanticTokenType::OPERATOR,
+                _ => continue,
+            };
+            (token_type, 0)
+        };
 
         let pos = offset_to_position(text, tok.start);
         let len = (tok.end.saturating_sub(tok.start)) as u32;

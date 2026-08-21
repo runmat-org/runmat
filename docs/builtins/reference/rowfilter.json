@@ -2,14 +2,14 @@
   "title": "rowfilter",
   "category": "table",
   "keywords": ["rowfilter", "table", "rows", "filter"],
-  "summary": "Create a table row filter selector object.",
+  "summary": "Create a row-filter selector for tabular and Parquet workflows.",
   "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Filter descriptors are host metadata."},
   "fusion": {"elementwise": false, "reduction": false, "max_inputs": 2, "constants": "inline"},
   "requires_feature": null,
   "tested": {"unit": "builtins::table::tests", "integration": "crates/runmat-vm/tests/tables_timetables.rs"},
-  "description": "`rowfilter(vars, predicate)` creates a selector object with `Variables` and `Predicate` properties for table row filtering workflows.",
-  "behaviors": ["The selector can be used as a table or timetable row subscript.", "Logical predicate arrays are applied directly.", "Named scalar predicates such as `\"@gt0\"`, `\"@ge0\"`, `\"@lt0\"`, and `\"nonmissing\"` are evaluated against the selected variables."],
+  "description": "`rowfilter(source)` creates a host-side row-filter selector from supported table, timetable, Parquet metadata, datastore, or variable-selection inputs. RunMat's current compatibility object records the selector payload in `Variables`; its legacy optional second payload is recorded in `Predicate`.",
+  "behaviors": ["The selector is a host metadata object intended for table, timetable, datastore, and Parquet row-filtering workflows.", "Direct native integer arrays and gpuArray values are not constructor roles and reject before gathering; integer-valued columns nested inside an admitted table or timetable remain exact opaque payloads.", "RunMat currently preserves a legacy optional predicate payload for existing callers while the broader tabular selector surface continues to converge."],
   "examples": [{"description": "Filter rows", "input": "T(rowfilter({'A'}, '@gt0'), :)", "output": "Rows where variable A is positive"}],
   "links": [{"label": "vartype", "url": "./vartype"}],
-  "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}
+  "source": {"label": "`crates/runmat-runtime/src/builtins/table/builtins/constructors.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/builtins/constructors.rs"}
 }

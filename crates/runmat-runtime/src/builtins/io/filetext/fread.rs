@@ -1,24 +1,171 @@
 //! MATLAB-compatible `fread` builtin for RunMat.
 
+#[cfg(test)]
+use runmat_accelerate_api::HostTensorView;
 use std::io::{ErrorKind, Read, Seek, SeekFrom};
 
-use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, LogicalArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CharArray, IntValue, IntegerStorage, LogicalArray, NumericDType, NumericScalar, NumericStorage,
+    Tensor, Value,
+};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::io::filetext::{helpers::extract_scalar_string, registry};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use runmat_filesystem::File;
 
 const BUILTIN_NAME: &str = "fread";
+
+const FREAD_LIKE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fread-like",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "the fread \"like\" prototype selector is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FreadLikeExtension"),
+};
+const FREAD_INTEGER_ID_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fread-integer-fileid",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "integer-class fread file identifiers are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FreadIntegerIdExtension"),
+};
+const FREAD_INTEGER_SIZE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fread-integer-size",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "typed integer fread size controls are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FreadIntegerSizeExtension"),
+};
+const FREAD_INTEGER_SKIP_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fread-integer-skip",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "typed integer fread skip controls are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FreadIntegerSkipExtension"),
+};
+const FREAD_LOGICAL_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fread-logical-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "logical fread file identifiers, sizes, and skips are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FreadLogicalControlExtension"),
+};
+const FREAD_SINGLE_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fread-single-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "single-precision fread file identifiers, sizes, and skips are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FreadSingleControlExtension"),
+};
+const FREAD_RESIDENT_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fread-resident-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "provider-resident fread control arguments are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FreadResidentControlExtension"),
+};
+
+pub const FREAD_EXTENSIONS: [BuiltinExtensionDescriptor; 7] = [
+    FREAD_LIKE_EXTENSION,
+    FREAD_INTEGER_ID_EXTENSION,
+    FREAD_INTEGER_SIZE_EXTENSION,
+    FREAD_INTEGER_SKIP_EXTENSION,
+    FREAD_LOGICAL_CONTROL_EXTENSION,
+    FREAD_SINGLE_CONTROL_EXTENSION,
+    FREAD_RESIDENT_CONTROL_EXTENSION,
+];
+
+const FREAD_INTEGER_ID_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "fileID",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target documents double file identifiers; typed integer identifiers are independently gated and checked exactly.",
+    }];
+const FREAD_INTEGER_SIZE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "sizeA",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target documents double size values; typed integer scalar and two-element size controls are independently gated.",
+    }];
+const FREAD_INTEGER_SKIP_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "skip",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target documents a double skip scalar; typed integer skip values are independently gated.",
+    }];
+const FREAD_INTEGER_PROTOTYPE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "prototype",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
+        notes: "A typed integer host or resident prototype selects the exact output class; this like form is a RunMat extension.",
+    }];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 5] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "A = fread(fileID, ..., integer_output_precision)",
+        inputs: &[],
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Documented source=>output and *source precision forms produce the requested exact integer storage; the count output remains double.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "A = fread(integer_fileID, ...)",
+        inputs: &FREAD_INTEGER_ID_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The registry identifier is validated exactly as an integer.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "A = fread(fileID, integer_sizeA, ...)",
+        inputs: &FREAD_INTEGER_SIZE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Scalar and two-element sizes are decoded exactly and bounded before allocation or file access.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "A = fread(fileID, ..., integer_skip, ...)",
+        inputs: &FREAD_INTEGER_SKIP_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The skip is decoded exactly and bounded to the seek domain.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "A = fread(fileID, ..., \"like\", integer_prototype)",
+        inputs: &FREAD_INTEGER_PROTOTYPE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::FunctionSpecific,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "The prototype determines one of all eight integer output classes. Host prototypes return exact host storage; resident prototypes upload through their actual owning provider after saturating conversion and strict output validation.",
+    },
+];
 
 const FREAD_OUTPUT_DATA: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "data",
@@ -69,7 +216,7 @@ const FREAD_INPUTS_FID_SIZE_PRECISION: [BuiltinParamDescriptor; 3] = [
         name: "precision",
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
-        default: Some("\"double\""),
+        default: Some("\"uint8=>double\""),
         description: "Read precision label (for example \"double\", \"uint8\", \"*char\").",
     },
 ];
@@ -432,6 +579,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::fread_type),
     descriptor(crate::builtins::io::filetext::fread::FREAD_DESCRIPTOR),
+    extensions(crate::builtins::io::filetext::fread::FREAD_EXTENSIONS),
+    integer_capabilities(crate::builtins::io::filetext::fread::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::filetext::fread"
 )]
 async fn fread_builtin(fid: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -482,6 +631,34 @@ impl FreadEval {
 }
 
 pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FreadEval> {
+    let raw_refs: Vec<&Value> = rest.iter().collect();
+    let (raw_size, raw_precision, raw_skip, _, raw_like) =
+        map_string_result(classify_arguments(&raw_refs), &FREAD_ERROR_INVALID_INPUT)?;
+    if raw_like.is_some() {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FREAD_LIKE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if let Some(prototype) = raw_like {
+        let precision =
+            map_string_result(parse_precision(raw_precision), &FREAD_ERROR_INVALID_OPTION)?;
+        map_string_result(
+            validate_like_prototype(prototype),
+            &FREAD_ERROR_INVALID_OPTION,
+        )?;
+        map_string_result(
+            validate_like_output_kind(prototype, precision.output),
+            &FREAD_ERROR_INVALID_OPTION,
+        )?;
+    }
+    preflight_control(fid_value, ControlRole::FileId)?;
+    if let Some(value) = raw_size {
+        preflight_control(value, ControlRole::Size)?;
+    }
+    if let Some(value) = raw_skip {
+        preflight_control(value, ControlRole::Skip)?;
+    }
     let fid_host = gather_value(fid_value).await?;
     let fid = map_string_result(parse_fid(&fid_host), &FREAD_ERROR_INVALID_INPUT)?;
     if fid < 0 {
@@ -513,7 +690,6 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FreadE
     let arg_refs: Vec<&Value> = rest.iter().collect();
     let (size_arg, precision_arg, skip_arg, machine_arg, like_arg) =
         map_string_result(classify_arguments(&arg_refs), &FREAD_ERROR_INVALID_INPUT)?;
-
     let size_host = match size_arg {
         Some(value) => Some(gather_value(value).await?),
         None => None,
@@ -556,15 +732,84 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FreadE
         )
     })?;
 
-    let mut eval = map_string_result(
+    let (mut eval, encountered_eof) = map_string_result(
         read_from_handle(file, &size_spec, &precision, skip_bytes, machine_format),
         &FREAD_ERROR_IO,
     )?;
+    drop(guard);
+    if encountered_eof {
+        registry::mark_eof_encountered(fid);
+    }
     map_string_result(
         eval.apply_like(like_arg, precision),
         &FREAD_ERROR_INVALID_OPTION,
     )?;
     Ok(eval)
+}
+
+fn validate_like_prototype(prototype: &Value) -> Result<(), String> {
+    match prototype {
+        Value::GpuTensor(handle) => {
+            if runmat_accelerate_api::provider_for_handle(handle)
+                .is_none_or(|owner| owner.device_id() != handle.device_id)
+            {
+                return Err(
+                    "fread: resident 'like' prototype has no registered owning provider"
+                        .to_string(),
+                );
+            }
+            if runmat_accelerate_api::handle_storage(handle)
+                != runmat_accelerate_api::GpuTensorStorage::Real
+            {
+                return Err(
+                    "fread: complex resident 'like' prototypes are not supported".to_string(),
+                );
+            }
+            let integer = runmat_accelerate_api::handle_integer_type(handle).is_some();
+            let logical = runmat_accelerate_api::handle_is_logical(handle);
+            if integer && logical {
+                return Err(
+                    "fread: resident 'like' prototype has conflicting integer and logical metadata"
+                        .to_string(),
+                );
+            }
+            if !integer && !logical && runmat_accelerate_api::handle_precision(handle).is_none() {
+                return Err(
+                    "fread: resident 'like' prototype is missing precision metadata".to_string(),
+                );
+            }
+            Ok(())
+        }
+        Value::ComplexTensor(_) | Value::Complex(_, _) => {
+            Err("fread: complex prototypes are not supported yet".to_string())
+        }
+        Value::Cell(_) => Err("fread: cell prototypes are not supported".to_string()),
+        Value::LogicalArray(_)
+        | Value::Bool(_)
+        | Value::CharArray(_)
+        | Value::String(_)
+        | Value::StringArray(_)
+        | Value::Tensor(_)
+        | Value::Int(_)
+        | Value::Num(_) => Ok(()),
+        _ => Err("fread: unsupported 'like' prototype".to_string()),
+    }
+}
+
+fn validate_like_output_kind(prototype: &Value, output: OutputKind) -> Result<(), String> {
+    let character_prototype = matches!(
+        prototype,
+        Value::CharArray(_) | Value::String(_) | Value::StringArray(_)
+    );
+    match (character_prototype, output) {
+        (true, OutputKind::Char) | (false, OutputKind::Numeric(_)) => Ok(()),
+        (true, OutputKind::Numeric(_)) => Err(
+            "fread: character prototypes require a character precision such as '*char'".to_string(),
+        ),
+        (false, OutputKind::Char) => {
+            Err("fread: character output requires a character prototype".to_string())
+        }
+    }
 }
 
 async fn gather_value(value: &Value) -> BuiltinResult<Value> {
@@ -573,10 +818,83 @@ async fn gather_value(value: &Value) -> BuiltinResult<Value> {
         .map_err(map_control_flow)
 }
 
+#[derive(Clone, Copy)]
+enum ControlRole {
+    FileId,
+    Size,
+    Skip,
+}
+
+fn preflight_control(value: &Value, role: ControlRole) -> BuiltinResult<()> {
+    let integer_extension = match role {
+        ControlRole::FileId => &FREAD_INTEGER_ID_EXTENSION,
+        ControlRole::Size => &FREAD_INTEGER_SIZE_EXTENSION,
+        ControlRole::Skip => &FREAD_INTEGER_SKIP_EXTENSION,
+    };
+    match value {
+        Value::Int(_) => {
+            crate::compatibility::ensure_builtin_extension_enabled(integer_extension, BUILTIN_NAME)
+        }
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            crate::compatibility::ensure_builtin_extension_enabled(integer_extension, BUILTIN_NAME)
+        }
+        Value::Bool(_) | Value::LogicalArray(_) => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FREAD_LOGICAL_CONTROL_EXTENSION,
+                BUILTIN_NAME,
+            )
+        }
+        Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32 => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FREAD_SINGLE_CONTROL_EXTENSION,
+                BUILTIN_NAME,
+            )
+        }
+        Value::GpuTensor(handle) => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FREAD_RESIDENT_CONTROL_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+            if runmat_accelerate_api::handle_is_logical(handle) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &FREAD_LOGICAL_CONTROL_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            } else if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    integer_extension,
+                    BUILTIN_NAME,
+                )?;
+            } else if runmat_accelerate_api::handle_precision(handle)
+                == Some(runmat_accelerate_api::ProviderPrecision::F32)
+            {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &FREAD_SINGLE_CONTROL_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
 fn parse_fid(value: &Value) -> Result<i32, String> {
     let number = match value {
         Value::Num(n) => *n,
-        Value::Int(int) => int.to_f64(),
+        Value::Int(int) => {
+            return int
+                .try_to_i32()
+                .ok_or_else(|| "file identifier is out of range".to_string());
+        }
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
+            if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                return int
+                    .try_to_i32()
+                    .ok_or_else(|| "file identifier is out of range".to_string());
+            }
+            tensor::tensor_value_f64(t, 0)
+        }
         _ => {
             return Err("file identifier must be numeric".to_string());
         }
@@ -726,7 +1044,12 @@ fn matches_keyword(value: &Value, keyword: &str) -> bool {
 fn is_numeric_like(value: &Value) -> bool {
     matches!(
         value,
-        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Tensor(_) | Value::LogicalArray(_)
+        Value::Num(_)
+            | Value::Int(_)
+            | Value::Bool(_)
+            | Value::Tensor(_)
+            | Value::LogicalArray(_)
+            | Value::GpuTensor(_)
     )
 }
 
@@ -762,6 +1085,10 @@ fn parse_size(arg: Option<&Value>) -> Result<SizeSpec, String> {
         }
         Some(Value::StringArray(sa)) if sa.data.len() == 1 => parse_size_string(&sa.data[0]),
         Some(Value::Tensor(t)) => parse_size_tensor(t),
+        Some(Value::Int(int)) => Ok(SizeSpec::Count(int_to_usize(
+            int,
+            "size argument must be a non-negative integer",
+        )?)),
         Some(value) => {
             let scalar = value_to_scalar(value, "size argument must be numeric or a size vector")?;
             scalar_to_size(scalar)
@@ -785,15 +1112,46 @@ fn parse_size_string(text: &str) -> Result<SizeSpec, String> {
 }
 
 fn parse_size_tensor(t: &Tensor) -> Result<SizeSpec, String> {
-    match t.data.len() {
+    if let Some(storage) = t.integer_storage() {
+        return match storage.len() {
+            0 => Ok(SizeSpec::Count(0)),
+            1 => {
+                let value = storage.value_at(0).expect("one-element integer storage");
+                Ok(SizeSpec::Count(value.try_to_usize().ok_or_else(|| {
+                    "size argument must be a non-negative integer".to_string()
+                })?))
+            }
+            2 => {
+                let rows_value = storage
+                    .value_at(0)
+                    .expect("integer storage length matches tensor length");
+                let cols_value = storage
+                    .value_at(1)
+                    .expect("integer storage length matches tensor length");
+                let rows = rows_value.try_to_usize().ok_or_else(|| {
+                    "size vector components must be non-negative integers or Inf".to_string()
+                })?;
+                let cols = cols_value.try_to_usize().ok_or_else(|| {
+                    "size vector components must be non-negative integers or Inf".to_string()
+                })?;
+                Ok(SizeSpec::Matrix {
+                    rows,
+                    cols: Some(cols),
+                })
+            }
+            _ => Err("size vector must contain at most two elements".to_string()),
+        };
+    }
+
+    match t.len() {
         0 => Ok(SizeSpec::Count(0)),
-        1 => scalar_to_size(t.data[0]),
+        1 => scalar_to_size(tensor::tensor_value_f64(t, 0)),
         2 => {
             let rows = scalar_to_size_component(
-                t.data[0],
+                tensor::tensor_value_f64(t, 0),
                 "size vector components must be non-negative integers or Inf",
             )?;
-            let cols_raw = t.data[1];
+            let cols_raw = tensor::tensor_value_f64(t, 1);
             if cols_raw.is_infinite() && cols_raw.is_sign_positive() {
                 Ok(SizeSpec::Matrix { rows, cols: None })
             } else {
@@ -830,7 +1188,7 @@ fn scalar_to_size_component(value: f64, err: &str) -> Result<usize, String> {
     if (rounded - value).abs() > f64::EPSILON {
         return Err(err.to_string());
     }
-    if rounded > usize::MAX as f64 {
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
         return Err("size argument is too large".to_string());
     }
     Ok(rounded as usize)
@@ -859,11 +1217,26 @@ impl InputType {
             InputType::UInt64 | InputType::Int64 | InputType::Float64 => 8,
         }
     }
+
+    fn numeric_dtype(self) -> NumericDType {
+        match self {
+            Self::UInt8 => NumericDType::U8,
+            Self::Int8 => NumericDType::I8,
+            Self::UInt16 => NumericDType::U16,
+            Self::Int16 => NumericDType::I16,
+            Self::UInt32 => NumericDType::U32,
+            Self::Int32 => NumericDType::I32,
+            Self::UInt64 => NumericDType::U64,
+            Self::Int64 => NumericDType::I64,
+            Self::Float32 => NumericDType::F32,
+            Self::Float64 => NumericDType::F64,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
 enum OutputKind {
-    Double,
+    Numeric(NumericDType),
     Char,
 }
 
@@ -871,13 +1244,15 @@ enum OutputKind {
 struct PrecisionSpec {
     input: InputType,
     output: OutputKind,
+    repeat: usize,
 }
 
 impl PrecisionSpec {
     fn default() -> Self {
         Self {
-            input: InputType::Float64,
-            output: OutputKind::Double,
+            input: InputType::UInt8,
+            output: OutputKind::Numeric(NumericDType::F64),
+            repeat: 1,
         }
     }
 }
@@ -904,70 +1279,105 @@ fn parse_precision_string(raw: &str) -> Result<PrecisionSpec, String> {
     if let Some(rest) = lower.strip_prefix('*') {
         parse_star_precision(rest.trim())
     } else if let Some((lhs, rhs)) = lower.split_once("=>") {
-        let input = parse_input_label(lhs.trim())?;
+        let (repeat, input) = parse_repeated_input_label(lhs.trim())?;
         let output = parse_output_label(rhs.trim())?;
-        if matches!(output, OutputKind::Char)
-            && !matches!(input, InputType::UInt8 | InputType::UInt16)
-        {
-            return Err(
-                "char output requires an unsigned byte or unsigned 16-bit input precision"
-                    .to_string(),
-            );
-        }
-        Ok(PrecisionSpec { input, output })
+        Ok(PrecisionSpec {
+            input,
+            output,
+            repeat,
+        })
     } else {
-        let input = parse_input_label(lower.trim())?;
+        let (repeat, input) = parse_repeated_input_label(lower.trim())?;
         let wants_char =
             lower == "char" || (matches!(input, InputType::UInt8) && lower.contains("char"));
         let output = if wants_char {
             OutputKind::Char
         } else {
-            OutputKind::Double
+            OutputKind::Numeric(NumericDType::F64)
         };
-        if matches!(output, OutputKind::Char)
-            && !matches!(input, InputType::UInt8 | InputType::UInt16)
-        {
-            return Err(
-                "char precision requires unsigned byte or unsigned 16-bit input".to_string(),
-            );
-        }
-        Ok(PrecisionSpec { input, output })
+        Ok(PrecisionSpec {
+            input,
+            output,
+            repeat,
+        })
     }
 }
 
 fn parse_star_precision(label: &str) -> Result<PrecisionSpec, String> {
-    let output = parse_output_label(label)?;
-    match output {
-        OutputKind::Char => Ok(PrecisionSpec {
+    if label == "char" {
+        return Ok(PrecisionSpec {
             input: InputType::UInt8,
-            output,
-        }),
-        OutputKind::Double => Ok(PrecisionSpec {
-            input: InputType::Float64,
-            output,
-        }),
+            output: OutputKind::Char,
+            repeat: 1,
+        });
     }
+    let input = parse_input_label(label)?;
+    Ok(PrecisionSpec {
+        input,
+        output: OutputKind::Numeric(input.numeric_dtype()),
+        repeat: 1,
+    })
+}
+
+fn parse_repeated_input_label(label: &str) -> Result<(usize, InputType), String> {
+    if let Some((repeat, source)) = label.split_once('*') {
+        if repeat.trim().chars().all(|ch| ch.is_ascii_digit()) {
+            let repeat = repeat
+                .trim()
+                .parse::<usize>()
+                .ok()
+                .filter(|&repeat| repeat > 0)
+                .ok_or_else(|| "precision repeat count must be a positive integer".to_string())?;
+            return Ok((repeat, parse_input_label(source.trim())?));
+        }
+    }
+    Ok((1, parse_input_label(label)?))
 }
 
 fn parse_input_label(label: &str) -> Result<InputType, String> {
     match label {
         "double" | "float64" | "real*8" => Ok(InputType::Float64),
-        "single" | "float32" | "real*4" => Ok(InputType::Float32),
-        "int8" | "schar" | "integer*1" => Ok(InputType::Int8),
-        "uint8" | "uchar" | "unsignedchar" | "char" | "byte" => Ok(InputType::UInt8),
+        "single" | "float" | "float32" | "real*4" => Ok(InputType::Float32),
+        "int8" | "schar" | "signedchar" | "signed char" | "integer*1" => Ok(InputType::Int8),
+        "uint8" | "uchar" | "unsignedchar" | "unsigned char" | "char" | "byte" => {
+            Ok(InputType::UInt8)
+        }
         "int16" | "short" | "integer*2" => Ok(InputType::Int16),
-        "uint16" | "ushort" | "unsignedshort" => Ok(InputType::UInt16),
-        "int32" | "integer*4" | "long" => Ok(InputType::Int32),
-        "uint32" | "unsignedint" | "unsignedlong" => Ok(InputType::UInt32),
-        "int64" | "integer*8" | "longlong" => Ok(InputType::Int64),
-        "uint64" | "unsignedlonglong" => Ok(InputType::UInt64),
+        "uint16" | "ushort" | "unsignedshort" | "unsigned short" => Ok(InputType::UInt16),
+        "int32" | "int" | "integer*4" | "long" => Ok(InputType::Int32),
+        "uint32" | "uint" | "unsignedint" | "unsigned int" | "unsignedlong" | "unsigned long" => {
+            Ok(InputType::UInt32)
+        }
+        "int64" | "integer*8" | "longlong" | "long long" => Ok(InputType::Int64),
+        "uint64" | "unsignedlonglong" | "unsigned long long" => Ok(InputType::UInt64),
         other => Err(format!("unsupported precision '{other}'")),
     }
 }
 
 fn parse_output_label(label: &str) -> Result<OutputKind, String> {
     match label {
-        "double" | "float64" | "real*8" => Ok(OutputKind::Double),
+        "double" | "float64" | "real*8" => Ok(OutputKind::Numeric(NumericDType::F64)),
+        "single" | "float" | "float32" | "real*4" => Ok(OutputKind::Numeric(NumericDType::F32)),
+        "int8" | "schar" | "signedchar" | "signed char" | "integer*1" => {
+            Ok(OutputKind::Numeric(NumericDType::I8))
+        }
+        "int16" | "short" | "integer*2" => Ok(OutputKind::Numeric(NumericDType::I16)),
+        "int32" | "int" | "integer*4" | "long" => Ok(OutputKind::Numeric(NumericDType::I32)),
+        "int64" | "integer*8" | "longlong" | "long long" => {
+            Ok(OutputKind::Numeric(NumericDType::I64))
+        }
+        "uint8" | "uchar" | "unsignedchar" | "unsigned char" => {
+            Ok(OutputKind::Numeric(NumericDType::U8))
+        }
+        "uint16" | "ushort" | "unsignedshort" | "unsigned short" => {
+            Ok(OutputKind::Numeric(NumericDType::U16))
+        }
+        "uint32" | "uint" | "unsignedint" | "unsigned int" | "unsignedlong" | "unsigned long" => {
+            Ok(OutputKind::Numeric(NumericDType::U32))
+        }
+        "uint64" | "unsignedlonglong" | "unsigned long long" => {
+            Ok(OutputKind::Numeric(NumericDType::U64))
+        }
         "char" => Ok(OutputKind::Char),
         other => Err(format!("output class '{other}' is not implemented yet")),
     }
@@ -976,24 +1386,47 @@ fn parse_output_label(label: &str) -> Result<OutputKind, String> {
 fn parse_skip(arg: Option<&Value>) -> Result<usize, String> {
     match arg {
         None => Ok(0),
+        Some(Value::Int(int)) => int_to_skip(int),
+        Some(Value::Tensor(t)) if tensor::is_scalar_tensor(t) => {
+            if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                return int_to_skip(&int);
+            }
+            parse_skip_scalar(tensor::tensor_value_f64(t, 0))
+        }
         Some(value) => {
             let scalar = value_to_scalar(value, "skip value must be numeric")?;
-            if !scalar.is_finite() {
-                return Err("skip value must be finite".to_string());
-            }
-            if scalar < 0.0 {
-                return Err("skip value must be non-negative".to_string());
-            }
-            let rounded = scalar.round();
-            if (rounded - scalar).abs() > f64::EPSILON {
-                return Err("skip value must be an integer".to_string());
-            }
-            if rounded > i64::MAX as f64 {
-                return Err("skip value is too large".to_string());
-            }
-            Ok(rounded as usize)
+            parse_skip_scalar(scalar)
         }
     }
+}
+
+fn parse_skip_scalar(scalar: f64) -> Result<usize, String> {
+    if !scalar.is_finite() {
+        return Err("skip value must be finite".to_string());
+    }
+    if scalar < 0.0 {
+        return Err("skip value must be non-negative".to_string());
+    }
+    let rounded = scalar.round();
+    if (rounded - scalar).abs() > f64::EPSILON {
+        return Err("skip value must be an integer".to_string());
+    }
+    if rounded >= i64::MAX as f64 {
+        return Err("skip value is too large".to_string());
+    }
+    Ok(rounded as usize)
+}
+
+fn int_to_skip(value: &IntValue) -> Result<usize, String> {
+    let skip = int_to_usize(value, "skip value must be non-negative")?;
+    if skip > i64::MAX as usize {
+        return Err("skip value is too large".to_string());
+    }
+    Ok(skip)
+}
+
+fn int_to_usize(value: &IntValue, err: &str) -> Result<usize, String> {
+    value.try_to_usize().ok_or_else(|| err.to_string())
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1086,7 +1519,7 @@ fn value_to_scalar(value: &Value, err: &str) -> Result<f64, String> {
         Value::Num(n) => Ok(*n),
         Value::Int(int) => Ok(int.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => Ok(t.data[0]),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(tensor::tensor_value_f64(t, 0)),
         Value::LogicalArray(la) if la.data.len() == 1 => {
             Ok(if la.data[0] != 0 { 1.0 } else { 0.0 })
         }
@@ -1100,24 +1533,49 @@ fn read_from_handle(
     precision: &PrecisionSpec,
     skip: usize,
     machine: MachineFormat,
-) -> Result<FreadEval, String> {
+) -> Result<(FreadEval, bool), String> {
     let endianness = machine.to_endianness();
     match precision.output {
-        OutputKind::Double => {
+        OutputKind::Numeric(output_dtype) => {
             let limit = size_spec.element_limit();
-            let (values, count) =
-                read_numeric_values(file, precision.input, limit, skip, endianness)?;
+            let (values, count, encountered_eof) = read_numeric_values(
+                file,
+                precision.input,
+                precision.repeat,
+                limit,
+                skip,
+                endianness,
+            )?;
             let (data, rows, cols) = finalize_numeric(size_spec, count, values);
-            let tensor = Tensor::new(data, vec![rows, cols]).map_err(|e| format!("fread: {e}"))?;
-            Ok(FreadEval::new(Value::Tensor(tensor), count))
+            let tensor = Tensor::from_numeric_storage(data, vec![rows, cols])
+                .map_err(|e| format!("fread: {e}"))?;
+            let tensor = if tensor.numeric_dtype() == output_dtype {
+                tensor
+            } else {
+                tensor::coerce_tensor_dtype(tensor, output_dtype)
+            };
+            Ok((
+                FreadEval::new(Value::Tensor(tensor), count),
+                encountered_eof,
+            ))
         }
         OutputKind::Char => {
             let limit = size_spec.element_limit();
-            let (values, count) = read_char_values(file, precision.input, limit, skip, endianness)?;
+            let (values, count, encountered_eof) = read_char_values(
+                file,
+                precision.input,
+                precision.repeat,
+                limit,
+                skip,
+                endianness,
+            )?;
             let (row_major, rows, cols) = finalize_char(size_spec, count, values);
             let char_array =
                 CharArray::new(row_major, rows, cols).map_err(|e| format!("fread: {e}"))?;
-            Ok(FreadEval::new(Value::CharArray(char_array), count))
+            Ok((
+                FreadEval::new(Value::CharArray(char_array), count),
+                encountered_eof,
+            ))
         }
     }
 }
@@ -1127,9 +1585,9 @@ fn adjust_output_for_like(
     prototype: &Value,
     precision: PrecisionSpec,
 ) -> Result<Value, String> {
-    if matches!(prototype, Value::GpuTensor(_)) {
+    if let Value::GpuTensor(prototype) = prototype {
         return match data {
-            Value::Tensor(tensor) => tensor_to_gpu_value(tensor),
+            Value::Tensor(tensor) => tensor_to_gpu_value(tensor, prototype),
             Value::CharArray(_) => {
                 Err("fread: character output cannot be returned on the GPU via 'like'".to_string())
             }
@@ -1148,12 +1606,27 @@ fn adjust_output_for_like(
             }
             ensure_char_result(data)
         }
-        Value::Tensor(_) | Value::Num(_) | Value::Int(_) => Ok(data),
+        Value::Tensor(tensor) => tensor_to_numeric_like(data, tensor.numeric_dtype()),
+        Value::Int(value) => tensor_to_numeric_like(
+            data,
+            IntegerStorage::from_scalar(value.clone()).numeric_dtype(),
+        ),
+        Value::Num(_) => tensor_to_numeric_like(data, NumericDType::F64),
         Value::ComplexTensor(_) | Value::Complex(_, _) => {
             Err("fread: complex prototypes are not supported yet".to_string())
         }
         Value::Cell(_) => Err("fread: cell prototypes are not supported".to_string()),
         _ => Ok(data),
+    }
+}
+
+fn tensor_to_numeric_like(data: Value, dtype: NumericDType) -> Result<Value, String> {
+    match data {
+        Value::Tensor(tensor) => Ok(Value::Tensor(tensor::coerce_tensor_dtype(tensor, dtype))),
+        Value::CharArray(_) => Err(
+            "fread: character output cannot be converted to a numeric 'like' prototype".to_string(),
+        ),
+        other => Ok(other),
     }
 }
 
@@ -1164,27 +1637,138 @@ fn ensure_char_result(data: Value) -> Result<Value, String> {
     }
 }
 
-fn tensor_to_gpu_value(tensor: Tensor) -> Result<Value, String> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        let view = HostTensorView {
-            data: &tensor.data,
-            shape: &tensor.shape,
-        };
-        if let Ok(handle) = provider.upload(&view) {
-            return Ok(Value::GpuTensor(handle));
-        }
+fn tensor_to_gpu_value(
+    tensor: Tensor,
+    prototype: &runmat_accelerate_api::GpuTensorHandle,
+) -> Result<Value, String> {
+    use runmat_accelerate_api::{GpuTensorStorage, IntegerElementType, ProviderPrecision};
+
+    if runmat_accelerate_api::handle_storage(prototype) != GpuTensorStorage::Real {
+        return Err("fread: complex resident 'like' prototypes are not supported".to_string());
     }
-    Ok(Value::Tensor(tensor))
+    let provider = runmat_accelerate_api::provider_for_handle(prototype).ok_or_else(|| {
+        "fread: resident 'like' prototype has no registered owning provider".to_string()
+    })?;
+    let expected_integer = runmat_accelerate_api::handle_integer_type(prototype);
+    let expected_logical = runmat_accelerate_api::handle_is_logical(prototype);
+    if expected_integer.is_some() && expected_logical {
+        return Err(
+            "fread: resident 'like' prototype has conflicting integer and logical metadata"
+                .to_string(),
+        );
+    }
+    let expected_precision = runmat_accelerate_api::handle_precision(prototype);
+    let tensor = if let Some(integer) = expected_integer {
+        let dtype = match integer {
+            IntegerElementType::I8 => NumericDType::I8,
+            IntegerElementType::I16 => NumericDType::I16,
+            IntegerElementType::I32 => NumericDType::I32,
+            IntegerElementType::I64 => NumericDType::I64,
+            IntegerElementType::U8 => NumericDType::U8,
+            IntegerElementType::U16 => NumericDType::U16,
+            IntegerElementType::U32 => NumericDType::U32,
+            IntegerElementType::U64 => NumericDType::U64,
+        };
+        tensor::coerce_tensor_dtype(tensor, dtype)
+    } else if expected_logical {
+        let values = (0..tensor.len())
+            .map(|index| {
+                if tensor
+                    .numeric_value_at(index)
+                    .expect("validated fread numeric tensor index")
+                    .materialize_f64()
+                    == 0.0
+                {
+                    0.0
+                } else {
+                    1.0
+                }
+            })
+            .collect();
+        Tensor::new(values, tensor.shape.clone()).map_err(|error| format!("fread: {error}"))?
+    } else {
+        let dtype = match expected_precision {
+            Some(ProviderPrecision::F32) => NumericDType::F32,
+            Some(ProviderPrecision::F64) => NumericDType::F64,
+            None => {
+                return Err(
+                    "fread: resident 'like' prototype is missing precision metadata".to_string(),
+                )
+            }
+        };
+        tensor::coerce_tensor_dtype(tensor, dtype)
+    };
+    let expected_shape = tensor.shape.clone();
+    let output = gpu_helpers::upload_tensor(provider, &tensor)
+        .map_err(|error| format!("fread: prototype owner upload failed: {error}"))?;
+    if expected_logical {
+        runmat_accelerate_api::set_handle_logical(&output, true);
+    }
+    validate_resident_like_output(
+        prototype,
+        &output,
+        &expected_shape,
+        provider,
+        expected_precision,
+        expected_integer,
+        expected_logical,
+    )?;
+    Ok(Value::GpuTensor(output))
+}
+
+fn validate_resident_like_output(
+    prototype: &runmat_accelerate_api::GpuTensorHandle,
+    output: &runmat_accelerate_api::GpuTensorHandle,
+    expected_shape: &[usize],
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    expected_precision: Option<runmat_accelerate_api::ProviderPrecision>,
+    expected_integer: Option<runmat_accelerate_api::IntegerElementType>,
+    expected_logical: bool,
+) -> Result<(), String> {
+    let aliases_prototype = output.buffer_id == prototype.buffer_id;
+    let valid = !aliases_prototype
+        && output.device_id == prototype.device_id
+        && output.shape == expected_shape
+        && runmat_accelerate_api::provider_for_handle(output)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+        && runmat_accelerate_api::handle_storage(output)
+            == runmat_accelerate_api::GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_precision(output) == expected_precision
+        && runmat_accelerate_api::handle_integer_type(output) == expected_integer
+        && runmat_accelerate_api::handle_is_logical(output) == expected_logical;
+    if valid {
+        return Ok(());
+    }
+    if !aliases_prototype {
+        let output_owner = runmat_accelerate_api::provider_for_handle(output)
+            .filter(|owner| owner.device_id() == output.device_id)
+            .unwrap_or(provider);
+        let _ = output_owner.free(output);
+    }
+    Err("fread: resident 'like' upload returned an invalid or aliased handle".to_string())
 }
 
 fn convert_to_logical_value(data: Value) -> Result<Value, String> {
     match data {
         Value::LogicalArray(_) => Ok(data),
         Value::Tensor(tensor) => {
-            let mut bits = Vec::with_capacity(tensor.data.len());
-            for &value in &tensor.data {
-                bits.push(if value != 0.0 { 1 } else { 0 });
-            }
+            let bits = (0..tensor.len())
+                .map(|index| {
+                    let value = tensor
+                        .numeric_value_at(index)
+                        .expect("validated fread numeric tensor index");
+                    match value {
+                        NumericScalar::F64(value) => u8::from(value != 0.0),
+                        NumericScalar::F32(value) => u8::from(value != 0.0),
+                        value => u8::from(
+                            !value
+                                .into_int_value()
+                                .expect("non-floating numeric scalar is integer")
+                                .is_zero(),
+                        ),
+                    }
+                })
+                .collect();
             LogicalArray::new(bits, tensor.shape.clone())
                 .map(Value::LogicalArray)
                 .map_err(|e| format!("fread: {e}"))
@@ -1213,18 +1797,20 @@ fn convert_to_logical_value(data: Value) -> Result<Value, String> {
 fn read_numeric_values<R: Read + Seek>(
     reader: &mut R,
     input: InputType,
+    repeat: usize,
     limit: Option<usize>,
     skip: usize,
     endianness: Endianness,
-) -> Result<(Vec<f64>, usize), String> {
+) -> Result<(NumericStorage, usize, bool), String> {
     if let Some(0) = limit {
-        return Ok((Vec::new(), 0));
+        return Ok((NumericStorage::zeros(input.numeric_dtype(), 0), 0, false));
     }
     let element_size = input.byte_len();
     let mut buffer = vec![0u8; element_size];
     let mut values = Vec::new();
     let mut count = 0usize;
     let target = limit.unwrap_or(usize::MAX);
+    let mut encountered_eof = false;
 
     'outer: loop {
         if count >= target {
@@ -1233,7 +1819,10 @@ fn read_numeric_values<R: Read + Seek>(
         let mut remaining = element_size;
         while remaining > 0 {
             match reader.read(&mut buffer[element_size - remaining..element_size]) {
-                Ok(0) => break 'outer,
+                Ok(0) => {
+                    encountered_eof = true;
+                    break 'outer;
+                }
                 Ok(n) => remaining -= n,
                 Err(err) if err.kind() == ErrorKind::Interrupted => continue,
                 Err(err) => {
@@ -1244,38 +1833,39 @@ fn read_numeric_values<R: Read + Seek>(
         if remaining > 0 {
             break;
         }
-        let value = decode_to_f64(&buffer, input, endianness)?;
+        let value = decode_numeric_scalar(&buffer, input, endianness)?;
         values.push(value);
         count += 1;
-        if skip > 0 {
+        if skip > 0 && count.is_multiple_of(repeat) {
             reader
                 .seek(SeekFrom::Current(skip as i64))
                 .map_err(|err| format!("fread: failed to skip bytes ({err})"))?;
         }
     }
-    Ok((values, count))
+    Ok((
+        numeric_storage_from_scalars(input, values)?,
+        count,
+        encountered_eof,
+    ))
 }
 
 fn read_char_values<R: Read + Seek>(
     reader: &mut R,
     input: InputType,
+    repeat: usize,
     limit: Option<usize>,
     skip: usize,
     endianness: Endianness,
-) -> Result<(Vec<char>, usize), String> {
-    if !matches!(input, InputType::UInt8 | InputType::UInt16) {
-        return Err(
-            "char output requires an unsigned byte or unsigned 16-bit input precision".to_string(),
-        );
-    }
+) -> Result<(Vec<char>, usize, bool), String> {
     if let Some(0) = limit {
-        return Ok((Vec::new(), 0));
+        return Ok((Vec::new(), 0, false));
     }
     let element_size = input.byte_len();
     let mut buffer = vec![0u8; element_size];
     let mut values = Vec::new();
     let mut count = 0usize;
     let target = limit.unwrap_or(usize::MAX);
+    let mut encountered_eof = false;
 
     'outer: loop {
         if count >= target {
@@ -1284,7 +1874,10 @@ fn read_char_values<R: Read + Seek>(
         let mut remaining = element_size;
         while remaining > 0 {
             match reader.read(&mut buffer[element_size - remaining..element_size]) {
-                Ok(0) => break 'outer,
+                Ok(0) => {
+                    encountered_eof = true;
+                    break 'outer;
+                }
                 Ok(n) => remaining -= n,
                 Err(err) if err.kind() == ErrorKind::Interrupted => continue,
                 Err(err) => {
@@ -1298,51 +1891,92 @@ fn read_char_values<R: Read + Seek>(
         let ch = decode_to_char(&buffer, input, endianness)?;
         values.push(ch);
         count += 1;
-        if skip > 0 {
+        if skip > 0 && count.is_multiple_of(repeat) {
             reader
                 .seek(SeekFrom::Current(skip as i64))
                 .map_err(|err| format!("fread: failed to skip bytes ({err})"))?;
         }
     }
 
-    Ok((values, count))
+    Ok((values, count, encountered_eof))
 }
 
-fn decode_to_f64(bytes: &[u8], input: InputType, endianness: Endianness) -> Result<f64, String> {
+fn decode_numeric_scalar(
+    bytes: &[u8],
+    input: InputType,
+    endianness: Endianness,
+) -> Result<NumericScalar, String> {
     Ok(match input {
-        InputType::UInt8 => bytes[0] as f64,
-        InputType::Int8 => (bytes[0] as i8) as f64,
-        InputType::UInt16 => read_u16(bytes, endianness) as f64,
-        InputType::Int16 => read_u16(bytes, endianness) as i16 as f64,
-        InputType::UInt32 => read_u32(bytes, endianness) as f64,
-        InputType::Int32 => read_u32(bytes, endianness) as i32 as f64,
-        InputType::UInt64 => read_u64(bytes, endianness) as f64,
-        InputType::Int64 => read_u64(bytes, endianness) as i64 as f64,
+        InputType::UInt8 => NumericScalar::U8(bytes[0]),
+        InputType::Int8 => NumericScalar::I8(bytes[0] as i8),
+        InputType::UInt16 => NumericScalar::U16(read_u16(bytes, endianness)),
+        InputType::Int16 => NumericScalar::I16(read_u16(bytes, endianness) as i16),
+        InputType::UInt32 => NumericScalar::U32(read_u32(bytes, endianness)),
+        InputType::Int32 => NumericScalar::I32(read_u32(bytes, endianness) as i32),
+        InputType::UInt64 => NumericScalar::U64(read_u64(bytes, endianness)),
+        InputType::Int64 => NumericScalar::I64(read_u64(bytes, endianness) as i64),
         InputType::Float32 => {
             let bits = read_u32(bytes, endianness);
-            f32::from_bits(bits) as f64
+            NumericScalar::F32(f32::from_bits(bits))
         }
         InputType::Float64 => {
             let bits = read_u64(bytes, endianness);
-            f64::from_bits(bits)
+            NumericScalar::F64(f64::from_bits(bits))
         }
+    })
+}
+
+fn numeric_storage_from_scalars(
+    input: InputType,
+    values: Vec<NumericScalar>,
+) -> Result<NumericStorage, String> {
+    macro_rules! collect_variant {
+        ($scalar_variant:ident, $storage_variant:ident) => {{
+            let mut output = Vec::with_capacity(values.len());
+            for value in values {
+                let NumericScalar::$scalar_variant(value) = value else {
+                    return Err("fread: decoded numeric source class mismatch".to_string());
+                };
+                output.push(value);
+            }
+            NumericStorage::$storage_variant(output)
+        }};
+    }
+    Ok(match input {
+        InputType::UInt8 => collect_variant!(U8, U8),
+        InputType::Int8 => collect_variant!(I8, I8),
+        InputType::UInt16 => collect_variant!(U16, U16),
+        InputType::Int16 => collect_variant!(I16, I16),
+        InputType::UInt32 => collect_variant!(U32, U32),
+        InputType::Int32 => collect_variant!(I32, I32),
+        InputType::UInt64 => collect_variant!(U64, U64),
+        InputType::Int64 => collect_variant!(I64, I64),
+        InputType::Float32 => collect_variant!(F32, F32),
+        InputType::Float64 => collect_variant!(F64, F64),
     })
 }
 
 fn decode_to_char(bytes: &[u8], input: InputType, endianness: Endianness) -> Result<char, String> {
-    let code = match input {
-        InputType::UInt8 => bytes[0] as u32,
-        InputType::UInt16 => read_u16(bytes, endianness) as u32,
-        _ => {
-            return Err(
-                "char output requires an unsigned byte or unsigned 16-bit input precision"
-                    .to_string(),
-            );
-        }
+    let scalar = decode_numeric_scalar(bytes, input, endianness)?;
+    let code = match scalar {
+        NumericScalar::F64(value) => floating_char_code(value)?,
+        NumericScalar::F32(value) => floating_char_code(f64::from(value))?,
+        value => value
+            .into_int_value()
+            .and_then(|value| value.try_to_u64())
+            .and_then(|value| u32::try_from(value).ok())
+            .ok_or_else(|| "fread: character value is outside the Unicode range".to_string())?,
     };
     char::from_u32(code).ok_or_else(|| {
         format!("value 0x{code:X} cannot be represented as a Unicode scalar for char output")
     })
+}
+
+fn floating_char_code(value: f64) -> Result<u32, String> {
+    if !value.is_finite() || value < 0.0 || value > f64::from(u32::MAX) || value.round() != value {
+        return Err("fread: character value is outside the Unicode range".to_string());
+    }
+    Ok(value as u32)
 }
 
 fn read_u16(bytes: &[u8], endianness: Endianness) -> u16 {
@@ -1373,12 +2007,12 @@ fn read_u64(bytes: &[u8], endianness: Endianness) -> u64 {
 fn finalize_numeric(
     size_spec: &SizeSpec,
     count_read: usize,
-    mut values: Vec<f64>,
-) -> (Vec<f64>, usize, usize) {
+    mut values: NumericStorage,
+) -> (NumericStorage, usize, usize) {
     match size_spec {
         SizeSpec::All | SizeSpec::Count(_) => {
             let rows = count_read;
-            let cols = if count_read == 0 { 0 } else { 1 };
+            let cols = 1;
             (values, rows, cols)
         }
         SizeSpec::Matrix {
@@ -1386,16 +2020,12 @@ fn finalize_numeric(
             cols: Some(c),
         } => {
             let target = rows.saturating_mul(*c);
-            if values.len() < target {
-                values.resize(target, 0.0);
-            } else if values.len() > target {
-                values.truncate(target);
-            }
+            resize_numeric_storage(&mut values, target);
             (values, *rows, *c)
         }
         SizeSpec::Matrix { rows, cols: None } => {
             if *rows == 0 {
-                values.clear();
+                resize_numeric_storage(&mut values, 0);
                 (values, 0, 0)
             } else {
                 let cols = if count_read == 0 {
@@ -1404,14 +2034,30 @@ fn finalize_numeric(
                     count_read.div_ceil(*rows)
                 };
                 let target = rows.saturating_mul(cols);
-                if values.len() < target {
-                    values.resize(target, 0.0);
-                } else if values.len() > target {
-                    values.truncate(target);
-                }
+                resize_numeric_storage(&mut values, target);
                 (values, *rows, cols)
             }
         }
+    }
+}
+
+fn resize_numeric_storage(storage: &mut NumericStorage, len: usize) {
+    macro_rules! resize {
+        ($values:expr, $zero:expr) => {{
+            $values.resize(len, $zero);
+        }};
+    }
+    match storage {
+        NumericStorage::F64(values) => resize!(values, 0.0),
+        NumericStorage::F32(values) => resize!(values, 0.0),
+        NumericStorage::I8(values) => resize!(values, 0),
+        NumericStorage::I16(values) => resize!(values, 0),
+        NumericStorage::I32(values) => resize!(values, 0),
+        NumericStorage::I64(values) => resize!(values, 0),
+        NumericStorage::U8(values) => resize!(values, 0),
+        NumericStorage::U16(values) => resize!(values, 0),
+        NumericStorage::U32(values) => resize!(values, 0),
+        NumericStorage::U64(values) => resize!(values, 0),
     }
 }
 
@@ -1423,7 +2069,7 @@ fn finalize_char(
     match size_spec {
         SizeSpec::All | SizeSpec::Count(_) => {
             let rows = count_read;
-            let cols = if count_read == 0 { 0 } else { 1 };
+            let cols = 1;
             let row_major = column_to_row_major(&column_major, rows, cols);
             (row_major, rows, cols)
         }
@@ -1487,11 +2133,90 @@ pub(crate) mod tests {
     use crate::builtins::io::filetext::registry;
     use crate::builtins::io::filetext::{fclose, fopen};
     use crate::RuntimeError;
+    use runmat_accelerate_api::AccelProvider as _;
     use runmat_filesystem::File;
     use runmat_time::system_time_now;
     use std::io::Write;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::UNIX_EPOCH;
+
+    struct FreadOwnerProvider {
+        inner: runmat_accelerate::simple_provider::InProcessProvider,
+        precision: runmat_accelerate_api::ProviderPrecision,
+        free_count: AtomicUsize,
+    }
+
+    impl FreadOwnerProvider {
+        fn new(precision: runmat_accelerate_api::ProviderPrecision) -> Self {
+            Self {
+                inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+                precision,
+                free_count: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl runmat_accelerate_api::AccelProvider for FreadOwnerProvider {
+        fn upload(
+            &self,
+            host: &runmat_accelerate_api::HostTensorView,
+        ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+            self.inner.upload(host)
+        }
+
+        fn download<'a>(
+            &'a self,
+            handle: &'a runmat_accelerate_api::GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+            self.inner.download(handle)
+        }
+
+        fn upload_numeric(
+            &self,
+            host: &runmat_accelerate_api::HostNumericTensorView,
+        ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+            self.inner.upload_numeric(host)
+        }
+
+        fn download_numeric<'a>(
+            &'a self,
+            handle: &'a runmat_accelerate_api::GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelNumericDownloadFuture<'a> {
+            self.inner.download_numeric(handle)
+        }
+
+        fn upload_integer(
+            &self,
+            host: &runmat_accelerate_api::HostIntegerTensorView,
+        ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+            self.inner.upload_integer(host)
+        }
+
+        fn download_integer<'a>(
+            &'a self,
+            handle: &'a runmat_accelerate_api::GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelIntegerDownloadFuture<'a> {
+            self.inner.download_integer(handle)
+        }
+
+        fn free(&self, handle: &runmat_accelerate_api::GpuTensorHandle) -> anyhow::Result<()> {
+            self.free_count.fetch_add(1, Ordering::SeqCst);
+            self.inner.free(handle)
+        }
+
+        fn device_info(&self) -> String {
+            self.inner.device_info()
+        }
+
+        fn device_id(&self) -> u32 {
+            self.inner.device_id()
+        }
+
+        fn precision(&self) -> runmat_accelerate_api::ProviderPrecision {
+            self.precision
+        }
+    }
 
     fn unwrap_error_message(err: RuntimeError) -> String {
         err.message().to_string()
@@ -1507,6 +2232,183 @@ pub(crate) mod tests {
 
     fn run_fclose(args: &[Value]) -> BuiltinResult<fclose::FcloseEval> {
         futures::executor::block_on(fclose::evaluate(args))
+    }
+
+    fn double_values(tensor: &Tensor) -> &[f64] {
+        tensor.as_f64_slice().expect("expected double tensor")
+    }
+
+    #[test]
+    fn fread_like_preserves_every_exact_integer_class() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let prototypes = [
+            IntegerStorage::I8(vec![0]),
+            IntegerStorage::I16(vec![0]),
+            IntegerStorage::I32(vec![0]),
+            IntegerStorage::I64(vec![0]),
+            IntegerStorage::U8(vec![0]),
+            IntegerStorage::U16(vec![0]),
+            IntegerStorage::U32(vec![0]),
+            IntegerStorage::U64(vec![0]),
+        ];
+
+        for storage in prototypes {
+            let expected = storage
+                .from_same_class_values(
+                    [1.0, 2.5, -3.0]
+                        .into_iter()
+                        .map(|value| storage.cast_f64_assignment(value))
+                        .collect(),
+                )
+                .expect("expected storage");
+            let data = Value::Tensor(Tensor::new(vec![1.0, 2.5, -3.0], vec![3, 1]).unwrap());
+            let prototype_tensor = Tensor::new_integer(storage, vec![1, 1]).unwrap();
+            let prototype = Value::Tensor(prototype_tensor);
+            let output = adjust_output_for_like(data, &prototype, PrecisionSpec::default())
+                .expect("integer like output");
+            let Value::Tensor(output) = output else {
+                panic!("expected tensor output");
+            };
+            assert_eq!(output.integer_storage(), Some(&expected));
+        }
+    }
+
+    #[test]
+    fn fread_resident_like_preserves_every_exact_integer_class() {
+        let _guard = test_support::accel_test_lock();
+        let owner: &'static FreadOwnerProvider = Box::leak(Box::new(FreadOwnerProvider::new(
+            runmat_accelerate_api::ProviderPrecision::F64,
+        )));
+        unsafe { runmat_accelerate_api::register_provider(owner) };
+        let prototypes = [
+            IntegerStorage::I8(vec![0]),
+            IntegerStorage::I16(vec![0]),
+            IntegerStorage::I32(vec![0]),
+            IntegerStorage::I64(vec![0]),
+            IntegerStorage::U8(vec![0]),
+            IntegerStorage::U16(vec![0]),
+            IntegerStorage::U32(vec![0]),
+            IntegerStorage::U64(vec![0]),
+        ];
+        for storage in prototypes {
+            let expected_type = match storage.numeric_dtype() {
+                NumericDType::I8 => runmat_accelerate_api::IntegerElementType::I8,
+                NumericDType::I16 => runmat_accelerate_api::IntegerElementType::I16,
+                NumericDType::I32 => runmat_accelerate_api::IntegerElementType::I32,
+                NumericDType::I64 => runmat_accelerate_api::IntegerElementType::I64,
+                NumericDType::U8 => runmat_accelerate_api::IntegerElementType::U8,
+                NumericDType::U16 => runmat_accelerate_api::IntegerElementType::U16,
+                NumericDType::U32 => runmat_accelerate_api::IntegerElementType::U32,
+                NumericDType::U64 => runmat_accelerate_api::IntegerElementType::U64,
+                other => panic!("unexpected dtype {other:?}"),
+            };
+            let prototype_tensor =
+                Tensor::new_integer(storage, vec![1, 1]).expect("prototype tensor");
+            let prototype = gpu_helpers::upload_tensor(owner, &prototype_tensor)
+                .expect("prototype integer upload");
+            let output = tensor_to_gpu_value(
+                Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("read tensor"),
+                &prototype,
+            )
+            .expect("resident integer like");
+            let Value::GpuTensor(output) = output else {
+                panic!("expected resident output");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&output),
+                Some(expected_type)
+            );
+            assert_eq!(output.device_id, prototype.device_id);
+            assert_ne!(output.buffer_id, prototype.buffer_id);
+        }
+    }
+
+    #[test]
+    fn fread_resident_like_routes_to_prototype_owner_not_ambient_provider() {
+        let _guard = test_support::accel_test_lock();
+        let owner: &'static FreadOwnerProvider = Box::leak(Box::new(FreadOwnerProvider::new(
+            runmat_accelerate_api::ProviderPrecision::F32,
+        )));
+        let ambient: &'static FreadOwnerProvider = Box::leak(Box::new(FreadOwnerProvider::new(
+            runmat_accelerate_api::ProviderPrecision::F64,
+        )));
+        unsafe {
+            runmat_accelerate_api::register_provider(owner);
+            runmat_accelerate_api::register_provider(ambient);
+        }
+        let _ambient = runmat_accelerate_api::ThreadProviderGuard::set(Some(ambient));
+        let prototype_data = [0.0_f32];
+        let prototype = owner
+            .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
+                data: runmat_accelerate_api::HostNumericDataView::F32(&prototype_data),
+                shape: &[1, 1],
+                storage: runmat_accelerate_api::GpuTensorStorage::Real,
+            })
+            .expect("prototype upload");
+        let output = tensor_to_gpu_value(
+            Tensor::new(vec![1.25, 2.5], vec![2, 1]).expect("tensor"),
+            &prototype,
+        )
+        .expect("owner upload");
+        let Value::GpuTensor(output) = output else {
+            panic!("expected resident output");
+        };
+        assert_eq!(output.device_id, owner.device_id());
+        assert_ne!(output.device_id, ambient.device_id());
+        assert_ne!(output.buffer_id, prototype.buffer_id);
+        assert_eq!(output.shape, vec![2, 1]);
+        assert_eq!(
+            runmat_accelerate_api::handle_precision(&output),
+            Some(runmat_accelerate_api::ProviderPrecision::F32)
+        );
+    }
+
+    #[test]
+    fn fread_resident_like_rejects_and_cleans_malformed_outputs_without_freeing_prototype() {
+        let _guard = test_support::accel_test_lock();
+        let owner: &'static FreadOwnerProvider = Box::leak(Box::new(FreadOwnerProvider::new(
+            runmat_accelerate_api::ProviderPrecision::F64,
+        )));
+        unsafe { runmat_accelerate_api::register_provider(owner) };
+        let prototype = owner
+            .upload(&HostTensorView {
+                data: &[0.0],
+                shape: &[1, 1],
+            })
+            .expect("prototype upload");
+        let mut malformed = owner
+            .upload(&HostTensorView {
+                data: &[1.0],
+                shape: &[1, 1],
+            })
+            .expect("malformed upload");
+        malformed.descriptor.storage =
+            Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
+        let error = validate_resident_like_output(
+            &prototype,
+            &malformed,
+            &[1, 1],
+            owner,
+            Some(runmat_accelerate_api::ProviderPrecision::F64),
+            None,
+            false,
+        )
+        .unwrap_err();
+        assert!(error.contains("invalid or aliased"));
+        assert_eq!(owner.free_count.load(Ordering::SeqCst), 1);
+
+        let alias_error = validate_resident_like_output(
+            &prototype,
+            &prototype,
+            &[1, 1],
+            owner,
+            Some(runmat_accelerate_api::ProviderPrecision::F64),
+            None,
+            false,
+        )
+        .unwrap_err();
+        assert!(alias_error.contains("invalid or aliased"));
+        assert_eq!(owner.free_count.load(Ordering::SeqCst), 1);
     }
 
     #[cfg(feature = "wgpu")]
@@ -1532,14 +2434,331 @@ pub(crate) mod tests {
         assert!(labels.contains(&"data = fread(fid, ..., \"like\", prototype)"));
     }
 
+    #[test]
+    fn fread_integer_capabilities_and_control_roles_are_independently_gated() {
+        assert_eq!(INTEGER_CAPABILITIES.len(), 5);
+        assert_eq!(INTEGER_CAPABILITIES[4].inputs[0].classes.len(), 8);
+        let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+        let fid =
+            preflight_control(&Value::Int(IntValue::I32(3)), ControlRole::FileId).unwrap_err();
+        assert_eq!(
+            fid.identifier(),
+            Some("RunMat:compatibility:FreadIntegerIdExtension")
+        );
+        let size = preflight_control(&Value::Int(IntValue::U16(2)), ControlRole::Size).unwrap_err();
+        assert_eq!(
+            size.identifier(),
+            Some("RunMat:compatibility:FreadIntegerSizeExtension")
+        );
+        let skip = preflight_control(&Value::Int(IntValue::U8(1)), ControlRole::Skip).unwrap_err();
+        assert_eq!(
+            skip.identifier(),
+            Some("RunMat:compatibility:FreadIntegerSkipExtension")
+        );
+    }
+
+    #[test]
+    fn fread_classifies_resident_size_and_skip_before_gathering() {
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 901,
+            buffer_id: 901,
+            descriptor: Default::default(),
+        });
+        let precision = Value::from("uint8");
+        let args = [&resident, &precision, &resident];
+        let (size, _, skip, _, _) = classify_arguments(&args).expect("classified controls");
+        assert!(matches!(size, Some(Value::GpuTensor(_))));
+        assert!(matches!(skip, Some(Value::GpuTensor(_))));
+        let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = preflight_control(skip.expect("skip"), ControlRole::Skip).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:FreadResidentControlExtension")
+        );
+    }
+
+    #[test]
+    fn fread_like_gate_precedes_resident_fid_gather_and_effects() {
+        let fid = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 902,
+            buffer_id: 902,
+            descriptor: Default::default(),
+        });
+        let args = [Value::from("like"), Value::Num(0.0)];
+        let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = run_evaluate(&fid, &args).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:FreadLikeExtension")
+        );
+    }
+
+    #[test]
+    fn fread_invalid_like_prototype_does_not_advance_file_position() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let _guard = registry_guard();
+        registry::reset_for_tests();
+        let path = unique_path("fread_invalid_like_position");
+        test_support::fs::write(&path, [11_u8, 22_u8]).expect("write fixture");
+        let open = run_fopen(&[
+            Value::from(path.to_string_lossy().to_string()),
+            Value::from("rb"),
+        ])
+        .expect("open");
+        let fid = open.as_open().expect("open result").fid as i32;
+        let unsupported =
+            Value::Cell(runmat_value::CellArray::new(vec![Value::Num(0.0)], 1, 1).expect("cell"));
+        let error = run_evaluate(
+            &Value::Num(fid as f64),
+            &[
+                Value::Num(1.0),
+                Value::from("uint8"),
+                Value::from("like"),
+                unsupported,
+            ],
+        )
+        .unwrap_err();
+        assert!(error
+            .message()
+            .contains("cell prototypes are not supported"));
+
+        let eval = run_evaluate(
+            &Value::Num(fid as f64),
+            &[Value::Num(1.0), Value::from("*uint8")],
+        )
+        .expect("read after rejected prototype");
+        let Value::Tensor(tensor) = eval.data() else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::U8(vec![11]))
+        );
+        run_fclose(&[Value::Num(fid as f64)]).expect("close");
+        test_support::fs::remove_file(path).expect("remove fixture");
+    }
+
+    #[test]
+    fn fread_numeric_like_with_character_precision_does_not_advance_file_position() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let _guard = registry_guard();
+        registry::reset_for_tests();
+        let path = unique_path("fread_numeric_like_char_position");
+        test_support::fs::write(&path, [31_u8, 32_u8]).expect("write fixture");
+        let open = run_fopen(&[
+            Value::from(path.to_string_lossy().to_string()),
+            Value::from("rb"),
+        ])
+        .expect("open");
+        let fid = open.as_open().expect("open result").fid as i32;
+        let error = run_evaluate(
+            &Value::Num(fid as f64),
+            &[
+                Value::Num(1.0),
+                Value::from("*char"),
+                Value::from("like"),
+                Value::Num(0.0),
+            ],
+        )
+        .unwrap_err();
+        assert!(error
+            .message()
+            .contains("character output requires a character prototype"));
+        let eval = run_evaluate(
+            &Value::Num(fid as f64),
+            &[Value::Num(1.0), Value::from("*uint8")],
+        )
+        .expect("read after rejected matrix");
+        let Value::Tensor(tensor) = eval.data() else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::U8(vec![31]))
+        );
+        run_fclose(&[Value::Num(fid as f64)]).expect("close");
+        test_support::fs::remove_file(path).expect("remove fixture");
+    }
+
+    #[test]
+    fn fread_resident_like_with_character_precision_does_not_advance_file_position() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let _registry = registry_guard();
+        let _guard = test_support::accel_test_lock();
+        let owner: &'static FreadOwnerProvider = Box::leak(Box::new(FreadOwnerProvider::new(
+            runmat_accelerate_api::ProviderPrecision::F64,
+        )));
+        unsafe { runmat_accelerate_api::register_provider(owner) };
+        let prototype = owner
+            .upload(&HostTensorView {
+                data: &[0.0],
+                shape: &[1, 1],
+            })
+            .expect("prototype upload");
+        registry::reset_for_tests();
+        let path = unique_path("fread_resident_like_char_position");
+        test_support::fs::write(&path, [41_u8, 42_u8]).expect("write fixture");
+        let open = run_fopen(&[
+            Value::from(path.to_string_lossy().to_string()),
+            Value::from("rb"),
+        ])
+        .expect("open");
+        let fid = open.as_open().expect("open result").fid as i32;
+        let error = run_evaluate(
+            &Value::Num(fid as f64),
+            &[
+                Value::Num(1.0),
+                Value::from("*char"),
+                Value::from("like"),
+                Value::GpuTensor(prototype),
+            ],
+        )
+        .unwrap_err();
+        assert!(error
+            .message()
+            .contains("character output requires a character prototype"));
+        let eval = run_evaluate(
+            &Value::Num(fid as f64),
+            &[Value::Num(1.0), Value::from("*uint8")],
+        )
+        .expect("read after rejected resident matrix");
+        let Value::Tensor(tensor) = eval.data() else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::U8(vec![41]))
+        );
+        run_fclose(&[Value::Num(fid as f64)]).expect("close");
+        test_support::fs::remove_file(path).expect("remove fixture");
+    }
+
+    #[test]
+    fn fread_empty_count_returns_an_empty_column() {
+        let (storage, rows, cols) =
+            finalize_numeric(&SizeSpec::Count(0), 0, NumericStorage::U8(Vec::new()));
+        assert_eq!((rows, cols), (0, 1));
+        assert_eq!(storage.len(), 0);
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn fread_size_tensor_parser_preserves_exact_integer_storage() {
+        let count = (1_u64 << 53) + 1;
+        let count_tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![count]), vec![1, 1]).expect("count");
+        match parse_size(Some(&Value::Tensor(count_tensor))).expect("size") {
+            SizeSpec::Count(value) => assert_eq!(value, usize::try_from(count).unwrap()),
+            other => panic!("expected count size, got {other:?}"),
+        }
+
+        let matrix_tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![count, 3]), vec![1, 2]).expect("matrix");
+        match parse_size(Some(&Value::Tensor(matrix_tensor))).expect("size") {
+            SizeSpec::Matrix {
+                rows,
+                cols: Some(cols),
+            } => {
+                assert_eq!(rows, usize::try_from(count).unwrap());
+                assert_eq!(cols, 3);
+            }
+            other => panic!("expected matrix size, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fread_size_tensor_parser_rejects_negative_integer_storage() {
+        let count_tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("count");
+        assert!(parse_size(Some(&Value::Tensor(count_tensor))).is_err());
+
+        let matrix_tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![2, -1]), vec![1, 2]).expect("matrix");
+        assert!(parse_size(Some(&Value::Tensor(matrix_tensor))).is_err());
+    }
+
+    #[test]
+    fn fread_scalar_parser_reads_typed_integer_storage_exactly() {
+        let scalar = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("scalar");
+        assert_eq!(
+            value_to_scalar(&Value::Tensor(scalar), "scalar").expect("scalar"),
+            7.0
+        );
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn fread_scalar_size_and_skip_parse_integer_values_exactly() {
+        let exact = (1_u64 << 53) + 1;
+        match parse_size(Some(&Value::Int(IntValue::U64(exact)))).expect("size") {
+            SizeSpec::Count(value) => assert_eq!(value, exact as usize),
+            other => panic!("expected count size, got {other:?}"),
+        }
+
+        assert_eq!(
+            parse_skip(Some(&Value::Int(IntValue::U64(exact)))).unwrap(),
+            exact as usize
+        );
+        assert!(parse_skip(Some(&Value::Int(IntValue::U64(u64::MAX)))).is_err());
+        assert!(parse_size(Some(&Value::Int(IntValue::I8(-1)))).is_err());
+
+        assert!(parse_size(Some(&Value::Num(usize::MAX as f64))).is_err());
+        assert!(parse_size(Some(&Value::Num((usize::MAX as f64) + 1.0))).is_err());
+        assert!(parse_skip(Some(&Value::Num(i64::MAX as f64))).is_err());
+        assert!(parse_skip(Some(&Value::Num((i64::MAX as f64) + 1.0))).is_err());
+    }
+
+    #[test]
+    fn fread_fid_and_skip_read_typed_integer_storage_exactly() {
+        let fid =
+            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("fid tensor");
+        assert_eq!(parse_fid(&Value::Tensor(fid)).unwrap(), 7);
+        assert_eq!(parse_fid(&Value::Int(IntValue::U16(7))).unwrap(), 7);
+        assert!(parse_fid(&Value::Int(IntValue::U64(u64::MAX))).is_err());
+
+        let skip =
+            Tensor::new_integer(IntegerStorage::U16(vec![9]), vec![1, 1]).expect("skip tensor");
+        assert_eq!(parse_skip(Some(&Value::Tensor(skip))).unwrap(), 9);
+
+        let too_large =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("skip");
+        assert!(parse_skip(Some(&Value::Tensor(too_large))).is_err());
+    }
+
+    #[test]
+    fn fread_typed_scalar_parameters_cover_every_integer_class() {
+        let classes = [
+            IntegerStorage::I8(vec![7]),
+            IntegerStorage::I16(vec![7]),
+            IntegerStorage::I32(vec![7]),
+            IntegerStorage::I64(vec![7]),
+            IntegerStorage::U8(vec![7]),
+            IntegerStorage::U16(vec![7]),
+            IntegerStorage::U32(vec![7]),
+            IntegerStorage::U64(vec![7]),
+        ];
+        for storage in classes {
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed scalar");
+            let value = Value::Tensor(tensor);
+            assert_eq!(parse_fid(&value).unwrap(), 7);
+            assert!(matches!(
+                parse_size(Some(&value)).unwrap(),
+                SizeSpec::Count(7)
+            ));
+            assert_eq!(parse_skip(Some(&value)).unwrap(), 7);
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn fread_reads_default_double() {
+    fn fread_default_reads_uint8_and_returns_double() {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fread_default_double");
         let mut file = File::create(&path).expect("create");
-        file.write_all(&1.5f64.to_le_bytes()).expect("write");
+        file.write_all(&[7_u8]).expect("write");
         drop(file);
 
         let open = run_fopen(&[
@@ -1554,13 +2773,128 @@ pub(crate) mod tests {
         match eval.data() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 1]);
-                assert!((t.data[0] - 1.5).abs() < 1e-12);
+                assert_eq!(double_values(t), &[7.0]);
             }
             other => panic!("unexpected result {other:?}"),
         }
 
         run_fclose(&[Value::Num(fid as f64)]).unwrap();
         test_support::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn fread_precision_parser_supports_every_numeric_output_class() {
+        let cases = [
+            ("uint8=>double", NumericDType::F64),
+            ("uint8=>single", NumericDType::F32),
+            ("uint8=>int8", NumericDType::I8),
+            ("uint8=>int16", NumericDType::I16),
+            ("uint8=>int32", NumericDType::I32),
+            ("uint8=>int64", NumericDType::I64),
+            ("uint8=>uint8", NumericDType::U8),
+            ("uint8=>uint16", NumericDType::U16),
+            ("uint8=>uint32", NumericDType::U32),
+            ("uint8=>uint64", NumericDType::U64),
+        ];
+        for (precision, expected) in cases {
+            let parsed = parse_precision_string(precision).expect("precision");
+            assert!(matches!(parsed.output, OutputKind::Numeric(dtype) if dtype == expected));
+        }
+        assert!(matches!(
+            parse_precision_string("*single").unwrap().output,
+            OutputKind::Numeric(NumericDType::F32)
+        ));
+        assert!(matches!(
+            parse_precision_string("*uint64").unwrap().output,
+            OutputKind::Numeric(NumericDType::U64)
+        ));
+        let repeated = parse_precision_string("2*uint16=>uint16").unwrap();
+        assert_eq!(repeated.repeat, 2);
+        assert!(matches!(
+            repeated.output,
+            OutputKind::Numeric(NumericDType::U16)
+        ));
+        assert_eq!(parse_precision_string("real*4").unwrap().repeat, 1);
+    }
+
+    #[test]
+    fn fread_star_uint64_preserves_values_beyond_binary64_exact_range() {
+        let _guard = registry_guard();
+        registry::reset_for_tests();
+        let path = unique_path("fread_exact_uint64");
+        let expected = [9_007_199_254_740_993_u64, u64::MAX];
+        let mut file = File::create(&path).expect("create");
+        for value in expected {
+            file.write_all(&value.to_le_bytes()).expect("write");
+        }
+        drop(file);
+
+        let open = run_fopen(&[
+            Value::from(path.to_string_lossy().to_string()),
+            Value::from("rb"),
+        ])
+        .expect("fopen");
+        let fid = open.as_open().unwrap().fid as i32;
+        let eval = run_evaluate(&Value::Num(fid as f64), &[Value::from("*uint64")]).expect("fread");
+        assert_eq!(eval.count(), 2);
+        let Value::Tensor(output) = eval.data() else {
+            panic!("expected tensor output");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U64(expected.to_vec()))
+        );
+
+        run_fclose(&[Value::Num(fid as f64)]).unwrap();
+        test_support::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn fread_star_single_preserves_native_single_storage() {
+        let _guard = registry_guard();
+        registry::reset_for_tests();
+        let path = unique_path("fread_native_single");
+        let expected = [1.25_f32, -3.5_f32];
+        let mut file = File::create(&path).expect("create");
+        for value in expected {
+            file.write_all(&value.to_le_bytes()).expect("write");
+        }
+        drop(file);
+
+        let open = run_fopen(&[
+            Value::from(path.to_string_lossy().to_string()),
+            Value::from("rb"),
+        ])
+        .expect("fopen");
+        let fid = open.as_open().unwrap().fid as i32;
+        let eval = run_evaluate(&Value::Num(fid as f64), &[Value::from("*single")]).expect("fread");
+        let Value::Tensor(output) = eval.data() else {
+            panic!("expected tensor output");
+        };
+        assert_eq!(
+            output.clone().into_numeric_storage().expect("storage"),
+            NumericStorage::F32(expected.to_vec())
+        );
+
+        run_fclose(&[Value::Num(fid as f64)]).unwrap();
+        test_support::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn fread_logical_conversion_uses_typed_integer_storage() {
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![0, 9_007_199_254_740_993, u64::MAX]),
+            vec![3, 1],
+        )
+        .expect("integer tensor");
+
+        let Value::LogicalArray(logical) =
+            convert_to_logical_value(Value::Tensor(tensor)).expect("logical conversion")
+        else {
+            panic!("expected logical array");
+        };
+        assert_eq!(logical.shape, vec![3, 1]);
+        assert_eq!(logical.data, vec![0, 1, 1]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1585,7 +2919,7 @@ pub(crate) mod tests {
         assert_eq!(eval.count(), 4);
         match eval.data() {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![1.0, 2.0, 3.0, 4.0]);
+                assert_eq!(double_values(t), &[1.0, 2.0, 3.0, 4.0]);
                 assert_eq!(t.shape, vec![4, 1]);
             }
             other => panic!("unexpected result {other:?}"),
@@ -1619,7 +2953,7 @@ pub(crate) mod tests {
         match eval.data() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
-                assert_eq!(t.data, vec![1.0, 2.0, 3.0, 4.0, 5.0, 0.0]);
+                assert_eq!(double_values(t), &[1.0, 2.0, 3.0, 4.0, 5.0, 0.0]);
             }
             other => panic!("unexpected result {other:?}"),
         }
@@ -1685,7 +3019,19 @@ pub(crate) mod tests {
             Value::from("like"),
             Value::LogicalArray(prototype),
         ];
-        let eval = run_evaluate(&Value::Num(fid as f64), &args).expect("fread");
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = run_evaluate(&Value::Num(fid as f64), &args)
+                .expect_err("MATLAB mode rejects fread like");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:FreadLikeExtension")
+            );
+        }
+        let eval = {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            run_evaluate(&Value::Num(fid as f64), &args).expect("RunMat mode accepts fread like")
+        };
         assert_eq!(eval.count(), 2);
         match eval.data() {
             Value::LogicalArray(array) => {
@@ -1727,6 +3073,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_like_char_requires_precision() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fread_like_char_requires_precision");
@@ -1757,6 +3104,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_like_gpu_provider_roundtrip() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fread_like_gpu_provider_roundtrip");
@@ -1774,7 +3122,7 @@ pub(crate) mod tests {
 
             let proto = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
             let view = HostTensorView {
-                data: &proto.data,
+                data: double_values(&proto),
                 shape: &proto.shape,
             };
             let handle = provider.upload(&view).expect("upload prototype");
@@ -1790,7 +3138,7 @@ pub(crate) mod tests {
                 Value::GpuTensor(result) => {
                     let gathered =
                         test_support::gather(Value::GpuTensor(result.clone())).expect("gather");
-                    assert_eq!(gathered.data, vec![1.5]);
+                    assert_eq!(double_values(&gathered), &[1.5]);
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
             }
@@ -1805,6 +3153,7 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn fread_wgpu_like_uploads_gpu() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fread_wgpu_like_uploads_gpu");
@@ -1837,7 +3186,7 @@ pub(crate) mod tests {
             Value::GpuTensor(handle) => {
                 let gathered =
                     test_support::gather(Value::GpuTensor(handle.clone())).expect("gather");
-                assert_eq!(gathered.data, vec![2.25]);
+                assert_eq!(double_values(&gathered), &[2.25]);
             }
             other => panic!("expected gpu tensor, got {other:?}"),
         }
@@ -1868,10 +3217,36 @@ pub(crate) mod tests {
         assert_eq!(eval.count(), 3);
         match eval.data() {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![1.0, 3.0, 5.0]);
+                assert_eq!(double_values(t), &[1.0, 3.0, 5.0]);
             }
             other => panic!("unexpected result {other:?}"),
         }
+
+        run_fclose(&[Value::Num(fid as f64)]).unwrap();
+        test_support::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn fread_repeated_precision_skips_after_each_block() {
+        let _guard = registry_guard();
+        registry::reset_for_tests();
+        let path = unique_path("fread_repeated_skip");
+        let mut file = File::create(&path).expect("create");
+        file.write_all(&[1_u8, 2, 99, 3, 4, 99]).expect("write");
+        drop(file);
+
+        let open = run_fopen(&[
+            Value::from(path.to_string_lossy().to_string()),
+            Value::from("rb"),
+        ])
+        .expect("fopen");
+        let fid = open.as_open().unwrap().fid as i32;
+        let args = vec![Value::Num(4.0), Value::from("2*uint8"), Value::Num(1.0)];
+        let eval = run_evaluate(&Value::Num(fid as f64), &args).expect("fread");
+        let Value::Tensor(output) = eval.data() else {
+            panic!("expected tensor output");
+        };
+        assert_eq!(double_values(output), &[1.0, 2.0, 3.0, 4.0]);
 
         run_fclose(&[Value::Num(fid as f64)]).unwrap();
         test_support::fs::remove_file(path).unwrap();
@@ -1900,7 +3275,7 @@ pub(crate) mod tests {
         assert_eq!(eval.count(), 2);
         match eval.data() {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![258.0, 772.0]);
+                assert_eq!(double_values(t), &[258.0, 772.0]);
                 assert_eq!(t.shape, vec![2, 1]);
             }
             other => panic!("unexpected result {other:?}"),

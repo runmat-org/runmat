@@ -1,6 +1,8 @@
 //! Geometry import and normalization pipeline.
 
 pub mod cad;
+pub mod exact;
+pub mod faceted;
 pub mod import;
 pub mod normalize;
 pub mod preview;
@@ -9,10 +11,16 @@ pub mod sniff;
 
 mod occt;
 
+pub use exact::{
+    import_exact_cad, ExactCadAnalysisOptions, ExactCadImportOptions, ImportedExactCad,
+};
+pub use faceted::{import_faceted_solid, FacetedSolidImportOptions, ImportedFacetedSolid};
 pub use import::{
     import_geometry, import_geometry_with_context, GeometryImportBudgetPolicy,
     GeometryImportContext, GeometryImportOptions,
 };
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+pub use occt::evaluator::OcctExactEvaluator;
 pub use preview::{
     close_cad_preview_session, read_cad_preview_session_chunk, start_cad_preview_session,
     CadPreviewSessionChunk, CadPreviewSessionStart,

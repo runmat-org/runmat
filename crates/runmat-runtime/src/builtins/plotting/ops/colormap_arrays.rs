@@ -1,14 +1,19 @@
 //! MATLAB-compatible colormap array generators.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, Tensor, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, Type,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::surface::ColorMap;
+use runmat_value::{IntValue, Tensor, Value};
 
 use super::state::current_colormap_length;
+use crate::builtins::common::tensor as tensor_utils;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const MAX_COLORMAP_LENGTH: usize = 1_000_000;
@@ -39,6 +44,39 @@ const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
 
 const ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_INVALID_ARGUMENT];
 
+const COLORCUBE_INTEGER_LENGTH_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "m",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented nonnegative scalar length accepts every built-in integer class.",
+    }];
+
+pub const COLORCUBE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "c = colorcube(integer_m)",
+        inputs: &COLORCUBE_INTEGER_LENGTH_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "m is read exactly from authoritative host integer storage, validated against RunMat's allocation guard, and used only as the row count. The generated m-by-3 RGB colormap is double; resident scalar controls are rejected without provider dispatch.",
+    }];
+
+pub const PARULA_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "c = parula(integer_m)",
+        inputs: &COLORCUBE_INTEGER_LENGTH_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The compatibility target explicitly lists every built-in integer class for m. The exact nonnegative length is read from authoritative host storage and used only as a guarded row count; the generated m-by-3 RGB colormap is double, and resident controls reject without provider dispatch.",
+    }];
+
 fn colormap_type(_args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> Type {
     Type::Tensor { shape: None }
 }
@@ -55,6 +93,7 @@ macro_rules! define_colormap_builtin {
         $keywords:literal,
         $label_none:literal,
         $label_length:literal
+        $(, $integer_capabilities:path)?
     ) => {
         const $signatures: [BuiltinSignatureDescriptor; 2] = [
             BuiltinSignatureDescriptor {
@@ -83,6 +122,7 @@ macro_rules! define_colormap_builtin {
             keywords = $keywords,
             type_resolver(colormap_type),
             descriptor(crate::builtins::plotting::colormap_arrays::$descriptor),
+            $(integer_capabilities($integer_capabilities),)?
             builtin_path = "crate::builtins::plotting::colormap_arrays"
         )]
         pub fn $fn_name(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -101,7 +141,8 @@ define_colormap_builtin!(
     "Return the parula colormap as an RGB array.",
     "parula,colormap,plotting,rgb",
     "c = parula()",
-    "c = parula(m)"
+    "c = parula(m)",
+    crate::builtins::plotting::colormap_arrays::PARULA_INTEGER_CAPABILITIES
 );
 define_colormap_builtin!(
     COLORCUBE_DESCRIPTOR,
@@ -112,7 +153,8 @@ define_colormap_builtin!(
     "Return the colorcube colormap as an RGB array.",
     "colorcube,colormap,plotting,rgb",
     "c = colorcube()",
-    "c = colorcube(m)"
+    "c = colorcube(m)",
+    crate::builtins::plotting::colormap_arrays::COLORCUBE_INTEGER_CAPABILITIES
 );
 define_colormap_builtin!(
     VIRIDIS_DESCRIPTOR,
@@ -314,7 +356,8 @@ pub(crate) fn parse_rgb_colormap_tensor(
     tensor: &Tensor,
     builtin: &'static str,
 ) -> BuiltinResult<(ColorMap, usize)> {
-    if tensor.cols != 3 || tensor.data.len() != tensor.rows.saturating_mul(3) {
+    if tensor.cols != 3 || tensor_utils::tensor_element_len(tensor) != tensor.rows.saturating_mul(3)
+    {
         return Err(invalid(
             builtin,
             "RGB colormap arrays must be m-by-3 numeric matrices",
@@ -331,12 +374,18 @@ pub(crate) fn parse_rgb_colormap_tensor(
     }
 
     let mut colors = Vec::with_capacity(tensor.rows);
+    let uint8_map = tensor.numeric_dtype() == runmat_value::NumericDType::U8;
     for row in 0..tensor.rows {
-        let color = [
-            tensor.data[row],
-            tensor.data[tensor.rows + row],
-            tensor.data[2 * tensor.rows + row],
+        let mut color = [
+            tensor_utils::tensor_value_f64(tensor, row),
+            tensor_utils::tensor_value_f64(tensor, tensor.rows + row),
+            tensor_utils::tensor_value_f64(tensor, 2 * tensor.rows + row),
         ];
+        if uint8_map {
+            for component in &mut color {
+                *component /= f64::from(u8::MAX);
+            }
+        }
         if !color.iter().all(|value| value.is_finite()) {
             return Err(invalid(builtin, "RGB colormap entries must be finite"));
         }
@@ -364,10 +413,14 @@ fn parse_length_arg(args: &[Value], builtin: &'static str) -> BuiltinResult<usiz
 }
 
 fn colormap_length(value: &Value, builtin: &'static str) -> BuiltinResult<usize> {
+    if let Some(length) = exact_integer_scalar(value) {
+        return colormap_integer_length(&length, builtin);
+    }
     let raw = match value {
         Value::Num(value) => *value,
-        Value::Int(value) => value.to_f64(),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            tensor_utils::tensor_value_f64(tensor, 0)
+        }
         _ => return Err(invalid(builtin, "colormap length must be a numeric scalar")),
     };
     if !raw.is_finite() || raw.fract() != 0.0 || raw < 0.0 {
@@ -382,6 +435,29 @@ fn colormap_length(value: &Value, builtin: &'static str) -> BuiltinResult<usize>
     Ok(raw as usize)
 }
 
+fn exact_integer_scalar(value: &Value) -> Option<IntValue> {
+    match value {
+        Value::Int(value) => Some(value.clone()),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0)),
+        _ => None,
+    }
+}
+
+fn colormap_integer_length(value: &IntValue, builtin: &'static str) -> BuiltinResult<usize> {
+    let Some(length) = value.try_to_usize() else {
+        return Err(invalid(
+            builtin,
+            "colormap length must be a nonnegative integer",
+        ));
+    };
+    if length > MAX_COLORMAP_LENGTH {
+        return Err(invalid(builtin, "colormap length is too large"));
+    }
+    Ok(length)
+}
+
 fn rgb_tensor_from_colors(colors: &[[f64; 3]]) -> Tensor {
     let rows = colors.len();
     let mut data = Vec::with_capacity(rows.saturating_mul(3));
@@ -394,14 +470,7 @@ fn rgb_tensor_from_colors(colors: &[[f64; 3]]) -> Tensor {
     for color in colors {
         data.push(color[2]);
     }
-    Tensor {
-        data,
-        shape: vec![rows, 3],
-        rows,
-        cols: 3,
-        integer_data: None,
-        dtype: NumericDType::F64,
-    }
+    Tensor::new(data, vec![rows, 3]).expect("RGB colormap matrix")
 }
 
 fn sample_colormap(map: &ColorMap, idx: usize, len: usize) -> [f64; 3] {
@@ -509,9 +578,14 @@ mod tests {
             let Value::Tensor(cmap) = builtin(vec![Value::Num(6.0)]).expect(name) else {
                 panic!("expected tensor");
             };
-            assert_eq!((cmap.rows, cmap.cols, cmap.data.len()), (6, 3, 18));
+            assert_eq!(
+                (cmap.rows, cmap.cols, cmap.materialize_f64().len()),
+                (6, 3, 18)
+            );
             assert!(
-                cmap.data.iter().all(|v| (0.0..=1.0).contains(v)),
+                cmap.materialize_f64()
+                    .iter()
+                    .all(|v| (0.0..=1.0).contains(v)),
                 "{name} produced out-of-range RGB entries"
             );
         }
@@ -537,22 +611,138 @@ mod tests {
     }
 
     #[test]
+    fn length_argument_reads_typed_integer_tensor_exactly() {
+        let length = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![MAX_COLORMAP_LENGTH as u64]),
+            vec![1, 1],
+        )
+        .expect("typed length");
+        assert_eq!(
+            colormap_length(&Value::Tensor(length), "parula").unwrap(),
+            MAX_COLORMAP_LENGTH
+        );
+
+        let too_large = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![MAX_COLORMAP_LENGTH as u64 + 1]),
+            vec![1, 1],
+        )
+        .expect("too large");
+        assert!(colormap_length(&Value::Tensor(too_large), "parula").is_err());
+
+        let negative = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::I64(vec![-1]),
+            vec![1, 1],
+        )
+        .expect("negative");
+        assert!(colormap_length(&Value::Tensor(negative), "parula").is_err());
+    }
+
+    #[test]
+    fn colorcube_accepts_all_integer_length_classes_and_returns_double() {
+        let storages = [
+            runmat_value::IntegerStorage::I8(vec![6]),
+            runmat_value::IntegerStorage::I16(vec![6]),
+            runmat_value::IntegerStorage::I32(vec![6]),
+            runmat_value::IntegerStorage::I64(vec![6]),
+            runmat_value::IntegerStorage::U8(vec![6]),
+            runmat_value::IntegerStorage::U16(vec![6]),
+            runmat_value::IntegerStorage::U32(vec![6]),
+            runmat_value::IntegerStorage::U64(vec![6]),
+        ];
+
+        for storage in storages {
+            let length = Tensor::new_integer(storage, vec![1, 1]).expect("length");
+            let Value::Tensor(cmap) =
+                colorcube_builtin(vec![Value::Tensor(length)]).expect("colorcube")
+            else {
+                panic!("expected colormap tensor");
+            };
+            assert_eq!((cmap.rows, cmap.cols), (6, 3));
+            assert_eq!(cmap.numeric_dtype(), runmat_value::NumericDType::F64);
+        }
+    }
+
+    #[test]
+    fn parula_accepts_all_integer_length_classes_and_returns_double() {
+        let storages = [
+            runmat_value::IntegerStorage::I8(vec![6]),
+            runmat_value::IntegerStorage::I16(vec![6]),
+            runmat_value::IntegerStorage::I32(vec![6]),
+            runmat_value::IntegerStorage::I64(vec![6]),
+            runmat_value::IntegerStorage::U8(vec![6]),
+            runmat_value::IntegerStorage::U16(vec![6]),
+            runmat_value::IntegerStorage::U32(vec![6]),
+            runmat_value::IntegerStorage::U64(vec![6]),
+        ];
+
+        for storage in storages {
+            let length = Tensor::new_integer(storage, vec![1, 1]).expect("length");
+            let Value::Tensor(cmap) = parula_builtin(vec![Value::Tensor(length)]).expect("parula")
+            else {
+                panic!("expected colormap tensor");
+            };
+            assert_eq!((cmap.rows, cmap.cols), (6, 3));
+            assert_eq!(cmap.numeric_dtype(), runmat_value::NumericDType::F64);
+        }
+    }
+
+    #[test]
+    fn colorcube_rejects_resident_length_without_provider_dispatch() {
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+            descriptor: Default::default(),
+        });
+        let err = colorcube_builtin(vec![resident]).expect_err("resident length");
+        assert!(err.message().contains("numeric scalar"));
+    }
+
+    #[test]
+    fn colorcube_integer_capability_is_documented_structural_host_only() {
+        let capability = &COLORCUBE_INTEGER_CAPABILITIES[0];
+        assert_eq!(capability.inputs[0].classes.len(), 8);
+        assert_eq!(
+            capability.inputs[0].availability,
+            BuiltinIntegerInputAvailability::Documented
+        );
+        assert_eq!(
+            capability.computation_domain,
+            BuiltinIntegerComputationDomain::Structural
+        );
+        assert_eq!(capability.backend, BuiltinIntegerBackendRule::HostOnly);
+        assert_eq!(
+            capability.output_class,
+            BuiltinIntegerOutputClassRule::Double
+        );
+    }
+
+    #[test]
     fn parse_rgb_colormap_tensor_recognizes_generated_maps_and_custom_gradient() {
         let parula = colormap_tensor(ColorMap::Parula, 8);
         let (map, len) = parse_rgb_colormap_tensor(&parula, "colormap").expect("parse parula");
         assert!(matches!(map, ColorMap::Listed(_)));
         assert_eq!(len, 8);
 
-        let custom = Tensor {
-            data: vec![0.0, 1.0, 0.0, 0.5, 1.0, 0.0],
-            integer_data: None,
-            shape: vec![2, 3],
-            rows: 2,
-            cols: 3,
-            dtype: NumericDType::F64,
-        };
+        let custom =
+            Tensor::new(vec![0.0, 1.0, 0.0, 0.5, 1.0, 0.0], vec![2, 3]).expect("custom colormap");
         let (map, len) = parse_rgb_colormap_tensor(&custom, "colormap").expect("parse custom");
         assert_eq!(len, 2);
         assert!(matches!(map, ColorMap::Listed(_)));
+
+        let typed = Tensor::new_integer(
+            runmat_value::IntegerStorage::U8(vec![0, 255, 0, 128, 255, 0]),
+            vec![2, 3],
+        )
+        .expect("typed RGB colormap");
+        let (map, len) = parse_rgb_colormap_tensor(&typed, "colormap").expect("parse typed");
+        assert_eq!(len, 2);
+        let ColorMap::Listed(rows) = map else {
+            panic!("expected listed map");
+        };
+        assert_eq!(rows.as_ref()[0], [0.0, 0.0, 1.0]);
+        assert_eq!(rows.as_ref()[1][0], 1.0);
+        assert!((rows.as_ref()[1][1] - 128.0_f32 / 255.0_f32).abs() < f32::EPSILON);
+        assert_eq!(rows.as_ref()[1][2], 0.0);
     }
 }

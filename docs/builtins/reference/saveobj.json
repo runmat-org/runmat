@@ -35,7 +35,7 @@
     "Nested objects inside structs or cells are serialized recursively before MAT-file encoding.",
     "`save` automatically applies this object serialization path before writing MAT-file variables.",
     "Recursion is bounded and reports `RunMat:ObjectSerialization:RecursionLimit` for cyclic or excessively nested object graphs.",
-    "Non-object inputs to direct `saveobj` raise `RunMat:ObjectSerialization:InvalidArgument`."
+    "Non-object inputs to direct `saveobj`, including typed integers and gpuArray values, raise `RunMat:ObjectSerialization:InvalidArgument` before serialization. Integer-valued properties nested inside an object remain opaque payloads and preserve authoritative native storage."
   ],
   "examples": [
     {

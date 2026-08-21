@@ -1,15 +1,17 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericDType, Tensor, Value};
 
 use super::properties::{resolve_plot_handle, PlotHandle};
 use super::state::{
     axes_metadata_snapshot, encode_axes_handle, figure_has_sg_title, legend_entries_snapshot,
     FigureHandle, PlotObjectKind,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_array_type;
 use crate::{build_runtime_error, RuntimeError};
 
@@ -93,6 +95,12 @@ pub const ANCESTOR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ANCESTOR_ERRORS,
 };
 
+pub const ANCESTOR_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "ancestor accepts graphics objects plus text type selectors and returns a graphics object or empty handle array. Integer scalars and arrays are non-graphics inputs and return empty; RunMat's host-double handle encoding is opaque object state, not integer data.",
+};
+
 #[runtime_builtin(
     name = "ancestor",
     category = "plotting",
@@ -101,6 +109,7 @@ pub const ANCESTOR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     suppress_auto_output = true,
     type_resolver(handle_array_type),
     descriptor(crate::builtins::plotting::ancestor::ANCESTOR_DESCRIPTOR),
+    integer_audit(crate::builtins::plotting::ancestor::ANCESTOR_INTEGER_AUDIT),
     builtin_path = "crate::builtins::plotting::ancestor"
 )]
 pub fn ancestor_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -141,15 +150,18 @@ fn ancestor_array(
     types: &TypeSelector,
     toplevel: bool,
 ) -> crate::BuiltinResult<Value> {
-    if tensor.data.len() == 1 {
-        return Ok(match ancestor_scalar(tensor.data[0], types, toplevel) {
+    if tensor.numeric_dtype() != NumericDType::F64 {
+        return Ok(empty_handle_array());
+    }
+    let values = tensor_utils::tensor_values_f64_cow(tensor);
+    if values.len() == 1 {
+        return Ok(match ancestor_scalar(values[0], types, toplevel) {
             Some(handle) => Value::Num(handle),
             None => empty_handle_array(),
         });
     }
 
-    let data: Vec<f64> = tensor
-        .data
+    let data: Vec<f64> = values
         .iter()
         .filter_map(|&handle| ancestor_scalar(handle, types, toplevel))
         .collect();
@@ -157,14 +169,9 @@ fn ancestor_array(
         return Ok(empty_handle_array());
     }
     let len = data.len();
-    Ok(Value::Tensor(Tensor {
-        data,
-        shape: vec![1, len],
-        rows: 1,
-        cols: len,
-        integer_data: None,
-        dtype: NumericDType::F64,
-    }))
+    Ok(Value::Tensor(
+        Tensor::new(data, vec![1, len]).expect("ancestor handle row"),
+    ))
 }
 
 fn ancestor_scalar(handle_value: f64, types: &TypeSelector, toplevel: bool) -> Option<f64> {
@@ -325,8 +332,12 @@ fn push_normalized_name(raw: &str, names: &mut Vec<String>) -> crate::BuiltinRes
 fn scalar_handle(value: &Value) -> Option<f64> {
     match value {
         Value::Num(v) => Some(*v),
-        Value::Int(i) => Some(i.to_f64()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data.first().copied(),
+        Value::Tensor(tensor)
+            if tensor.numeric_dtype() == NumericDType::F64
+                && tensor_utils::is_scalar_tensor(tensor) =>
+        {
+            Some(tensor_utils::tensor_value_f64(tensor, 0))
+        }
         _ => None,
     }
 }
@@ -373,7 +384,7 @@ mod tests {
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, reset_plot_state};
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, Tensor, Value};
+    use runmat_value::{CellArray, IntValue, IntegerStorage, Tensor, Value};
 
     fn setup() -> PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -397,6 +408,10 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(labels.contains(&"p = ancestor(h, type)"));
         assert!(labels.contains(&"p = ancestor(h, type, 'toplevel')"));
+        assert_eq!(
+            ANCESTOR_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
     }
 
     #[test]
@@ -521,7 +536,7 @@ mod tests {
             panic!("expected empty tensor for absent legend");
         };
         assert_eq!(tensor.shape, vec![0, 0]);
-        assert!(tensor.data.is_empty());
+        assert!(tensor.materialize_f64().is_empty());
     }
 
     #[test]
@@ -568,7 +583,7 @@ mod tests {
             panic!("expected empty tensor");
         };
         assert_eq!(tensor.shape, vec![0, 0]);
-        assert!(tensor.data.is_empty());
+        assert!(tensor.materialize_f64().is_empty());
     }
 
     #[test]
@@ -590,7 +605,7 @@ mod tests {
             panic!("expected tensor result");
         };
         assert_eq!(tensor.shape, vec![1, 1]);
-        assert_eq!(tensor.data[0], axes_handle);
+        assert_eq!(tensor.materialize_f64()[0], axes_handle);
     }
 
     #[test]
@@ -600,5 +615,51 @@ mod tests {
             ancestor_builtin(vec![Value::Num(0.0), Value::String("root".into())]).unwrap(),
             Value::Num(0.0)
         );
+    }
+
+    #[test]
+    fn integer_values_are_non_graphics_inputs_and_return_empty() {
+        let _guard = setup();
+        let scalars = [
+            IntValue::I8(0),
+            IntValue::I16(0),
+            IntValue::I32(0),
+            IntValue::I64(0),
+            IntValue::U8(0),
+            IntValue::U16(0),
+            IntValue::U32(0),
+            IntValue::U64(0),
+        ];
+        let arrays = [
+            IntegerStorage::I8(vec![0]),
+            IntegerStorage::I16(vec![0]),
+            IntegerStorage::I32(vec![0]),
+            IntegerStorage::I64(vec![0]),
+            IntegerStorage::U8(vec![0]),
+            IntegerStorage::U16(vec![0]),
+            IntegerStorage::U32(vec![0]),
+            IntegerStorage::U64(vec![0]),
+        ];
+        for scalar in scalars {
+            assert_empty_handle_array(
+                ancestor_builtin(vec![Value::Int(scalar), Value::String("root".into())]).unwrap(),
+            );
+        }
+        for storage in arrays {
+            let handle = Tensor::new_integer(storage, vec![1, 1]).expect("typed non-handle");
+            assert_empty_handle_array(
+                ancestor_builtin(vec![Value::Tensor(handle), Value::String("root".into())])
+                    .unwrap(),
+            );
+        }
+    }
+
+    fn assert_empty_handle_array(value: Value) {
+        let Value::Tensor(tensor) = value else {
+            panic!("expected empty handle array");
+        };
+        assert_eq!(tensor.numeric_dtype(), NumericDType::F64);
+        assert_eq!(tensor.shape, vec![0, 0]);
+        assert!(tensor.materialize_f64().is_empty());
     }
 }

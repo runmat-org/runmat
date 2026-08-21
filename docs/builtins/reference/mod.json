@@ -55,7 +55,7 @@
       "output": "result =\n    [0.5  1.1;\n     1.7  0.4]"
     },
     {
-      "description": "MATLAB-compatible modulus for complex numbers",
+      "description": "Computing The Modulus Of Complex Numbers",
       "input": "z = [3 + 4i, -2 + 5i];\ndiv = 2 + 1i;\nres = mod(z, div)",
       "output": "res =\n    [0.0 + 0.0i, 0.0 + 1.0i]"
     },

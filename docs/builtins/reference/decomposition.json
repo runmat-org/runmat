@@ -11,7 +11,7 @@
     "triangular",
     "diagonal"
   ],
-  "summary": "Create MATLAB-compatible matrix decomposition objects for reusable linear solves.",
+  "summary": "Create matrix decomposition objects for reusable linear solves, with explicitly gated RunMat extensions.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -20,7 +20,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "Construction gathers gpuArray inputs to host object storage. Solving through the object delegates to mldivide or mrdivide, so GPU residency follows those solve builtins when a provider accepts the transformed matrix."
+    "notes": "In `runmat` compatibility mode, construction accepts gpuArray arguments as a RunMat extension and gathers them to host object storage. Solving through the object delegates to mldivide or mrdivide, so GPU residency follows those solve builtins when a provider accepts the transformed matrix."
   },
   "fusion": {
     "elementwise": false,
@@ -34,14 +34,16 @@
   },
   "description": "`dA = decomposition(A)` creates a decomposition object that can be reused with `dA \\ b` and `b / dA`. RunMat stores a validated coefficient matrix and routes solves through the same MATLAB-compatible `mldivide` and `mrdivide` engines used by ordinary matrix division.",
   "behaviors": [
-    "The constructor accepts dense real, dense complex, scalar numeric, logical scalar, and integer scalar coefficient matrices. Sparse inputs are rejected until RunMat has a sparse solve path behind the decomposition object.",
+    "The MATLAB-compatible surface accepts full real or complex coefficient matrices of class `single` or `double`. With RunMat extensions enabled, all eight integer coefficient classes and logical coefficients are accepted and retained exactly in the object; strict compatibility mode rejects those forms before gathering a resident value. Sparse inputs remain rejected until RunMat has a sparse solve path behind the decomposition object.",
     "Supported type strings are `'auto'`, `'lu'`, `'qr'`, `'chol'`, `'triangular'`, and `'diagonal'`. The default `'auto'` selects `diagonal`, `triangular`, `lu`, or `qr` based on the matrix shape and structure.",
     "Square-only types reject rectangular matrices. The `diagonal` and `triangular` types validate the corresponding structure. The optional `'upper'` or `'lower'` triangular flag is supported for `decomposition(A, 'triangular', flag)` and ignores the opposite triangle.",
-    "Name-value options include `CheckCondition` and `RankTolerance`. `CheckCondition` is exposed as an object property; `RankTolerance` is accepted and stored for QR compatibility metadata.",
+    "Name-value options include `CheckCondition` and `RankTolerance`. MATLAB-compatible `CheckCondition` values are logical; accepting an integer scalar is a separately gated RunMat extension. `CheckCondition` is exposed as an object property, while `RankTolerance` is accepted and stored for QR compatibility metadata.",
+    "Typed-integer `RankTolerance` and real or paired-complex typed-integer scale factors are independently gated RunMat extensions. Each authoritative integer component must be exactly representable before crossing into binary64 scale or tolerance metadata.",
     "Object properties include `MatrixSize`, `Type`, `CheckCondition`, `Datatype`, `IsConjugateTransposed`, `IsReal`, `IsSparse`, and `ScaleFactor`. Internal coefficient storage is not publicly readable.",
-    "Unary plus returns the same decomposition. Unary minus, scalar multiplication, and scalar division return a new decomposition with an adjusted scale factor.",
-    "Conjugate transpose (`dA'`) toggles `IsConjugateTransposed`, conjugates the scale factor, and solves against the conjugate-transposed coefficient matrix.",
-    "Left division (`dA \\ b`) and right division (`b / dA`) support the same real, complex, square, rectangular, and least-squares behavior as RunMat's `mldivide` and `mrdivide` builtins."
+    "Unary plus returns the same decomposition. Unary minus, scalar multiplication, and scalar division return a new decomposition with an adjusted scale factor. GPU scalar operands are gated before provider access because the public decomposition surface does not document GPU Arrays.",
+    "Conjugate transpose (`dA'`) toggles `IsConjugateTransposed`, conjugates the scale factor, and solves against the conjugate-transposed coefficient matrix. Gated integer and logical objects retain exact coefficient storage through this structural operation.",
+    "Left division (`dA \\ b`) and right division (`b / dA`) support the same real, complex, square, rectangular, and least-squares behavior as RunMat's `mldivide` and `mrdivide` builtins. Integer and logical coefficients are promoted explicitly to binary64 only at this solve boundary, so their solutions are double or complex double.",
+    "Element-wise left division (`ldivide` or `.\\`) is not a decomposition-object method, and `decomposition.ldivide` is absent from the builtin registry."
   ],
   "examples": [
     {
@@ -79,12 +81,20 @@
       "answer": "RunMat supports property access, unary plus/minus, conjugate transpose, scalar multiplication, scalar division, left division, and right division for decomposition objects."
     },
     {
+      "question": "How are integer and logical coefficient matrices handled?",
+      "answer": "They are RunMat-only extensions. With extensions enabled, construction and structural transpose preserve exact host storage for all eight integer classes and logical arrays. A solve promotes the effective coefficient matrix to double at the solve boundary and reports a double or complex-double solution. With extensions disabled, construction and later object methods reject the extended object with a stable compatibility identifier."
+    },
+    {
       "question": "Are condition warnings emitted?",
       "answer": "No. The `CheckCondition` property is parsed and preserved, but RunMat does not yet emit MATLAB-compatible condition warnings during decomposition construction or solve."
     },
     {
       "question": "Are sparse decomposition objects supported?",
       "answer": "Not yet. RunMat rejects sparse coefficient matrices instead of silently densifying them, because large sparse matrices need a dedicated sparse solve path to be safe and MATLAB-compatible."
+    },
+    {
+      "question": "Which broader decomposition features are still incomplete?",
+      "answer": "The current object does not implement sparse decomposition, cached native factor storage, condition warnings, algorithmic use of RankTolerance, or the additional banded, Hessenberg, LDL, COD, and permuted-triangular forms. Unsupported type strings are rejected explicitly."
     }
   ],
   "links": [
@@ -118,7 +128,7 @@
     "url": "crates/runmat-runtime/src/builtins/math/linalg/factor/decomposition.rs"
   },
   "gpu_behavior": [
-    "Constructing a decomposition object gathers any gpuArray coefficient matrix to host storage because the object owns normalized matrix metadata.",
+    "The compatibility target does not document GPU Array support for `decomposition`. RunMat retains gpuArray arguments behind its explicit extension mode and gathers them to host storage because the object owns normalized matrix metadata.",
     "Solves through `dA \\ b` and `b / dA` call the existing `mldivide` and `mrdivide` implementations with the effective coefficient matrix. If a provider accepts that solve, residency follows the same provider behavior as direct matrix division; otherwise RunMat uses the host fallback."
   ]
 }

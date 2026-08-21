@@ -14,19 +14,22 @@ pub enum BufferUsageClass {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct ResidencyKey {
     usage: BufferUsageClass,
-    len: usize,
+    allocated_bytes: u64,
 }
 
 impl ResidencyKey {
-    fn new(usage: BufferUsageClass, len: usize) -> Self {
-        Self { usage, len }
+    fn new(usage: BufferUsageClass, allocated_bytes: u64) -> Self {
+        Self {
+            usage,
+            allocated_bytes,
+        }
     }
 }
 
 impl Hash for ResidencyKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.usage.hash(state);
-        self.len.hash(state);
+        self.allocated_bytes.hash(state);
     }
 }
 
@@ -65,7 +68,8 @@ impl BufferResidency {
             );
         }
 
-        let key = ResidencyKey::new(usage, len);
+        let size_bytes = (len as u64).max(1) * element_size as u64;
+        let key = ResidencyKey::new(usage, size_bytes);
         if let Ok(mut guard) = self.pools.lock() {
             if let Some(queue) = guard.get_mut(&key) {
                 if let Some(buffer) = queue.pop_front() {
@@ -80,7 +84,6 @@ impl BufferResidency {
             }
         }
 
-        let size_bytes = (len as u64).max(1) * element_size as u64;
         let buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(label),
             size: size_bytes,
@@ -98,30 +101,49 @@ impl BufferResidency {
         (buffer, false)
     }
 
-    pub fn release(&self, usage: BufferUsageClass, len: usize, buffer: Arc<wgpu::Buffer>) {
-        if len == 0 {
+    pub fn release(
+        &self,
+        usage: BufferUsageClass,
+        allocated_bytes: u64,
+        buffer: Arc<wgpu::Buffer>,
+    ) {
+        if allocated_bytes == 0 {
             return;
         }
 
-        let key = ResidencyKey::new(usage, len);
+        let key = ResidencyKey::new(usage, allocated_bytes);
         if let Ok(mut guard) = self.pools.lock() {
             let queue = guard.entry(key).or_insert_with(VecDeque::new);
             if queue.len() < self.max_per_key {
                 log::trace!(
-                    "buffer_residency: release {:?} len={} ptr={:p}",
+                    "buffer_residency: release {:?} bytes={} ptr={:p}",
                     usage,
-                    len,
+                    allocated_bytes,
                     Arc::as_ptr(&buffer)
                 );
                 queue.push_back(buffer);
             } else {
                 log::trace!(
-                    "buffer_residency: drop {:?} len={} ptr={:p} (pool full)",
+                    "buffer_residency: drop {:?} bytes={} ptr={:p} (pool full)",
                     usage,
-                    len,
+                    allocated_bytes,
                     Arc::as_ptr(&buffer)
                 );
             }
         }
+    }
+
+    pub fn pooled_bytes(&self, _element_size: usize) -> u64 {
+        self.pools
+            .lock()
+            .map(|pools| {
+                pools.iter().fold(0_u64, |total, (key, buffers)| {
+                    let bytes_each = key.allocated_bytes;
+                    total.saturating_add(
+                        bytes_each.saturating_mul(u64::try_from(buffers.len()).unwrap_or(u64::MAX)),
+                    )
+                })
+            })
+            .unwrap_or(0)
     }
 }

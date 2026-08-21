@@ -8,13 +8,13 @@
     "matlab",
     "compatibility"
   ],
-  "summary": "Convert string values contained in cells and structs to character vectors.",
+  "summary": "Convert string values and strings contained in cells and structs to character vectors.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "No GPU kernel is registered for this compatibility builtin; GPU-resident inputs are gathered to host memory before evaluation."
+    "notes": "No GPU kernel is needed. Non-string members, including resident integer arrays, pass through unchanged without provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -28,24 +28,31 @@
     "unit": "builtins::strings::core::compat::tests",
     "integration": null
   },
-  "description": "out = convertContainedStringsToChars(value) - Convert string values contained in cells and structs to character vectors.",
+  "description": "[out1, ...] = convertContainedStringsToChars(value1, ...) - Convert top-level or contained string values to character vectors.",
   "signatures": [
     {
-      "label": "out = convertContainedStringsToChars(value)",
+      "label": "[out1, ...] = convertContainedStringsToChars(value1, ...)",
       "inputs": [
         {
-          "name": "value",
+          "name": "text",
           "ty": "Any",
           "arity": "Required",
           "default": null,
-          "description": "Input value."
+          "description": "First input value."
+        },
+        {
+          "name": "arg",
+          "ty": "Any",
+          "arity": "Variadic",
+          "default": null,
+          "description": "Additional input values."
         }
       ],
       "outputs": [
         {
           "name": "out",
           "ty": "Any",
-          "arity": "Required",
+          "arity": "Variadic",
           "default": null,
           "description": "Output value."
         }
@@ -53,7 +60,9 @@
     }
   ],
   "behaviors": [
-    "Convert string values contained in cells and structs to character vectors."
+    "Convert top-level string scalars and arrays, and string values contained at arbitrary cell/struct nesting depth, while preserving container shape and every non-string member exactly.",
+    "Variadic inputs convert independently to corresponding variadic outputs.",
+    "Empty and missing string scalars convert to 0-by-0 character arrays."
   ],
   "examples": [
     "convertContainedStringsToChars(C) converts string values nested in cells or structs to character vectors."

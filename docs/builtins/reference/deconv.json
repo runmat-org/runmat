@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "When the active provider lacks a dedicated deconvolution kernel, RunMat gathers the data to the host, evaluates the quotient/remainder, and uploads the outputs back to the GPU if possible."
+    "notes": "RunMat gathers through each input's owning provider, requires resident inputs to share one owner/device, evaluates on the host, and restores only when that owner can physically supply the computed precision and the output owner, device, shape, storage, and precision all validate."
   },
   "fusion": {
     "elementwise": false,
@@ -33,22 +33,23 @@
   "description": "`deconv(b, a)` performs one-dimensional polynomial long division and returns quotient `q` plus remainder `r`. Coefficients use MATLAB/RunMat polynomial ordering (highest-order term first), with support for real and complex inputs.",
   "behaviors": [
     "Inputs must be scalars, row vectors, or column vectors. Multi-dimensional tensors are rejected.",
-    "Leading zeros are ignored during division, matching MATLAB’s behaviour. The outputs include just enough coefficients to represent the resulting polynomials (with at least one element for the zero polynomial).",
+    "Only exact zero coefficients are treated as leading zeros. The remainder retains the numerator's full length and orientation so `conv(a, q) + r` reconstructs the numerator with ordinary aligned polynomial addition.",
     "When `length(b) < length(a)`, the quotient is zero and the remainder equals `b`.",
-    "Logical inputs are promoted to double precision prior to division (TRUE → 1.0, FALSE → 0.0).",
-    "Complex coefficients are handled exactly; the quotient and remainder retain complex values.",
-    "Empty denominators and all-zero denominators raise MATLAB-compatible errors."
+    "MATLAB documents single and double coefficients. RunMat extension mode additionally accepts logical coefficients and integer coefficients that are exactly representable as double; inexact wide integers are rejected.",
+    "Single and complex-single coefficients preserve single output precision when every coefficient input is floating-point. Any logical or typed-integer coefficient selects double output precision, independent of whether inputs are host values or resident gpuArrays; complex coefficients preserve complex output storage.",
+    "Empty denominators and all-zero denominators raise MATLAB-compatible errors.",
+    "This implementation currently covers classic vector polynomial division. The newer shape, least-squares Method, and RegularizationFactor forms remain an explicit compatibility gap."
   ],
   "examples": [
     {
       "description": "Recovering a factor from a polynomial product",
       "input": "p = conv([1 2], [1 -3 2]);   % Multiply two polynomials\n[q, r] = deconv(p, [1 2])   % Divide by the first factor",
-      "output": "q = [1 -3 2];\nr = 0"
+      "output": "q = [1 -3 2];\nr = [0 0 0 0]"
     },
     {
       "description": "Obtaining a non-zero remainder",
       "input": "[q, r] = deconv([1 4 7], [1 2])",
-      "output": "q = [1 2];\nr = [3]"
+      "output": "q = [1 2];\nr = [0 0 3]"
     },
     {
       "description": "Dividing by a longer sequence",
@@ -58,7 +59,7 @@
     {
       "description": "Handling leading zeros explicitly",
       "input": "b = [0 0 1 2];\na = [0 1 1];\n[q, r] = deconv(b, a)",
-      "output": "q = [1];\nr = [1]"
+      "output": "q = [1];\nr = [0 0 0 1]"
     },
     {
       "description": "Complex polynomial division",
@@ -77,11 +78,11 @@
     },
     {
       "question": "Can I pass logical or integer vectors?",
-      "answer": "Yes. They are promoted to double precision before division so the results match MATLAB exactly."
+      "answer": "They are RunMat-only extensions, not MATLAB-compatible input forms. Extension mode accepts logical coefficients and exactly-double-representable integer coefficients; strict compatibility mode rejects them before data access. If either coefficient input is logical or typed integer, quotient and remainder use double precision on both host and resident execution paths."
     },
     {
-      "question": "Why are leading zeros dropped from the outputs?",
-      "answer": "They do not change the represented polynomial. Dropping them keeps results compact and mirrors MATLAB’s behaviour. The zero polynomial is returned as a single zero."
+      "question": "Why does the remainder contain leading zeros?",
+      "answer": "The remainder has the numerator's full length. This preserves the documented coefficient identity and makes reconstruction with `conv(a, q) + r` unambiguous."
     },
     {
       "question": "Does `deconv` support column vectors?",
@@ -139,6 +140,6 @@
     "url": "https://github.com/runmat-org/runmat/issues/new/choose"
   },
   "gpu_behavior": [
-    "When either input resides on the GPU (`gpuArray` values), RunMat first checks whether the active acceleration provider exposes a dedicated deconvolution hook. The current providers (in-process and WGPU) do not yet offer this kernel, so the runtime always:\n\n1. Gathers the device operands into host memory. 2. Performs the polynomial long division on the CPU. 3. Re-uploads real-valued results to the provider so downstream fused kernels can remain device-resident (complex outputs stay on the host until providers add complex buffer uploads).\n\nThis fallback keeps behaviour identical to MATLAB. Gather the outputs explicitly only when you need them on the host."
+    "When either input is resident, RunMat gathers it through its registered owner and performs polynomial division on the CPU. Two resident inputs must already share an owner and device. Results return to that owner/device only when it can physically supply the computed precision, and restored handles are accepted only when their owner, device, shape, storage, and precision match the computed result."
   ]
 }

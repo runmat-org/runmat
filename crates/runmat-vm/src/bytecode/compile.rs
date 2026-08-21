@@ -102,6 +102,7 @@ pub fn compile(
         instructions: c.instructions,
         instr_spans: c.instr_spans,
         call_arg_spans: c.call_arg_spans,
+        coverage_sites: Vec::new(),
         source_id,
         var_count: c.var_count,
         bound_functions,
@@ -111,6 +112,7 @@ pub fn compile(
         initially_unassigned_slots,
         layout: c.layout,
         async_metadata,
+        regions: Vec::new(),
         #[cfg(feature = "native-accel")]
         accel_graph,
         #[cfg(feature = "native-accel")]
@@ -751,7 +753,9 @@ fn rvalue_has_fusion_signal(value: &MirRvalue) -> bool {
         | MirRvalue::Colon
         | MirRvalue::End
         | MirRvalue::Future { .. }
-        | MirRvalue::Spawn(_) => false,
+        | MirRvalue::Spawn(_)
+        | MirRvalue::Distributed(_)
+        | MirRvalue::Collective(_) => false,
     }
 }
 
@@ -787,6 +791,12 @@ fn compile_semantic_functions(
             .modules
             .get(function.module.0)
             .map(|module| module.source_id);
+        let resume_points = compiler
+            .layout
+            .as_ref()
+            .and_then(|layout| layout.functions.get(&function.id))
+            .map(|layout| layout.resume_points.clone())
+            .unwrap_or_default();
         functions.insert(
             function.id,
             FunctionBytecode {
@@ -797,6 +807,7 @@ fn compile_semantic_functions(
                 instructions: compiler.instructions,
                 instr_spans: compiler.instr_spans,
                 call_arg_spans: compiler.call_arg_spans,
+                coverage_sites: Vec::new(),
                 var_count: compiler.var_count,
                 input_slots: function_layout
                     .frame_abi
@@ -836,175 +847,19 @@ fn compile_semantic_functions(
                         function_layout
                             .binding_slots
                             .get(&validation.binding)
-                            .map(|slot| crate::bytecode::program::FunctionArgumentValidation {
-                                input_slot: slot.0,
-                                size: validation.size.as_ref().map(|size| {
-                                    crate::bytecode::program::FunctionArgSizeSpec {
-                                        rows: match size.rows {
-                                            runmat_hir::FunctionArgDim::Any => {
-                                                crate::bytecode::program::FunctionArgDim::Any
-                                            }
-                                            runmat_hir::FunctionArgDim::Exact(value) => {
-                                                crate::bytecode::program::FunctionArgDim::Exact(value)
-                                            }
-                                        },
-                                        cols: match size.cols {
-                                            runmat_hir::FunctionArgDim::Any => {
-                                                crate::bytecode::program::FunctionArgDim::Any
-                                            }
-                                            runmat_hir::FunctionArgDim::Exact(value) => {
-                                                crate::bytecode::program::FunctionArgDim::Exact(value)
-                                            }
-                                        },
-                                    }
-                                }),
-                                class_name: validation.class_name.clone(),
-                                validators: validation
-                                    .validators
-                                    .iter()
-                                    .map(|validator| match validator {
-                                        runmat_hir::FunctionArgValidator::A(class_names) => {
-                                            crate::bytecode::program::FunctionArgValidator::A(class_names.clone())
-                                        }
-                                        runmat_hir::FunctionArgValidator::Column => {
-                                            crate::bytecode::program::FunctionArgValidator::Column
-                                        }
-                                        runmat_hir::FunctionArgValidator::Finite => {
-                                            crate::bytecode::program::FunctionArgValidator::Finite
-                                        }
-                                        runmat_hir::FunctionArgValidator::Float => {
-                                            crate::bytecode::program::FunctionArgValidator::Float
-                                        }
-                                        runmat_hir::FunctionArgValidator::Folder => {
-                                            crate::bytecode::program::FunctionArgValidator::Folder
-                                        }
-                                        runmat_hir::FunctionArgValidator::File => {
-                                            crate::bytecode::program::FunctionArgValidator::File
-                                        }
-                                        runmat_hir::FunctionArgValidator::NumericOrLogical => {
-                                            crate::bytecode::program::FunctionArgValidator::NumericOrLogical
-                                        }
-                                        runmat_hir::FunctionArgValidator::Numeric => {
-                                            crate::bytecode::program::FunctionArgValidator::Numeric
-                                        }
-                                        runmat_hir::FunctionArgValidator::Text => {
-                                            crate::bytecode::program::FunctionArgValidator::Text
-                                        }
-                                        runmat_hir::FunctionArgValidator::TextScalar => {
-                                            crate::bytecode::program::FunctionArgValidator::TextScalar
-                                        }
-                                        runmat_hir::FunctionArgValidator::NonzeroLengthText => {
-                                            crate::bytecode::program::FunctionArgValidator::NonzeroLengthText
-                                        }
-                                        runmat_hir::FunctionArgValidator::Nonempty => {
-                                            crate::bytecode::program::FunctionArgValidator::Nonempty
-                                        }
-                                        runmat_hir::FunctionArgValidator::ScalarOrEmpty => {
-                                            crate::bytecode::program::FunctionArgValidator::ScalarOrEmpty
-                                        }
-                                        runmat_hir::FunctionArgValidator::Real => {
-                                            crate::bytecode::program::FunctionArgValidator::Real
-                                        }
-                                        runmat_hir::FunctionArgValidator::Integer => {
-                                            crate::bytecode::program::FunctionArgValidator::Integer
-                                        }
-                                        runmat_hir::FunctionArgValidator::Vector => {
-                                            crate::bytecode::program::FunctionArgValidator::Vector
-                                        }
-                                        runmat_hir::FunctionArgValidator::Positive => {
-                                            crate::bytecode::program::FunctionArgValidator::Positive
-                                        }
-                                        runmat_hir::FunctionArgValidator::Negative => {
-                                            crate::bytecode::program::FunctionArgValidator::Negative
-                                        }
-                                        runmat_hir::FunctionArgValidator::Nonnegative => {
-                                            crate::bytecode::program::FunctionArgValidator::Nonnegative
-                                        }
-                                        runmat_hir::FunctionArgValidator::Nonmissing => {
-                                            crate::bytecode::program::FunctionArgValidator::Nonmissing
-                                        }
-                                        runmat_hir::FunctionArgValidator::NonNan => {
-                                            crate::bytecode::program::FunctionArgValidator::NonNan
-                                        }
-                                        runmat_hir::FunctionArgValidator::Nonzero => {
-                                            crate::bytecode::program::FunctionArgValidator::Nonzero
-                                        }
-                                        runmat_hir::FunctionArgValidator::Nonpositive => {
-                                            crate::bytecode::program::FunctionArgValidator::Nonpositive
-                                        }
-                                        runmat_hir::FunctionArgValidator::Nonsparse => {
-                                            crate::bytecode::program::FunctionArgValidator::Nonsparse
-                                        }
-                                        runmat_hir::FunctionArgValidator::Sparse => {
-                                            crate::bytecode::program::FunctionArgValidator::Sparse
-                                        }
-                                        runmat_hir::FunctionArgValidator::ValidVariableName => {
-                                            crate::bytecode::program::FunctionArgValidator::ValidVariableName
-                                        }
-                                        runmat_hir::FunctionArgValidator::UnderlyingType(class_names) => {
-                                            crate::bytecode::program::FunctionArgValidator::UnderlyingType(class_names.clone())
-                                        }
-                                        runmat_hir::FunctionArgValidator::Member(literals) => {
-                                            crate::bytecode::program::FunctionArgValidator::Member(
-                                                literals
-                                                    .iter()
-                                                    .map(|literal| match literal {
-                                                        runmat_hir::FunctionArgValidationLiteral::Number(value) => {
-                                                            crate::bytecode::program::FunctionArgValidationLiteral::Number(*value)
-                                                        }
-                                                        runmat_hir::FunctionArgValidationLiteral::Text(value) => {
-                                                            crate::bytecode::program::FunctionArgValidationLiteral::Text(value.clone())
-                                                        }
-                                                        runmat_hir::FunctionArgValidationLiteral::Bool(value) => {
-                                                            crate::bytecode::program::FunctionArgValidationLiteral::Bool(*value)
-                                                        }
-                                                    })
-                                                    .collect(),
-                                            )
-                                        }
-                                        runmat_hir::FunctionArgValidator::InRange(lower, upper, inclusivity) => {
-                                            crate::bytecode::program::FunctionArgValidator::InRange(
-                                                *lower,
-                                                *upper,
-                                                crate::bytecode::program::FunctionArgRangeInclusivity {
-                                                    lower: inclusivity.lower,
-                                                    upper: inclusivity.upper,
-                                                },
-                                            )
-                                        }
-                                        runmat_hir::FunctionArgValidator::GreaterThanOrEqual(
-                                            threshold,
-                                        ) => crate::bytecode::program::FunctionArgValidator::GreaterThanOrEqual(*threshold),
-                                        runmat_hir::FunctionArgValidator::LessThanOrEqual(
-                                            threshold,
-                                        ) => crate::bytecode::program::FunctionArgValidator::LessThanOrEqual(*threshold),
-                                        runmat_hir::FunctionArgValidator::GreaterThan(
-                                            threshold,
-                                        ) => crate::bytecode::program::FunctionArgValidator::GreaterThan(*threshold),
-                                        runmat_hir::FunctionArgValidator::LessThan(
-                                            threshold,
-                                        ) => crate::bytecode::program::FunctionArgValidator::LessThan(*threshold),
-                                    })
-                                    .collect(),
-                                default_value: validation.default_value.as_ref().map(|default| {
-                                    match default {
-                                        runmat_hir::FunctionArgDefaultValue::Number(value) => {
-                                            crate::bytecode::program::FunctionArgDefaultValue::Number(*value)
-                                        }
-                                        runmat_hir::FunctionArgDefaultValue::Bool(value) => {
-                                            crate::bytecode::program::FunctionArgDefaultValue::Bool(*value)
-                                        }
-                                        runmat_hir::FunctionArgDefaultValue::String(value) => {
-                                            crate::bytecode::program::FunctionArgDefaultValue::String(value.clone())
-                                        }
-                                        runmat_hir::FunctionArgDefaultValue::EmptyArray => {
-                                            crate::bytecode::program::FunctionArgDefaultValue::EmptyArray
-                                        }
-                                    }
-                                }),
-                            })
+                            .map(
+                                |slot| crate::bytecode::program::FunctionArgumentValidation {
+                                    input_slot: slot.0,
+                                    size: validation.size.clone(),
+                                    class_name: validation.class_name.clone(),
+                                    validators: validation.validators.clone(),
+                                    default_value: validation.default_value.clone(),
+                                },
+                            )
                     })
                     .collect(),
+                resume_points,
+                regions: Vec::new(),
             },
         );
     }
@@ -1050,7 +905,6 @@ mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "native-accel")]
     use runmat_accelerate::fusion::prepare_fusion_plan;
-    use runmat_builtins::Value;
     use runmat_hir::{
         lower, AssignmentCreationPolicy, BuiltinId, CallableFallbackPolicy, CallableIdentity,
         DefPath, DefPathSegment, FunctionId, IndexResultContext, LoweringContext, MethodId,
@@ -1061,6 +915,7 @@ mod tests {
         MirAggregateKind, MirCallee, MirConstant, MirIndexComponent, MirIndexPlan, MirOperand,
         MirOutputTarget, MirPlace, MirRvalue, MirStmtKind, MirTerminatorKind,
     };
+    use runmat_value::Value;
     use std::collections::HashMap;
     use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -2894,7 +2749,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(tensor.shape, vec![2, 2]);
-        assert_eq!(tensor.data, vec![1.0, 3.0, 2.0, 4.0]);
+        assert_eq!(tensor.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
     }
 
     #[test]
@@ -2950,7 +2805,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(tensor.shape, vec![2, 1]);
-        assert_eq!(tensor.data, vec![2.0, 4.0]);
+        assert_eq!(tensor.materialize_f64(), vec![2.0, 4.0]);
     }
 
     #[test]
@@ -2983,8 +2838,8 @@ mod tests {
         let Value::Tensor(tensor) = &vars[y_export.slot.0] else {
             panic!("expected tensor");
         };
-        assert_eq!(tensor.shape, vec![2, 1]);
-        assert_eq!(tensor.data, vec![30.0, 40.0]);
+        assert_eq!(tensor.shape, vec![1, 2]);
+        assert_eq!(tensor.materialize_f64(), vec![30.0, 40.0]);
     }
 
     #[test]
@@ -3017,7 +2872,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(tensor.shape, vec![1, 4]);
-        assert_eq!(tensor.data, vec![10.0, 9.0, 30.0, 8.0]);
+        assert_eq!(tensor.materialize_f64(), vec![10.0, 9.0, 30.0, 8.0]);
     }
 
     #[test]
@@ -3765,7 +3620,7 @@ out = weekly.AvgRevenue;\n",
             );
         };
         assert_eq!(tensor.shape, vec![2, 1]);
-        assert_eq!(tensor.data, vec![200.0, 90.0]);
+        assert_eq!(tensor.materialize_f64(), vec![200.0, 90.0]);
         let _ = std::fs::remove_file(&path);
     }
 
@@ -3801,7 +3656,7 @@ summary = [peak; dominant; total];\n",
             );
         };
         assert_eq!(tensor.shape, vec![3, 1]);
-        assert_eq!(tensor.data, vec![3.0, 2.0, 6.0]);
+        assert_eq!(tensor.materialize_f64(), vec![3.0, 2.0, 6.0]);
     }
 
     #[test]
@@ -3836,7 +3691,7 @@ summary = [numel(b); numel(a); all(isfinite(y)); err < 1e-12];\n",
             );
         };
         assert_eq!(tensor.shape, vec![4, 1]);
-        assert_eq!(tensor.data, vec![3.0, 3.0, 1.0, 1.0]);
+        assert_eq!(tensor.materialize_f64(), vec![3.0, 3.0, 1.0, 1.0]);
     }
 
     #[test]
@@ -3873,7 +3728,7 @@ summary = [rankA; double(err < 1e-12); numel(p); double(pivot_ok)];\n",
             );
         };
         assert_eq!(tensor.shape, vec![4, 1]);
-        assert_eq!(tensor.data, vec![2.0, 1.0, 2.0, 1.0]);
+        assert_eq!(tensor.materialize_f64(), vec![2.0, 1.0, 2.0, 1.0]);
     }
 
     #[test]
@@ -4887,6 +4742,78 @@ y = x^[1 2; 3 4];\n",
             err.identifier.as_deref(),
             Some("RunMat:MirOperatorUnsupported")
         );
+    }
+
+    #[test]
+    fn compile_rejects_parallel_region_until_scheduler_lowering_is_available() {
+        let source = "parfor (i = 1:10, 4); y = i; end";
+        let ast = runmat_parser::parse(source).expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirParallelCapabilityUnsupported")
+        );
+        let span = err.span.expect("parallel source span");
+        assert_eq!(&source[span.start..span.end], source);
+    }
+
+    #[test]
+    fn compile_rejects_spmd_until_scheduler_lowering_is_available() {
+        let source = "spmd (2, 8); y = 1; end";
+        let ast = runmat_parser::parse(source).expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirParallelCapabilityUnsupported")
+        );
+        let span = err.span.expect("SPMD source span");
+        assert_eq!(&source[span.start..span.end], source);
+    }
+
+    #[test]
+    fn compile_rejects_distributed_values_until_runtime_capability_is_available() {
+        let ast = runmat_parser::parse("x = 1;").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+        let value = body
+            .blocks
+            .iter_mut()
+            .flat_map(|block| block.statements.iter_mut())
+            .find_map(|statement| match &mut statement.kind {
+                MirStmtKind::Assign { value, .. } => Some(value),
+                _ => None,
+            })
+            .expect("assignment rvalue");
+        *value = MirRvalue::Distributed(runmat_mir::parallel::MirDistributedOp::Create {
+            id: runmat_types::DistributedValueId {
+                function: runmat_types::ProgramFunctionId(0),
+                ordinal: 0,
+            },
+            owner: runmat_types::ParallelRegionId(runmat_types::RegionId {
+                function: runmat_types::ProgramFunctionId(0),
+                ordinal: 0,
+            }),
+            input: MirOperand::Constant(MirConstant::Number("1".into())),
+            scheme: runmat_types::DistributionScheme::Replicated,
+        });
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirDistributedCapabilityUnsupported")
+        );
+        assert!(err.span.is_some());
     }
 
     #[test]
@@ -6205,7 +6132,7 @@ y = x^[1 2; 3 4];\n",
             panic!("expected tensor");
         };
         assert_eq!(tensor.shape, vec![2, 2]);
-        assert_eq!(tensor.data, vec![1.0, 3.0, 9.0, 4.0]);
+        assert_eq!(tensor.materialize_f64(), vec![1.0, 3.0, 9.0, 4.0]);
     }
 
     #[test]
@@ -6233,7 +6160,7 @@ y = x^[1 2; 3 4];\n",
             panic!("expected tensor");
         };
         assert_eq!(tensor.shape, vec![2, 2]);
-        assert_eq!(tensor.data, vec![1.0, 3.0, 9.0, 8.0]);
+        assert_eq!(tensor.materialize_f64(), vec![1.0, 3.0, 9.0, 8.0]);
     }
 
     #[test]
@@ -6463,9 +6390,9 @@ y = x^[1 2; 3 4];\n",
                     *pos == 0
                         && matches!(
                             expr,
-                            crate::bytecode::EndExpr::Div(left, right)
-                                if matches!(left.as_ref(), crate::bytecode::EndExpr::End)
-                                    && matches!(right.as_ref(), crate::bytecode::EndExpr::Const(v) if (*v - 2.0).abs() < f64::EPSILON)
+                            runmat_runtime::indexing::EndExpr::Div(left, right)
+                                if matches!(left.as_ref(), runmat_runtime::indexing::EndExpr::End)
+                                    && matches!(right.as_ref(), runmat_runtime::indexing::EndExpr::Const(v) if (*v - 2.0).abs() < f64::EPSILON)
                         )
                 })
             ) || matches!(
@@ -6478,9 +6405,9 @@ y = x^[1 2; 3 4];\n",
                     *pos == 0
                         && matches!(
                             expr,
-                            crate::bytecode::EndExpr::Div(left, right)
-                                if matches!(left.as_ref(), crate::bytecode::EndExpr::End)
-                                    && matches!(right.as_ref(), crate::bytecode::EndExpr::Const(v) if (*v - 2.0).abs() < f64::EPSILON)
+                            runmat_runtime::indexing::EndExpr::Div(left, right)
+                                if matches!(left.as_ref(), runmat_runtime::indexing::EndExpr::End)
+                                    && matches!(right.as_ref(), runmat_runtime::indexing::EndExpr::Const(v) if (*v - 2.0).abs() < f64::EPSILON)
                         )
                 })
             )
@@ -6528,7 +6455,7 @@ y = x^[1 2; 3 4];\n",
                     *pos == 0
                         && matches!(
                             expr,
-                            crate::bytecode::EndExpr::ResolvedCall { args, .. } if args.len() == 1
+                            runmat_runtime::indexing::EndExpr::ResolvedCall { args, .. } if args.len() == 1
                         )
                 })
             )
@@ -7025,11 +6952,11 @@ y = x^[1 2; 3 4];\n",
                 }
             })),
         );
-        let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(
-            Some(Arc::new(|function, args, requested_outputs| {
-                assert_eq!(function, 9001);
-                assert_eq!(args, &[Value::Num(2.0)]);
-                assert_eq!(requested_outputs, 1);
+        let _invoker_guard = runmat_runtime::user_functions::install_external_function_invoker(
+            Some(Arc::new(|call| {
+                assert_eq!(call.function, 9001);
+                assert_eq!(call.arguments, [Value::Num(2.0)]);
+                assert_eq!(call.requested_outputs, 1);
                 Box::pin(async move { Ok(Value::Num(3.0)) })
             })),
         );

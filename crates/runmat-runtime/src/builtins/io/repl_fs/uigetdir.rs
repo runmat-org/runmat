@@ -5,10 +5,10 @@ use std::path::PathBuf;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, Value,
 };
 use runmat_filesystem::{DirectoryDialogRequest, DirectoryDialogSelection};
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, Value};
 
 use super::file_dialog::scalar_text;
 use crate::builtins::common::spec::{
@@ -277,8 +277,8 @@ fn selected_output(selection: DirectoryDialogSelection) -> BuiltinResult<Value> 
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use runmat_builtins::Tensor;
     use runmat_filesystem::{DirEntry, FileHandle, FsMetadata, FsProvider, OpenFlags};
+    use runmat_value::Tensor;
     use std::io::{self, ErrorKind};
     use std::path::Path;
     use std::sync::{Arc, Mutex};

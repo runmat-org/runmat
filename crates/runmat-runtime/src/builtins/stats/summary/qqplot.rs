@@ -1,17 +1,23 @@
 //! Quantile-quantile plot compatibility helper.
 
+use runmat_builtins::{
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use std::cmp::Ordering;
 
 use glam::Vec4;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Type, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::line::LineMarkerAppearance;
 use runmat_plot::plots::scatter::MarkerStyle;
 use runmat_plot::plots::{LinePlot, LineStyle};
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::builtins::plotting::op_common::{apply_axes_target, split_leading_axes_handle};
@@ -131,6 +137,82 @@ pub const QQPLOT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const QQPLOT_INTEGER_SAMPLE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "qqplot-integer-sample",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "qqplot accepts typed-integer sample data as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:QqplotIntegerSampleExtension"),
+};
+const QQPLOT_INTEGER_PVEC_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "qqplot-integer-pvec",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "qqplot accepts a typed-integer quantile vector as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:QqplotIntegerPvecExtension"),
+};
+const QQPLOT_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "qqplot-explicit-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "qqplot accepts explicitly GPU-resident inputs as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:QqplotExplicitGpuInputExtension"),
+};
+const QQPLOT_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "qqplot-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "qqplot accepts logical sample or percentage input as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:QqplotLogicalInputExtension"),
+};
+pub const QQPLOT_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    QQPLOT_INTEGER_SAMPLE_EXTENSION,
+    QQPLOT_INTEGER_PVEC_EXTENSION,
+    QQPLOT_EXPLICIT_GPU_EXTENSION,
+    QQPLOT_LOGICAL_INPUT_EXTENSION,
+];
+const QQPLOT_INTEGER_SAMPLES: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "x",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double sample data. RunMat admits typed integers only after exact binary64 representability is proved.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The optional second sample has the same independently gated checked floating boundary as x.",
+    },
+];
+const QQPLOT_INTEGER_PVEC: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "pvec",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "The compatibility target documents single and double quantile percentages; typed integer percentages cross a checked binary64 normalization boundary.",
+}];
+pub const QQPLOT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = qqplot(integer_x [, integer_y])",
+        inputs: &QQPLOT_INTEGER_SAMPLES,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Quantiles, interpolation, and reference-line geometry are explicit floating boundaries. Automatic residency gathers transparently; explicit undocumented GPU intent is independently gated.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = qqplot(x,y,integer_pvec)",
+        inputs: &QQPLOT_INTEGER_PVEC,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Typed quantile percentages are a separately gated RunMat extension and are normalized only after exactness and range checks.",
+    },
+];
+
 fn qqplot_type(_args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> Type {
     Type::Unknown
 }
@@ -181,11 +263,14 @@ struct QqplotEvaluation {
     suppress_auto_output = true,
     type_resolver(qqplot_type),
     descriptor(crate::builtins::stats::summary::qqplot::QQPLOT_DESCRIPTOR),
+    extensions(crate::builtins::stats::summary::qqplot::QQPLOT_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::summary::qqplot::QQPLOT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::summary::qqplot"
 )]
 pub(crate) async fn qqplot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let (target, args) =
         split_leading_axes_handle(args, NAME).map_err(|err| invalid(format!("qqplot: {err}")))?;
+    ensure_qqplot_boundaries(&args).await?;
     apply_axes_target(target, NAME).map_err(|err| invalid(err.message))?;
 
     let eval = parse_args(args).await?;
@@ -203,6 +288,44 @@ pub(crate) async fn qqplot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     Tensor::new(handles.clone(), vec![handles.len(), 1])
         .map(Value::Tensor)
         .map_err(|err| internal(format!("qqplot: {err}")))
+}
+
+async fn ensure_qqplot_boundaries(args: &[Value]) -> BuiltinResult<()> {
+    use crate::builtins::common::validation::{
+        native_integer_value_is_exact_f64_async, value_has_logical_class,
+        value_has_native_integer_class,
+    };
+    for (index, value) in args.iter().enumerate() {
+        if matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
+        {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &QQPLOT_EXPLICIT_GPU_EXTENSION,
+                NAME,
+            )?;
+        }
+        if value_has_logical_class(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &QQPLOT_LOGICAL_INPUT_EXTENSION,
+                NAME,
+            )?;
+        }
+        if !value_has_native_integer_class(value) {
+            continue;
+        }
+        let extension = if index == 2 {
+            &QQPLOT_INTEGER_PVEC_EXTENSION
+        } else {
+            &QQPLOT_INTEGER_SAMPLE_EXTENSION
+        };
+        crate::compatibility::ensure_builtin_extension_enabled(extension, NAME)?;
+        if !native_integer_value_is_exact_f64_async(value).await? {
+            let role = if index == 2 { "pvec" } else { "sample" };
+            return Err(invalid(format!(
+                "qqplot: integer {role} values must be exactly representable as double"
+            )));
+        }
+    }
+    Ok(())
 }
 
 async fn parse_args(args: Vec<Value>) -> BuiltinResult<QqplotEvaluation> {
@@ -229,7 +352,7 @@ async fn parse_args(args: Vec<Value>) -> BuiltinResult<QqplotEvaluation> {
             let x = value_to_tensor(iter.next().unwrap()).await?;
             let y = value_to_tensor(iter.next().unwrap()).await?;
             let p = probabilities_from_tensor(value_to_tensor(iter.next().unwrap()).await?)?;
-            if y.data.is_empty() {
+            if tensor::tensor_element_len(&y) == 0 {
                 Ok(QqplotEvaluation {
                     mode: PlotMode::Normal,
                     series: normal_series_from_tensor(x, Some(p))?,
@@ -249,11 +372,17 @@ async fn value_to_tensor(value: Value) -> BuiltinResult<Tensor> {
     let gathered = gather_if_needed_async(&value)
         .await
         .map_err(|err| invalid(format!("qqplot: {err}")))?;
-    tensor::value_into_tensor_for(NAME, gathered).map_err(|err| invalid(format!("qqplot: {err}")))
+    let tensor = tensor::value_into_tensor_for(NAME, gathered)
+        .map_err(|err| invalid(format!("qqplot: {err}")))?;
+    if tensor.integer_storage().is_some() {
+        return Tensor::new(tensor_values_f64(&tensor), tensor.shape.clone())
+            .map_err(|err| internal(format!("qqplot: {err}")));
+    }
+    Ok(tensor)
 }
 
 fn normal_series_from_tensor(x: Tensor, pvec: Option<Vec<f64>>) -> BuiltinResult<Vec<Series>> {
-    let shape = tensor::default_shape_for(&x.shape, x.data.len());
+    let shape = tensor::default_shape_for(&x.shape, tensor::tensor_element_len(&x));
     let columns = columns_from_tensor(x, &shape)?;
     columns
         .into_iter()
@@ -272,8 +401,8 @@ fn two_sample_series_from_tensors(
     y: Tensor,
     pvec: Option<Vec<f64>>,
 ) -> BuiltinResult<Vec<Series>> {
-    let x_shape = tensor::default_shape_for(&x.shape, x.data.len());
-    let y_shape = tensor::default_shape_for(&y.shape, y.data.len());
+    let x_shape = tensor::default_shape_for(&x.shape, tensor::tensor_element_len(&x));
+    let y_shape = tensor::default_shape_for(&y.shape, tensor::tensor_element_len(&y));
     let x_columns = columns_from_tensor(x, &x_shape)?;
     let y_columns = columns_from_tensor(y, &y_shape)?;
     if x_columns.is_empty() || y_columns.is_empty() {
@@ -338,11 +467,12 @@ fn series_from_pairs(theoretical: Vec<f64>, observed: Vec<f64>) -> Series {
 }
 
 fn columns_from_tensor(tensor: Tensor, shape: &[usize]) -> BuiltinResult<Vec<Vec<f64>>> {
+    let data = tensor_values_f64(&tensor);
     if shape.is_empty() {
-        return Ok(vec![tensor.data]);
+        return Ok(vec![data]);
     }
     if shape.iter().filter(|dim| **dim > 1).count() <= 1 {
-        return Ok(vec![tensor.data]);
+        return Ok(vec![data]);
     }
     if shape.len() > 2 {
         return Err(invalid("qqplot: input must be a vector or 2-D matrix"));
@@ -353,7 +483,7 @@ fn columns_from_tensor(tensor: Tensor, shape: &[usize]) -> BuiltinResult<Vec<Vec
     for col in 0..cols {
         let mut values = Vec::with_capacity(rows);
         for row in 0..rows {
-            values.push(tensor.data[row + col * rows]);
+            values.push(data[row + col * rows]);
         }
         out.push(values);
     }
@@ -390,11 +520,12 @@ fn finite_sorted(mut values: Vec<f64>) -> Vec<f64> {
 }
 
 fn probabilities_from_tensor(tensor: Tensor) -> BuiltinResult<Vec<f64>> {
-    if tensor.data.is_empty() {
+    let data = tensor_values_f64(&tensor);
+    if data.is_empty() {
         return Err(invalid("qqplot: pvec must not be empty"));
     }
-    let mut probabilities = Vec::with_capacity(tensor.data.len());
-    for value in tensor.data {
+    let mut probabilities = Vec::with_capacity(data.len());
+    for value in data {
         if !value.is_finite() || !(0.0..=100.0).contains(&value) {
             return Err(invalid(
                 "qqplot: pvec values must be finite percentages in the interval [0, 100]",
@@ -404,6 +535,10 @@ fn probabilities_from_tensor(tensor: Tensor) -> BuiltinResult<Vec<f64>> {
     }
     probabilities.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
     Ok(probabilities)
+}
+
+fn tensor_values_f64(tensor: &Tensor) -> Vec<f64> {
+    tensor::tensor_values_f64(tensor)
 }
 
 fn default_probabilities(n: usize) -> Vec<f64> {
@@ -586,6 +721,7 @@ mod tests {
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
     use futures::executor::block_on;
+    use runmat_value::{IntValue, IntegerStorage};
 
     fn setup() -> PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -599,11 +735,48 @@ mod tests {
         Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
     }
 
+    fn int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, vec![rows, cols]).unwrap())
+    }
+
     fn tensor_data(value: Value) -> Vec<f64> {
         match value {
-            Value::Tensor(tensor) => tensor.data,
+            Value::Tensor(tensor) => tensor.materialize_f64(),
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn qqplot_numeric_helpers_read_typed_integer_storage_exactly() {
+        let wide = u64::MAX - 1;
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide, wide - 1]), vec![2, 1]).unwrap();
+        assert_eq!(
+            tensor_values_f64(&tensor),
+            vec![
+                IntValue::U64(wide).to_f64(),
+                IntValue::U64(wide - 1).to_f64()
+            ]
+        );
+        assert_eq!(
+            columns_from_tensor(tensor, &[2, 1]).unwrap(),
+            vec![vec![
+                IntValue::U64(wide).to_f64(),
+                IntValue::U64(wide - 1).to_f64()
+            ]]
+        );
+        let pvec = Tensor::new_integer(IntegerStorage::U8(vec![75, 25]), vec![1, 2]).unwrap();
+        assert_eq!(probabilities_from_tensor(pvec).unwrap(), vec![0.25, 0.75]);
+    }
+
+    #[test]
+    fn qqplot_scalar_typed_integer_sample_uses_storage_len_for_default_shape() {
+        let input = Tensor::new_integer(IntegerStorage::I16(vec![42]), Vec::new()).unwrap();
+
+        let series = normal_series_from_tensor(input, None).unwrap();
+
+        assert_eq!(series.len(), 1);
+        assert_eq!(series[0].observed, vec![42.0]);
     }
 
     #[test]
@@ -658,6 +831,91 @@ mod tests {
             get_builtin(vec![Value::Num(handles[0]), Value::String("YData".into())]).unwrap(),
         );
         assert_eq!(y, vec![5.0, 10.0, 15.0]);
+    }
+
+    #[test]
+    fn qqplot_accepts_typed_integer_samples_and_pvec() {
+        let _guard = setup();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let out = block_on(qqplot_builtin(vec![
+            int_tensor(IntegerStorage::I16(vec![0, 10, 20]), 3, 1),
+            int_tensor(IntegerStorage::I16(Vec::new()), 0, 0),
+            int_tensor(IntegerStorage::U8(vec![25, 50, 75]), 1, 3),
+        ]))
+        .unwrap();
+        let handles = tensor_data(out);
+        let y = tensor_data(
+            get_builtin(vec![Value::Num(handles[0]), Value::String("YData".into())]).unwrap(),
+        );
+        assert_eq!(y, vec![5.0, 10.0, 15.0]);
+    }
+
+    #[test]
+    fn qqplot_integer_extensions_are_gated_and_inexact_values_reject() {
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(qqplot_builtin(vec![int_tensor(
+            IntegerStorage::I16(vec![1, 2]),
+            2,
+            1,
+        )]))
+        .expect_err("strict mode rejects integer samples");
+        assert_eq!(
+            error.identifier(),
+            QQPLOT_INTEGER_SAMPLE_EXTENSION.error_identifier
+        );
+        drop(strict);
+
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(qqplot_builtin(vec![
+            tensor(vec![1.0, 2.0], 2, 1),
+            tensor(Vec::new(), 0, 0),
+            int_tensor(IntegerStorage::U8(vec![25, 75]), 1, 2),
+        ]))
+        .expect_err("strict mode rejects integer pvec");
+        assert_eq!(
+            error.identifier(),
+            QQPLOT_INTEGER_PVEC_EXTENSION.error_identifier
+        );
+        drop(strict);
+
+        let extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let error = block_on(qqplot_builtin(vec![int_tensor(
+            IntegerStorage::U64(vec![(1_u64 << 53) + 1, 2]),
+            2,
+            1,
+        )]))
+        .expect_err("inexact integer sample rejects");
+        assert!(error.message().contains("exactly representable as double"));
+        drop(extensions);
+    }
+
+    #[test]
+    fn qqplot_strict_mode_gates_explicit_gpu_before_provider_access() {
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![2, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX - 444,
+            descriptor: Default::default(),
+        };
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(qqplot_builtin(vec![Value::GpuTensor(handle)]))
+            .expect_err("strict mode rejects explicit GPU input before gather");
+        assert_eq!(
+            error.identifier(),
+            QQPLOT_EXPLICIT_GPU_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn qqplot_logical_input_is_a_gated_extension() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(qqplot_builtin(vec![Value::Bool(true)]))
+            .expect_err("strict mode rejects logical sample extension");
+        assert_eq!(
+            error.identifier(),
+            QQPLOT_LOGICAL_INPUT_EXTENSION.error_identifier
+        );
     }
 
     #[test]

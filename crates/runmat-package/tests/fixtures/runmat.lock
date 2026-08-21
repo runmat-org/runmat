@@ -1,0 +1,65 @@
+schema_version = 1
+resolver_version = "1"
+graph_digest = "sha256:0f4c83e01628cbbab14cd744e80c464e1e72324ae70bb21fa1f1288fd2690eb5"
+
+[root]
+manifest_digest = "sha256:ffda74db5f417d574ef98274eceecf085b93c3ca5b8a3969eaf9c40250f4289e"
+package = "default:acme/application"
+
+[selection]
+target = "wasm32-unknown-unknown"
+groups = ["runtime", "test"]
+root_features = ["default", "web"]
+host_capabilities = ["browser-filesystem", "network", "worker"]
+
+[[packages]]
+features = ["sparse"]
+required_capabilities = ["network"]
+runmat_version = "^0.6.1"
+singleton = false
+
+[packages.instance]
+package = "default:runmat/matrix"
+version = "1.2.3"
+tree_digest = "sha256:5332eb4dc2fec537b18fc671722b817c7e9eb49b4e19003a6eec6f9c95408a37"
+identity_digest = "sha256:9f0b2031715e872db0ef978422d678746af5129e2bf71356976eb4d9adc776ec"
+
+[packages.instance.source]
+kind = "path"
+
+[packages.instance.source.source]
+workspace_path = "deps/matrix"
+manifest_digest = "sha256:d8bfbde9a27f0280ad5896643753b3fcd06656b2cba6057bb763e4cc3f15efd8"
+tree_digest = "sha256:5332eb4dc2fec537b18fc671722b817c7e9eb49b4e19003a6eec6f9c95408a37"
+
+[[packages]]
+features = []
+required_capabilities = []
+singleton = false
+
+[packages.instance]
+package = "default:runmat/helper"
+version = "1.2.3"
+tree_digest = "sha256:bbb5597722495ae03be7c9284bd0252e7e99f5c359367e0f27034328a57b13c5"
+identity_digest = "sha256:ba234580c132c41f4299085331a0cd77ff765a6d1e655457f4d71da458dacc22"
+
+[packages.instance.source]
+kind = "path"
+
+[packages.instance.source.source]
+workspace_path = "deps/helper"
+manifest_digest = "sha256:1642b0d6d8001346c8388a1245e1cf86a6feda06746c4609f247974e890167e0"
+tree_digest = "sha256:bbb5597722495ae03be7c9284bd0252e7e99f5c359367e0f27034328a57b13c5"
+
+[[edges]]
+alias = "matrix"
+to = "sha256:9f0b2031715e872db0ef978422d678746af5129e2bf71356976eb4d9adc776ec"
+group = "runtime"
+optional = false
+
+[[edges]]
+from = "sha256:9f0b2031715e872db0ef978422d678746af5129e2bf71356976eb4d9adc776ec"
+alias = "helper"
+to = "sha256:ba234580c132c41f4299085331a0cd77ff765a6d1e655457f4d71da458dacc22"
+group = "runtime"
+optional = false

@@ -3,7 +3,7 @@
   "category": "math/signal",
   "keywords": ["hann", "window", "signal processing", "dsp", "fft"],
   "summary": "Generate Hann windows in MATLAB and RunMat.",
-  "description": "`hann(L)` returns an L-by-1 Hann window. Symmetric/periodic forms and optional single-precision output follow MATLAB semantics.",
+  "description": "`hann(L)` returns an L-by-1 Hann window using the compatibility target's `cospi` formulation. `L` accepts floating input and every integer class; logical scalar lengths are available only when RunMat extensions are enabled. Symmetric/periodic forms and optional single-precision output follow MATLAB semantics.",
   "behaviors": [
     "`hann(L)` returns an `L x 1` symmetric Hann window.",
     "`hann(L, 'periodic')` returns the periodic form used in spectral-analysis workflows.",
@@ -11,7 +11,7 @@
     "If `L` is noninteger, RunMat rounds it to the nearest integer before constructing the window.",
     "`hann(0)` returns an empty `0 x 1` tensor.",
     "`hann(1)` returns `1`.",
-    "For the symmetric case and `L > 1`, coefficients follow `0.5 - 0.5*cos(2*pi*n/(L-1))`.",
+    "For the symmetric case and `L > 1`, coefficients use the compatibility target's `cospi` form `0.5 - 0.5*cospi(2*n/(L-1))`.",
     "The periodic form is constructed by evaluating a symmetric window of length `L + 1` and dropping the final sample."
   ],
   "examples": [

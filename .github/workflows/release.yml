@@ -26,10 +26,23 @@ jobs:
       # Enable backtraces on CI to aid debugging of panics/segfaults
       RUST_BACKTRACE: 1
       MATRIX_NAME: windows-x86_64
+      # The Windows runner cannot reliably link the full workspace at Cargo's
+      # default parallelism. Bound compiler/linker pressure and avoid large PDBs.
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@v3
         with:
           ref: ${{ github.event.inputs.ref || github.ref_name }}
+
+      - name: Isolate Cargo build artifacts
+        shell: pwsh
+        run: |
+          # Self-hosted runners retain the checkout between jobs. Isolate build
+          # artifacts so stale rmeta/rlib fingerprints cannot cross release runs.
+          Add-Content -Path $env:GITHUB_ENV -Value "CARGO_TARGET_DIR=${{ runner.temp }}\runmat-release-${{ github.run_id }}"
 
       - name: Validate Rust toolchain (Windows self-hosted)
         shell: pwsh
@@ -277,6 +290,10 @@ jobs:
         if: runner.os == 'macOS'
         run: bash scripts/ci-install-macos-cross-dependencies.sh "${{ matrix.platform.target }}"
 
+      - name: Install Rust release target
+        shell: bash
+        run: rustup target add "${{ matrix.platform.target }}"
+
       - name: Install Windows MSVC native dependencies
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
         shell: pwsh
@@ -424,31 +441,63 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_BIN_DIR=$vcpkgRoot\installed\$triplet\bin"
           Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_LINK_MODE=dylib"
 
-      - name: Cross build (linux-x86_64)
-        if: matrix.platform.target == 'x86_64-unknown-linux-gnu'
-        uses: houseabsolute/actions-rust-cross@v0
+      - name: Build release CLI with embedded AOT runtime (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
         env:
+          CARGO_PROFILE_RELEASE_STRIP: symbols
+          OPENSSL_NO_PKG_CONFIG: ${{ runner.os == 'macOS' && '1' || '0' }}
+          OPENSSL_STATIC: ${{ runner.os == 'macOS' && '1' || '0' }}
+          RUNMAT_BUILD_TARGET: ${{ matrix.platform.target }}
           RUNMAT_OCCT_LINK_MODE: static
-        with:
-          command: ${{ matrix.platform.command }}
-          target: ${{ matrix.platform.target }}
-          # Use system OpenSSL via pkg-config; libssl-dev installed above
-          args: "--locked --release --bin runmat --features blas-lapack,occt-native"
-          strip: true
+        run: |
+          set -euo pipefail
+          features="blas-lapack,occt-native"
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            features="$features,vendored-openssl"
+          fi
+          bash scripts/build-runmat-with-aot-runtime.sh \
+            --locked --release --target "${{ matrix.platform.target }}" \
+            --bin runmat --features "$features"
 
-      - name: Cross build (other targets)
-        if: matrix.platform.target != 'x86_64-unknown-linux-gnu'
-        uses: houseabsolute/actions-rust-cross@v0
+      - name: Build release CLI with embedded AOT runtime (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
         env:
+          CARGO_PROFILE_RELEASE_STRIP: symbols
           OPENSSL_NO_PKG_CONFIG: '1'
           OPENSSL_STATIC: '1'
-          RUNMAT_OCCT_LINK_MODE: ${{ runner.os == 'Windows' && 'dylib' || 'static' }}
-        with:
-          command: ${{ matrix.platform.command }}
-          target: ${{ matrix.platform.target }}
-          # Build all targets with vendored OpenSSL and full BLAS+LAPACK
-          args: "--locked --release --bin runmat --features blas-lapack,vendored-openssl,occt-native"
-          strip: true
+          RUNMAT_BUILD_TARGET: ${{ matrix.platform.target }}
+          RUNMAT_OCCT_LINK_MODE: dylib
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./scripts/build-runmat-with-aot-runtime.ps1 --locked --release --target "${{ matrix.platform.target }}" --bin runmat --features "blas-lapack,vendored-openssl,occt-native"
+          if ($LASTEXITCODE -ne 0) { throw "embedded-runtime release build failed with exit code $LASTEXITCODE" }
+
+      - name: Verify packaged CLI contains the native compile runtime (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          smoke_dir="$(mktemp -d)"
+          trap 'rm -rf "$smoke_dir"' EXIT
+          printf 'x = 2 + 3;\ndisp(x);\n' > "$smoke_dir/smoke.m"
+          target/${{ matrix.platform.target }}/release/runmat compile "$smoke_dir/smoke.m" -o "$smoke_dir/smoke"
+          "$smoke_dir/smoke" | grep -Fx '5'
+
+      - name: Verify packaged CLI contains the native compile runtime (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $smokeDir = Join-Path $env:RUNNER_TEMP 'runmat-aot-smoke'
+          New-Item -ItemType Directory -Path $smokeDir -Force | Out-Null
+          Set-Content -LiteralPath (Join-Path $smokeDir 'smoke.m') -Value "x = 2 + 3;`ndisp(x);"
+          & "target/${{ matrix.platform.target }}/release/runmat.exe" compile (Join-Path $smokeDir 'smoke.m') -o (Join-Path $smokeDir 'smoke.exe')
+          if ($LASTEXITCODE -ne 0) { throw "embedded compile runtime verification failed with exit code $LASTEXITCODE" }
+          $output = & (Join-Path $smokeDir 'smoke.exe')
+          if ($LASTEXITCODE -ne 0) { throw "compiled smoke program failed with exit code $LASTEXITCODE" }
+          if (($output | Out-String).Trim() -ne '5') { throw "compiled smoke program returned unexpected output: $output" }
 
       - name: Import signing cert and codesign (macOS)
         if: runner.os == 'macOS'

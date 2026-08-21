@@ -30,7 +30,7 @@
   "behaviors": [
     "The input must be a `MemoizedFunction` object returned by `memoize`.",
     "Cache state is shared per wrapped function, so clearing one object also clears other memoized handles for the same function.",
-    "The operation returns zero internally and suppresses automatic output in statement form.",
+    "The operation exposes no output argument; requesting one is an error.",
     "Object properties such as `Function`, `Enabled`, and `CacheSize` are preserved."
   ],
   "examples": [

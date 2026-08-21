@@ -1,10 +1,3 @@
----
-title: "Lexer & Parser"
-category: "Compilation Pipeline"
-section: "2.1"
-last_updated: "May 28, 2026"
----
-
 # Lexer & Parser
 
 The RunMat compilation pipeline begins with the transformation of raw MATLAB source text into a structured Abstract Syntax Tree (AST). This process is handled by two primary components: `runmat-lexer`, which tokenizes the input using the `logos` library, and `runmat-parser`, a hand-written recursive descent parser that handles the unique ambiguities of MATLAB syntax, including command-form calls and matrix literals.
@@ -18,6 +11,7 @@ The lexer converts source text into a stream of `Token` variants. It is built on
 - Keywords: Standard MATLAB control flow tokens such as `if`, `for`, `while`, `function`, `classdef`, and `try`
 - Operators: Arithmetic (`+`, `-`, `*`, `./`), logical (`&&`, `||`), and comparison (`==`, `>=`, `~=`)
 - Structural: Brackets `[]`, braces `{}`, and parentheses `()` used for arrays, cell arrays, and indexing/calls
+- Literals: Decimal floating-point values and exact hexadecimal or binary integer values with optional integer-class suffixes
 - MATLAB Specifics: The `transpose` operator (`'`), the `colon` operator (`:`), and the `ellipsis` (`...`) for line continuation
 
 ### Data Flow: Lexer to Parser
@@ -111,6 +105,7 @@ classDiagram
     Tensor(Vec~Vec~Expr~~)
     Ident(String)
     Number(String)
+    IntegerLiteral(IntegerLiteral)
   }
 
   Program *-- Stmt

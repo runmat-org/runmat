@@ -6,14 +6,20 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::introspection::class::class_name_for_value;
 use crate::builtins::introspection::type_resolvers::isa_type;
+use crate::class_registry::get_class;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-use runmat_accelerate_api::handle_is_logical;
+use runmat_accelerate_api::{handle_integer_type, handle_is_logical};
 use runmat_builtins::{
-    get_class, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::isa")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -91,6 +97,8 @@ pub const ISA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ISA_ERRORS,
 };
+const ISA_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "A", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Host and internally auto-resident integer values expose their exact class and integer/numeric abstract categories; an explicit gpuArray remains the resident wrapper object's class." }];
+pub const ISA_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "tf = isa(integer_A, type_name)", inputs: &ISA_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Logical, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Host and internally auto-resident integer class/category checks use dtype metadata exactly. Only explicit resident values match gpuArray; isUnderlyingType owns explicit resident underlying-class inspection." }];
 
 #[runtime_builtin(
     name = "isa",
@@ -100,6 +108,7 @@ pub const ISA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "metadata",
     type_resolver(isa_type),
     descriptor(crate::builtins::introspection::isa::ISA_DESCRIPTOR),
+    integer_capabilities(crate::builtins::introspection::isa::ISA_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::introspection::isa"
 )]
 fn isa_builtin(value: Value, class_designator: Value) -> crate::BuiltinResult<Value> {
@@ -143,6 +152,10 @@ fn value_is_a(value: &Value, requested: &str) -> bool {
         return false;
     }
     let requested_lower = trimmed.to_ascii_lowercase();
+    if matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
+    {
+        return requested_lower == "gpuarray";
+    }
     match requested_lower.as_str() {
         "numeric" => is_numeric(value),
         "float" => is_float(value),
@@ -160,7 +173,9 @@ fn value_is_a(value: &Value, requested: &str) -> bool {
                 | Value::BoundFunctionHandle { .. }
                 | Value::Closure(_)
         ),
-        "gpuarray" => matches!(value, Value::GpuTensor(_)),
+        "gpuarray" => {
+            matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
+        }
         "listener" | "event.listener" => matches!(value, Value::Listener(_)),
         "meta.class" => matches!(value, Value::ClassRef(_)),
         "mexception" => matches!(value, Value::MException(_)),
@@ -171,6 +186,7 @@ fn value_is_a(value: &Value, requested: &str) -> bool {
                 return true;
             }
             match value {
+                Value::ObjectArray(array) => class_inherits(array.class_name(), &requested_lower),
                 Value::Object(obj) => class_inherits(&obj.class_name, &requested_lower),
                 Value::HandleObject(handle) => {
                     !handle.class_name.is_empty()
@@ -189,6 +205,7 @@ fn is_numeric(value: &Value) -> bool {
         | Value::ComplexTensor(_)
         | Value::Complex(_, _)
         | Value::Int(_) => true,
+        Value::SparseTensor(sparse) => !sparse.is_logical(),
         Value::GpuTensor(handle) => !handle_is_logical(handle),
         _ => false,
     }
@@ -196,19 +213,32 @@ fn is_numeric(value: &Value) -> bool {
 
 fn is_float(value: &Value) -> bool {
     match value {
-        Value::Num(_) | Value::Tensor(_) | Value::ComplexTensor(_) | Value::Complex(_, _) => true,
-        Value::GpuTensor(handle) => !handle_is_logical(handle),
+        Value::Num(_) | Value::Complex(_, _) => true,
+        Value::Tensor(tensor) => tensor.integer_storage().is_none(),
+        Value::ComplexTensor(tensor) => tensor.integer_storage().is_none(),
+        Value::SparseTensor(sparse) => !sparse.is_logical() && sparse.integer_storage().is_none(),
+        Value::GpuTensor(handle) => {
+            !handle_is_logical(handle) && handle_integer_type(handle).is_none()
+        }
         _ => false,
     }
 }
 
 fn is_integer(value: &Value) -> bool {
-    matches!(value, Value::Int(_))
+    match value {
+        Value::Int(_) => true,
+        Value::Tensor(tensor) => tensor.integer_storage().is_some(),
+        Value::ComplexTensor(tensor) => tensor.integer_storage().is_some(),
+        Value::SparseTensor(sparse) => sparse.integer_storage().is_some(),
+        Value::GpuTensor(handle) => handle_integer_type(handle).is_some(),
+        _ => false,
+    }
 }
 
 fn is_logical(value: &Value) -> bool {
     match value {
         Value::Bool(_) | Value::LogicalArray(_) => true,
+        Value::SparseTensor(sparse) => sparse.is_logical(),
         Value::GpuTensor(handle) => handle_is_logical(handle),
         _ => false,
     }
@@ -217,6 +247,7 @@ fn is_logical(value: &Value) -> bool {
 fn is_handle_like(value: &Value) -> bool {
     match value {
         Value::HandleObject(_) | Value::Listener(_) => true,
+        Value::ObjectArray(array) => class_inherits(array.class_name(), "handle"),
         Value::Object(obj) => class_inherits(&obj.class_name, "handle"),
         _ => false,
     }
@@ -235,7 +266,7 @@ fn class_inherits(class_name: &str, requested_lower: &str) -> bool {
         if name.eq_ignore_ascii_case(requested_lower) {
             return true;
         }
-        if let Some(def) = get_class(&name) {
+        if let Some(def) = crate::class_registry::get_class(&name) {
             cursor = def.parent.clone();
         } else {
             break;
@@ -248,10 +279,14 @@ fn class_inherits(class_name: &str, requested_lower: &str) -> bool {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{gpu_helpers, test_support};
-    use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{
-        CellArray, CharArray, ClassDef, HandleRef, IntValue, Listener, LogicalArray,
-        ObjectInstance, StringArray, StructValue, Tensor,
+    use crate::class_registry::RuntimeClass;
+    use runmat_accelerate_api::{
+        AccelProvider, HostIntegerDataView, HostIntegerTensorView, HostTensorView,
+    };
+    use runmat_value::{
+        CellArray, CharArray, ComplexTensor, HandleRef, IntValue, IntegerComplexStorage,
+        IntegerStorage, Listener, LogicalArray, ObjectInstance, SparseTensor, StringArray,
+        StructValue, Tensor,
     };
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -293,6 +328,102 @@ pub(crate) mod tests {
 
         let float_result = isa_builtin(value, Value::from("float")).expect("isa");
         assert_eq!(float_result, Value::Bool(false));
+    }
+
+    #[test]
+    fn isa_integer_category_matches_exact_integer_arrays() {
+        let dense = Value::Tensor(
+            Tensor::new_integer(
+                IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+                vec![1, 2],
+            )
+            .expect("uint64 tensor"),
+        );
+        assert_eq!(
+            isa_builtin(dense.clone(), Value::from("integer")).expect("isa"),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            isa_builtin(dense.clone(), Value::from("float")).expect("isa"),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            isa_builtin(dense, Value::from("uint64")).expect("isa"),
+            Value::Bool(true)
+        );
+
+        let sparse = Value::SparseTensor(
+            SparseTensor::new_integer(
+                2,
+                1,
+                vec![0, 1],
+                vec![1],
+                IntegerStorage::I64(vec![i64::MIN]),
+            )
+            .expect("int64 sparse"),
+        );
+        assert_eq!(
+            isa_builtin(sparse.clone(), Value::from("integer")).expect("isa"),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            isa_builtin(sparse.clone(), Value::from("float")).expect("isa"),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            isa_builtin(sparse, Value::from("int64")).expect("isa"),
+            Value::Bool(true)
+        );
+
+        let typed_complex = Value::ComplexTensor(
+            ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::I16(vec![-1, i16::MAX]),
+                    IntegerStorage::I16(vec![2, i16::MIN]),
+                )
+                .expect("matching complex integer storage"),
+                vec![1, 2],
+            )
+            .expect("typed complex integer tensor"),
+        );
+        assert_eq!(
+            isa_builtin(typed_complex.clone(), Value::from("integer")).expect("isa"),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            isa_builtin(typed_complex.clone(), Value::from("float")).expect("isa"),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            isa_builtin(typed_complex, Value::from("int16")).expect("isa"),
+            Value::Bool(true)
+        );
+    }
+
+    #[test]
+    fn isa_float_category_excludes_only_integer_backed_numeric_arrays() {
+        let dense_float =
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("double tensor"));
+        assert_eq!(
+            isa_builtin(dense_float, Value::from("float")).expect("isa"),
+            Value::Bool(true)
+        );
+
+        let sparse_float = Value::SparseTensor(
+            SparseTensor::new(2, 1, vec![0, 1], vec![1], vec![2.5]).expect("double sparse"),
+        );
+        assert_eq!(
+            isa_builtin(sparse_float, Value::from("float")).expect("isa"),
+            Value::Bool(true)
+        );
+
+        let complex_float = Value::ComplexTensor(
+            ComplexTensor::new(vec![(1.0, 2.0)], vec![1, 1]).expect("double complex tensor"),
+        );
+        assert_eq!(
+            isa_builtin(complex_float, Value::from("float")).expect("isa"),
+            Value::Bool(true)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -346,11 +477,11 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn isa_gpu_arrays_treat_metadata_correctly() {
+    fn isa_distinguishes_automatic_numeric_class_from_explicit_wrapper() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -359,18 +490,36 @@ pub(crate) mod tests {
             let numeric = isa_builtin(gpu_value.clone(), Value::from("numeric")).expect("isa");
             assert_eq!(numeric, Value::Bool(true));
 
-            let double = isa_builtin(gpu_value, Value::from("double")).expect("isa");
-            assert_eq!(double, Value::Bool(false));
+            let double = isa_builtin(gpu_value.clone(), Value::from("double")).expect("isa");
+            assert_eq!(double, Value::Bool(true));
+            assert_eq!(
+                isa_builtin(gpu_value.clone(), Value::from("gpuArray")).expect("automatic isa"),
+                Value::Bool(false)
+            );
+            let Value::GpuTensor(handle) = gpu_value else {
+                unreachable!()
+            };
+            let gpu_value = Value::GpuTensor(
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit),
+            );
+            assert_eq!(
+                isa_builtin(gpu_value.clone(), Value::from("gpuArray")).expect("explicit isa"),
+                Value::Bool(true)
+            );
+            assert_eq!(
+                isa_builtin(gpu_value, Value::from("numeric")).expect("wrapper category"),
+                Value::Bool(false)
+            );
         });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn isa_gpu_logical_handles_match_categories() {
+    fn isa_gpu_logical_handles_preserve_automatic_transparency() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 0.0, 1.0, 0.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -382,6 +531,38 @@ pub(crate) mod tests {
             let numeric =
                 isa_builtin(logical_value, Value::from("numeric")).expect("isa numeric false");
             assert_eq!(numeric, Value::Bool(false));
+        });
+    }
+
+    #[test]
+    fn isa_gpu_integer_handles_preserve_automatic_transparency() {
+        test_support::with_test_provider(|provider| {
+            let values = [u64::MAX, 9_007_199_254_740_993];
+            let shape = [1usize, 2usize];
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&values),
+                    shape: &shape,
+                })
+                .expect("upload integer gpu tensor");
+            let gpu_value = Value::GpuTensor(handle);
+
+            assert_eq!(
+                isa_builtin(gpu_value.clone(), Value::from("gpuArray")).expect("isa gpuArray"),
+                Value::Bool(false)
+            );
+            assert_eq!(
+                isa_builtin(gpu_value.clone(), Value::from("numeric")).expect("isa numeric"),
+                Value::Bool(true)
+            );
+            assert_eq!(
+                isa_builtin(gpu_value.clone(), Value::from("integer")).expect("isa integer"),
+                Value::Bool(true)
+            );
+            assert_eq!(
+                isa_builtin(gpu_value, Value::from("float")).expect("isa float"),
+                Value::Bool(false)
+            );
         });
     }
 
@@ -400,13 +581,13 @@ pub(crate) mod tests {
 
         // Register a class that derives from handle and ensure inheritance is respected.
         let class_name = "pkg.TestHandle";
-        let def = ClassDef {
+        let def = crate::class_registry::RuntimeClass {
             name: class_name.into(),
             parent: Some("handle".into()),
             properties: HashMap::new(),
             methods: HashMap::new(),
         };
-        runmat_builtins::register_class(def);
+        crate::class_registry::register_class(def);
         let obj = Value::Object(ObjectInstance::new(class_name.into()));
         let handle_result = isa_builtin(obj.clone(), Value::from("handle")).expect("isa");
         assert_eq!(handle_result, Value::Bool(true));
@@ -420,13 +601,13 @@ pub(crate) mod tests {
         let class_a = unique_class_name("runmat.unittest.CycleA");
         let class_b = unique_class_name("runmat.unittest.CycleB");
 
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: class_a.clone(),
             parent: Some(class_b.clone()),
             properties: HashMap::new(),
             methods: HashMap::new(),
         });
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: class_b.clone(),
             parent: Some(class_a.clone()),
             properties: HashMap::new(),
@@ -495,7 +676,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
-    fn isa_gpuarray_with_wgpu_provider_matches_numeric_category() {
+    fn isa_automatic_wgpu_value_matches_underlying_numeric_class() {
         use runmat_accelerate::backend::wgpu::provider::ensure_wgpu_provider;
         use runmat_accelerate_api::AccelProvider;
 
@@ -505,17 +686,14 @@ pub(crate) mod tests {
         };
 
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let view = HostTensorView {
-            data: &tensor.data,
-            shape: &tensor.shape,
-        };
-        let handle = provider.upload(&view).expect("wgpu upload");
+        let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+            .expect("wgpu upload");
         let value = Value::GpuTensor(handle);
 
         let numeric = isa_builtin(value.clone(), Value::from("numeric")).expect("isa numeric");
         assert_eq!(numeric, Value::Bool(true));
 
         let dbl = isa_builtin(value, Value::from("double")).expect("isa double");
-        assert_eq!(dbl, Value::Bool(false));
+        assert_eq!(dbl, Value::Bool(true));
     }
 }

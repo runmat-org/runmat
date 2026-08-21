@@ -5,7 +5,8 @@ use runmat_accelerate::graph::{
     AccelGraph, AccelGraphTag, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan, PrimitiveOp,
     ShapeInfo, ValueId, ValueInfo, ValueOrigin, VarBinding, VarKind,
 };
-use runmat_builtins::{Type, Value};
+use runmat_builtins::Type;
+use runmat_value::Value;
 use std::collections::HashMap;
 
 fn sum_native_graph() -> AccelGraph {

@@ -9,9 +9,11 @@ use crate::builtins::common::spec::{
 use crate::builtins::introspection::type_resolvers::ischar_type;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::ischar")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -70,6 +72,7 @@ pub const ISCHAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ISCHAR_ERRORS,
 };
+pub const ISCHAR_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "ischar is a universal type predicate; integer host or resident values return scalar false from metadata without payload conversion or provider access." };
 
 #[runtime_builtin(
     name = "ischar",
@@ -79,6 +82,7 @@ pub const ISCHAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "metadata",
     type_resolver(ischar_type),
     descriptor(crate::builtins::introspection::ischar::ISCHAR_DESCRIPTOR),
+    integer_audit(crate::builtins::introspection::ischar::ISCHAR_INTEGER_AUDIT),
     builtin_path = "crate::builtins::introspection::ischar"
 )]
 fn ischar_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -92,7 +96,7 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{CellArray, CharArray, LogicalArray, StringArray, StructValue, Tensor};
+    use runmat_value::{CellArray, CharArray, LogicalArray, StringArray, StructValue, Tensor};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -167,7 +171,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("tensor");
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");

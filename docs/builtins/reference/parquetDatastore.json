@@ -7,8 +7,8 @@
   "fusion": {"elementwise": false, "reduction": false, "max_inputs": 1, "constants": "inline"},
   "requires_feature": null,
   "tested": {"unit": "builtins::table::tests"},
-  "description": "`parquetDatastore(files)` creates a descriptor object with a `Files` property for parquet table workflows.",
-  "behaviors": ["The constructor preserves file specifications for code that passes datastore descriptors around.", "Parquet decoding and iterator-style operations such as `read`, `hasdata`, and `reset` require the generic datastore dispatch layer and are not provided by this constructor builtin."],
+  "description": "`parquetDatastore(files, ...)` creates a validated descriptor object for parquet table workflows.",
+  "behaviors": ["The constructor preserves file specifications and accepts supported `ReadSize` and `BlockSize` controls as positive doubles; `ReadSize` also accepts `\"file\"` and `\"rowgroup\"`.", "Typed-integer constructor arguments are rejected before gathering because the documented numeric constructor controls use double rather than native integer classes.", "Unknown options and invalid option pairs raise explicit errors instead of being ignored.", "Parquet decoding and iterator-style operations such as `read`, `hasdata`, and `reset` require the generic datastore dispatch layer and are not provided by this constructor builtin."],
   "examples": [{"description": "Create parquet datastore descriptor", "input": "ds = parquetDatastore('data.parquet')", "output": "ds = parquetDatastore object"}],
   "links": [{"label": "arrayDatastore", "url": "./arrayDatastore"}],
   "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}

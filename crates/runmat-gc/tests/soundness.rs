@@ -7,10 +7,8 @@
 //! cargo miri test -p runmat-gc --test soundness
 //! ```
 
-use runmat_builtins::{
-    CellArray, Closure, HandleRef, Listener, ObjectInstance, StructValue, Value,
-};
 use runmat_gc::*;
+use runmat_value::{CellArray, Closure, HandleRef, Listener, ObjectInstance, StructValue, Value};
 use std::ptr::NonNull;
 
 #[test]

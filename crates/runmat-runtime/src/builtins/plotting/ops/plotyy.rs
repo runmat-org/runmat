@@ -3,9 +3,14 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Tensor, Value};
 
 use super::line::{append_line_objects_to_figure, handles_value, parse_line_args};
 use super::state::{
@@ -16,6 +21,25 @@ use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "plotyy";
+const PLOTYY_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X1/Y1/X2/Y2",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Both coordinate pairs accept all eight integer classes and retain native source properties on their line objects.",
+    }];
+pub const PLOTYY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[ax,h1,h2] = plotyy(integer_X1, integer_Y1, integer_X2, integer_Y2, ...)",
+        inputs: &PLOTYY_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Each delegated line retains exact native source and persisted property data; dual-axis display and rendering are explicit floating boundaries.",
+    }];
 
 const OUTPUT_AX_H1_H2: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
@@ -146,6 +170,7 @@ enum PlotSelector {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::plotyy::PLOTYY_DESCRIPTOR),
+    integer_capabilities(crate::builtins::plotting::plotyy::PLOTYY_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::plotyy"
 )]
 pub async fn plotyy_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -329,14 +354,7 @@ fn apply_selector_modes(
 
 fn handles_tensor(handles: Vec<f64>) -> Value {
     let len = handles.len();
-    Value::Tensor(Tensor {
-        data: handles,
-        integer_data: None,
-        shape: vec![1, len],
-        rows: 1,
-        cols: len,
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    Value::Tensor(Tensor::new(handles, vec![1, len]).expect("plotyy handle row"))
 }
 
 fn invalid(message: impl Into<String>) -> RuntimeError {
@@ -374,14 +392,7 @@ mod tests {
     }
 
     fn tensor(data: &[f64]) -> Value {
-        Value::Tensor(Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![1, data.len()],
-            rows: 1,
-            cols: data.len(),
-            dtype: runmat_builtins::NumericDType::F64,
-        })
+        Value::Tensor(Tensor::new(data.to_vec(), vec![1, data.len()]).expect("plotyy row vector"))
     }
 
     #[test]
@@ -397,14 +408,14 @@ mod tests {
         let Value::Tensor(ax) = out else {
             panic!("expected axes handle vector");
         };
-        assert_eq!(ax.data.len(), 2);
+        assert_eq!(ax.materialize_f64().len(), 2);
         let left_location = get_builtin(vec![
-            Value::Num(ax.data[0]),
+            Value::Num(ax.materialize_f64()[0]),
             Value::String("YAxisLocation".into()),
         ])
         .unwrap();
         let right_location = get_builtin(vec![
-            Value::Num(ax.data[1]),
+            Value::Num(ax.materialize_f64()[1]),
             Value::String("YAxisLocation".into()),
         ])
         .unwrap();
@@ -428,7 +439,7 @@ mod tests {
             panic!("expected output list");
         };
         assert_eq!(values.len(), 3);
-        assert!(matches!(&values[0], Value::Tensor(ax) if ax.data.len() == 2));
+        assert!(matches!(&values[0], Value::Tensor(ax) if ax.materialize_f64().len() == 2));
         assert!(matches!(&values[1], Value::Num(_) | Value::Tensor(_)));
         assert!(matches!(&values[2], Value::Num(_) | Value::Tensor(_)));
     }
@@ -449,19 +460,35 @@ mod tests {
             panic!("expected axes handle vector");
         };
         assert_eq!(
-            get_builtin(vec![Value::Num(ax.data[0]), Value::String("XScale".into())]).unwrap(),
+            get_builtin(vec![
+                Value::Num(ax.materialize_f64()[0]),
+                Value::String("XScale".into())
+            ])
+            .unwrap(),
             Value::String("log".into())
         );
         assert_eq!(
-            get_builtin(vec![Value::Num(ax.data[0]), Value::String("YScale".into())]).unwrap(),
+            get_builtin(vec![
+                Value::Num(ax.materialize_f64()[0]),
+                Value::String("YScale".into())
+            ])
+            .unwrap(),
             Value::String("linear".into())
         );
         assert_eq!(
-            get_builtin(vec![Value::Num(ax.data[1]), Value::String("XScale".into())]).unwrap(),
+            get_builtin(vec![
+                Value::Num(ax.materialize_f64()[1]),
+                Value::String("XScale".into())
+            ])
+            .unwrap(),
             Value::String("linear".into())
         );
         assert_eq!(
-            get_builtin(vec![Value::Num(ax.data[1]), Value::String("YScale".into())]).unwrap(),
+            get_builtin(vec![
+                Value::Num(ax.materialize_f64()[1]),
+                Value::String("YScale".into())
+            ])
+            .unwrap(),
             Value::String("log".into())
         );
     }

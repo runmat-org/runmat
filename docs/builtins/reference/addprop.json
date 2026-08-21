@@ -31,6 +31,7 @@
   "behaviors": [
     "The target must be a valid handle object whose class inherits from `dynamicprops`; value objects, ordinary handle classes, and structs are rejected.",
     "The property name must be a valid identifier and must not duplicate a class-defined property or an existing dynamic property on the same instance.",
+    "`addprop` does not accept an initial value. Numeric or integer data assigned later belongs to the dynamic property and follows ordinary object-property assignment semantics; it is not an `addprop` input or output.",
     "The new property is immediately readable and writable through dot syntax, `getfield`, and `setfield`.",
     "The returned metadata handle exposes `Name`, `DefiningClass`, `GetAccess`, `SetAccess`, `Dependent`, `Hidden`, `Transient`, `NonCopyable`, `AbortSet`, `SetObservable`, `GetObservable`, and `Description` fields.",
     "Writable metadata fields update the target object's dynamic property metadata. `Name` and `DefiningClass` are read-only.",

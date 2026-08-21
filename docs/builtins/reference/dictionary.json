@@ -3,13 +3,13 @@
   "category": "table",
   "keywords": ["dictionary", "map", "keys", "values", "containers.Map"],
   "summary": "Create a key-value dictionary object.",
-  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Dictionary objects are host metadata containers."},
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Dictionary objects are host metadata containers. Resident input is a RunMat-only extension gated before exact download through the owning provider."},
   "fusion": {"elementwise": false, "reduction": false, "max_inputs": 2, "constants": "inline"},
   "requires_feature": null,
   "tested": {"unit": "builtins::table::tests", "integration": "crates/runmat-vm/tests/tables_timetables.rs"},
-  "description": "`dictionary(keys, values)` creates a dictionary object with cell-backed `Keys` and `Values` properties. Alternating key/value pairs are also accepted.",
-  "behaviors": ["Keys and values must have the same number of elements.", "String, numeric, logical, char, and cell collections are expanded into element lists."],
+  "description": "`dictionary(keys, values)` creates a host dictionary object. Alternating key/value pairs are also accepted, including array-valued pairs.",
+  "behaviors": ["Keys and values must have the same size unless the value input is scalar, in which case it expands to every key.", "String, numeric, logical, char, and cell collections are expanded into entries and normalized to one compatible configured key class and one compatible configured value class.", "All eight integer classes remain exact, including `uint64` keys beyond binary64's exact range. Construction, lookup, assignment, and removal compare authoritative configured-class integers.", "Duplicate keys keep their first insertion position and the last supplied value.", "Multi-key lookup preserves the configured uniform value class and the query shape; scalar lookup returns a scalar. Non-scalar assignment values must match the key-query shape, while scalar assignment expands.", "Resident keys or values are a RunMat-only interactive extension. Compatibility mode rejects them before provider access; RunMat mode gathers them exactly through the owning provider.", "Concrete MATLAB dictionary class metadata and unsupported heterogeneous object-type conversions remain recorded general gaps."],
   "examples": [{"description": "Create a dictionary", "input": "D = dictionary([\"a\" \"b\"], [1 2])", "output": "D = dictionary object"}],
   "links": [{"label": "containers.Map", "url": "./containers.Map"}],
-  "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}
+  "source": {"label": "`crates/runmat-runtime/src/builtins/table/containers/dictionary.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/containers/dictionary.rs"}
 }

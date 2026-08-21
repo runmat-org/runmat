@@ -1,23 +1,29 @@
 //! MATLAB-compatible `hold` builtin.
 
-use runmat_builtins::Value;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
+use super::op_common::axes_target::{apply_axes_target, split_leading_axes_handle};
 use super::op_common::cmd_parsing::parse_hold_mode;
 use super::state::{set_hold, HoldMode};
-use crate::builtins::plotting::type_resolvers::bool_type;
 
-const HOLD_OUTPUT_STATUS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "enabled",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "True when hold is enabled after command execution.",
+const HOLD_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "state",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+    notes: "Documented numeric scalar states accept every built-in integer class; all classes are inspected exactly and only values 0 and 1 are accepted.",
 }];
+pub const HOLD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor { form: "hold([ax,] integer_state)", inputs: &HOLD_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::Multiple, notes: "The scalar state is read without floating conversion and mutates only the selected axes hold policy after validation." }];
 
 const HOLD_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
 
@@ -29,16 +35,38 @@ const HOLD_INPUTS_MODE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     description: "Hold mode ('on'|'off'|'all') or numeric/logical scalar.",
 }];
 
-const HOLD_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+const HOLD_INPUTS_AX_MODE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes.",
+    },
+    BuiltinParamDescriptor {
+        name: "mode",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Hold mode ('on'|'off'|'all') or numeric/logical scalar.",
+    },
+];
+
+const HOLD_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
     BuiltinSignatureDescriptor {
-        label: "enabled = hold()",
+        label: "hold()",
         inputs: &HOLD_INPUTS_NONE,
-        outputs: &HOLD_OUTPUT_STATUS,
+        outputs: &[],
     },
     BuiltinSignatureDescriptor {
-        label: "enabled = hold(mode)",
+        label: "hold(mode)",
         inputs: &HOLD_INPUTS_MODE,
-        outputs: &HOLD_OUTPUT_STATUS,
+        outputs: &[],
+    },
+    BuiltinSignatureDescriptor {
+        label: "hold(ax, mode)",
+        inputs: &HOLD_INPUTS_AX_MODE,
+        outputs: &[],
     },
 ];
 
@@ -64,18 +92,25 @@ pub const HOLD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     summary = "Control plot replacement versus appending.",
     keywords = "hold,plotting",
     suppress_auto_output = true,
-    type_resolver(bool_type),
+    integer_capabilities(crate::builtins::plotting::hold::HOLD_INTEGER_CAPABILITIES),
     descriptor(crate::builtins::plotting::hold::HOLD_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::hold"
 )]
-pub fn hold_builtin(rest: Vec<Value>) -> crate::BuiltinResult<bool> {
-    let mode = if rest.is_empty() {
-        HoldMode::Toggle
-    } else {
-        parse_hold_mode(&rest[0])?
+pub fn hold_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let (axes_target, rest) = split_leading_axes_handle(args, "hold")?;
+    let mode = match rest.as_slice() {
+        [] => HoldMode::Toggle,
+        [value] => parse_hold_mode(value)?,
+        _ => {
+            return Err(crate::builtins::plotting::plotting_error(
+                "hold",
+                "hold: expected at most one input",
+            ))
+        }
     };
-    let enabled = set_hold(mode);
-    Ok(enabled)
+    apply_axes_target(axes_target, "hold")?;
+    set_hold(mode);
+    Ok(Value::OutputList(Vec::new()))
 }
 
 #[cfg(test)]
@@ -89,16 +124,32 @@ mod tests {
             .iter()
             .map(|sig| sig.label)
             .collect();
-        assert!(labels.contains(&"enabled = hold()"));
-        assert!(labels.contains(&"enabled = hold(mode)"));
+        assert!(labels.contains(&"hold()"));
+        assert!(labels.contains(&"hold(mode)"));
+        assert!(HOLD_DESCRIPTOR
+            .signatures
+            .iter()
+            .all(|signature| signature.outputs.is_empty()));
     }
 
     #[test]
     fn hold_toggle_and_explicit_modes_work() {
         let _ = hold_builtin(Vec::new()).unwrap();
-        let on = hold_builtin(vec![Value::String("on".into())]).unwrap();
-        assert!(on);
-        let off = hold_builtin(vec![Value::String("off".into())]).unwrap();
-        assert!(!off);
+        assert_eq!(
+            hold_builtin(vec![Value::String("on".into())]).unwrap(),
+            Value::OutputList(Vec::new())
+        );
+        assert_eq!(
+            hold_builtin(vec![Value::String("off".into())]).unwrap(),
+            Value::OutputList(Vec::new())
+        );
+        assert!(hold_builtin(vec![Value::from("on"), Value::from("off")]).is_err());
+    }
+
+    #[test]
+    fn hold_typed_integer_state_is_exact_in_compatibility_mode() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        assert!(hold_builtin(vec![Value::Int(runmat_value::IntValue::U8(1))]).is_ok());
+        assert!(hold_builtin(vec![Value::Int(runmat_value::IntValue::I64(0))]).is_ok());
     }
 }

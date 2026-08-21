@@ -34,8 +34,20 @@ jobs:
       # Enable backtraces on CI to aid debugging of panics/segfaults
       RUST_BACKTRACE: 1
       MATRIX_NAME: ${{ matrix.name }}
+      # The all-feature workspace produces large native objects. Keep ephemeral
+      # compiler state and DWARF from exhausting hosted and self-hosted runners.
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@v3
+
+      - name: Isolate Cargo build artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          target_dir="${RUNNER_TEMP}/runmat-ci-${GITHUB_RUN_ID}-${MATRIX_NAME}"
+          echo "CARGO_TARGET_DIR=${target_dir}" >> "${GITHUB_ENV}"
 
       - name: Validate Rust toolchain (Linux self-hosted)
         if: runner.os == 'Linux'
@@ -197,6 +209,9 @@ jobs:
       - name: Format
         run: cargo fmt -- --check
 
+      - name: Validate crate architecture boundaries
+        run: scripts/development/check-architecture-boundaries.sh
+
       - name: Validate public FEA field ids
         run: python3 scripts/fea/governance/validate_public_field_ids.py
 
@@ -206,6 +221,13 @@ jobs:
 
       - name: Check (Unix)
         run: cargo check --all-targets --all-features
+
+      - name: Reclaim macOS linker space before tests
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo clean
 
       - name: Test (Linux)
         if: runner.os == 'Linux'

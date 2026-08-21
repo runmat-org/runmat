@@ -1,16 +1,25 @@
 //! Word encoding compatibility objects and word/index lookup helpers.
+use runmat_types::MemberAccess;
 
-use std::cell::Cell;
+use runmat_builtins::{
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
+    BuiltinIntegerAuditKind, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
+use runmat_value::IntValue;
 use std::collections::HashMap;
 
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ClassDef, LogicalArray, ObjectInstance, PropertyDef, ResolveContext, StringArray,
-    Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, LogicalArray, ObjectInstance, StringArray, Tensor, Value};
 
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::strings::core::compat::scalar_text;
 use crate::builtins::strings::text_analytics::documents::{
     documents_from_object, TOKENIZED_DOCUMENT_CLASS,
@@ -22,9 +31,80 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult};
 
 pub const WORD_ENCODING_CLASS: &str = "wordEncoding";
 
-thread_local! {
-    static WORD_ENCODING_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
-}
+const WORD_ENCODING_INTEGER_MAX_WORDS_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "wordencoding-integer-max-num-words",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "wordEncoding with a typed-integer MaxNumWords value is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:WordEncodingIntegerMaxNumWordsExtension"),
+    };
+pub const WORD_ENCODING_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [WORD_ENCODING_INTEGER_MAX_WORDS_EXTENSION];
+const WORD_ENCODING_INTEGER_MAX_WORDS_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "MaxNumWords",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public reference specifies a positive integer value or Inf without publishing native integer storage classes. RunMat mode decodes a typed scalar exactly as a bounded vocabulary length.",
+    }];
+pub const WORD_ENCODING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "enc = wordEncoding(documents, 'MaxNumWords', integer_n)",
+        inputs: &WORD_ENCODING_INTEGER_MAX_WORDS_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The exact positive count truncates the ranked host vocabulary and does not enter floating arithmetic. Ordinary positive integer-valued double and positive Inf retain their documented behavior.",
+    }];
+
+const IND2WORD_TYPED_INTEGER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ind2word-typed-integer-indices",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ind2word with a typed-integer index vector is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Ind2wordTypedIntegerExtension"),
+};
+const IND2WORD_NONVECTOR_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ind2word-nonvector-indices",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ind2word with matrix or multidimensional indices is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Ind2wordNonvectorExtension"),
+};
+const IND2WORD_RESIDENT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ind2word-resident-indices",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ind2word with resident indices is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Ind2wordResidentExtension"),
+};
+pub const IND2WORD_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    IND2WORD_TYPED_INTEGER_EXTENSION,
+    IND2WORD_NONVECTOR_EXTENSION,
+    IND2WORD_RESIDENT_EXTENSION,
+];
+const IND2WORD_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "M",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The current public reference specifies positive integer values but does not publish a native numeric class table; typed-integer vectors are therefore gated and read from authoritative integer storage.",
+    }];
+pub const IND2WORD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "words = ind2word(enc, integer_M)",
+        inputs: &IND2WORD_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The public form uses a host positive-integer vector and returns a string vector. RunMat gates typed-integer and resident forms independently, reads typed indices exactly from their native class, and always returns host strings.",
+    }];
+
+static WORD_ENCODING_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
+    crate::class_registry::ClassRegistration::new(WORD_ENCODING_CLASS);
 
 const OUT_ENCODING: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "enc",
@@ -260,6 +340,11 @@ pub const WORD2IND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &WORD2IND_ERRORS,
 };
+pub const WORD2IND_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "word2ind accepts a wordEncoding object, textual words, and a logical IgnoreCase option. It returns double indices or NaN; integer and resident numeric word/control inputs are invalid and reject before provider access.",
+};
 
 pub const IND2WORD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &[BuiltinSignatureDescriptor {
@@ -294,6 +379,12 @@ pub const IS_VOCABULARY_WORD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &IS_VOCABULARY_WORD_ERRORS,
 };
+pub const IS_VOCABULARY_WORD_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "isVocabularyWord accepts vocabulary objects, textual words, and logical options; integer and resident numeric values are invalid and reject before provider access.",
+    };
 
 #[runtime_builtin(
     name = "wordEncoding",
@@ -303,9 +394,24 @@ pub const IS_VOCABULARY_WORD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::encoding::WORD_ENCODING_DESCRIPTOR),
+    extensions(crate::builtins::strings::text_analytics::encoding::WORD_ENCODING_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::strings::text_analytics::encoding::WORD_ENCODING_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::strings::text_analytics::encoding"
 )]
 async fn word_encoding_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    for pair in args.windows(2) {
+        if scalar_text(&pair[0], "wordEncoding")
+            .is_ok_and(|name| name.eq_ignore_ascii_case("MaxNumWords"))
+            && is_typed_integer_value(&pair[1])
+        {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &WORD_ENCODING_INTEGER_MAX_WORDS_EXTENSION,
+                "wordEncoding",
+            )?;
+        }
+    }
     let gathered = gather_args(args, "wordEncoding").await?;
     let (source, options) = parse_word_encoding_args(gathered)?;
     word_encoding_object(build_word_encoding(source, options)?)
@@ -319,9 +425,19 @@ async fn word_encoding_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::encoding::WORD2IND_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::text_analytics::encoding::WORD2IND_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::text_analytics::encoding"
 )]
 async fn word2ind_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args.iter().skip(1).any(|value| {
+        crate::builtins::common::validation::value_contains_native_integer_class(value)
+            || value_contains_resident(value)
+    }) {
+        return Err(encoding_error(
+            "word2ind",
+            "word2ind: words and option names must be host text and IgnoreCase must be logical",
+        ));
+    }
     let gathered = gather_args(args, "word2ind").await?;
     let (object, words, options) = parse_word2ind_args(gathered)?;
     let encoding = word_encoding_from_object(&object, "word2ind")?;
@@ -354,9 +470,14 @@ async fn word2ind_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::encoding::IND2WORD_DESCRIPTOR),
+    extensions(crate::builtins::strings::text_analytics::encoding::IND2WORD_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::strings::text_analytics::encoding::IND2WORD_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::strings::text_analytics::encoding"
 )]
 async fn ind2word_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_ind2word_extensions(&args)?;
     let gathered = gather_args(args, "ind2word").await?;
     let (object, indices) = parse_ind2word_args(gathered)?;
     let encoding = word_encoding_from_object(&object, "ind2word")?;
@@ -373,6 +494,51 @@ async fn ind2word_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         .map_err(|err| encoding_error("ind2word", err))
 }
 
+fn ensure_ind2word_extensions(args: &[Value]) -> BuiltinResult<()> {
+    if args.len() != 2 {
+        return Ok(());
+    }
+    let indices = &args[1];
+    if is_typed_integer_value(indices) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &IND2WORD_TYPED_INTEGER_EXTENSION,
+            "ind2word",
+        )?;
+    }
+    if crate::dispatcher::value_contains_gpu(indices) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &IND2WORD_RESIDENT_EXTENSION,
+            "ind2word",
+        )?;
+    }
+    if value_shape(indices).is_some_and(|shape| !is_vector_shape(shape)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &IND2WORD_NONVECTOR_EXTENSION,
+            "ind2word",
+        )?;
+    }
+    Ok(())
+}
+
+fn is_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn value_shape(value: &Value) -> Option<&[usize]> {
+    match value {
+        Value::Tensor(tensor) => Some(&tensor.shape),
+        Value::GpuTensor(handle) => Some(&handle.shape),
+        Value::Num(_) | Value::Int(_) => Some(&[1, 1]),
+        _ => None,
+    }
+}
+
+fn is_vector_shape(shape: &[usize]) -> bool {
+    shape.len() <= 2 && shape.iter().filter(|extent| **extent > 1).count() <= 1
+}
+
 #[runtime_builtin(
     name = "isVocabularyWord",
     category = "strings/text_analytics",
@@ -381,9 +547,18 @@ async fn ind2word_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::encoding::IS_VOCABULARY_WORD_DESCRIPTOR),
+    integer_audit(
+        crate::builtins::strings::text_analytics::encoding::IS_VOCABULARY_WORD_INTEGER_AUDIT
+    ),
     builtin_path = "crate::builtins::strings::text_analytics::encoding"
 )]
 async fn is_vocabulary_word_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args.iter().any(value_contains_resident) {
+        return Err(encoding_error(
+            "isVocabularyWord",
+            "isVocabularyWord: provider-resident numeric inputs are not vocabulary objects, words, or controls",
+        ));
+    }
     let gathered = gather_args(args, "isVocabularyWord").await?;
     let (object, words, options) = parse_is_vocabulary_word_args(gathered)?;
     let vocabulary = if object.is_class(WORD_ENCODING_CLASS) {
@@ -415,6 +590,18 @@ async fn is_vocabulary_word_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     LogicalArray::new(flags, words.shape)
         .map(Value::LogicalArray)
         .map_err(|err| encoding_error("isVocabularyWord", err))
+}
+
+fn value_contains_resident(value: &Value) -> bool {
+    match value {
+        Value::GpuTensor(_) => true,
+        Value::Cell(value) => value.data.iter().any(value_contains_resident),
+        Value::Struct(value) => value.fields.values().any(value_contains_resident),
+        Value::Object(value) => value.properties.values().any(value_contains_resident),
+        Value::Closure(value) => value.captures.iter().any(value_contains_resident),
+        Value::OutputList(values) => values.iter().any(value_contains_resident),
+        _ => false,
+    }
 }
 
 async fn gather_args(args: Vec<Value>, fn_name: &str) -> BuiltinResult<Vec<Value>> {
@@ -486,32 +673,28 @@ fn word_encoding_object(model: WordEncodingModel) -> BuiltinResult<Value> {
 }
 
 fn ensure_word_encoding_class_registered() {
-    WORD_ENCODING_CLASS_REGISTERED.with(|registered| {
-        if registered.get() {
-            return;
-        }
+    WORD_ENCODING_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();
         for name in ["NumWords", "Vocabulary"] {
             properties.insert(name.to_string(), property_def(name));
         }
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: WORD_ENCODING_CLASS.to_string(),
             parent: None,
             properties,
             methods: HashMap::new(),
         });
-        registered.set(true);
     });
 }
 
-fn property_def(name: &str) -> PropertyDef {
-    PropertyDef {
+fn property_def(name: &str) -> crate::class_registry::RuntimeProperty {
+    crate::class_registry::RuntimeProperty {
         name: name.to_string(),
         is_static: false,
         is_constant: false,
         is_dependent: false,
-        get_access: Access::Public,
-        set_access: Access::Public,
+        get_access: MemberAccess::Public,
+        set_access: MemberAccess::Public,
         default_value: None,
     }
 }
@@ -791,24 +974,47 @@ fn word_input_from_value(value: &Value, fn_name: &str) -> BuiltinResult<WordInpu
 }
 
 struct NumericInput {
-    values: Vec<f64>,
+    values: Vec<NumericIndex>,
     shape: Vec<usize>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum NumericIndex {
+    Float(f64),
+    Integer(IntValue),
 }
 
 fn numeric_input_from_value(value: &Value, fn_name: &str) -> BuiltinResult<NumericInput> {
     match value {
         Value::Num(value) => Ok(NumericInput {
-            values: vec![*value],
+            values: vec![NumericIndex::Float(*value)],
             shape: vec![1, 1],
         }),
         Value::Int(value) => Ok(NumericInput {
-            values: vec![int_value_to_f64(value)],
+            values: vec![NumericIndex::Integer(value.clone())],
             shape: vec![1, 1],
         }),
-        Value::Tensor(tensor) => Ok(NumericInput {
-            values: tensor.data.clone(),
-            shape: tensor.shape.clone(),
-        }),
+        Value::Tensor(tensor) => {
+            let values = if let Some(storage) = tensor.integer_storage() {
+                (0..storage.len())
+                    .map(|index| {
+                        storage
+                            .value_at(index)
+                            .map(NumericIndex::Integer)
+                            .expect("integer index is within storage bounds")
+                    })
+                    .collect()
+            } else {
+                tensor_utils::tensor_values_f64(tensor)
+                    .into_iter()
+                    .map(NumericIndex::Float)
+                    .collect()
+            };
+            Ok(NumericInput {
+                values,
+                shape: tensor.shape.clone(),
+            })
+        }
         other => Err(encoding_error(
             fn_name,
             format!("{fn_name}: expected numeric positive integer indices, got {other:?}"),
@@ -816,14 +1022,36 @@ fn numeric_input_from_value(value: &Value, fn_name: &str) -> BuiltinResult<Numer
     }
 }
 
-fn positive_index(value: f64, len: usize, fn_name: &str) -> BuiltinResult<usize> {
-    if !value.is_finite() || value < 1.0 || value.fract() != 0.0 {
+fn positive_index(value: NumericIndex, len: usize, fn_name: &str) -> BuiltinResult<usize> {
+    let idx = match value {
+        NumericIndex::Float(value) => {
+            if !value.is_finite() || value < 1.0 || value.fract() != 0.0 {
+                return Err(encoding_error(
+                    fn_name,
+                    format!("{fn_name}: indices must be positive integers, got {value}"),
+                ));
+            }
+            if value > usize::MAX as f64 {
+                return Err(encoding_error(
+                    fn_name,
+                    format!("{fn_name}: index exceeds platform limits"),
+                ));
+            }
+            value as usize
+        }
+        NumericIndex::Integer(value) => value.try_to_usize().ok_or_else(|| {
+            encoding_error(
+                fn_name,
+                format!("{fn_name}: indices must be positive integers"),
+            )
+        })?,
+    };
+    if idx == 0 {
         return Err(encoding_error(
             fn_name,
-            format!("{fn_name}: indices must be positive integers, got {value}"),
+            format!("{fn_name}: indices must be positive integers"),
         ));
     }
-    let idx = value as usize;
     if idx > len {
         return Err(encoding_error(
             fn_name,
@@ -834,6 +1062,37 @@ fn positive_index(value: f64, len: usize, fn_name: &str) -> BuiltinResult<usize>
 }
 
 fn parse_max_num_words(value: &Value) -> BuiltinResult<Option<usize>> {
+    if let Value::Int(value) = value {
+        return value
+            .try_to_usize()
+            .filter(|value| *value >= 1)
+            .map(Some)
+            .ok_or_else(|| {
+                encoding_error(
+                    "wordEncoding",
+                    "wordEncoding: MaxNumWords must be a positive integer or Inf",
+                )
+            });
+    }
+    if let Value::Tensor(tensor) = value {
+        if tensor_utils::is_scalar_tensor(tensor) {
+            if let Some(value) = tensor
+                .integer_storage()
+                .and_then(|storage| storage.value_at(0))
+            {
+                return value
+                    .try_to_usize()
+                    .filter(|value| *value >= 1)
+                    .map(Some)
+                    .ok_or_else(|| {
+                        encoding_error(
+                            "wordEncoding",
+                            "wordEncoding: MaxNumWords must be a positive integer or Inf",
+                        )
+                    });
+            }
+        }
+    }
     let n = numeric_scalar(value, "wordEncoding", "MaxNumWords")?;
     if n.is_infinite() && n.is_sign_positive() {
         return Ok(None);
@@ -851,7 +1110,9 @@ fn numeric_scalar(value: &Value, fn_name: &str, option: &str) -> BuiltinResult<f
     match value {
         Value::Num(value) => Ok(*value),
         Value::Int(value) => Ok(int_value_to_f64(value)),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            Ok(tensor_utils::tensor_value_f64(tensor, 0))
+        }
         other => Err(encoding_error(
             fn_name,
             format!("{fn_name}: {option} must be a numeric scalar, got {other:?}"),
@@ -863,14 +1124,31 @@ fn parse_bool_scalar(value: &Value, fn_name: &str) -> BuiltinResult<bool> {
     match value {
         Value::Bool(value) => Ok(*value),
         Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => match tensor.data[0] {
-            0.0 => Ok(false),
-            1.0 => Ok(true),
-            other => Err(encoding_error(
-                fn_name,
-                format!("{fn_name}: logical scalar option must be true or false, got {other}"),
-            )),
-        },
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            if let Some(value) = tensor
+                .integer_storage()
+                .and_then(|storage| storage.value_at(0))
+            {
+                return match value.try_to_u64() {
+                    Some(0) => Ok(false),
+                    Some(1) => Ok(true),
+                    _ => Err(encoding_error(
+                        fn_name,
+                        format!(
+                            "{fn_name}: logical scalar option must be true or false, got {value:?}"
+                        ),
+                    )),
+                };
+            }
+            match tensor_utils::tensor_value_f64(tensor, 0) {
+                0.0 => Ok(false),
+                1.0 => Ok(true),
+                other => Err(encoding_error(
+                    fn_name,
+                    format!("{fn_name}: logical scalar option must be true or false, got {other}"),
+                )),
+            }
+        }
         Value::LogicalArray(array) if array.data.len() == 1 => Ok(array.data[0] != 0),
         other => Err(encoding_error(
             fn_name,
@@ -879,16 +1157,16 @@ fn parse_bool_scalar(value: &Value, fn_name: &str) -> BuiltinResult<bool> {
     }
 }
 
-fn int_value_to_f64(value: &runmat_builtins::IntValue) -> f64 {
+fn int_value_to_f64(value: &runmat_value::IntValue) -> f64 {
     match value {
-        runmat_builtins::IntValue::I8(value) => *value as f64,
-        runmat_builtins::IntValue::I16(value) => *value as f64,
-        runmat_builtins::IntValue::I32(value) => *value as f64,
-        runmat_builtins::IntValue::I64(value) => *value as f64,
-        runmat_builtins::IntValue::U8(value) => *value as f64,
-        runmat_builtins::IntValue::U16(value) => *value as f64,
-        runmat_builtins::IntValue::U32(value) => *value as f64,
-        runmat_builtins::IntValue::U64(value) => *value as f64,
+        runmat_value::IntValue::I8(value) => *value as f64,
+        runmat_value::IntValue::I16(value) => *value as f64,
+        runmat_value::IntValue::I32(value) => *value as f64,
+        runmat_value::IntValue::I64(value) => *value as f64,
+        runmat_value::IntValue::U8(value) => *value as f64,
+        runmat_value::IntValue::U16(value) => *value as f64,
+        runmat_value::IntValue::U32(value) => *value as f64,
+        runmat_value::IntValue::U64(value) => *value as f64,
     }
 }
 
@@ -913,7 +1191,17 @@ fn encoding_error(fn_name: &str, message: impl Into<String>) -> crate::RuntimeEr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::CellArray;
+    use runmat_value::{CellArray, IntegerStorage};
+
+    fn poisoned_integer_scalar(storage: IntegerStorage) -> Value {
+        let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
+        Value::Tensor(tensor)
+    }
+
+    fn poisoned_integer_vector(storage: IntegerStorage, cols: usize) -> Value {
+        let tensor = Tensor::new_integer(storage, vec![1, cols]).expect("integer tensor");
+        Value::Tensor(tensor)
+    }
 
     fn tokenized_document_object(rows: Vec<Vec<&str>>) -> ObjectInstance {
         let values = rows
@@ -936,6 +1224,47 @@ mod tests {
             .properties
             .insert("Documents".to_string(), Value::Cell(documents));
         object
+    }
+
+    #[test]
+    fn scalar_option_parsers_read_typed_integer_storage_exactly() {
+        assert_eq!(
+            numeric_scalar(
+                &poisoned_integer_scalar(IntegerStorage::U16(vec![12])),
+                "wordEncoding",
+                "MaxNumWords"
+            )
+            .expect("numeric"),
+            12.0
+        );
+        assert!(parse_bool_scalar(
+            &poisoned_integer_scalar(IntegerStorage::U8(vec![1])),
+            "wordEncoding"
+        )
+        .expect("bool"));
+        assert!(!parse_bool_scalar(
+            &poisoned_integer_scalar(IntegerStorage::I16(vec![0])),
+            "wordEncoding"
+        )
+        .expect("bool"));
+    }
+
+    #[test]
+    fn numeric_input_reads_typed_integer_storage_exactly() {
+        let input = numeric_input_from_value(
+            &poisoned_integer_vector(IntegerStorage::I16(vec![2, 3]), 2),
+            "ind2word",
+        )
+        .expect("numeric");
+
+        assert_eq!(
+            input.values,
+            vec![
+                NumericIndex::Integer(IntValue::I16(2)),
+                NumericIndex::Integer(IntValue::I16(3))
+            ]
+        );
+        assert_eq!(input.shape, vec![1, 2]);
     }
 
     #[tokio::test]
@@ -995,6 +1324,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn word_encoding_typed_maximum_is_a_gated_exact_control() {
+        let documents = Value::Object(tokenized_document_object(vec![vec!["alpha", "beta"]]));
+        let args = vec![
+            documents,
+            Value::String("MaxNumWords".into()),
+            Value::Int(IntValue::U64(1)),
+        ];
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = word_encoding_builtin(args.clone())
+            .await
+            .expect_err("typed MaxNumWords is gated in strict mode");
+        assert_eq!(
+            error.identifier(),
+            WORD_ENCODING_INTEGER_MAX_WORDS_EXTENSION.error_identifier
+        );
+        drop(_strict);
+
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let value = word_encoding_builtin(args)
+            .await
+            .expect("RunMat mode accepts typed MaxNumWords");
+        let Value::Object(object) = value else {
+            panic!("expected wordEncoding object");
+        };
+        assert_eq!(
+            word_encoding_from_object(&object, "test")
+                .unwrap()
+                .vocabulary,
+            vec!["alpha"]
+        );
+    }
+
+    #[tokio::test]
     async fn word2ind_preserves_shape_and_supports_ignore_case() {
         let enc = word_encoding_builtin(vec![Value::StringArray(
             StringArray::new(vec!["Alpha".into(), "beta".into()], vec![1, 2]).unwrap(),
@@ -1025,10 +1387,21 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(indices.shape, vec![2, 2]);
-        assert_eq!(indices.data[0], 2.0);
-        assert!(indices.data[1].is_nan());
-        assert_eq!(indices.data[2], 1.0);
-        assert_eq!(indices.data[3], 1.0);
+        assert_eq!(indices.materialize_f64()[0], 2.0);
+        assert!(indices.materialize_f64()[1].is_nan());
+        assert_eq!(indices.materialize_f64()[2], 1.0);
+        assert_eq!(indices.materialize_f64()[3], 1.0);
+    }
+
+    #[tokio::test]
+    async fn word2ind_rejects_integer_words_before_object_validation() {
+        let error = word2ind_builtin(vec![
+            Value::String("not an object".into()),
+            Value::Int(IntValue::U8(1)),
+        ])
+        .await
+        .expect_err("integer words are outside the text-only surface");
+        assert!(error.message().contains("must be host text"));
     }
 
     #[tokio::test]
@@ -1058,6 +1431,63 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("exceeds vocabulary"), "{err}");
+    }
+
+    #[test]
+    fn ind2word_extensions_gate_before_gather_and_integer_indices_stay_exact() {
+        let enc = futures::executor::block_on(word_encoding_builtin(vec![Value::StringArray(
+            StringArray::new(vec!["red".into(), "blue".into()], vec![1, 2]).unwrap(),
+        )]))
+        .unwrap();
+
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let integer_error = futures::executor::block_on(ind2word_builtin(vec![
+                enc.clone(),
+                poisoned_integer_vector(IntegerStorage::U64(vec![1]), 1),
+            ]))
+            .unwrap_err();
+            assert_eq!(
+                integer_error.identifier(),
+                Some("RunMat:compatibility:Ind2wordTypedIntegerExtension")
+            );
+            let matrix_error = futures::executor::block_on(ind2word_builtin(vec![
+                enc.clone(),
+                Value::Tensor(Tensor::new(vec![1.0, 2.0, 1.0, 2.0], vec![2, 2]).unwrap()),
+            ]))
+            .unwrap_err();
+            assert_eq!(
+                matrix_error.identifier(),
+                Some("RunMat:compatibility:Ind2wordNonvectorExtension")
+            );
+        }
+
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let wide = futures::executor::block_on(ind2word_builtin(vec![
+            enc.clone(),
+            poisoned_integer_vector(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), 1),
+        ]))
+        .unwrap_err();
+        assert!(wide.message().contains("exceeds vocabulary"));
+
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+                .expect("resident indices");
+            runmat_accelerate::fusion_residency::mark(&handle);
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = futures::executor::block_on(ind2word_builtin(vec![
+                enc.clone(),
+                Value::GpuTensor(handle.clone()),
+            ]))
+            .unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:Ind2wordResidentExtension")
+            );
+            assert!(runmat_accelerate::fusion_residency::is_resident(&handle));
+            let _ = provider.free(&handle);
+        });
     }
 
     #[tokio::test]

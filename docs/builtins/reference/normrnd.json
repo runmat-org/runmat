@@ -14,10 +14,11 @@
     "elementwise": false,
     "reduction": false,
     "precisions": [
+      "f32",
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "Uses the provider random_normrnd hook (Philox CSPRNG + Box-Muller sampling) when an F64-precision provider is active. F32 providers and providers without the hook fall back to host generation."
+    "notes": "A resident floating mu or sigma selects its exact owning provider. A validated matching-precision random_normrnd hook stays resident; otherwise host generation restores only when the owner can preserve the required class. Incompatible automatic residency may finish on host and incompatible explicit gpuArray intent errors. Host parameters do not opportunistically use a global provider."
   },
   "fusion": {
     "elementwise": false,
@@ -28,17 +29,19 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::stats::random::normrnd::tests",
-    "integration": null
+    "integration": "crates/runmat-vm/tests/integer_normal_distribution_and_regression_semantics.rs"
   },
-  "description": "`normrnd(mu, sigma, ...)` draws pseudorandom samples from normal distributions with mean `mu` and standard deviation `sigma`. Size forms, broadcasting, and parameter validation follow MATLAB semantics.",
+  "description": "`normrnd(mu, sigma, ...)` draws pseudorandom samples from a normal distribution with scalar mean `mu` and standard deviation `sigma`. Scalar and vector size forms control the output shape.",
   "behaviors": [
-    "`normrnd(mu, sigma)` returns a scalar double drawn from `N(mu, sigma^2)`.",
+    "`normrnd(mu, sigma)` returns a scalar drawn from `N(mu, sigma^2)`.",
     "`normrnd(mu, sigma, n)` returns an `n × n` matrix of samples.",
     "`normrnd(mu, sigma, m, n)` returns an `m × n` matrix of samples.",
     "`normrnd(mu, sigma, sz)` accepts a size vector and returns an array with shape `sz`.",
     "`mu` and `sigma` must be scalar numeric values.",
+    "Current MATLAB documents single and double mu, sigma, and size values. Typed-integer and logical inputs are independently gated RunMat extensions; integer parameters must be exactly representable at the binary64 sampling boundary.",
+    "Integer size controls are parsed structurally and do not select output class or residency. Explicit resident size controls are a separate RunMat extension.",
     "`sigma` must be non-negative; `normrnd` errors if `sigma < 0`.",
-    "All outputs are double precision regardless of input type."
+    "Any single mu or sigma selects single output; otherwise output is double. A resident data parameter preserves output residency through its exact owner."
   ],
   "examples": [
     {

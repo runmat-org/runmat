@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Runs entirely on the CPU. gpuArray text inputs are gathered automatically before processing."
+    "notes": "Runs entirely on the CPU. Numeric and resident tensor inputs are invalid path text and reject before provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -30,6 +30,7 @@
   "description": "`rmpath` removes one or more folders from the active MATLAB search path used for function and script resolution. Updates apply immediately and follow MATLAB-compatible validation and error reporting for missing, invalid, or non-path folders.",
   "behaviors": [
     "Folder arguments may be character vectors, string scalars, string arrays, or cell arrays of character vectors or strings. Multi-row char arrays contribute one folder per row (trailing padding is stripped).",
+    "Numeric inputs, including every integer class and resident numeric handles, reject before path mutation or provider access rather than being converted to text.",
     "Multiple folders can be passed inside a single argument using the platform path separator (`:` on Linux/macOS, `;` on Windows); this is compatible with `genpath` output.",
     "RunMat accepts any ordering of arguments. Each requested folder is removed at most once even if it appears repeatedly.",
     "Inputs are resolved to absolute, normalised paths. Relative inputs are interpreted relative to the current working directory, and `~` expands to the user’s home directory.",
@@ -195,8 +196,8 @@
     "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/rmpath.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/rmpath.rs"
   },
-  "gpu_residency": "No. `rmpath` operates entirely on CPU-side strings. Supplying `gpuArray` text inputs offers no benefit—RunMat gathers them automatically before processing.",
+  "gpu_residency": "No. `rmpath` operates entirely on CPU-side strings and does not treat resident numeric storage as text.",
   "gpu_behavior": [
-    "`rmpath` manipulates host-side configuration. If any input value resides on the GPU, RunMat gathers it back to the host before parsing. No acceleration provider hooks or kernels are involved."
+    "`rmpath` manipulates host-side configuration. Numeric provider handles are rejected before gathering because they cannot represent path text; no acceleration provider hooks or kernels are involved."
   ]
 }

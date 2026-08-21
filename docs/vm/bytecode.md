@@ -1,13 +1,6 @@
----
-title: "Bytecode Compilation (MIR → Bytecode)"
-category: "Virtual Machine (VM)"
-section: "3.1"
-last_updated: "May 28, 2026"
----
-
 # Bytecode Compilation (MIR → Bytecode)
 
-The bytecode compilation stage is the final lowering step before VM execution. It transforms the Mid-Level IR (MIR) into a linear sequence of `Instr` values, plus the metadata the interpreter needs for variable layout, source spans, semantic function dispatch, async execution, and acceleration planning.
+The bytecode compilation stage is the final lowering step before VM execution. It transforms the Mid-Level IR (MIR) into a linear sequence of `Instr` values, plus the metadata the interpreter needs for variable layout, source spans, semantic function dispatch, async execution, pure-region boundaries, and acceleration planning.
 
 The lowering is managed by the `Compiler` in `runmat-vm`. It consumes a `MirAssembly` and the corresponding `HirAssembly`, derives a `VmAssemblyLayout`, emits bytecode for the entry body and semantic functions, patches jumps, and attaches fusion metadata used by the acceleration tiers.
 
@@ -19,7 +12,7 @@ The compiler is a stateful instruction emitter. It tracks the instruction stream
 
 - `Compiler`: Orchestrates MIR-to-bytecode lowering.
 - `Instr`: The VM instruction enum executed by the interpreter.
-- `Bytecode`: The top-level program container for instructions, layout, functions, spans, async metadata, and fusion metadata.
+- `Bytecode`: The top-level program container for instructions, layout, functions, spans, async metadata, exact region-to-PC boundaries, and fusion metadata.
 - `FunctionRegistry`: Maps `FunctionId` and display names to compiled semantic function bytecode.
 - `VmAssemblyLayout`: Maps MIR locals and HIR bindings to VM slots.
 
@@ -70,6 +63,10 @@ The compiler preserves the indexing plan established by MIR. Scalar indexing emi
 ### Control Flow
 
 MIR basic-block targets are not known as final instruction offsets until all relevant blocks are emitted. The compiler therefore records block-to-instruction mappings and patches `Jump`, `JumpIfFalse`, `AndAnd`, and `OrOr` targets after emission.
+
+### Region Boundaries
+
+The compiler records a resume PC at every empty-stack MIR statement boundary. After MIR analysis discovers pure regions, `ExecutableUnit` installs each stable region contract into bytecode by resolving its exact entry and exit program points through those resume maps. The top-level bytecode table contains the complete region inventory, while each semantic function retains the regions it owns. Missing functions or boundaries are compile-product errors; the VM does not estimate a nearby PC. The portable manifest retains the same contracts for Native IR and other execution consumers.
 
 ## Complete Instruction Set
 

@@ -1,0 +1,24 @@
+{
+  "title": "bitset",
+  "category": "logical/bit",
+  "keywords": ["bitset", "bit", "position", "integer", "gpuArray"],
+  "summary": "Set or clear selected one-based bit positions.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "scalar-or-exact-size",
+    "notes": "Supported gpuArray data input uses exact owner-aware fallback and returns resident output; bit-position and replacement controls do not select residency."
+  },
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 3, "constants": "none"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::logical::bit::integer::integer_tests"},
+  "description": "`C = bitset(A,bit)` sets selected bits to one. `C = bitset(A,bit,V)` sets or clears them according to `V`. Scalar controls expand, while nonscalar inputs must have exactly matching sizes.",
+  "behaviors": [
+    "All eight native integer classes are supported and output preserves the class of A.",
+    "Bit positions must be finite positive integers within the selected storage width.",
+    "Replacement values must classify as zero or one.",
+    "Only A selects GPU output ownership; bit and V are controls."
+  ],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/logical/bit/integer.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/bit/integer.rs"}
+}

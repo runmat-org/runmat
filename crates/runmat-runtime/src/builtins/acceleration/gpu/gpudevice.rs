@@ -2,20 +2,87 @@
 
 use runmat_accelerate_api::{ApiDeviceInfo, ProviderPrecision};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, NumericScalar, StructValue, Value};
 
 use crate::builtins::acceleration::gpu::type_resolvers::gpudevice_type;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "gpuDevice";
+
+const GPU_DEVICE_PROVIDER_INFO_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "gpudevice-provider-info",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "gpuDevice returning RunMat acceleration-provider metadata instead of a MATLAB GPUDevice object is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:GpuDeviceProviderInfoExtension"),
+    };
+
+const GPU_DEVICE_LOGICAL_SELECTOR_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "gpudevice-logical-selector",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "using a logical scalar as a gpuDevice index is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:GpuDeviceLogicalSelectorExtension"),
+    };
+
+pub const GPU_DEVICE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    GPU_DEVICE_PROVIDER_INFO_EXTENSION,
+    GPU_DEVICE_LOGICAL_SELECTOR_EXTENSION,
+];
+
+const GPU_DEVICE_DOCUMENTED_INTEGER_INDEX: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "ind",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Rejected,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented selector is a positive scalar integer in the available device-index range, but RunMat does not yet implement the required GPUDevice object and reset lifecycle.",
+    }];
+
+const GPU_DEVICE_RUNMAT_INTEGER_INDEX: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "ind",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "RunMat's provider-info facade accepts an exact positive integer scalar selecting its currently active provider.",
+    }];
+
+pub const GPU_DEVICE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "D = gpuDevice(integer_ind)",
+        inputs: &GPU_DEVICE_DOCUMENTED_INTEGER_INDEX,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The documented selection form returns a GPUDevice object and resets the selected device even when already current. RunMat does not implement that object/lifecycle form and rejects it in MATLAB-compatible mode rather than substituting provider metadata.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "info = gpuDevice(integer_ind)",
+        inputs: &GPU_DEVICE_RUNMAT_INTEGER_INDEX,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The compatibility-gated RunMat facade returns provider metadata rather than a MATLAB GPUDevice object.",
+    },
+];
 
 const GPU_DEVICE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "info",
@@ -159,14 +226,32 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     examples = "info = gpuDevice();",
     type_resolver(gpudevice_type),
     descriptor(crate::builtins::acceleration::gpu::gpudevice::GPU_DEVICE_DESCRIPTOR),
+    extensions(crate::builtins::acceleration::gpu::gpudevice::GPU_DEVICE_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::acceleration::gpu::gpudevice::GPU_DEVICE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::acceleration::gpu::gpudevice"
 )]
 async fn gpu_device_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    match args.as_slice() {
+    if args
+        .first()
+        .is_some_and(|value| matches!(value, Value::Bool(_) | Value::LogicalArray(_)))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &GPU_DEVICE_LOGICAL_SELECTOR_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    let result = match args.as_slice() {
         [] => active_device_struct().map(Value::Struct),
         [arg] => handle_single_argument(arg),
-        _ => Err(gpu_device_error(&GPU_DEVICE_ERROR_TOO_MANY_INPUTS).into()),
-    }
+        _ => return Err(gpu_device_error(&GPU_DEVICE_ERROR_TOO_MANY_INPUTS).into()),
+    }?;
+    crate::compatibility::ensure_builtin_extension_enabled(
+        &GPU_DEVICE_PROVIDER_INFO_EXTENSION,
+        BUILTIN_NAME,
+    )?;
+    Ok(result)
 }
 
 /// Internal helper that queries the provider and returns a populated struct.
@@ -243,17 +328,10 @@ fn handle_single_argument(arg: &Value) -> BuiltinResult<Value> {
 
 fn struct_device_index(info: &StructValue) -> Option<u32> {
     info.fields.get("index").and_then(|value| match value {
-        Value::Int(intv) => {
-            let idx = intv.to_i64();
-            if idx >= 0 && idx <= u32::MAX as i64 {
-                Some(idx as u32)
-            } else {
-                None
-            }
-        }
+        Value::Int(intv) => intv.try_to_u64().and_then(|idx| u32::try_from(idx).ok()),
         Value::Num(n) if n.is_finite() && *n >= 0.0 => {
             let rounded = n.round();
-            if (rounded - n).abs() <= 1e-9 {
+            if (rounded - n).abs() <= 1e-9 && rounded <= u32::MAX as f64 {
                 Some(rounded as u32)
             } else {
                 None
@@ -268,7 +346,7 @@ fn is_reset_arg(value: &Value) -> bool {
         return true;
     }
     match value {
-        Value::Tensor(t) => t.data.is_empty(),
+        Value::Tensor(t) => tensor::tensor_element_len(t) == 0,
         Value::LogicalArray(la) => la.data.is_empty(),
         _ => false,
     }
@@ -285,9 +363,20 @@ fn parse_device_index(value: &Value) -> BuiltinResult<Option<u32>> {
                 Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into())
             }
         }
-        Value::Tensor(t) => match t.data.len() {
+        Value::Tensor(t) => match tensor::tensor_element_len(t) {
             0 => Ok(None),
-            1 => num_to_index(t.data[0]),
+            1 => match t
+                .numeric_value_at(0)
+                .expect("tensor storage length matches shape")
+            {
+                NumericScalar::F64(value) => num_to_index(value),
+                NumericScalar::F32(value) => num_to_index(f64::from(value)),
+                value => integer_to_index(
+                    &value
+                        .into_int_value()
+                        .expect("non-floating numeric scalar is integer"),
+                ),
+            },
             _ => Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into()),
         },
         Value::LogicalArray(la) => match la.data.len() {
@@ -315,12 +404,24 @@ fn int_to_index(raw: i64) -> BuiltinResult<Option<u32>> {
     Ok(Some(raw as u32))
 }
 
+fn integer_to_index(value: &IntValue) -> BuiltinResult<Option<u32>> {
+    value
+        .try_to_u64()
+        .and_then(|raw| u32::try_from(raw).ok())
+        .filter(|raw| *raw > 0)
+        .map(Some)
+        .ok_or_else(|| gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into())
+}
+
 fn num_to_index(raw: f64) -> BuiltinResult<Option<u32>> {
     if !raw.is_finite() {
         return Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into());
     }
     let rounded = raw.round();
     if (rounded - raw).abs() > 1e-9 {
+        return Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into());
+    }
+    if rounded > u32::MAX as f64 {
         return Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into());
     }
     let idx = rounded as i64;
@@ -333,9 +434,24 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntegerStorage, NumericStorage, Tensor};
 
     fn call(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         block_on(gpu_device_builtin(args))
+    }
+
+    #[test]
+    fn gpu_device_provider_info_facade_is_gated() {
+        test_support::with_test_provider(|_| {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(gpu_device_builtin(Vec::new()))
+                .expect_err("provider info is a RunMat extension");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:GpuDeviceProviderInfoExtension")
+            );
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -362,8 +478,8 @@ pub(crate) mod tests {
     fn gpu_device_accepts_current_index() {
         test_support::with_test_provider(|_| {
             let tensor_scalar =
-                runmat_builtins::Tensor::new(vec![1.0], vec![1, 1]).expect("scalar tensor");
-            let logical_scalar = runmat_builtins::LogicalArray::new(vec![1u8], vec![1]).unwrap();
+                runmat_value::Tensor::new(vec![1.0], vec![1, 1]).expect("scalar tensor");
+            let logical_scalar = runmat_value::LogicalArray::new(vec![1u8], vec![1]).unwrap();
             let cases = vec![
                 Value::Int(IntValue::I32(1)),
                 Value::Num(1.0),
@@ -375,6 +491,42 @@ pub(crate) mod tests {
                 let value = call(vec![case]).expect("gpuDevice");
                 assert!(matches!(value, Value::Struct(_)));
             }
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn gpu_device_index_parser_reads_typed_integer_storage_exactly() {
+        test_support::with_test_provider(|_| {
+            let tensor = Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1])
+                .expect("integer tensor");
+
+            let value = call(vec![Value::Tensor(tensor)]).expect("gpuDevice");
+            assert!(matches!(value, Value::Struct(_)));
+
+            let negative = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
+                .expect("integer tensor");
+            let err = call(vec![Value::Tensor(negative)]).unwrap_err().to_string();
+            assert_eq!(err, GPU_DEVICE_ERROR_INVALID_INDEX.message);
+        });
+    }
+
+    #[test]
+    fn gpu_device_index_parser_reads_native_single_storage() {
+        test_support::with_test_provider(|_| {
+            let tensor = Tensor::from_numeric_storage(NumericStorage::F32(vec![1.0]), vec![1, 1])
+                .expect("single tensor");
+            let value = call(vec![Value::Tensor(tensor)]).expect("gpuDevice");
+            assert!(matches!(value, Value::Struct(_)));
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn gpu_device_index_parser_rejects_out_of_range_double_before_casting() {
+        test_support::with_test_provider(|_| {
+            let err = call(vec![Value::Num((u32::MAX as f64) + 1.0)]).unwrap_err();
+            assert_eq!(err.to_string(), GPU_DEVICE_ERROR_INVALID_INDEX.message);
         });
     }
 
@@ -426,7 +578,7 @@ pub(crate) mod tests {
     #[test]
     fn gpu_device_reset_char_array_argument_reports_not_supported() {
         test_support::with_test_provider(|_| {
-            let chars = runmat_builtins::CharArray::new("reset".chars().collect(), 1, 5).unwrap();
+            let chars = runmat_value::CharArray::new("reset".chars().collect(), 1, 5).unwrap();
             let err = call(vec![Value::CharArray(chars)]).unwrap_err();
             assert_eq!(
                 err.to_string(),
@@ -443,7 +595,7 @@ pub(crate) mod tests {
     #[test]
     fn gpu_device_empty_array_argument_reports_not_supported() {
         test_support::with_test_provider(|_| {
-            let empty = runmat_builtins::Tensor::zeros(vec![0, 0]);
+            let empty = runmat_value::Tensor::zeros(vec![0, 0]);
             let err = call(vec![Value::Tensor(empty)]).unwrap_err();
             assert_eq!(
                 err.to_string(),
@@ -466,10 +618,8 @@ pub(crate) mod tests {
                 Value::Num(-1.0),
                 Value::Num(1.5),
                 Value::Bool(false),
-                Value::LogicalArray(
-                    runmat_builtins::LogicalArray::new(vec![0u8], vec![1]).unwrap(),
-                ),
-                Value::Tensor(runmat_builtins::Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+                Value::LogicalArray(runmat_value::LogicalArray::new(vec![0u8], vec![1]).unwrap()),
+                Value::Tensor(runmat_value::Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
             ];
             for case in cases {
                 let err = call(vec![case]).unwrap_err().to_string();
@@ -492,8 +642,11 @@ pub(crate) mod tests {
     fn gpu_device_wgpu_reports_metadata() {
         use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
 
-        let _ =
-            wgpu_provider::register_wgpu_provider(wgpu_provider::WgpuProviderOptions::default());
+        let Ok(_provider) =
+            wgpu_provider::register_wgpu_provider(wgpu_provider::WgpuProviderOptions::default())
+        else {
+            return;
+        };
         let value = call(Vec::new()).expect("gpuDevice");
         match value {
             Value::Struct(info) => {

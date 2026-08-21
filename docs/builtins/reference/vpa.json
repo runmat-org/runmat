@@ -32,8 +32,10 @@
     "The default precision is controlled by `digits` and starts at 32 significant digits.",
     "Exact rational symbolic inputs such as `sym('1/3')` are expanded and rounded with the requested significant digits.",
     "Numeric scalar inputs are converted to symbolic decimal literals from their existing numeric value at the requested display precision.",
+    "Scalar values from every integer class are lifted directly into exact arbitrary-precision integer storage, including `int64` and `uint64` extrema.",
+    "Integer precision controls are decoded exactly; noninteger floating controls are rounded to the nearest integer before the supported range is checked.",
     "Nonconstant symbolic variables remain symbolic.",
-    "RunMat currently represents scalar symbolic expressions; array-valued symbolic containers are not materialized."
+    "RunMat currently represents scalar symbolic expressions; array-valued symbolic containers and the documented `BoostPrecision` option are not implemented."
   ],
   "examples": [
     {

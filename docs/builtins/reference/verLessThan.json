@@ -25,7 +25,8 @@
   "behaviors": [
     "The product name `matlab` is recognized case-insensitively.",
     "Unknown products return false, matching compatibility-branch use where non-MATLAB products are not installed.",
-    "Version components are compared numerically from left to right."
+    "Version components are compared numerically from left to right.",
+    "Both inputs are text controls. Numeric values, including every integer class and resident arrays, are rejected rather than converted to version text."
   ],
   "examples": [
     {
@@ -37,7 +38,7 @@
   "faqs": [
     {
       "question": "Does this inspect installed toolbox versions?",
-      "answer": "No. This implementation supports the common MATLAB runtime compatibility branch and returns false for other products."
+      "answer": "No. This implementation supports the common MATLAB runtime compatibility branch and returns false for other products. The documented unknown-toolbox error remains a compatibility gap."
     }
   ],
   "links": [

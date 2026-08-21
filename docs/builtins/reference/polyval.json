@@ -33,7 +33,7 @@
   "description": "`polyval(p, x)` evaluates polynomial `p` at each element of `x`. Coefficient ordering, optional prediction-interval forms, and output-shape behavior follow MATLAB semantics.",
   "behaviors": [
     "Accepts scalar, vector, or N-D coefficient inputs that have at most one non-singleton dimension.",
-    "Logical and integer coefficients are promoted to double precision; complex coefficients are kept exactly.",
+    "Logical coefficients are promoted to double precision; typed-integer coefficients, query points, and numeric fit options are independent RunMat-mode extensions and cross only after exact double representability is proved; floating complex coefficients are retained.",
     "When `p` and `x` are real-valued and a provider is registered, RunMat issues a Horner-series GPU kernel via RunMat Accelerate. Mixed or complex inputs fall back to the reference CPU implementation, with purely real outputs re-uploaded to the device when residency makes sense.",
     "`polyval(p, x, [], mu)` applies centering and scaling parameters from `polyfit`, evaluating the polynomial at `(x - mu(1)) / mu(2)`.",
     "`[y, delta] = polyval(p, x, S, mu)` computes prediction intervals using the structure `S` produced by `polyfit`. RunMat mirrors MATLAB rules: `S` must contain the fields `R`, `normr`, and `df`, and the interval collapses to zeros when `df <= 0` or `normr == 0`.",

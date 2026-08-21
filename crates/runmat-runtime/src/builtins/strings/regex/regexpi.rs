@@ -1,11 +1,12 @@
 //! MATLAB-compatible `regexpi` builtin for RunMat.
 
-use runmat_builtins::Value;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -190,6 +191,12 @@ pub const REGEXPI_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &REGEXPI_ERRORS,
 };
 
+pub const REGEXPI_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "regexpi accepts host string, character, and cell text for subjects, expressions, output keys, and options. Numeric match indices are outputs only; numeric, logical, symbolic, and provider-resident inputs reject through the shared regexp admission boundary before gather or provider access.",
+};
+
 fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
@@ -214,6 +221,7 @@ pub async fn evaluate(
     accel = "sink",
     type_resolver(unknown_type),
     descriptor(crate::builtins::strings::regex::regexpi::REGEXPI_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::regex::regexpi::REGEXPI_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::regex::regexpi"
 )]
 async fn regexpi_builtin(
@@ -266,7 +274,8 @@ fn option_name(value: &Value) -> Option<String> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{CellArray, ResolveContext, StringArray, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{CellArray, StringArray};
 
     #[test]
     fn regexpi_descriptor_signatures_cover_core_forms() {
@@ -307,7 +316,7 @@ pub(crate) mod tests {
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![1.0, 4.0, 6.0, 8.0, 11.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 4.0, 6.0, 8.0, 11.0]);
             }
             other => panic!("unexpected output {other:?}"),
         }
@@ -346,7 +355,7 @@ pub(crate) mod tests {
         let outputs = eval.outputs_for_single().unwrap();
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
-            Value::Tensor(t) => assert!(t.data.is_empty()),
+            Value::Tensor(t) => assert!(t.materialize_f64().is_empty()),
             Value::Num(n) => assert_eq!(*n, 0.0),
             other => panic!("unexpected output {other:?}"),
         }
@@ -459,7 +468,7 @@ pub(crate) mod tests {
                 match matrix {
                     Value::Tensor(t) => {
                         assert_eq!(t.shape, vec![2, 2]);
-                        assert_eq!(t.data, vec![4.0, 6.0, 5.0, 7.0]);
+                        assert_eq!(t.materialize_f64(), vec![4.0, 6.0, 5.0, 7.0]);
                     }
                     other => panic!("expected tensor for token extents, got {other:?}"),
                 }
@@ -511,7 +520,7 @@ pub(crate) mod tests {
         let outputs = eval.outputs_for_single().unwrap();
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 2.0, 3.0, 4.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]),
             other => panic!("expected tensor with match indices, got {other:?}"),
         }
     }

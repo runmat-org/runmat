@@ -1,8 +1,11 @@
 mod dataflow;
-mod facts;
+mod engine;
+mod inference;
+mod reachability;
+mod regions;
 mod spawn_safety;
 mod store;
 
-pub use dataflow::*;
-pub use facts::*;
+pub use engine::analyze_assembly;
+pub use reachability::*;
 pub use store::*;

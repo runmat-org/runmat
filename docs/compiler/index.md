@@ -1,10 +1,3 @@
----
-title: "Compilation Pipeline"
-category: "Compilation Pipeline"
-section: "2.0"
-last_updated: "May 28, 2026"
----
-
 # Compilation Pipeline
 
 The RunMat compilation pipeline is a multi-stage transformation process that converts MATLAB source text into executable bytecode. This pipeline is designed to support MATLAB's dynamic semantics while enabling optimizations like static analysis, type inference, and JIT compilation. The pipeline is primarily orchestrated by the `RunMatSession` within the `runmat-core` crate.

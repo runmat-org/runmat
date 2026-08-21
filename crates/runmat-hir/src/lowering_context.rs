@@ -1,4 +1,5 @@
 use crate::FunctionId;
+use runmat_types::ExternalClassDeclaration;
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
@@ -36,10 +37,12 @@ pub struct LoweringContext<'a> {
     pub bound_functions: &'a HashMap<String, FunctionId>,
     pub function_output_arities: &'a HashMap<FunctionId, FunctionOutputArity>,
     pub known_project_symbols: &'a HashSet<String>,
+    pub project_symbol_aliases: &'a HashMap<String, String>,
     pub private_function_owners: &'a HashMap<String, String>,
     pub private_function_aliases: &'a HashMap<String, HashMap<String, String>>,
     pub runmat_extensions_enabled: bool,
     pub top_level_await_enabled: bool,
+    pub external_class_declarations: &'a [ExternalClassDeclaration],
 }
 
 impl<'a> LoweringContext<'a> {
@@ -49,10 +52,12 @@ impl<'a> LoweringContext<'a> {
             bound_functions: empty_bound_functions(),
             function_output_arities: empty_function_output_arities(),
             known_project_symbols: empty_project_symbols(),
+            project_symbol_aliases: empty_project_symbol_aliases(),
             private_function_owners: empty_private_function_owners(),
             private_function_aliases: empty_private_function_aliases(),
             runmat_extensions_enabled: true,
             top_level_await_enabled: true,
+            external_class_declarations: &[],
         }
     }
 
@@ -77,6 +82,11 @@ impl<'a> LoweringContext<'a> {
         self
     }
 
+    pub fn with_project_symbol_aliases(mut self, aliases: &'a HashMap<String, String>) -> Self {
+        self.project_symbol_aliases = aliases;
+        self
+    }
+
     pub fn with_private_functions(
         mut self,
         owners: &'a HashMap<String, String>,
@@ -97,6 +107,14 @@ impl<'a> LoweringContext<'a> {
         self
     }
 
+    pub fn with_external_class_declarations(
+        mut self,
+        declarations: &'a [ExternalClassDeclaration],
+    ) -> Self {
+        self.external_class_declarations = declarations;
+        self
+    }
+
     pub fn empty() -> Self {
         static EMPTY_VARS: OnceLock<HashMap<String, usize>> = OnceLock::new();
         Self {
@@ -104,10 +122,12 @@ impl<'a> LoweringContext<'a> {
             bound_functions: empty_bound_functions(),
             function_output_arities: empty_function_output_arities(),
             known_project_symbols: empty_project_symbols(),
+            project_symbol_aliases: empty_project_symbol_aliases(),
             private_function_owners: empty_private_function_owners(),
             private_function_aliases: empty_private_function_aliases(),
             runmat_extensions_enabled: true,
             top_level_await_enabled: true,
+            external_class_declarations: &[],
         }
     }
 }
@@ -126,6 +146,11 @@ fn empty_function_output_arities() -> &'static HashMap<FunctionId, FunctionOutpu
 fn empty_project_symbols() -> &'static HashSet<String> {
     static EMPTY_PROJECT_SYMBOLS: OnceLock<HashSet<String>> = OnceLock::new();
     EMPTY_PROJECT_SYMBOLS.get_or_init(HashSet::new)
+}
+
+fn empty_project_symbol_aliases() -> &'static HashMap<String, String> {
+    static EMPTY_PROJECT_SYMBOL_ALIASES: OnceLock<HashMap<String, String>> = OnceLock::new();
+    EMPTY_PROJECT_SYMBOL_ALIASES.get_or_init(HashMap::new)
 }
 
 fn empty_private_function_owners() -> &'static HashMap<String, String> {

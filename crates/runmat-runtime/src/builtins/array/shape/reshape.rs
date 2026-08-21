@@ -12,10 +12,15 @@ use runmat_builtins::shape_rules::{element_count_if_known, unknown_shape};
 use runmat_builtins::ResolveContext;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Type, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::reshape")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -186,6 +191,44 @@ pub const RESHAPE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &RESHAPE_ERRORS,
 };
+const RESHAPE_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target documents all eight integer classes and preserves the input datatype.",
+    }];
+const RESHAPE_INTEGER_SIZE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "sz/m/n/dims",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed size controls are parsed exactly as nonnegative dimensions, with one optional inferred dimension.",
+    }];
+pub const RESHAPE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = reshape(integer_A, sz)",
+        inputs: &RESHAPE_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Reshape changes metadata only; authoritative integer payload and resident handle ownership remain unchanged.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = reshape(A, integer_sz) or reshape(A, integer_m,integer_n,...)",
+        inputs: &RESHAPE_INTEGER_SIZE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Size controls remain exact and checked multiplication proves element-count equality without binary64 conversion.",
+    },
+];
 
 fn reshape_rank_from_args(args: &[Type]) -> Option<usize> {
     if args.len() < 2 {
@@ -236,6 +279,7 @@ fn reshape_type(args: &[Type], ctx: &ResolveContext) -> Type {
     accel = "shape",
     type_resolver(reshape_type),
     descriptor(crate::builtins::array::shape::reshape::RESHAPE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::array::shape::reshape::RESHAPE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::shape::reshape"
 )]
 async fn reshape_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -257,8 +301,7 @@ fn reshape_value(value: Value, dims: &[usize]) -> crate::BuiltinResult<Value> {
                 .map_err(|e| reshape_error(format!("reshape: {e}")))
         }
         Value::ComplexTensor(ct) => {
-            let ComplexTensor { data, .. } = ct;
-            ComplexTensor::new(data, dims.to_vec())
+            ComplexTensor::from_complex_storage(ct.into_complex_storage(), dims.to_vec())
                 .map(Value::ComplexTensor)
                 .map_err(|e| reshape_error(format!("reshape: {e}")))
         }
@@ -285,6 +328,12 @@ fn reshape_value(value: Value, dims: &[usize]) -> crate::BuiltinResult<Value> {
         }
         Value::CharArray(chars) => reshape_char_array(chars, dims),
         Value::Cell(cell) => reshape_cell_array(cell, dims),
+        Value::ObjectArray(array) => {
+            let class_name = array.class_name().to_string();
+            runmat_value::ObjectArray::new(class_name, array.into_data(), dims.to_vec())
+                .map(Value::ObjectArray)
+                .map_err(|error| reshape_error(format!("reshape: {error}")))
+        }
         Value::GpuTensor(handle) => reshape_gpu_tensor(handle, dims),
         Value::Num(n) => {
             if dims.len() <= 2 && dims.iter().all(|&d| d == 1) {
@@ -299,7 +348,7 @@ fn reshape_value(value: Value, dims: &[usize]) -> crate::BuiltinResult<Value> {
             if dims.len() <= 2 && dims.iter().all(|&d| d == 1) {
                 Ok(Value::Int(i))
             } else {
-                Tensor::new(vec![i.to_f64()], dims.to_vec())
+                Tensor::new_integer(runmat_value::IntegerStorage::from_scalar(i), dims.to_vec())
                     .map(Value::Tensor)
                     .map_err(|e| reshape_error(format!("reshape: {e}")))
             }
@@ -341,41 +390,33 @@ fn reshape_complex_scalar(re: f64, im: f64, dims: &[usize]) -> crate::BuiltinRes
 }
 
 fn reshape_char_array(ca: CharArray, dims: &[usize]) -> crate::BuiltinResult<Value> {
-    let (rows, cols) = match dims.len() {
-        0 => {
-            return Err(reshape_error(
-                "reshape: size vector must contain at least one element",
-            ))
-        }
-        1 => (dims[0], 1),
-        2 => (dims[0], dims[1]),
-        _ => {
-            return Err(reshape_error(
-                "reshape: char arrays currently support at most two dimensions",
-            ))
-        }
+    if dims.is_empty() {
+        return Err(reshape_error(
+            "reshape: size vector must contain at least one element",
+        ));
+    }
+    let shape = if dims.len() == 1 {
+        vec![dims[0], 1]
+    } else {
+        dims.to_vec()
     };
-    CharArray::new(ca.data, rows, cols)
+    CharArray::from_column_major(ca.to_column_major(), shape)
         .map(Value::CharArray)
         .map_err(|e| reshape_error(format!("reshape: {e}")))
 }
 
 fn reshape_cell_array(ca: CellArray, dims: &[usize]) -> crate::BuiltinResult<Value> {
-    let (rows, cols) = match dims.len() {
-        0 => {
-            return Err(reshape_error(
-                "reshape: size vector must contain at least one element",
-            ))
-        }
-        1 => (dims[0], 1),
-        2 => (dims[0], dims[1]),
-        _ => {
-            return Err(reshape_error(
-                "reshape: cell arrays currently support at most two dimensions",
-            ))
-        }
+    if dims.is_empty() {
+        return Err(reshape_error(
+            "reshape: size vector must contain at least one element",
+        ));
+    }
+    let shape = if dims.len() == 1 {
+        vec![dims[0], 1]
+    } else {
+        dims.to_vec()
     };
-    CellArray::new(ca.data, rows, cols)
+    CellArray::from_column_major(ca.to_column_major(), shape)
         .map(Value::Cell)
         .map_err(|e| reshape_error(format!("reshape: {e}")))
 }
@@ -422,7 +463,7 @@ async fn parse_size_arguments(args: &[Value]) -> crate::BuiltinResult<Vec<DimTok
         let value = &args[0];
         match value {
             Value::Tensor(t) => {
-                if t.data.is_empty() {
+                if tensor::tensor_element_len(t) == 0 {
                     return Err(reshape_error(
                         "reshape: size vector must contain at least one element",
                     ));
@@ -483,10 +524,11 @@ async fn parse_size_arguments(args: &[Value]) -> crate::BuiltinResult<Vec<DimTok
 async fn parse_size_scalar(value: &Value) -> crate::BuiltinResult<DimToken> {
     match value {
         Value::Tensor(t) => {
-            if t.data.is_empty() {
+            let len = tensor::tensor_element_len(t);
+            if len == 0 {
                 return Ok(DimToken::Auto);
             }
-            if t.data.len() != 1 {
+            if len != 1 {
                 return Err(reshape_error("reshape: size arguments must be scalars"));
             }
         }
@@ -576,8 +618,6 @@ fn finalize_dimensions(tokens: Vec<DimToken>, numel: usize) -> crate::BuiltinRes
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    #[cfg(feature = "wgpu")]
-    use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
@@ -586,7 +626,7 @@ pub(crate) mod tests {
         block_on(super::reshape_builtin(value, rest))
     }
     use crate::builtins::common::test_support;
-    use runmat_builtins::{IntValue, LogicalArray};
+    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray};
 
     #[test]
     fn reshape_type_infers_rank_from_size_vector() {
@@ -625,6 +665,30 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn reshape_size_scalar_reads_typed_integer_storage_exactly() {
+        let dim = Tensor::new_integer(IntegerStorage::U64(vec![3]), vec![1, 1])
+            .expect("dimension tensor");
+
+        match block_on(parse_size_scalar(&Value::Tensor(dim))).expect("dimension") {
+            DimToken::Known(value) => assert_eq!(value, 3),
+            other => panic!("expected known dimension, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reshape_size_vector_reads_typed_integer_storage_without_mirror() {
+        let dims = Tensor::new_integer(IntegerStorage::U64(vec![2, 3]), vec![1, 2])
+            .expect("dimension tensor");
+
+        let parsed =
+            block_on(parse_size_arguments(&[Value::Tensor(dims)])).expect("dimension vector");
+        assert!(matches!(
+            parsed.as_slice(),
+            [DimToken::Known(2), DimToken::Known(3)]
+        ));
+    }
+
     fn tensor_from_slice(data: &[f64], shape: &[usize]) -> Tensor {
         Tensor::new(data.to_vec(), shape.to_vec()).unwrap()
     }
@@ -642,7 +706,10 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 4]);
-                assert_eq!(out.data, (1..=12).map(|v| v as f64).collect::<Vec<_>>());
+                assert_eq!(
+                    out.materialize_f64(),
+                    (1..=12).map(|v| v as f64).collect::<Vec<_>>()
+                );
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -679,6 +746,63 @@ pub(crate) mod tests {
                 assert_eq!(out.data, vec![1, 0, 1, 0, 1, 0]);
             }
             other => panic!("expected logical array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn reshape_preserves_all_exact_integer_classes() {
+        for storage in [
+            IntegerStorage::I8(vec![i8::MIN, -1, 0, i8::MAX]),
+            IntegerStorage::I16(vec![i16::MIN, -1, 0, i16::MAX]),
+            IntegerStorage::I32(vec![i32::MIN, -1, 0, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, -1, 0, i64::MAX]),
+            IntegerStorage::U8(vec![0, 1, 7, u8::MAX]),
+            IntegerStorage::U16(vec![0, 1, 700, u16::MAX]),
+            IntegerStorage::U32(vec![0, 1, 9_007_199, u32::MAX]),
+            IntegerStorage::U64(vec![0, 1, 9_007_199_254_740_993, u64::MAX]),
+        ] {
+            let expected = storage.clone();
+            let tensor = Tensor::new_integer(storage, vec![4, 1]).expect("integer tensor");
+            let result = reshape_builtin(
+                Value::Tensor(tensor),
+                vec![Value::from(2.0), Value::from(2.0)],
+            )
+            .expect("reshape");
+
+            match result {
+                Value::Tensor(out) => {
+                    assert_eq!(out.shape, vec![2, 2]);
+                    assert_eq!(out.integer_storage(), Some(&expected));
+                }
+                other => panic!("expected typed integer tensor, got {other:?}"),
+            }
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn reshape_preserves_typed_complex_integer_storage() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![0, 1, 9_007_199_254_740_993, u64::MAX]),
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993, 1, 0]),
+        )
+        .expect("complex integer storage");
+        let tensor =
+            ComplexTensor::new_integer(storage.clone(), vec![4, 1]).expect("complex integer");
+
+        let result = reshape_builtin(
+            Value::ComplexTensor(tensor),
+            vec![Value::from(2.0), Value::from(2.0)],
+        )
+        .expect("reshape");
+
+        match result {
+            Value::ComplexTensor(out) => {
+                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.integer_storage().cloned(), Some(storage));
+            }
+            other => panic!("expected typed complex integer tensor, got {other:?}"),
         }
     }
 
@@ -742,7 +866,7 @@ pub(crate) mod tests {
             let data: Vec<f64> = (1..=12).map(|v| v as f64).collect();
             let tensor = tensor_from_slice(&data, &[3, 4]);
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -796,7 +920,7 @@ pub(crate) mod tests {
             )
             .expect("gather complex");
             assert_eq!(gathered.shape, vec![3, 2]);
-            assert_eq!(gathered.data, complex.data);
+            assert_eq!(gathered.materialize_f64(), complex.materialize_f64());
         });
     }
 
@@ -814,7 +938,7 @@ pub(crate) mod tests {
         let data: Vec<f64> = (1..=12).map(|v| v as f64).collect();
         let tensor = tensor_from_slice(&data, &[3, 4]);
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
@@ -827,9 +951,10 @@ pub(crate) mod tests {
             panic!("expected gpu tensor");
         };
         assert_eq!(reshaped.shape, vec![2, 6]);
-        let host = block_on(download_handle_async(provider, &reshaped)).expect("download");
+        let host = test_support::gather(Value::GpuTensor(reshaped.clone())).expect("gather");
         assert_eq!(host.shape, vec![2, 6]);
-        assert_eq!(host.data, tensor.data);
+        assert_eq!(host.materialize_f64(), tensor.materialize_f64());
+        provider.free(&reshaped).expect("free reshaped tensor");
     }
 
     #[test]
@@ -869,16 +994,13 @@ pub(crate) mod tests {
             runmat_accelerate_api::handle_storage(&reshaped),
             runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
         );
-        let host = block_on(download_handle_async(provider, &reshaped)).expect("download");
+        let host = block_on(
+            crate::builtins::math::fft::common::gather_gpu_complex_tensor(&reshaped, "reshape"),
+        )
+        .expect("gather complex reshape");
         assert_eq!(host.shape, vec![3, 2]);
-        assert_eq!(
-            host.storage,
-            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
-        );
-        assert_eq!(
-            host.data,
-            vec![1.0, -1.0, 2.0, -2.0, 3.0, -3.0, 4.0, -4.0, 5.0, -5.0, 6.0, -6.0]
-        );
+        assert_eq!(host.materialize_f64(), complex.materialize_f64());
+        provider.free(&reshaped).expect("free complex reshape");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -937,6 +1059,27 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn reshape_int_scalar_high_rank_preserves_exact_integer_storage() {
+        let result = reshape_builtin(
+            Value::Int(IntValue::U64(9_007_199_254_740_993)),
+            vec![Value::from(1.0), Value::from(1.0), Value::from(1.0)],
+        )
+        .expect("reshape scalar");
+
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 1, 1]);
+                assert_eq!(
+                    out.integer_storage(),
+                    Some(&IntegerStorage::U64(vec![9_007_199_254_740_993]))
+                );
+            }
+            other => panic!("expected typed integer tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn reshape_complex_scalar_high_rank() {
         let result = reshape_builtin(
             Value::Complex(1.0, 2.0),
@@ -946,7 +1089,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![1, 1, 1]);
-                assert_eq!(ct.data, vec![(1.0, 2.0)]);
+                assert_eq!(ct.materialize_f64(), vec![(1.0, 2.0)]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }

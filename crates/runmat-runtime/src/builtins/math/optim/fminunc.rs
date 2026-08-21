@@ -1,19 +1,23 @@
 //! MATLAB-compatible `fminunc` builtin for unconstrained smooth minimization.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    LogicalArray, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{LogicalArray, StructValue, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::math::optim::common::{
-    call_function, initial_guess, lookup_option, option_f64, option_string, value_to_real_vector,
-    value_to_scalar, vector_to_value,
+    call_function, lookup_option, option_f64, option_string, vector_to_value,
 };
 use crate::builtins::math::optim::type_resolvers::nonlinear_solve_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -252,6 +256,157 @@ const FMINUNC_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescript
 const FMINUNC_ERRORS: [BuiltinErrorDescriptor; 2] =
     [FMINUNC_ERROR_INVALID_ARGUMENT, FMINUNC_ERROR_INVALID_INPUT];
 
+const FMINUNC_INTEGER_INITIAL_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "x0",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer initial guesses are independently gated and every element must convert exactly to binary64.",
+    }];
+const FMINUNC_INTEGER_CALLBACK_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "objective result",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer objective values are gated before resident gather and must convert exactly to binary64.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "gradient result",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer supplied gradients are gated independently and every element must convert exactly to binary64.",
+    },
+];
+const FMINUNC_INTEGER_TOLERANCE_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "TolX",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer TolX is independently gated and must convert exactly to a positive binary64 scalar.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "TolFun",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer TolFun is independently gated and must convert exactly to a positive binary64 scalar.",
+    },
+];
+const FMINUNC_INTEGER_COUNT_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "MaxIter",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer iteration counts are independently gated and decoded exactly through the solver limit.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "MaxFunEvals",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer evaluation counts are independently gated and decoded exactly through the solver limit.",
+    },
+];
+const FMINUNC_INTEGER_FLAG_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "SpecifyObjectiveGradient",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer 0 or 1 is a RunMat-only spelling. Documented logical false or true remains accepted in strict compatibility mode.",
+    }];
+pub const FMINUNC_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 5] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "x = fminunc(fun, integer_x0, options)",
+        inputs: &FMINUNC_INTEGER_INITIAL_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Documented x0 is double. Strict compatibility rejects typed integers; RunMat mode admits exact binary64 values and returns the ordinary double x, fval, gradient, and Hessian outputs plus diagnostics.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "fminunc callback returns integer objective or gradient",
+        inputs: &FMINUNC_INTEGER_CALLBACK_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Strict compatibility rejects typed callback outputs before provider access. RunMat mode converts exact values to binary64; solver outputs retain their function-specific double and diagnostic classes.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "fminunc(..., options.TolX=integer, options.TolFun=integer)",
+        inputs: &FMINUNC_INTEGER_TOLERANCE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed-integer tolerance controls are RunMat-only and do not change output classes.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "fminunc(..., options.MaxIter=integer, options.MaxFunEvals=integer)",
+        inputs: &FMINUNC_INTEGER_COUNT_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The documented controls are integer-valued numeric scalars, not documented typed-integer classes. RunMat's typed forms preserve exact counts without a binary64 round trip.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "fminunc(..., options.SpecifyObjectiveGradient=integer)",
+        inputs: &FMINUNC_INTEGER_FLAG_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Predicate,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Only typed-integer 0 or 1 uses this extension. Logical option values are documented and bypass the typed-integer extension gate.",
+    },
+];
+
+pub(crate) const FMINUNC_INPUT_NUMERIC_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "fminunc-nonfloating-initial-point",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "fminunc with a typed-integer or logical initial point is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:FminuncNumericInputExtension"),
+    };
+pub(crate) const FMINUNC_CALLBACK_NUMERIC_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fminunc-nonfloating-callback-output", mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fminunc with typed-integer or logical objective or derivative output is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FminuncCallbackExtension"),
+};
+pub(crate) const FMINUNC_OPTION_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "fminunc-typed-option-controls",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "fminunc with typed-integer option controls is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:FminuncOptionExtension"),
+    };
+pub(crate) const FMINUNC_RESIDENT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "fminunc-resident-fallback",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "fminunc with provider-resident numeric input or callback output is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:FminuncResidentExtension"),
+    };
+pub const FMINUNC_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    FMINUNC_INPUT_NUMERIC_EXTENSION,
+    FMINUNC_CALLBACK_NUMERIC_EXTENSION,
+    FMINUNC_OPTION_EXTENSION,
+    FMINUNC_RESIDENT_EXTENSION,
+];
+
 pub const FMINUNC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &FMINUNC_SIGNATURES,
     output_mode: BuiltinOutputMode::ByRequestedOutputCount,
@@ -319,6 +474,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     type_resolver(nonlinear_solve_type),
     descriptor(crate::builtins::math::optim::fminunc::FMINUNC_DESCRIPTOR),
+    extensions(crate::builtins::math::optim::fminunc::FMINUNC_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::optim::fminunc::FMINUNC_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::optim::fminunc"
 )]
 async fn fminunc_builtin(function: Value, x0: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -330,9 +487,14 @@ async fn fminunc_builtin(function: Value, x0: Value, rest: Vec<Value>) -> Builti
     }
     let options_struct = parse_options(rest.first())
         .map_err(|err| fminunc_map_error(err, &FMINUNC_ERROR_INVALID_ARGUMENT))?;
-    let guess = initial_guess(NAME, x0)
-        .await
-        .map_err(|err| fminunc_map_error(err, &FMINUNC_ERROR_INVALID_INPUT))?;
+    let guess = crate::builtins::math::optim::common::initial_guess_with_extensions(
+        NAME,
+        x0,
+        &FMINUNC_INPUT_NUMERIC_EXTENSION,
+        &FMINUNC_RESIDENT_EXTENSION,
+    )
+    .await
+    .map_err(|err| fminunc_map_error(err, &FMINUNC_ERROR_INVALID_INPUT))?;
     let options = FminuncOptions::from_struct(options_struct.as_ref(), guess.values.len())
         .map_err(|err| fminunc_map_error(err, &FMINUNC_ERROR_INVALID_ARGUMENT))?;
     let outcome = minimize(
@@ -395,6 +557,12 @@ struct FminuncOptions {
 
 impl FminuncOptions {
     fn from_struct(options: Option<&StructValue>, variables: usize) -> BuiltinResult<Self> {
+        crate::builtins::math::optim::common::ensure_option_extensions(
+            NAME,
+            options,
+            &FMINUNC_OPTION_EXTENSION,
+            &FMINUNC_RESIDENT_EXTENSION,
+        )?;
         let display = DisplayMode::parse(&option_string(options, "Display", "off")?)?;
         let algorithm = option_string(options, "Algorithm", "quasi-newton")?;
         if !matches!(algorithm.as_str(), "quasi-newton" | "bfgs") {
@@ -439,6 +607,23 @@ fn bounded_option_usize(
     default: usize,
     maximum: usize,
 ) -> BuiltinResult<usize> {
+    if let Some(value) = options.and_then(|options| lookup_option(options, field)) {
+        if let Some(integer) = tensor::scalar_integer_value(value) {
+            let Some(value) = integer.try_to_usize() else {
+                return Err(fminunc_error_with_detail(
+                    &FMINUNC_ERROR_INVALID_ARGUMENT,
+                    format!("option {field} must be non-negative"),
+                ));
+            };
+            if value > maximum {
+                return Err(fminunc_error_with_detail(
+                    &FMINUNC_ERROR_INVALID_ARGUMENT,
+                    format!("option {field} must be no greater than {maximum}"),
+                ));
+            }
+            return Ok(value);
+        }
+    }
     let value = option_f64(NAME, options, field, default as f64)?;
     if value < 0.0 {
         return Err(fminunc_error_with_detail(
@@ -485,12 +670,23 @@ fn option_bool(options: Option<&StructValue>, field: &str, default: bool) -> Bui
 }
 
 fn bool_value(field: &str, value: &Value) -> BuiltinResult<bool> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return match integer.try_to_u64() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(fminunc_error_with_detail(
+                &FMINUNC_ERROR_INVALID_ARGUMENT,
+                format!("option {field} must be logical 0 or 1"),
+            )),
+        };
+    }
     match value {
         Value::Bool(flag) => Ok(*flag),
         Value::Num(n) => bool_from_number(field, *n),
-        Value::Int(i) => bool_from_number(field, i.to_f64()),
         Value::LogicalArray(LogicalArray { data, .. }) if data.len() == 1 => Ok(data[0] != 0),
-        Value::Tensor(Tensor { data, .. }) if data.len() == 1 => bool_from_number(field, data[0]),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            bool_from_number(field, tensor::tensor_value_f64(tensor, 0))
+        }
         Value::String(s) => bool_from_text(field, s),
         Value::StringArray(sa) if sa.data.len() == 1 => bool_from_text(field, &sa.data[0]),
         Value::CharArray(chars) if chars.rows == 1 => {
@@ -601,9 +797,15 @@ impl<'a> ObjectiveEvaluator<'a> {
         self.ensure_value_budget()?;
         let arg = vector_to_value(NAME, x.to_vec(), &self.shape, self.scalar)?;
         let value = call_function(self.function, vec![arg]).await?;
-        let value = crate::dispatcher::gather_if_needed_async(&value).await?;
         self.func_count += 1;
-        value_to_scalar(NAME, value)
+        crate::builtins::math::optim::common::value_to_scalar_with_extensions(
+            NAME,
+            value,
+            &FMINUNC_CALLBACK_NUMERIC_EXTENSION,
+            &FMINUNC_RESIDENT_EXTENSION,
+            "objective value",
+        )
+        .await
     }
 
     async fn evaluate_with_gradient(&mut self, x: &[f64]) -> BuiltinResult<ObjectiveState> {
@@ -611,7 +813,6 @@ impl<'a> ObjectiveEvaluator<'a> {
             crate::canonicalize_callback_handle_for_semantic_resolution(self.function.clone());
         let arg = vector_to_value(NAME, x.to_vec(), &self.shape, self.scalar)?;
         let value = crate::call_feval_async_with_outputs(callback, &[arg], 2).await?;
-        let value = crate::dispatcher::gather_if_needed_async(&value).await?;
         self.func_count += 1;
         let Value::OutputList(outputs) = value else {
             return Err(fminunc_error_with_detail(
@@ -625,8 +826,22 @@ impl<'a> ObjectiveEvaluator<'a> {
                 "objective must return both objective value and gradient",
             ));
         }
-        let f = value_to_scalar(NAME, outputs[0].clone())?;
-        let grad = value_to_real_vector(NAME, outputs[1].clone()).await?;
+        let f = crate::builtins::math::optim::common::value_to_scalar_with_extensions(
+            NAME,
+            outputs[0].clone(),
+            &FMINUNC_CALLBACK_NUMERIC_EXTENSION,
+            &FMINUNC_RESIDENT_EXTENSION,
+            "objective value",
+        )
+        .await?;
+        let grad = crate::builtins::math::optim::common::value_to_real_vector_with_extensions(
+            NAME,
+            outputs[1].clone(),
+            &FMINUNC_CALLBACK_NUMERIC_EXTENSION,
+            &FMINUNC_RESIDENT_EXTENSION,
+            "objective gradient",
+        )
+        .await?;
         if grad.len() != x.len() {
             return Err(fminunc_error_with_detail(
                 &FMINUNC_ERROR_INVALID_INPUT,
@@ -1138,7 +1353,7 @@ fn add_scaled(x: &[f64], direction: &[f64], alpha: f64) -> Vec<f64> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntValue;
+    use runmat_value::{IntValue, IntegerStorage};
     use std::sync::Arc;
 
     fn bound(id: usize) -> Value {
@@ -1154,7 +1369,7 @@ mod tests {
 
     fn vector_from_value(value: &Value) -> Vec<f64> {
         match value {
-            Value::Tensor(tensor) => tensor.data.clone(),
+            Value::Tensor(tensor) => tensor.materialize_f64().clone(),
             Value::Num(n) => vec![*n],
             other => panic!("expected numeric value, got {other:?}"),
         }
@@ -1309,10 +1524,13 @@ mod tests {
         match &outputs[5] {
             Value::Tensor(hessian) => {
                 assert_eq!(hessian.shape, vec![3, 3]);
-                assert!(hessian.data.iter().all(|value| value.is_finite()));
-                assert!(hessian.data[0] > 0.0);
-                assert!(hessian.data[4] > 0.0);
-                assert!(hessian.data[8] > 0.0);
+                assert!(hessian
+                    .materialize_f64()
+                    .iter()
+                    .all(|value| value.is_finite()));
+                assert!(hessian.materialize_f64()[0] > 0.0);
+                assert!(hessian.materialize_f64()[4] > 0.0);
+                assert!(hessian.materialize_f64()[8] > 0.0);
             }
             other => panic!("unexpected hessian {other:?}"),
         }
@@ -1390,6 +1608,61 @@ mod tests {
         ))
         .unwrap_err();
         assert!(err.message().contains("MaxFunEvals"));
+    }
+
+    #[test]
+    fn options_read_typed_integer_tensor_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let max_iter =
+            Tensor::new_integer(IntegerStorage::U16(vec![5]), vec![1, 1]).expect("MaxIter");
+        let gradient = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1])
+            .expect("SpecifyObjectiveGradient");
+
+        let mut opts = StructValue::new();
+        opts.insert("MaxIter", Value::Tensor(max_iter));
+        opts.insert("SpecifyObjectiveGradient", Value::Tensor(gradient));
+        let parsed = FminuncOptions::from_struct(Some(&opts), 1).expect("options");
+        assert_eq!(parsed.max_iter, 5);
+        assert!(parsed.specify_objective_gradient);
+    }
+
+    #[test]
+    fn documented_logical_option_flag_is_not_extension_gated() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let mut opts = StructValue::new();
+        opts.insert("SpecifyObjectiveGradient", Value::Bool(true));
+        let parsed = FminuncOptions::from_struct(Some(&opts), 1).expect("logical option");
+        assert!(parsed.specify_objective_gradient);
+
+        opts.insert(
+            "SpecifyObjectiveGradient",
+            Value::Tensor(Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap()),
+        );
+        let error = FminuncOptions::from_struct(Some(&opts), 1)
+            .expect_err("typed-integer spelling is independently gated");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:FminuncOptionExtension")
+        );
+    }
+
+    #[test]
+    fn options_reject_typed_integer_limits_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let negative =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("MaxIter");
+        let mut opts = StructValue::new();
+        opts.insert("MaxIter", Value::Tensor(negative));
+        assert!(FminuncOptions::from_struct(Some(&opts), 1).is_err());
+
+        let too_large = Tensor::new_integer(
+            IntegerStorage::U64(vec![(MAX_FUN_EVAL_LIMIT as u64) + 1]),
+            vec![1, 1],
+        )
+        .expect("MaxFunEvals");
+        let mut opts = StructValue::new();
+        opts.insert("MaxFunEvals", Value::Tensor(too_large));
+        assert!(FminuncOptions::from_struct(Some(&opts), 1).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

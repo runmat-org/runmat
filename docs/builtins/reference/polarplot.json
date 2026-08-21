@@ -30,6 +30,7 @@
   },
   "description": "`polarplot` converts angular/radial data to cartesian line coordinates and marks the active axes as polar so the renderer draws concentric radial rings and angular spokes.",
   "behaviors": [
+    "Real integer coordinates are accepted before the explicit floating geometry boundary; complex integer `Z` data is a separately gated RunMat-mode extension that must be exactly representable before rendering.",
     "`polarplot(theta, rho)` interprets theta values as radians and requires theta and rho to have the same number of elements.",
     "`polarplot(rho)` creates implicit theta values over `[0, 2*pi]` with the same number of samples as rho.",
     "`polarplot(Z)` interprets complex input as `theta = angle(Z)` and `rho = abs(Z)`.",

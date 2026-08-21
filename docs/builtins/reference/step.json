@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "`step` simulates host-side transfer-function metadata. GPU inputs are not part of the initial `tf` object response path."
+    "notes": "`step` is a host-side control-system simulation. Automatically resident admitted time input can gather through its exact owning provider; the simulator and returned response/time arrays use binary64."
   },
   "fusion": {
     "elementwise": false,
@@ -28,7 +28,7 @@
     "unit": "builtins::control::step::tests",
     "integration": "crates/runmat-vm/tests/control.rs"
   },
-  "description": "`step(sys, ...)` plots or returns sampled unit-step responses for supported SISO `tf` models, using MATLAB-compatible default-time and explicit-time call signatures.",
+  "description": "`step(sys, ...)` plots or returns the sampled unit-step response of a supported SISO transfer-function model. With no time argument RunMat chooses a suitable grid; a scalar sets the final time and a vector supplies exact sample times. Typed-integer time values are available in RunMat mode and must be exactly representable in binary64 before entering the floating control-system simulation.",
   "behaviors": [
     "Supports SISO `tf` objects with real coefficients.",
     "Returns the response `y` as a column vector for single-output calls.",
@@ -38,7 +38,9 @@
     "Chooses an automatic time vector when no time input is supplied.",
     "Accepts a positive finite scalar final time.",
     "Accepts a finite, nonnegative, nondecreasing explicit time vector.",
-    "Discrete-time models use the stored `Ts` sample time."
+    "Discrete-time models use the stored `Ts` sample time.",
+    "Native typed-integer `t` and `tFinal` are RunMat extensions. Compatibility admission and exact-representability checks happen before provider access, and wide integers that would round as double are rejected.",
+    "Response values and returned time coordinates are double because transfer-function simulation is an explicit floating computation domain; integer time input does not imply an integer output class."
   ],
   "examples": [
     {

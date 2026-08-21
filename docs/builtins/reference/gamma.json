@@ -7,7 +7,7 @@
     "special function",
     "elementwise",
     "gpu",
-    "complex"
+    "real"
   ],
   "summary": "Compute gamma function values element-wise in MATLAB and RunMat.",
   "gpu_support": {
@@ -18,7 +18,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Uses the provider unary_gamma hook (Lanczos approximation on WGPU); falls back to host evaluation when the hook is unavailable."
+    "notes": "Uses unary_gamma only for real single or double inputs and accepts provider output only when shape, precision, residency, and storage match the contract; otherwise it falls back to host evaluation and restores the owning provider."
   },
   "fusion": {
     "elementwise": false,
@@ -29,15 +29,14 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::math::elementwise::gamma::tests",
-    "integration": "builtins::math::elementwise::gamma::tests::gamma_gpu_provider_fallback"
+    "integration": "builtins::math::elementwise::gamma::tests::gpu_provider_roundtrip_preserves_residency"
   },
-  "description": "`Y = gamma(X)` evaluates the Euler gamma function element-by-element. Positive integers map to `(n-1)!`, and real/complex branch behavior follows MATLAB semantics.",
+  "description": "`Y = gamma(X)` evaluates the Euler gamma function element-by-element for real single- or double-precision input.",
   "behaviors": [
-    "Respects MATLAB’s broadcasting rules for all dense tensor inputs.",
-    "Promotes logical and integer values to double precision before evaluation; character arrays are converted through their Unicode code points.",
-    "Computes complex values with a Lanczos approximation and the reflection identity so results match MATLAB for every quadrant.",
+    "Preserves single or double precision and the input tensor shape.",
+    "Integer, logical, character, string, complex, and sparse inputs are rejected.",
     "Returns `Inf` at non-positive integers, mirroring the poles in the analytic definition.",
-    "Keeps real-valued GPU tensors on device when the provider implements `unary_gamma`; otherwise it gathers to the host, evaluates, and reapplies any requested residency via `'like'`."
+    "Keeps real-valued GPU tensors on their owning provider. If a native result does not satisfy the output contract, RunMat discards it and uses the owner-preserving host fallback."
   ],
   "examples": [
     {
@@ -61,11 +60,6 @@
       "output": "B =\n     1     1\n     2     6"
     },
     {
-      "description": "Working with complex numbers",
-      "input": "z = 0.5 + 1i;\ng = gamma(z)",
-      "output": "g = 0.8182 - 0.7633i"
-    },
-    {
       "description": "Using `gamma` with GPU tensors",
       "input": "G = gpuArray([0.5 1.5 2.5]);\nout = gamma(G);\nresult = gather(out)",
       "output": "result = [1.7725 0.8862 1.3293]"
@@ -85,20 +79,16 @@
       "answer": "Yes. Values such as `gamma(0.5) = sqrt(pi)` are computed with a Lanczos approximation that provides double-precision accuracy consistent with MATLAB."
     },
     {
-      "question": "Do complex inputs work?",
-      "answer": "Absolutely. RunMat evaluates the analytic continuation using the reflection identity `Γ(z) = π / (sin(πz) Γ(1-z))` for `Re(z) < 0.5`, so complex arguments behave the same as in MATLAB."
+      "question": "Do typed integer, logical, character, or complex inputs work?",
+      "answer": "No. The compatibility contract accepts real single and double input only. A numeric literal such as `5` is double, so `gamma(5)` remains valid."
     },
     {
       "question": "Can I keep results on the GPU?",
-      "answer": "Yes for real-valued outputs whenever the active provider exposes `unary_gamma` (including the WGPU backend). If the provider lacks the hook, RunMat falls back to the host but re-uploads the tensor when you request a real-valued GPU prototype via `'like'`. Complex outputs stay on the host for now."
+      "answer": "Yes. RunMat uses the owning provider's `unary_gamma` hook when its output satisfies the required shape, precision, storage, and ownership contract. Otherwise it computes on the host and uploads the result back to that owner."
     },
     {
       "question": "What about overflow?",
       "answer": "Large positive inputs eventually overflow to `Inf`, just like MATLAB. Negative inputs near poles produce signed infinities consistent with the analytic behaviour."
-    },
-    {
-      "question": "Does `gamma` accept `'like'` prototypes?",
-      "answer": "Yes. Provide `'like', T` to control residency and numeric class. Complex prototypes are honoured on the host; GPU prototypes must be real."
     }
   ],
   "links": [
@@ -211,8 +201,8 @@
     "label": "`crates/runmat-runtime/src/builtins/math/elementwise/gamma.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/gamma.rs"
   },
-  "gpu_residency": "Usually not. Accelerate keeps tensors on the GPU when the provider exposes a `unary_gamma` kernel (the default WGPU backend does). Otherwise RunMat gathers the tensor, evaluates the gamma function on the CPU, and uploads the result again only when you explicitly request GPU residency via `'like', gpuArray(...)`. Complex results remain on the host because today’s GPU providers operate on real buffers.",
+  "gpu_residency": "Yes. Real single- and double-precision gpuArray inputs remain associated with their owning provider whether execution uses a validated native `unary_gamma` result or the owner-preserving host fallback.",
   "gpu_behavior": [
-    "RunMat Accelerate first calls the active provider’s `unary_gamma` hook. With the WGPU backend this kernel runs entirely on device using a Lanczos approximation. Providers that decline the hook trigger an automatic gather to the host. After computing the double-precision result, RunMat re-uploads the tensor when you pass `'like', gpuArray(...)`. Complex outputs always stay on the host because current providers expose real-valued buffers only."
+    "RunMat rejects resident integer, logical, and complex inputs before provider execution. For admitted real floating inputs, it accepts native `unary_gamma` output only when shape, device, real storage, precision, and owning provider match; malformed output is discarded before host fallback, and rejected non-alias allocations are freed safely before re-upload to the original owner."
   ]
 }

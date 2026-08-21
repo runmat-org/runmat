@@ -36,9 +36,11 @@
     "Inputs must behave like 2-D matrices. Trailing singleton dimensions are accepted; other higher ranks result in `\"rank: inputs must be 2-D matrices or vectors\"`.",
     "The default tolerance is `tol = max(size(A)) * eps(max(s))`, where `s` are the singular values from an SVD of `A`. You can override this by supplying a second argument: `rank(A, tol)`.",
     "When you provide an explicit tolerance it must be a finite, non-negative scalar. Non-scalars, `NaN`, `Inf`, or negative values raise MATLAB-compatible errors.",
-    "Logical and integer inputs are promoted to double precision before taking the SVD.",
+    "Public MATLAB matrix classes are single and double. RunMat mode separately admits logical matrices and all eight real integer classes through named extensions; integer matrix values cross only after exact binary64 representability checks.",
     "`rank([])` returns `0`. Rank is always reported as a double scalar (e.g., `2.0`).",
-    "Complex inputs use a complex SVD so that conjugate transposes and magnitudes follow MATLAB’s conventions."
+    "Complex inputs use a complex SVD so that conjugate transposes and magnitudes follow MATLAB’s conventions.",
+    "A typed-integer tolerance is a separate RunMat extension because the public scalar tolerance does not enumerate integer classes. It must be exactly representable as binary64 before threshold computation; logical tolerance is independently gated.",
+    "Resident integer input bypasses floating provider rank kernels, gathers through its exact owner, and restores the double rank scalar to that owner when supported."
   ],
   "examples": [
     {

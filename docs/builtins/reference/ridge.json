@@ -30,6 +30,7 @@
   "description": "`ridge(y,X,k)` returns ridge regression coefficient estimates for response vector `y`, predictor matrix `X`, and one or more nonnegative ridge parameters `k`.",
   "behaviors": [
     "`X` must be an n-by-p real numeric matrix and `y` must be a vector with n elements.",
+    "The documented computation domain is single or double. Native typed-integer `y`, `X`, `k`, and `scaled` controls are independently declared RunMat extensions; numerical values must be exactly representable at the explicit double solver boundary and MATLAB compatibility mode rejects them before gathering.",
     "`k` accepts a nonnegative finite scalar or vector. Each output column corresponds to one `k` value in input order.",
     "Rows containing `NaN` in `X` or `y` are omitted before fitting, matching MATLAB's missing-row behavior.",
     "By default, RunMat centers `y`, centers and standardizes predictors, and returns p standardized coefficients without an intercept.",

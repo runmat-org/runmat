@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "No GPU kernel is registered for this compatibility builtin; GPU-resident inputs are gathered to host memory before evaluation."
+    "notes": "The returned pattern is host metadata. Automatically resident numeric count controls gather transparently; explicit gpuArray count controls are unsupported."
   },
   "fusion": {
     "elementwise": false,
@@ -28,40 +28,75 @@
     "unit": "builtins::strings::core::compat::tests",
     "integration": null
   },
-  "description": "pat = wildcardPattern - Create a pattern matching arbitrary text.",
+  "description": "`wildcardPattern` creates a lazy pattern that matches as few characters as possible, including zero by default, or an exact or inclusive bounded count.",
   "signatures": [
     {
       "label": "pat = wildcardPattern",
-      "inputs": [
+      "inputs": [],
+      "outputs": [
         {
-          "name": "text",
+          "name": "pat",
           "ty": "Any",
           "arity": "Required",
           "default": null,
-          "description": "Input text."
-        },
+          "description": "Host pattern object."
+        }
+      ]
+    },
+    {
+      "label": "pat = wildcardPattern(N)",
+      "inputs": [
         {
-          "name": "arg",
-          "ty": "Any",
-          "arity": "Variadic",
+          "name": "N",
+          "ty": "NumericScalar",
+          "arity": "Required",
           "default": null,
-          "description": "Additional arguments."
+          "description": "Exact nonnegative number of characters to match."
         }
       ],
       "outputs": [
         {
-          "name": "out",
+          "name": "pat",
           "ty": "Any",
           "arity": "Required",
           "default": null,
-          "description": "Output value."
+          "description": "Host pattern object."
+        }
+      ]
+    },
+    {
+      "label": "pat = wildcardPattern(minCharacters, maxCharacters)",
+      "inputs": [
+        {
+          "name": "minCharacters",
+          "ty": "NumericScalar",
+          "arity": "Required",
+          "default": null,
+          "description": "Inclusive nonnegative minimum."
+        },
+        {
+          "name": "maxCharacters",
+          "ty": "NumericScalar",
+          "arity": "Required",
+          "default": null,
+          "description": "Inclusive nonnegative maximum, or positive infinity."
+        }
+      ],
+      "outputs": [
+        {
+          "name": "pat",
+          "ty": "Any",
+          "arity": "Required",
+          "default": null,
+          "description": "Host pattern object."
         }
       ]
     }
   ],
   "behaviors": [
-    "Create a pattern matching arbitrary text.",
-    "Creates a regular-expression-backed wildcard pattern, with optional exact count."
+    "Without a count, the lazy pattern can match zero characters and therefore prefers an empty match when unconstrained.",
+    "Exact and bounded counts accept single, double, and all eight integer classes without routing typed values through floating compatibility storage.",
+    "The bounded form accepts positive infinity as the maximum and stays lazy toward the minimum bound."
   ],
   "examples": [
     "contains(\"abc\", wildcardPattern) matches arbitrary text."

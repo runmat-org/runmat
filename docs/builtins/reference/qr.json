@@ -34,8 +34,10 @@
     "Single output: `R = qr(A)` returns the upper-triangular (or upper-trapezoidal) factor. Column pivoting is applied implicitly for numerical stability.",
     "Two outputs: `[Q, R] = qr(A)` yields the orthonormal/unitary factor `Q` and the upper-triangular `R` such that `Q * R = A * E`, where `E` is the column permutation matrix selected during factorization. When you omit `E`, the columns of `R` already appear in that permuted order.",
     "Three outputs: `[Q, R, E] = qr(A)` additionally returns the column permutation so that `A * E = Q * R`. Use the `'vector'` option to receive a pivot vector instead of a permutation matrix.",
-    "Economy size: `qr(A, 0)` or `qr(A, 'econ')` returns the reduced-size factors, mirroring MATLAB’s behaviour: when `m ≥ n`, `Q` is `m × n` and `R` is `n × n`. For wide matrices (`m < n`) the economy form equals the full form.",
-    "Logical inputs are promoted to double precision. Scalars and vectors are treated as 1-D or 2-D dense arrays."
+    "Economy size: `qr(A, 0)` or `qr(A, 'econ')` returns the reduced-size factors: when `m ≥ n`, `Q` is `m × n` and `R` is `n × n`; for wide matrices (`m < n`) the economy form equals the full form. The legacy numeric-zero syntax selects vector permutation output when a third output is requested.",
+    "Public MATLAB matrix classes are single and double. RunMat mode separately admits logical matrices and every real integer class through named extensions; integer matrix values cross only after exact binary64 representability checks. Scalars and vectors are treated as 1-D or 2-D dense arrays.",
+    "Typed-integer and logical zero economy selectors are separately gated RunMat extensions. An explicit resident option is independently gated and read through its exact owner; nonzero or nonscalar numeric options reject.",
+    "Integer inputs never enter a floating provider QR kernel. Resident integer input gathers through its exact owner and restores the double Q, R, and permutation outputs to that owner when supported."
   ],
   "examples": [
     {

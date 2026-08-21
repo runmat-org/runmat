@@ -29,6 +29,7 @@
   "description": "`openfig(filename)` loads a RunMat FIG scene file and returns the imported figure handle or a row vector of handles.",
   "behaviors": [
     "The `.fig` extension is appended when the filename has no extension.",
+    "Filename, copy mode, and visibility are textual roles; numeric and resident numeric arguments are rejected before provider access or file I/O.",
     "`openfig(filename, 'new')` imports a new copy of the saved scene. `reuse` mode is rejected until RunMat tracks figure-file reuse relationships.",
     "`openfig(..., 'visible')` and `openfig(..., 'invisible')` override the loaded figure visibility."
   ],

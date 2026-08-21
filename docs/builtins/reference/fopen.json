@@ -28,16 +28,16 @@
     "unit": "builtins::io::filetext::fopen::tests",
     "integration": "builtins::io::filetext::fopen::tests::fopen_list_all_includes_handles"
   },
-  "description": "`fopen` opens a file and returns a numeric file identifier (`fid`) used by other I/O builtins. Permission strings, machine-format specifiers, encoding handling, metadata query forms, and `'all'` listing behavior follow MATLAB semantics.",
+  "description": "`fopen` opens a file and returns a double file identifier (`fid`) used by other I/O builtins. Permission strings, machine-format specifiers, encoding handling, and metadata query forms follow MATLAB semantics. Legacy no-argument and `'all'` listing forms are explicit RunMat extensions.",
   "behaviors": [
     "`fid = fopen(filename)` opens an existing file for reading. The call fails (returning `fid = -1`) when the file cannot be opened.",
     "`fid = fopen(filename, permission)` opens a file using the requested permission string (`'r'`, `'w'`, `'a'`, `'r+'`, `'w+'`, `'a+'`, plus optional `'b'`/`'t'`). Permissions map to the same semantics as MATLAB: `'w'` truncates, `'a'` appends, and `'+'` enables reading and writing.",
     "`fid = fopen(filename, permission, machinefmt, encoding)` records the requested machine format (`'native'`, `'ieee-le'`, `'ieee-be'`) and text encoding (defaults to UTF-8 in text mode, `binary` otherwise) for later inspection.",
     "`[fid, message] = fopen(...)` returns an empty character vector on success and the operating-system error message on failure.",
     "`[filename, permission, machinefmt, encodingOut] = fopen(fid)` queries an existing file identifier.",
-    "`[fid_list, names, machinefmts, encodings] = fopen('all')` lists every open file (including standard input/output/error) and returns cell arrays containing metadata for each entry.",
-    "`[fid_list, names] = fopen('all', machinefmt)` filters the listing to files whose recorded machine format (for example `'ieee-be'` or `'native'`) matches the requested value.",
-    "RunMat gathers GPU-resident filename arguments before opening files; the resulting handles always live on the host. Providers do not implement GPU kernels for file I/O."
+    "In `runmat` compatibility mode, `[fid_list, names, machinefmts, encodings] = fopen('all')` lists open streams and files; the compatibility target removed the legacy `'all'` selector in favor of `openedFiles`, so no-argument and `'all'` forms are rejected in MATLAB-compatible modes.",
+    "In `runmat` compatibility mode, `[fid_list, names] = fopen('all', machinefmt)` additionally filters the legacy listing by recorded machine format.",
+    "The compatibility target documents double query identifiers. RunMat independently gates typed integer, single, and provider-resident query identifiers before gather; integer identifiers are checked exactly against the registry domain."
   ],
   "examples": [
     {
@@ -88,7 +88,7 @@
     },
     {
       "question": "Does `fopen('all')` include standard input and output?",
-      "answer": "Yes. The returned identifier list always contains `0` (standard input), `1` (standard output), and `2` (standard error), followed by any user-opened files."
+      "answer": "Only in `runmat` compatibility mode. The compatibility target removed `fopen('all')`; RunMat preserves the legacy listing as an explicitly gated extension."
     },
     {
       "question": "Are machine formats honoured during reads and writes?",
@@ -180,7 +180,7 @@
       "`machinefmt` selects the endianness for binary reads and writes. Common values are `'native'` (alias `'n'`), `'ieee-le'` (little-endian), and `'ieee-be'` (big-endian).",
       "`encodingIn` is the text encoding used for subsequent reads and writes. Accepted values include `'UTF-8'` (default for text mode), `'US-ASCII'`, `'ISO-8859-1'` (`'latin1'`), `'windows-1252'`, `'shift_jis'`, and `'system'`.",
       "On success `fileID` is a positive integer. On failure it is `-1`, and the optional second output `errmsg` contains the operating-system error message.",
-      "Passing an existing `fileID` returns its recorded metadata; `fopen('all')` returns a row vector of every currently open user file identifier."
+      "Passing an existing double `fileID` returns its recorded metadata. Typed integer, single, and resident query identifiers and the legacy `fopen('all')` form are independently gated RunMat extensions."
     ]
   },
   "gpu_behavior": [

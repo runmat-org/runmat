@@ -6,13 +6,20 @@ use runmat_accelerate_api::{
     GpuTensorHandle, SortComparison as ProviderSortComparison, SortOrder as ProviderSortOrder,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    ComplexStorage, ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericStorage, Tensor,
+    Value,
+};
 
-use super::type_resolvers::tensor_output_type;
+use super::{float_order::SetFloat, integer_order, type_resolvers::tensor_output_type};
 use crate::build_runtime_error;
 use crate::builtins::common::arg_tokens::{tokens_from_values, ArgToken};
 use crate::builtins::common::gpu_helpers;
@@ -30,12 +37,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[ProviderHook::Custom("sort_dim")],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: true,
-    notes: "Providers may add a dedicated sort kernel in the future; today tensors are gathered to host memory before sorting.",
+    notes: "Plain real tensors may use the provider sort hook; typed integer, logical, complex, explicit missing-placement, and unsupported-provider paths gather through authoritative host storage and restore both outputs to the owning provider.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::sorting_sets::sort")]
@@ -46,7 +53,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: None,
     emits_nan: true,
-    notes: "Sorting breaks fusion chains and acts as a residency sink; upstream tensors are gathered to host memory.",
+    notes: "Sorting breaks fusion chains; host fallback may gather upstream tensors before restoring new resident output handles.",
 };
 
 const BUILTIN_NAME: &str = "sort";
@@ -183,7 +190,7 @@ const SORT_INPUTS_MISSING_PLACEMENT: [BuiltinParamDescriptor; 4] = [
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Required,
         default: Some("\"auto\""),
-        description: "Requested NaN placement option (currently unsupported).",
+        description: "Missing-value placement: 'auto', 'first', or 'last'.",
     },
 ];
 
@@ -262,11 +269,19 @@ const SORT_ERROR_COMPARISON_METHOD_UNKNOWN: BuiltinErrorDescriptor = BuiltinErro
     message: "sort: unsupported ComparisonMethod",
 };
 
-const SORT_ERROR_MISSINGPLACEMENT_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SORT.MISSINGPLACEMENT_UNSUPPORTED",
-    identifier: Some("RunMat:sort:MissingPlacementUnsupported"),
-    when: "MissingPlacement option is provided but unsupported.",
-    message: "sort: the 'MissingPlacement' option is not supported yet",
+const SORT_ERROR_MISSINGPLACEMENT_REQUIRES_STRING: BuiltinErrorDescriptor =
+    BuiltinErrorDescriptor {
+        code: "RM.SORT.MISSINGPLACEMENT_REQUIRES_STRING",
+        identifier: Some("RunMat:sort:MissingPlacementRequiresString"),
+        when: "MissingPlacement option value is not string-like.",
+        message: "sort: 'MissingPlacement' requires a string value",
+    };
+
+const SORT_ERROR_MISSINGPLACEMENT_UNKNOWN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SORT.MISSINGPLACEMENT_UNKNOWN",
+    identifier: Some("RunMat:sort:MissingPlacementUnknown"),
+    when: "MissingPlacement option value is not one of 'auto'/'first'/'last'.",
+    message: "sort: unsupported MissingPlacement",
 };
 
 const SORT_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -283,14 +298,44 @@ const SORT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "sort: internal operation failed",
 };
 
-const SORT_ERRORS: [BuiltinErrorDescriptor; 6] = [
+const SORT_ERRORS: [BuiltinErrorDescriptor; 7] = [
     SORT_ERROR_INVALID_DIMENSION,
     SORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING,
     SORT_ERROR_COMPARISON_METHOD_UNKNOWN,
-    SORT_ERROR_MISSINGPLACEMENT_UNSUPPORTED,
+    SORT_ERROR_MISSINGPLACEMENT_REQUIRES_STRING,
+    SORT_ERROR_MISSINGPLACEMENT_UNKNOWN,
     SORT_ERROR_INVALID_ARGUMENT,
     SORT_ERROR_INTERNAL,
 ];
+
+const SORT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented sortable input domain includes all eight real integer classes.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "dim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented positive integer-scalar dimension accepts every integer class and integer-valued scalar double.",
+    },
+];
+
+const SORT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[B, I] = sort(integer_A, integer_dim, direction, options)",
+        inputs: &SORT_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "B preserves A's exact integer class and stable equal-value order; optional I is one-based double. Resident integer input uses exact typed gather fallback and restores both outputs to the owning provider.",
+    }];
 
 pub const SORT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SORT_SIGNATURES,
@@ -327,6 +372,7 @@ fn sort_invalid_argument(message: impl Into<String>) -> crate::RuntimeError {
     sink = true,
     type_resolver(tensor_output_type),
     descriptor(crate::builtins::array::sorting_sets::sort::SORT_DESCRIPTOR),
+    integer_capabilities(SORT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::sorting_sets::sort"
 )]
 async fn sort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -336,12 +382,14 @@ async fn sort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
             return Ok(Value::OutputList(Vec::new()));
         }
         let (sorted, indices) = eval.into_values();
-        let mut outputs = vec![sorted];
-        if out_count >= 2 {
-            outputs.push(indices);
+        if out_count == 1 {
+            return Ok(Value::OutputList(vec![sorted]));
         }
-        return Ok(crate::output_count::output_list_with_padding(
-            out_count, outputs,
+        if out_count == 2 {
+            return Ok(Value::OutputList(vec![sorted, indices]));
+        }
+        return Err(sort_invalid_argument(
+            "sort: too many output arguments; maximum is 2",
         ));
     }
     Ok(eval.into_sorted_value())
@@ -361,6 +409,8 @@ async fn sort_gpu(
     args: &SortArgs,
 ) -> crate::BuiltinResult<SortEvaluation> {
     let shape = handle.shape.clone();
+    let provider = runmat_accelerate_api::provider_for_handle(&handle)
+        .or_else(runmat_accelerate_api::provider);
     let dim = args.dimension.unwrap_or_else(|| default_dimension(&shape));
     if dim == 0 {
         return Err(sort_error(
@@ -369,8 +419,12 @@ async fn sort_gpu(
         ));
     }
     let dim_len = dimension_length(&shape, dim);
-    if dim_len > 1 {
-        if let Some(provider) = runmat_accelerate_api::provider() {
+    let plain_real = runmat_accelerate_api::handle_integer_type(&handle).is_none()
+        && !runmat_accelerate_api::handle_is_logical(&handle)
+        && runmat_accelerate_api::handle_storage(&handle)
+            == runmat_accelerate_api::GpuTensorStorage::Real;
+    if dim_len > 1 && plain_real && matches!(args.missing, MissingPlacement::Auto) {
+        if let Some(provider) = provider {
             let order = args.direction.to_provider();
             let comparison = args.comparison.to_provider();
             let zero_based = dim - 1;
@@ -383,15 +437,22 @@ async fn sort_gpu(
                 let sorted_value = tensor::tensor_into_value(sorted_tensor);
                 let indices_tensor = Tensor::new(result.indices.data, result.indices.shape)
                     .map_err(|e| sort_internal(format!("sort: {e}")))?;
-                return Ok(SortEvaluation {
-                    sorted: sorted_value,
-                    indices: indices_tensor,
-                });
+                return upload_sort_evaluation(
+                    provider,
+                    SortEvaluation {
+                        sorted: sorted_value,
+                        indices: tensor::tensor_into_value(indices_tensor),
+                    },
+                );
             }
         }
     }
-    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-    sort_real_tensor(tensor, args)
+    let host = gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await?;
+    let evaluation = sort_host(host, args)?;
+    match provider {
+        Some(provider) => upload_sort_evaluation(provider, evaluation),
+        None => Ok(evaluation),
+    }
 }
 
 fn sort_host(value: Value, args: &SortArgs) -> crate::BuiltinResult<SortEvaluation> {
@@ -402,6 +463,17 @@ fn sort_host(value: Value, args: &SortArgs) -> crate::BuiltinResult<SortEvaluati
                 .map_err(|e| sort_internal(format!("sort: {e}")))?;
             sort_complex_tensor(tensor, args)
         }
+        Value::Int(value) => {
+            let tensor = Tensor::new_integer(IntegerStorage::from_scalar(value), vec![1, 1])
+                .map_err(|e| sort_internal(format!("sort: {e}")))?;
+            sort_real_tensor(tensor, args)
+        }
+        Value::LogicalArray(logical) => sort_logical(logical, args),
+        Value::Bool(value) => {
+            let logical = LogicalArray::new(vec![u8::from(value)], vec![1, 1])
+                .map_err(|e| sort_internal(format!("sort: {e}")))?;
+            sort_logical(logical, args)
+        }
         other => {
             let tensor =
                 tensor::value_into_tensor_for("sort", other).map_err(sort_invalid_argument)?;
@@ -410,10 +482,111 @@ fn sort_host(value: Value, args: &SortArgs) -> crate::BuiltinResult<SortEvaluati
     }
 }
 
+fn sort_logical(logical: LogicalArray, args: &SortArgs) -> crate::BuiltinResult<SortEvaluation> {
+    let shape = logical.shape;
+    let evaluation = sort_real_tensor(
+        Tensor::new_integer(IntegerStorage::U8(logical.data), shape)
+            .map_err(|e| sort_internal(format!("sort: {e}")))?,
+        args,
+    )?;
+    let sorted = match evaluation.sorted {
+        Value::Int(IntValue::U8(value)) => Value::Bool(value != 0),
+        Value::Tensor(tensor) => {
+            let shape = tensor.shape.clone();
+            let storage = tensor
+                .into_numeric_storage()
+                .map_err(|e| sort_internal(format!("sort: {e}")))?
+                .into_integer_storage()
+                .map_err(|_| sort_internal("sort: logical output lost integer storage"))?;
+            let IntegerStorage::U8(values) = storage else {
+                return Err(sort_internal("sort: logical output changed storage class"));
+            };
+            if values.len() == 1 {
+                Value::Bool(values[0] != 0)
+            } else {
+                Value::LogicalArray(
+                    LogicalArray::new(values, shape)
+                        .map_err(|e| sort_internal(format!("sort: {e}")))?,
+                )
+            }
+        }
+        other => {
+            return Err(sort_internal(format!(
+                "sort: unexpected logical output {other:?}"
+            )))
+        }
+    };
+    Ok(SortEvaluation {
+        sorted,
+        indices: evaluation.indices,
+    })
+}
+
+fn upload_sort_evaluation(
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    evaluation: SortEvaluation,
+) -> crate::BuiltinResult<SortEvaluation> {
+    Ok(SortEvaluation {
+        sorted: upload_sort_value(provider, evaluation.sorted)?,
+        indices: upload_sort_value(provider, evaluation.indices)?,
+    })
+}
+
+fn upload_sort_value(
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    value: Value,
+) -> crate::BuiltinResult<Value> {
+    let upload_tensor = |tensor: Tensor, logical: bool| -> crate::BuiltinResult<Value> {
+        let handle = gpu_helpers::upload_tensor(provider, &tensor)
+            .map_err(|error| sort_internal(format!("sort: GPU upload failed: {error}")))?;
+        Ok(if logical {
+            gpu_helpers::logical_gpu_value(handle)
+        } else {
+            gpu_helpers::resident_gpu_value(handle)
+        })
+    };
+    match value {
+        Value::Tensor(tensor) => upload_tensor(tensor, false),
+        Value::Num(number) => upload_tensor(
+            Tensor::new(vec![number], vec![1, 1])
+                .map_err(|error| sort_internal(format!("sort: {error}")))?,
+            false,
+        ),
+        Value::Int(integer) => upload_tensor(
+            Tensor::new_integer(IntegerStorage::from_scalar(integer), vec![1, 1])
+                .map_err(|error| sort_internal(format!("sort: {error}")))?,
+            false,
+        ),
+        Value::Bool(logical) => upload_tensor(
+            Tensor::new(vec![if logical { 1.0 } else { 0.0 }], vec![1, 1])
+                .map_err(|error| sort_internal(format!("sort: {error}")))?,
+            true,
+        ),
+        Value::LogicalArray(logical) => {
+            let tensor = tensor::logical_to_tensor(&logical).map_err(sort_internal)?;
+            upload_tensor(tensor, true)
+        }
+        Value::Complex(real, imag) => {
+            let tensor = ComplexTensor::new(vec![(real, imag)], vec![1, 1])
+                .map_err(|error| sort_internal(format!("sort: {error}")))?;
+            let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)
+                .map_err(|error| sort_internal(format!("sort: {}", error.message())))?;
+            Ok(gpu_helpers::complex_gpu_value(handle))
+        }
+        Value::ComplexTensor(tensor) => {
+            let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)
+                .map_err(|error| sort_internal(format!("sort: {}", error.message())))?;
+            Ok(gpu_helpers::complex_gpu_value(handle))
+        }
+        other => Err(sort_internal(format!(
+            "sort: cannot upload unexpected output {other:?}"
+        ))),
+    }
+}
+
 fn sort_real_tensor(tensor: Tensor, args: &SortArgs) -> crate::BuiltinResult<SortEvaluation> {
-    let dim = args
-        .dimension
-        .unwrap_or_else(|| default_dimension(&tensor.shape));
+    let shape = tensor.shape.clone();
+    let dim = args.dimension.unwrap_or_else(|| default_dimension(&shape));
     if dim == 0 {
         return Err(sort_error(
             &SORT_ERROR_INVALID_DIMENSION,
@@ -421,30 +594,62 @@ fn sort_real_tensor(tensor: Tensor, args: &SortArgs) -> crate::BuiltinResult<Sor
         ));
     }
 
-    let dim_len = dimension_length(&tensor.shape, dim);
-    if tensor.data.is_empty() || dim_len <= 1 {
-        let indices = vec![1.0; tensor.data.len()];
-        let index_tensor = Tensor::new(indices, tensor.shape.clone())
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|e| sort_internal(format!("sort: {e}")))?;
+    match storage {
+        NumericStorage::F64(values) => {
+            sort_floating_tensor(values, shape, dim, args, NumericStorage::F64)
+        }
+        NumericStorage::F32(values) => {
+            sort_floating_tensor(values, shape, dim, args, NumericStorage::F32)
+        }
+        storage => sort_integer_tensor(
+            storage
+                .into_integer_storage()
+                .expect("non-floating numeric storage is integer"),
+            shape,
+            dim,
+            args,
+        ),
+    }
+}
+
+fn sort_floating_tensor<T>(
+    values: Vec<T>,
+    shape: Vec<usize>,
+    dim: usize,
+    args: &SortArgs,
+    wrap: fn(Vec<T>) -> NumericStorage,
+) -> crate::BuiltinResult<SortEvaluation>
+where
+    T: SetFloat,
+{
+    let dim_len = dimension_length(&shape, dim);
+    if values.is_empty() || dim_len <= 1 {
+        let indices = vec![1.0; values.len()];
+        let index_tensor =
+            Tensor::new(indices, shape.clone()).map_err(|e| sort_internal(format!("sort: {e}")))?;
+        let sorted_tensor = Tensor::from_numeric_storage(wrap(values), shape)
             .map_err(|e| sort_internal(format!("sort: {e}")))?;
-        let sorted_value = tensor::tensor_into_value(tensor);
         return Ok(SortEvaluation {
-            sorted: sorted_value,
-            indices: index_tensor,
+            sorted: tensor::tensor_into_value(sorted_tensor),
+            indices: tensor::tensor_into_value(index_tensor),
         });
     }
 
-    let stride_before = stride_before(&tensor.shape, dim);
-    let stride_after = stride_after(&tensor.shape, dim);
-    let mut sorted = tensor.data.clone();
-    let mut indices = vec![0.0f64; tensor.data.len()];
-    let mut buffer: Vec<(usize, f64)> = Vec::with_capacity(dim_len);
+    let stride_before = stride_before(&shape, dim);
+    let stride_after = stride_after(&shape, dim);
+    let mut sorted = values;
+    let mut indices = vec![0.0f64; sorted.len()];
+    let mut buffer: Vec<(usize, T)> = Vec::with_capacity(dim_len);
 
     for after in 0..stride_after {
         for before in 0..stride_before {
             buffer.clear();
             for k in 0..dim_len {
                 let idx = before + k * stride_before + after * stride_before * dim_len;
-                let value = tensor.data[idx];
+                let value = sorted[idx];
                 buffer.push((k, value));
             }
             buffer.sort_by(|a, b| compare_real_values(a.1, b.1, args));
@@ -456,14 +661,63 @@ fn sort_real_tensor(tensor: Tensor, args: &SortArgs) -> crate::BuiltinResult<Sor
         }
     }
 
-    let sorted_tensor = Tensor::new(sorted, tensor.shape.clone())
+    let sorted_tensor = Tensor::from_numeric_storage(wrap(sorted), shape.clone())
         .map_err(|e| sort_internal(format!("sort: {e}")))?;
-    let index_tensor = Tensor::new(indices, tensor.shape.clone())
-        .map_err(|e| sort_internal(format!("sort: {e}")))?;
+    let index_tensor =
+        Tensor::new(indices, shape).map_err(|e| sort_internal(format!("sort: {e}")))?;
 
     Ok(SortEvaluation {
         sorted: tensor::tensor_into_value(sorted_tensor),
-        indices: index_tensor,
+        indices: tensor::tensor_into_value(index_tensor),
+    })
+}
+
+fn sort_integer_tensor(
+    storage: IntegerStorage,
+    shape: Vec<usize>,
+    dim: usize,
+    args: &SortArgs,
+) -> crate::BuiltinResult<SortEvaluation> {
+    let stride_before = stride_before(&shape, dim);
+    let stride_after = stride_after(&shape, dim);
+    let dim_len = dimension_length(&shape, dim);
+    let mut sorted = storage.exact_values();
+    let mut indices = vec![0.0f64; sorted.len()];
+    let mut buffer: Vec<(usize, IntValue)> = Vec::with_capacity(dim_len);
+
+    for after in 0..stride_after {
+        for before in 0..stride_before {
+            buffer.clear();
+            for k in 0..dim_len {
+                let idx = before + k * stride_before + after * stride_before * dim_len;
+                buffer.push((k, sorted[idx].clone()));
+            }
+            buffer.sort_by(|a, b| {
+                integer_order::compare(
+                    &a.1,
+                    &b.1,
+                    matches!(args.direction, SortDirection::Descend),
+                    matches!(args.comparison, ComparisonMethod::Abs),
+                )
+            });
+            for (pos, (original_index, value)) in buffer.iter().enumerate() {
+                let target = before + pos * stride_before + after * stride_before * dim_len;
+                sorted[target] = value.clone();
+                indices[target] = (*original_index + 1) as f64;
+            }
+        }
+    }
+
+    let sorted_storage = storage
+        .from_exact_values_like(sorted)
+        .map_err(|e| sort_internal(format!("sort: {e}")))?;
+    let sorted_tensor = Tensor::new_integer(sorted_storage, shape.clone())
+        .map_err(|e| sort_internal(format!("sort: {e}")))?;
+    let index_tensor =
+        Tensor::new(indices, shape).map_err(|e| sort_internal(format!("sort: {e}")))?;
+    Ok(SortEvaluation {
+        sorted: Value::Tensor(sorted_tensor),
+        indices: tensor::tensor_into_value(index_tensor),
     })
 }
 
@@ -471,9 +725,8 @@ fn sort_complex_tensor(
     tensor: ComplexTensor,
     args: &SortArgs,
 ) -> crate::BuiltinResult<SortEvaluation> {
-    let dim = args
-        .dimension
-        .unwrap_or_else(|| default_dimension(&tensor.shape));
+    let shape = tensor.shape.clone();
+    let dim = args.dimension.unwrap_or_else(|| default_dimension(&shape));
     if dim == 0 {
         return Err(sort_error(
             &SORT_ERROR_INVALID_DIMENSION,
@@ -481,79 +734,143 @@ fn sort_complex_tensor(
         ));
     }
 
-    let dim_len = dimension_length(&tensor.shape, dim);
-    if tensor.data.is_empty() || dim_len <= 1 {
-        let indices = vec![1.0; tensor.data.len()];
-        let index_tensor = Tensor::new(indices, tensor.shape.clone())
+    let dim_len = dimension_length(&shape, dim);
+    let storage = tensor.into_complex_storage();
+    if storage.is_empty() || dim_len <= 1 {
+        let indices = vec![1.0; storage.len()];
+        let index_tensor =
+            Tensor::new(indices, shape.clone()).map_err(|e| sort_internal(format!("sort: {e}")))?;
+        let sorted_tensor = ComplexTensor::from_complex_storage(storage, shape)
             .map_err(|e| sort_internal(format!("sort: {e}")))?;
         return Ok(SortEvaluation {
-            sorted: complex_tensor_into_value(tensor),
-            indices: index_tensor,
+            sorted: complex_tensor_into_value(sorted_tensor),
+            indices: tensor::tensor_into_value(index_tensor),
         });
     }
 
-    let stride_before = stride_before(&tensor.shape, dim);
-    let stride_after = stride_after(&tensor.shape, dim);
-    let mut sorted = tensor.data.clone();
-    let mut indices = vec![0.0f64; tensor.data.len()];
-    let mut buffer: Vec<(usize, (f64, f64))> = Vec::with_capacity(dim_len);
+    let (source_indices, indices) = match &storage {
+        ComplexStorage::F64(values) => complex_sort_permutation(values, &shape, dim, args),
+        ComplexStorage::F32(values) => complex_sort_permutation(values, &shape, dim, args),
+        ComplexStorage::Integer(values) => {
+            complex_integer_sort_permutation(values, &shape, dim, args)
+        }
+    };
+    let sorted_storage = storage
+        .gather(&source_indices)
+        .map_err(|e| sort_internal(format!("sort: {e}")))?;
+    let sorted_tensor = ComplexTensor::from_complex_storage(sorted_storage, shape.clone())
+        .map_err(|e| sort_internal(format!("sort: {e}")))?;
+    let index_tensor =
+        Tensor::new(indices, shape).map_err(|e| sort_internal(format!("sort: {e}")))?;
+
+    Ok(SortEvaluation {
+        sorted: complex_tensor_into_value(sorted_tensor),
+        indices: tensor::tensor_into_value(index_tensor),
+    })
+}
+
+fn complex_integer_sort_permutation(
+    storage: &runmat_value::IntegerComplexStorage,
+    shape: &[usize],
+    dim: usize,
+    args: &SortArgs,
+) -> (Vec<usize>, Vec<f64>) {
+    let stride_before = stride_before(shape, dim);
+    let stride_after = stride_after(shape, dim);
+    let dim_len = dimension_length(shape, dim);
+    let mut source_indices = vec![0usize; storage.len()];
+    let mut indices = vec![0.0f64; storage.len()];
+    let mut buffer: Vec<(usize, usize)> = Vec::with_capacity(dim_len);
 
     for after in 0..stride_after {
         for before in 0..stride_before {
             buffer.clear();
             for k in 0..dim_len {
-                let idx = before + k * stride_before + after * stride_before * dim_len;
-                let value = tensor.data[idx];
-                buffer.push((k, value));
+                let source = before + k * stride_before + after * stride_before * dim_len;
+                buffer.push((k, source));
             }
-            buffer.sort_by(|a, b| compare_complex_values(a.1, b.1, args));
-            for (pos, (original_index, value)) in buffer.iter().enumerate() {
-                let target = before + pos * stride_before + after * stride_before * dim_len;
-                sorted[target] = *value;
+            buffer.sort_by(|a, b| {
+                let a_real = storage.real.value_at(a.1).expect("validated complex index");
+                let a_imag = storage.imag.value_at(a.1).expect("validated complex index");
+                let b_real = storage.real.value_at(b.1).expect("validated complex index");
+                let b_imag = storage.imag.value_at(b.1).expect("validated complex index");
+                integer_order::compare_complex(
+                    (&a_real, &a_imag),
+                    (&b_real, &b_imag),
+                    matches!(args.direction, SortDirection::Descend),
+                    matches!(args.comparison, ComparisonMethod::Real),
+                )
+            });
+            for (position, (original_index, source)) in buffer.iter().enumerate() {
+                let target = before + position * stride_before + after * stride_before * dim_len;
+                source_indices[target] = *source;
                 indices[target] = (*original_index + 1) as f64;
             }
         }
     }
 
-    let sorted_tensor = ComplexTensor::new(sorted, tensor.shape.clone())
-        .map_err(|e| sort_internal(format!("sort: {e}")))?;
-    let index_tensor = Tensor::new(indices, tensor.shape.clone())
-        .map_err(|e| sort_internal(format!("sort: {e}")))?;
+    (source_indices, indices)
+}
 
-    Ok(SortEvaluation {
-        sorted: complex_tensor_into_value(sorted_tensor),
-        indices: index_tensor,
-    })
+fn complex_sort_permutation<T: SetFloat>(
+    values: &[(T, T)],
+    shape: &[usize],
+    dim: usize,
+    args: &SortArgs,
+) -> (Vec<usize>, Vec<f64>) {
+    let stride_before = stride_before(shape, dim);
+    let stride_after = stride_after(shape, dim);
+    let dim_len = dimension_length(shape, dim);
+    let mut source_indices = vec![0usize; values.len()];
+    let mut indices = vec![0.0f64; values.len()];
+    let mut buffer: Vec<(usize, usize, (T, T))> = Vec::with_capacity(dim_len);
+
+    for after in 0..stride_after {
+        for before in 0..stride_before {
+            buffer.clear();
+            for k in 0..dim_len {
+                let source = before + k * stride_before + after * stride_before * dim_len;
+                buffer.push((k, source, values[source]));
+            }
+            buffer.sort_by(|a, b| compare_complex_values(a.2, b.2, args));
+            for (position, (original_index, source, _)) in buffer.iter().enumerate() {
+                let target = before + position * stride_before + after * stride_before * dim_len;
+                source_indices[target] = *source;
+                indices[target] = (*original_index + 1) as f64;
+            }
+        }
+    }
+
+    (source_indices, indices)
 }
 
 fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
-    if tensor.data.len() == 1 {
-        let (re, im) = tensor.data[0];
-        Value::Complex(re, im)
+    if let Some([value]) = tensor.as_f64_slice() {
+        Value::Complex(value.0, value.1)
     } else {
         Value::ComplexTensor(tensor)
     }
 }
 
-fn compare_real_values(a: f64, b: f64, args: &SortArgs) -> Ordering {
+fn compare_real_values<T: SetFloat>(a: T, b: T, args: &SortArgs) -> Ordering {
     match (a.is_nan(), b.is_nan()) {
         (true, true) => Ordering::Equal,
-        (true, false) => match args.direction {
-            SortDirection::Ascend => Ordering::Greater,
-            SortDirection::Descend => Ordering::Less,
+        (true, false) => match args.missing.resolve(args.direction) {
+            MissingPlacementResolved::First => Ordering::Less,
+            MissingPlacementResolved::Last => Ordering::Greater,
         },
-        (false, true) => match args.direction {
-            SortDirection::Ascend => Ordering::Less,
-            SortDirection::Descend => Ordering::Greater,
+        (false, true) => match args.missing.resolve(args.direction) {
+            MissingPlacementResolved::First => Ordering::Greater,
+            MissingPlacementResolved::Last => Ordering::Less,
         },
         (false, false) => compare_real_finite(a, b, args),
     }
 }
 
-fn compare_real_finite(a: f64, b: f64, args: &SortArgs) -> Ordering {
+fn compare_real_finite<T: SetFloat>(a: T, b: T, args: &SortArgs) -> Ordering {
     let primary = match args.comparison {
         ComparisonMethod::Abs => {
-            let abs_cmp = a.abs().partial_cmp(&b.abs()).unwrap_or(Ordering::Equal);
+            let abs_cmp = a.abs().compare(b.abs());
             if abs_cmp != Ordering::Equal {
                 return match args.direction {
                     SortDirection::Ascend => abs_cmp,
@@ -567,65 +884,88 @@ fn compare_real_finite(a: f64, b: f64, args: &SortArgs) -> Ordering {
     if primary != Ordering::Equal {
         return primary;
     }
+    let ordering = if matches!(args.comparison, ComparisonMethod::Abs) {
+        b.compare(a)
+    } else {
+        a.compare(b)
+    };
     match args.direction {
-        SortDirection::Ascend => a.partial_cmp(&b).unwrap_or(Ordering::Equal),
-        SortDirection::Descend => b.partial_cmp(&a).unwrap_or(Ordering::Equal),
+        SortDirection::Ascend => ordering,
+        SortDirection::Descend => ordering.reverse(),
     }
 }
 
-fn compare_complex_values(a: (f64, f64), b: (f64, f64), args: &SortArgs) -> Ordering {
+fn compare_complex_values<T: SetFloat>(a: (T, T), b: (T, T), args: &SortArgs) -> Ordering {
     match (complex_is_nan(a), complex_is_nan(b)) {
         (true, true) => Ordering::Equal,
-        (true, false) => match args.direction {
-            SortDirection::Ascend => Ordering::Greater,
-            SortDirection::Descend => Ordering::Less,
+        (true, false) => match args.missing.resolve(args.direction) {
+            MissingPlacementResolved::First => Ordering::Less,
+            MissingPlacementResolved::Last => Ordering::Greater,
         },
-        (false, true) => match args.direction {
-            SortDirection::Ascend => Ordering::Less,
-            SortDirection::Descend => Ordering::Greater,
+        (false, true) => match args.missing.resolve(args.direction) {
+            MissingPlacementResolved::First => Ordering::Greater,
+            MissingPlacementResolved::Last => Ordering::Less,
         },
         (false, false) => compare_complex_finite(a, b, args),
     }
 }
 
-fn compare_complex_finite(a: (f64, f64), b: (f64, f64), args: &SortArgs) -> Ordering {
+fn compare_complex_finite<T: SetFloat>(a: (T, T), b: (T, T), args: &SortArgs) -> Ordering {
     match args.comparison {
         ComparisonMethod::Real => compare_complex_real_imag(a, b, args.direction),
         ComparisonMethod::Abs | ComparisonMethod::Auto => {
-            let abs_cmp = complex_abs(a)
-                .partial_cmp(&complex_abs(b))
-                .unwrap_or(Ordering::Equal);
+            let abs_cmp = complex_abs(a).compare(complex_abs(b));
             if abs_cmp != Ordering::Equal {
                 return match args.direction {
                     SortDirection::Ascend => abs_cmp,
                     SortDirection::Descend => abs_cmp.reverse(),
                 };
             }
-            compare_complex_real_imag(a, b, args.direction)
+            compare_complex_phase(a, b, args.direction)
         }
     }
 }
 
-fn compare_complex_real_imag(a: (f64, f64), b: (f64, f64), direction: SortDirection) -> Ordering {
-    let real_cmp = match direction {
-        SortDirection::Ascend => a.0.partial_cmp(&b.0),
-        SortDirection::Descend => b.0.partial_cmp(&a.0),
+fn compare_complex_phase<T: SetFloat>(a: (T, T), b: (T, T), direction: SortDirection) -> Ordering {
+    let ordering = complex_phase(a).compare(complex_phase(b));
+    match direction {
+        SortDirection::Ascend => ordering,
+        SortDirection::Descend => ordering.reverse(),
     }
-    .unwrap_or(Ordering::Equal);
+}
+
+fn complex_phase<T: SetFloat>((real, imaginary): (T, T)) -> T {
+    let imaginary = if imaginary == T::default() {
+        T::default()
+    } else {
+        imaginary
+    };
+    imaginary.atan2(real)
+}
+
+fn compare_complex_real_imag<T: SetFloat>(
+    a: (T, T),
+    b: (T, T),
+    direction: SortDirection,
+) -> Ordering {
+    let real_cmp = match direction {
+        SortDirection::Ascend => a.0.compare(b.0),
+        SortDirection::Descend => b.0.compare(a.0),
+    };
     if real_cmp != Ordering::Equal {
         return real_cmp;
     }
     match direction {
-        SortDirection::Ascend => a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal),
-        SortDirection::Descend => b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal),
+        SortDirection::Ascend => a.1.compare(b.1),
+        SortDirection::Descend => b.1.compare(a.1),
     }
 }
 
-fn complex_is_nan(value: (f64, f64)) -> bool {
+fn complex_is_nan<T: SetFloat>(value: (T, T)) -> bool {
     value.0.is_nan() || value.1.is_nan()
 }
 
-fn complex_abs(value: (f64, f64)) -> f64 {
+fn complex_abs<T: SetFloat>(value: (T, T)) -> T {
     value.0.hypot(value.1)
 }
 
@@ -687,6 +1027,33 @@ enum ComparisonMethod {
     Abs,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum MissingPlacement {
+    #[default]
+    Auto,
+    First,
+    Last,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MissingPlacementResolved {
+    First,
+    Last,
+}
+
+impl MissingPlacement {
+    fn resolve(self, direction: SortDirection) -> MissingPlacementResolved {
+        match self {
+            Self::First => MissingPlacementResolved::First,
+            Self::Last => MissingPlacementResolved::Last,
+            Self::Auto => match direction {
+                SortDirection::Ascend => MissingPlacementResolved::Last,
+                SortDirection::Descend => MissingPlacementResolved::First,
+            },
+        }
+    }
+}
+
 impl ComparisonMethod {
     fn to_provider(self) -> ProviderSortComparison {
         match self {
@@ -702,6 +1069,7 @@ struct SortArgs {
     dimension: Option<usize>,
     direction: SortDirection,
     comparison: ComparisonMethod,
+    missing: MissingPlacement,
 }
 
 impl SortArgs {
@@ -752,7 +1120,7 @@ impl SortArgs {
                             _ => {
                                 return Err(sort_error(
                                     &SORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING,
-                                    "sort: 'ComparisonMethod' requires a string value",
+                                    SORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING.message,
                                 ))
                             }
                         };
@@ -772,11 +1140,34 @@ impl SortArgs {
                         continue;
                     }
                     "missingplacement" => {
-                        return Err(sort_error(
-                            &SORT_ERROR_MISSINGPLACEMENT_UNSUPPORTED,
-                            SORT_ERROR_MISSINGPLACEMENT_UNSUPPORTED.message,
-                        )
-                        .into());
+                        i += 1;
+                        if i >= rest.len() {
+                            return Err(sort_invalid_argument(
+                                "sort: expected a value for 'MissingPlacement'",
+                            ));
+                        }
+                        let value = match tokens.get(i) {
+                            Some(ArgToken::String(value)) => value.as_str(),
+                            _ => {
+                                return Err(sort_error(
+                                    &SORT_ERROR_MISSINGPLACEMENT_REQUIRES_STRING,
+                                    SORT_ERROR_MISSINGPLACEMENT_REQUIRES_STRING.message,
+                                ))
+                            }
+                        };
+                        args.missing = match value {
+                            "auto" => MissingPlacement::Auto,
+                            "first" => MissingPlacement::First,
+                            "last" => MissingPlacement::Last,
+                            other => {
+                                return Err(sort_error(
+                                    &SORT_ERROR_MISSINGPLACEMENT_UNKNOWN,
+                                    format!("sort: unsupported MissingPlacement '{other}'"),
+                                ))
+                            }
+                        };
+                        i += 1;
+                        continue;
                     }
                     _ => {}
                 }
@@ -811,7 +1202,7 @@ impl SortArgs {
                             _ => {
                                 return Err(sort_error(
                                     &SORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING,
-                                    "sort: 'ComparisonMethod' requires a string value",
+                                    SORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING.message,
                                 ))
                             }
                         };
@@ -832,11 +1223,31 @@ impl SortArgs {
                         continue;
                     }
                     "missingplacement" => {
-                        return Err(sort_error(
-                            &SORT_ERROR_MISSINGPLACEMENT_UNSUPPORTED,
-                            SORT_ERROR_MISSINGPLACEMENT_UNSUPPORTED.message,
-                        )
-                        .into());
+                        i += 1;
+                        if i >= rest.len() {
+                            return Err(sort_invalid_argument(
+                                "sort: expected a value for 'MissingPlacement'",
+                            ));
+                        }
+                        let value = tensor::value_to_string(&rest[i]).ok_or_else(|| {
+                            sort_error(
+                                &SORT_ERROR_MISSINGPLACEMENT_REQUIRES_STRING,
+                                SORT_ERROR_MISSINGPLACEMENT_REQUIRES_STRING.message,
+                            )
+                        })?;
+                        args.missing = match value.trim().to_ascii_lowercase().as_str() {
+                            "auto" => MissingPlacement::Auto,
+                            "first" => MissingPlacement::First,
+                            "last" => MissingPlacement::Last,
+                            other => {
+                                return Err(sort_error(
+                                    &SORT_ERROR_MISSINGPLACEMENT_UNKNOWN,
+                                    format!("sort: unsupported MissingPlacement '{other}'"),
+                                ))
+                            }
+                        };
+                        i += 1;
+                        continue;
                     }
                     _ => {}
                 }
@@ -852,7 +1263,7 @@ impl SortArgs {
 
 fn is_dimension_placeholder(value: &Value) -> bool {
     match value {
-        Value::Tensor(t) => t.data.is_empty(),
+        Value::Tensor(t) => tensor::tensor_element_len(t) == 0,
         Value::LogicalArray(logical) => logical.data.is_empty(),
         _ => false,
     }
@@ -860,7 +1271,7 @@ fn is_dimension_placeholder(value: &Value) -> bool {
 
 pub struct SortEvaluation {
     sorted: Value,
-    indices: Tensor,
+    indices: Value,
 }
 
 impl SortEvaluation {
@@ -869,12 +1280,11 @@ impl SortEvaluation {
     }
 
     pub fn into_values(self) -> (Value, Value) {
-        let indices = tensor::tensor_into_value(self.indices);
-        (self.sorted, indices)
+        (self.sorted, self.indices)
     }
 
     pub fn indices_value(&self) -> Value {
-        tensor::tensor_into_value(self.indices.clone())
+        self.indices.clone()
     }
 }
 
@@ -883,7 +1293,11 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ComplexTensor, IntValue, ResolveContext, Tensor, Type, Value};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{
+        ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericStorage, Tensor,
+        Value,
+    };
 
     fn sort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::sort_builtin(value, rest))
@@ -900,11 +1314,30 @@ pub(crate) mod tests {
         let result = sort_builtin(Value::Tensor(tensor), Vec::new()).expect("sort");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![1.0, 2.0, 3.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0]);
                 assert_eq!(t.shape, vec![3, 1]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn sort_preserves_native_single_storage_and_indices() {
+        let tensor = Tensor::from_f32(vec![3.0, 1.0, 2.0], vec![3, 1]).expect("input");
+        let (sorted, indices) = evaluate(Value::Tensor(tensor), &[])
+            .expect("sort")
+            .into_values();
+        let Value::Tensor(sorted) = sorted else {
+            panic!("expected sorted tensor");
+        };
+        assert_eq!(
+            sorted.into_numeric_storage().expect("storage"),
+            NumericStorage::F32(vec![1.0, 2.0, 3.0])
+        );
+        let Value::Tensor(indices) = indices else {
+            panic!("expected index tensor");
+        };
+        assert_eq!(indices.materialize_f64(), vec![2.0, 3.0, 1.0]);
     }
 
     #[test]
@@ -915,6 +1348,164 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn sort_preserves_all_exact_real_integer_classes_and_indices() {
+        let cases = [
+            (
+                IntegerStorage::I8(vec![i8::MAX, i8::MIN, 0, 7]),
+                IntegerStorage::I8(vec![i8::MIN, 0, 7, i8::MAX]),
+            ),
+            (
+                IntegerStorage::I16(vec![i16::MAX, i16::MIN, 0, 7]),
+                IntegerStorage::I16(vec![i16::MIN, 0, 7, i16::MAX]),
+            ),
+            (
+                IntegerStorage::I32(vec![i32::MAX, i32::MIN, 0, 7]),
+                IntegerStorage::I32(vec![i32::MIN, 0, 7, i32::MAX]),
+            ),
+            (
+                IntegerStorage::I64(vec![i64::MAX, i64::MIN, 0, 7]),
+                IntegerStorage::I64(vec![i64::MIN, 0, 7, i64::MAX]),
+            ),
+            (
+                IntegerStorage::U8(vec![u8::MAX, 0, 7, 9]),
+                IntegerStorage::U8(vec![0, 7, 9, u8::MAX]),
+            ),
+            (
+                IntegerStorage::U16(vec![u16::MAX, 0, 7, 700]),
+                IntegerStorage::U16(vec![0, 7, 700, u16::MAX]),
+            ),
+            (
+                IntegerStorage::U32(vec![u32::MAX, 0, 7, 9_007_199]),
+                IntegerStorage::U32(vec![0, 7, 9_007_199, u32::MAX]),
+            ),
+            (
+                IntegerStorage::U64(vec![u64::MAX, 0, 7, 9_007_199_254_740_993]),
+                IntegerStorage::U64(vec![0, 7, 9_007_199_254_740_993, u64::MAX]),
+            ),
+        ];
+
+        for (input, expected) in cases {
+            let tensor = Tensor::new_integer(input, vec![4, 1]).expect("input");
+            let (sorted, indices) = evaluate(Value::Tensor(tensor), &[])
+                .expect("sort")
+                .into_values();
+            let Value::Tensor(sorted) = sorted else {
+                panic!("expected exact integer sorted values");
+            };
+            assert_eq!(sorted.integer_storage(), Some(&expected));
+            let Value::Tensor(indices) = indices else {
+                panic!("expected index tensor");
+            };
+            assert_eq!(indices.materialize_f64(), vec![2.0, 3.0, 4.0, 1.0]);
+        }
+    }
+
+    #[test]
+    fn sort_reads_exact_integer_values_without_mirror() {
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993, 7]),
+            vec![4, 1],
+        )
+        .expect("input");
+
+        let (sorted, indices) = evaluate(Value::Tensor(tensor), &[])
+            .expect("sort")
+            .into_values();
+        let Value::Tensor(sorted) = sorted else {
+            panic!("expected exact integer sorted values");
+        };
+        assert_eq!(
+            sorted.integer_storage(),
+            Some(&IntegerStorage::U64(vec![
+                0,
+                7,
+                9_007_199_254_740_993,
+                u64::MAX,
+            ]))
+        );
+        let Value::Tensor(indices) = indices else {
+            panic!("expected index tensor");
+        };
+        assert_eq!(indices.materialize_f64(), vec![2.0, 4.0, 3.0, 1.0]);
+    }
+
+    #[test]
+    fn sort_exact_integer_honors_descend_abs_and_dimension() {
+        let input = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 0, 7, 9_007_199_254_740_993]),
+            vec![4, 1],
+        )
+        .expect("input");
+        let (sorted, indices) = evaluate(Value::Tensor(input), &[Value::from("descend")])
+            .expect("descending sort")
+            .into_values();
+        let Value::Tensor(sorted) = sorted else {
+            panic!("expected exact integer sorted values");
+        };
+        assert_eq!(
+            sorted.integer_storage(),
+            Some(&IntegerStorage::U64(vec![
+                u64::MAX,
+                9_007_199_254_740_993,
+                7,
+                0,
+            ]))
+        );
+        let Value::Tensor(indices) = indices else {
+            panic!("expected index tensor");
+        };
+        assert_eq!(indices.materialize_f64(), vec![1.0, 4.0, 3.0, 2.0]);
+
+        let input = Tensor::new_integer(
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX, 2, -1]),
+            vec![4, 1],
+        )
+        .expect("input");
+        let (sorted, indices) = evaluate(
+            Value::Tensor(input),
+            &[Value::from("ComparisonMethod"), Value::from("abs")],
+        )
+        .expect("absolute sort")
+        .into_values();
+        let Value::Tensor(sorted) = sorted else {
+            panic!("expected exact integer sorted values");
+        };
+        assert_eq!(
+            sorted.integer_storage(),
+            Some(&IntegerStorage::I64(vec![-1, 2, i64::MAX, i64::MIN]))
+        );
+        let Value::Tensor(indices) = indices else {
+            panic!("expected index tensor");
+        };
+        assert_eq!(indices.materialize_f64(), vec![4.0, 3.0, 2.0, 1.0]);
+
+        let input = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 0, 7, 9_007_199_254_740_993]),
+            vec![2, 2],
+        )
+        .expect("matrix input");
+        let (sorted, indices) = evaluate(Value::Tensor(input), &[Value::Int(IntValue::I32(2))])
+            .expect("dimension sort")
+            .into_values();
+        let Value::Tensor(sorted) = sorted else {
+            panic!("expected exact integer matrix values");
+        };
+        assert_eq!(
+            sorted.integer_storage(),
+            Some(&IntegerStorage::U64(vec![
+                7,
+                0,
+                u64::MAX,
+                9_007_199_254_740_993,
+            ]))
+        );
+        let Value::Tensor(indices) = indices else {
+            panic!("expected index tensor");
+        };
+        assert_eq!(indices.materialize_f64(), vec![2.0, 1.0, 1.0, 2.0]);
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sort_descend_direction() {
@@ -922,7 +1513,7 @@ pub(crate) mod tests {
         let result =
             sort_builtin(Value::Tensor(tensor), vec![Value::from("descend")]).expect("sort");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data, vec![4.0, 3.0, 2.0, 1.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![4.0, 3.0, 2.0, 1.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -935,13 +1526,13 @@ pub(crate) mod tests {
         let (sorted, indices) = eval.into_values();
         match sorted {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![2.0, 4.0, 1.0, 5.0, 3.0, 6.0]);
+                assert_eq!(t.materialize_f64(), vec![2.0, 4.0, 1.0, 5.0, 3.0, 6.0]);
                 assert_eq!(t.shape, vec![2, 3]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
         match indices {
-            Value::Tensor(t) => assert_eq!(t.data, vec![2.0, 1.0, 1.0, 2.0, 2.0, 1.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![2.0, 1.0, 1.0, 2.0, 2.0, 1.0]),
             other => panic!("expected tensor indices, got {other:?}"),
         }
     }
@@ -955,13 +1546,13 @@ pub(crate) mod tests {
         let (sorted, indices) = eval.into_values();
         match sorted {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![1.0, 2.0, 2.0, 3.0, 4.0, 5.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 2.0, 3.0, 4.0, 5.0]);
                 assert_eq!(t.shape, vec![2, 3]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
         match indices {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]),
             other => panic!("expected tensor indices, got {other:?}"),
         }
     }
@@ -982,8 +1573,28 @@ pub(crate) mod tests {
         .expect("evaluate");
         let (sorted, _) = eval.into_values();
         match sorted {
-            Value::Tensor(t) => assert_eq!(t.data, vec![4.0, 3.0, 1.0, 2.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![4.0, 3.0, 1.0, 2.0]),
             other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sort_typed_integer_dimension_argument_is_not_empty_placeholder_without_mirror() {
+        let tensor = Tensor::new(vec![1.0, 3.0, 4.0, 2.0, 2.0, 5.0], vec![2, 3]).unwrap();
+        let dim = Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("dimension");
+
+        let eval = evaluate(Value::Tensor(tensor), &[Value::Tensor(dim)]).expect("evaluate");
+        let (sorted, indices) = eval.into_values();
+        match sorted {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 3]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 2.0, 3.0, 4.0, 5.0]);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+        match indices {
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]),
+            other => panic!("expected tensor indices, got {other:?}"),
         }
     }
 
@@ -998,7 +1609,7 @@ pub(crate) mod tests {
         .expect("evaluate");
         let (sorted, _) = eval.into_values();
         match sorted {
-            Value::Tensor(t) => assert_eq!(t.data, vec![3.0, 1.0, 4.0, 2.0, 5.0, 2.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![3.0, 1.0, 4.0, 2.0, 5.0, 2.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -1010,11 +1621,11 @@ pub(crate) mod tests {
         let eval = evaluate(Value::Tensor(tensor), &[]).expect("evaluate");
         let (sorted, indices) = eval.into_values();
         match sorted {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 2.0, 4.0, 9.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 4.0, 9.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
         match indices {
-            Value::Tensor(t) => assert_eq!(t.data, vec![2.0, 4.0, 1.0, 3.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![2.0, 4.0, 1.0, 3.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -1027,8 +1638,8 @@ pub(crate) mod tests {
         let (sorted, _) = eval.into_values();
         match sorted {
             Value::Tensor(t) => {
-                assert!(t.data[3].is_nan());
-                assert_eq!(&t.data[0..3], &[1.0, 2.0, 4.0]);
+                assert!(t.materialize_f64()[3].is_nan());
+                assert_eq!(&t.materialize_f64()[0..3], &[1.0, 2.0, 4.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1038,8 +1649,8 @@ pub(crate) mod tests {
         let (sorted_desc, _) = eval_desc.into_values();
         match sorted_desc {
             Value::Tensor(t) => {
-                assert!(t.data[0].is_nan());
-                assert_eq!(&t.data[1..], &[4.0, 2.0, 1.0]);
+                assert!(t.materialize_f64()[0].is_nan());
+                assert_eq!(&t.materialize_f64()[1..], &[4.0, 2.0, 1.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1056,7 +1667,7 @@ pub(crate) mod tests {
         .expect("evaluate");
         let (sorted, _) = eval.into_values();
         match sorted {
-            Value::Tensor(t) => assert_eq!(t.data, vec![-1.0, -2.0, 3.0, -8.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![-1.0, -2.0, 3.0, -8.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -1076,7 +1687,7 @@ pub(crate) mod tests {
         .expect("evaluate");
         let (sorted, _) = eval.into_values();
         match sorted {
-            Value::Tensor(t) => assert_eq!(t.data, vec![4.0, -3.0, 2.0, -1.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![4.0, -3.0, 2.0, -1.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -1090,14 +1701,184 @@ pub(crate) mod tests {
         let (sorted, indices) = eval.into_values();
         match sorted {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.data, vec![(0.0, -1.0), (1.0, 2.0), (-3.0, 0.5)])
+                assert_eq!(
+                    t.materialize_f64(),
+                    vec![(0.0, -1.0), (1.0, 2.0), (-3.0, 0.5)]
+                )
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
         match indices {
-            Value::Tensor(t) => assert_eq!(t.data, vec![3.0, 1.0, 2.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![3.0, 1.0, 2.0]),
             other => panic!("expected tensor indices, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn sort_preserves_native_complex_single_storage_and_indices() {
+        let tensor =
+            ComplexTensor::from_f32(vec![(3.0, 4.0), (1.0, 0.0), (0.0, 2.0)], vec![3, 1]).unwrap();
+        let (sorted, indices) = evaluate(Value::ComplexTensor(tensor), &[])
+            .expect("sort")
+            .into_values();
+        let Value::ComplexTensor(sorted) = sorted else {
+            panic!("expected complex single tensor");
+        };
+        assert_eq!(
+            sorted.as_f32_slice(),
+            Some(&[(1.0, 0.0), (0.0, 2.0), (3.0, 4.0)][..])
+        );
+        let Value::Tensor(indices) = indices else {
+            panic!("expected index tensor");
+        };
+        assert_eq!(indices.as_f64_slice(), Some(&[2.0, 3.0, 1.0][..]));
+    }
+
+    #[test]
+    fn sort_preserves_one_element_complex_single_tensor() {
+        let tensor = ComplexTensor::from_f32(vec![(1.25, -2.5)], vec![1, 1]).unwrap();
+        let sorted = evaluate(Value::ComplexTensor(tensor), &[])
+            .expect("sort")
+            .into_sorted_value();
+        let Value::ComplexTensor(sorted) = sorted else {
+            panic!("expected complex single tensor");
+        };
+        assert_eq!(sorted.as_f32_slice(), Some(&[(1.25, -2.5)][..]));
+    }
+
+    #[test]
+    fn sort_orders_typed_complex_uint64_exactly_and_preserves_storage() {
+        for input in [
+            (
+                IntegerStorage::I8(vec![3, 1]),
+                IntegerStorage::I8(vec![4, 0]),
+            ),
+            (
+                IntegerStorage::I16(vec![3, 1]),
+                IntegerStorage::I16(vec![4, 0]),
+            ),
+            (
+                IntegerStorage::I32(vec![3, 1]),
+                IntegerStorage::I32(vec![4, 0]),
+            ),
+            (
+                IntegerStorage::I64(vec![3, 1]),
+                IntegerStorage::I64(vec![4, 0]),
+            ),
+            (
+                IntegerStorage::U8(vec![3, 1]),
+                IntegerStorage::U8(vec![4, 0]),
+            ),
+            (
+                IntegerStorage::U16(vec![3, 1]),
+                IntegerStorage::U16(vec![4, 0]),
+            ),
+            (
+                IntegerStorage::U32(vec![3, 1]),
+                IntegerStorage::U32(vec![4, 0]),
+            ),
+            (
+                IntegerStorage::U64(vec![3, 1]),
+                IntegerStorage::U64(vec![4, 0]),
+            ),
+        ] {
+            let expected_real = input
+                .0
+                .from_exact_values_like(vec![
+                    input.0.value_at(1).unwrap(),
+                    input.0.value_at(0).unwrap(),
+                ])
+                .unwrap();
+            let expected_imag = input
+                .1
+                .from_exact_values_like(vec![
+                    input.1.value_at(1).unwrap(),
+                    input.1.value_at(0).unwrap(),
+                ])
+                .unwrap();
+            let tensor = ComplexTensor::new_integer(
+                IntegerComplexStorage::new(input.0, input.1).unwrap(),
+                vec![2, 1],
+            )
+            .unwrap();
+            let sorted = evaluate(Value::ComplexTensor(tensor), &[])
+                .expect("typed complex integer sort")
+                .into_sorted_value();
+            let Value::ComplexTensor(sorted) = sorted else {
+                panic!("expected typed complex integer tensor");
+            };
+            assert_eq!(
+                sorted.integer_storage(),
+                Some(&IntegerComplexStorage::new(expected_real, expected_imag).unwrap())
+            );
+        }
+
+        let input = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX, u64::MAX - 1, 0]),
+            IntegerStorage::U64(vec![0, 1, u64::MAX]),
+        )
+        .unwrap();
+        let tensor = ComplexTensor::new_integer(input, vec![3, 1]).unwrap();
+        let (sorted, indices) = evaluate(Value::ComplexTensor(tensor), &[])
+            .expect("typed complex integer sort")
+            .into_values();
+        let Value::ComplexTensor(sorted) = sorted else {
+            panic!("expected typed complex integer tensor");
+        };
+        assert_eq!(
+            sorted.integer_storage(),
+            Some(
+                &IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![u64::MAX - 1, u64::MAX, 0]),
+                    IntegerStorage::U64(vec![1, 0, u64::MAX]),
+                )
+                .unwrap()
+            )
+        );
+        let Value::Tensor(indices) = indices else {
+            panic!("expected double indices");
+        };
+        assert_eq!(indices.as_f64_slice(), Some(&[2.0, 1.0, 3.0][..]));
+    }
+
+    #[test]
+    fn sort_restores_exact_typed_complex_integer_results_to_the_input_provider() {
+        test_support::with_test_provider(|provider| {
+            let input = ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![u64::MAX, u64::MAX - 1]),
+                    IntegerStorage::U64(vec![0, 1]),
+                )
+                .unwrap(),
+                vec![2, 1],
+            )
+            .unwrap();
+            let handle =
+                crate::builtins::common::gpu_helpers::upload_complex_tensor(provider, &input)
+                    .expect("typed complex upload");
+            let (sorted, indices) = evaluate(Value::GpuTensor(handle), &[])
+                .expect("resident typed complex sort")
+                .into_values();
+            let sorted = block_on(crate::builtins::common::gpu_helpers::gather_value_async(
+                &sorted,
+            ))
+            .expect("gather sorted values");
+            let indices = test_support::gather(indices).expect("gather sorted indices");
+            let Value::ComplexTensor(sorted) = sorted else {
+                panic!("expected typed complex integer tensor");
+            };
+            assert_eq!(
+                sorted.integer_storage(),
+                Some(
+                    &IntegerComplexStorage::new(
+                        IntegerStorage::U64(vec![u64::MAX - 1, u64::MAX]),
+                        IntegerStorage::U64(vec![1, 0]),
+                    )
+                    .unwrap()
+                )
+            );
+            assert_eq!(indices.as_f64_slice(), Some(&[2.0, 1.0][..]));
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1117,7 +1898,10 @@ pub(crate) mod tests {
         let (sorted, _) = eval.into_values();
         match sorted {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.data, vec![(1.0, 2.0), (1.0, -1.0), (-3.0, 0.0)]);
+                assert_eq!(
+                    t.materialize_f64(),
+                    vec![(1.0, 2.0), (1.0, -1.0), (-3.0, 0.0)]
+                );
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -1130,13 +1914,140 @@ pub(crate) mod tests {
         let eval = evaluate(Value::Tensor(tensor), &[]).expect("evaluate");
         let (sorted, indices) = eval.into_values();
         match sorted {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 2.0, 2.0, 2.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 2.0, 2.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
         match indices {
-            Value::Tensor(t) => assert_eq!(t.data, vec![3.0, 1.0, 2.0, 4.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![3.0, 1.0, 2.0, 4.0]),
             other => panic!("expected tensor indices, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn sort_abs_ties_follow_phase_for_real_integer_and_complex_values() {
+        let args = [Value::from("ComparisonMethod"), Value::from("abs")];
+        let (real, real_indices) = evaluate(
+            Value::Tensor(Tensor::new(vec![-3.0, 3.0], vec![2, 1]).expect("real")),
+            &args,
+        )
+        .expect("real sort")
+        .into_values();
+        let Value::Tensor(real) = real else {
+            panic!("expected real tensor");
+        };
+        assert_eq!(real.materialize_f64(), vec![3.0, -3.0]);
+        let Value::Tensor(real_indices) = real_indices else {
+            panic!("expected real indices");
+        };
+        assert_eq!(real_indices.materialize_f64(), vec![2.0, 1.0]);
+
+        let (integer, _) = evaluate(
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::I64(vec![-3, 3]), vec![2, 1]).expect("integer"),
+            ),
+            &args,
+        )
+        .expect("integer sort")
+        .into_values();
+        let Value::Tensor(integer) = integer else {
+            panic!("expected integer tensor");
+        };
+        assert_eq!(
+            integer.integer_storage(),
+            Some(&IntegerStorage::I64(vec![3, -3]))
+        );
+
+        let (complex, complex_indices) = evaluate(
+            Value::ComplexTensor(
+                ComplexTensor::new(vec![(-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)], vec![3, 1])
+                    .expect("complex"),
+            ),
+            &[],
+        )
+        .expect("complex sort")
+        .into_values();
+        let Value::ComplexTensor(complex) = complex else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(
+            complex.materialize_f64(),
+            vec![(0.0, -1.0), (0.0, 1.0), (-1.0, 0.0)]
+        );
+        let Value::Tensor(complex_indices) = complex_indices else {
+            panic!("expected complex indices");
+        };
+        assert_eq!(complex_indices.materialize_f64(), vec![3.0, 2.0, 1.0]);
+
+        let (phase_boundary, phase_boundary_indices) = evaluate(
+            Value::ComplexTensor(
+                ComplexTensor::new(vec![(-1.0, 0.0), (-1.0, -0.0)], vec![2, 1])
+                    .expect("phase boundary"),
+            ),
+            &[],
+        )
+        .expect("phase-boundary sort")
+        .into_values();
+        let Value::ComplexTensor(phase_boundary) = phase_boundary else {
+            panic!("expected complex phase-boundary tensor");
+        };
+        assert_eq!(
+            phase_boundary.materialize_f64(),
+            vec![(-1.0, 0.0), (-1.0, -0.0)]
+        );
+        let Value::Tensor(phase_boundary_indices) = phase_boundary_indices else {
+            panic!("expected complex phase-boundary indices");
+        };
+        assert_eq!(phase_boundary_indices.materialize_f64(), vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn sort_preserves_logical_class_and_accepts_every_integer_dimension_class() {
+        let (logical, logical_indices) = evaluate(
+            Value::LogicalArray(LogicalArray::new(vec![1, 0, 1], vec![3, 1]).expect("logical")),
+            &[],
+        )
+        .expect("logical sort")
+        .into_values();
+        let Value::LogicalArray(logical) = logical else {
+            panic!("expected logical array");
+        };
+        assert_eq!(logical.data, vec![0, 1, 1]);
+        let Value::Tensor(logical_indices) = logical_indices else {
+            panic!("expected logical indices");
+        };
+        assert_eq!(logical_indices.materialize_f64(), vec![2.0, 1.0, 3.0]);
+
+        for dimension in [
+            IntegerStorage::I8(vec![2]),
+            IntegerStorage::I16(vec![2]),
+            IntegerStorage::I32(vec![2]),
+            IntegerStorage::I64(vec![2]),
+            IntegerStorage::U8(vec![2]),
+            IntegerStorage::U16(vec![2]),
+            IntegerStorage::U32(vec![2]),
+            IntegerStorage::U64(vec![2]),
+        ] {
+            let input = Tensor::new(vec![4.0, 3.0, 2.0, 1.0], vec![2, 2]).expect("input");
+            let dim = Value::Tensor(Tensor::new_integer(dimension, vec![1, 1]).expect("dimension"));
+            let sorted = evaluate(Value::Tensor(input), &[dim])
+                .expect("typed dimension")
+                .into_sorted_value();
+            let Value::Tensor(sorted) = sorted else {
+                panic!("expected tensor");
+            };
+            assert_eq!(sorted.materialize_f64(), vec![2.0, 1.0, 4.0, 3.0]);
+        }
+    }
+
+    #[test]
+    fn sort_rejects_more_than_two_outputs() {
+        let _outputs = crate::output_count::push_output_count(Some(3));
+        let error = sort_builtin(
+            Value::Tensor(Tensor::new(vec![2.0, 1.0], vec![2, 1]).expect("input")),
+            Vec::new(),
+        )
+        .expect_err("too many outputs");
+        assert!(error.message().contains("maximum is 2"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1147,13 +2058,13 @@ pub(crate) mod tests {
         let (sorted, indices) = eval.into_values();
         match sorted {
             Value::Tensor(t) => {
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
                 assert_eq!(t.shape, tensor.shape);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
         match indices {
-            Value::Tensor(t) => assert!(t.data.is_empty()),
+            Value::Tensor(t) => assert!(t.materialize_f64().is_empty()),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -1169,26 +2080,57 @@ pub(crate) mod tests {
         .expect("evaluate");
         let (sorted, indices) = eval.into_values();
         match sorted {
-            Value::Tensor(t) => assert_eq!(t.data, tensor.data),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), tensor.materialize_f64()),
             other => panic!("expected tensor, got {other:?}"),
         }
         match indices {
-            Value::Tensor(t) => assert!(t.data.iter().all(|v| (*v - 1.0).abs() < f64::EPSILON)),
+            Value::Tensor(t) => assert!(t
+                .materialize_f64()
+                .iter()
+                .all(|v| (*v - 1.0).abs() < f64::EPSILON)),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn sort_invalid_argument_errors() {
+    fn sort_supports_missing_placement_and_rejects_unknown_values() {
+        let input =
+            Value::Tensor(Tensor::new(vec![2.0, f64::NAN, 1.0], vec![3, 1]).expect("input"));
+        let first = sort_builtin(
+            input.clone(),
+            vec![Value::from("MissingPlacement"), Value::from("first")],
+        )
+        .expect("missing first");
+        let Value::Tensor(first) = first else {
+            panic!("expected tensor");
+        };
+        assert!(first.materialize_f64()[0].is_nan());
+        assert_eq!(&first.materialize_f64()[1..], &[1.0, 2.0]);
+
+        let last_descending = sort_builtin(
+            input,
+            vec![
+                Value::from("descend"),
+                Value::from("MissingPlacement"),
+                Value::from("last"),
+            ],
+        )
+        .expect("missing last");
+        let Value::Tensor(last_descending) = last_descending else {
+            panic!("expected tensor");
+        };
+        assert_eq!(&last_descending.materialize_f64()[..2], &[2.0, 1.0]);
+        assert!(last_descending.materialize_f64()[2].is_nan());
+
         let err = sort_builtin(
             Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
-            vec![Value::from("missingplacement"), Value::from("first")],
+            vec![Value::from("MissingPlacement"), Value::from("middle")],
         )
         .unwrap_err();
         assert_eq!(
             err.identifier(),
-            SORT_ERROR_MISSINGPLACEMENT_UNSUPPORTED.identifier
+            SORT_ERROR_MISSINGPLACEMENT_UNKNOWN.identifier
         );
     }
 
@@ -1240,20 +2182,57 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![3.0, 1.0, 2.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let eval = evaluate(Value::GpuTensor(handle), &[]).expect("evaluate");
             let (sorted, indices) = eval.into_values();
-            match sorted {
-                Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 2.0, 3.0]),
-                other => panic!("expected tensor, got {other:?}"),
-            }
-            match indices {
-                Value::Tensor(t) => assert_eq!(t.data, vec![2.0, 3.0, 1.0]),
-                other => panic!("expected tensor, got {other:?}"),
-            }
+            assert!(matches!(sorted, Value::GpuTensor(_)));
+            assert!(matches!(indices, Value::GpuTensor(_)));
+            let sorted = test_support::gather(sorted).expect("gather sorted");
+            assert_eq!(sorted.materialize_f64(), vec![1.0, 2.0, 3.0]);
+            let indices = test_support::gather(indices).expect("gather indices");
+            assert_eq!(indices.materialize_f64(), vec![2.0, 3.0, 1.0]);
+        });
+    }
+
+    #[test]
+    fn sort_gpu_preserves_exact_wide_integer_and_logical_residency() {
+        test_support::with_test_provider(|provider| {
+            let integer = Tensor::new_integer(
+                IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993]),
+                vec![3, 1],
+            )
+            .expect("integer");
+            let handle = gpu_helpers::upload_tensor(provider, &integer).expect("upload integer");
+            let (sorted, indices) = evaluate(Value::GpuTensor(handle), &[])
+                .expect("integer GPU sort")
+                .into_values();
+            assert!(matches!(sorted, Value::GpuTensor(_)));
+            assert!(matches!(indices, Value::GpuTensor(_)));
+            let sorted = test_support::gather(sorted).expect("gather integer");
+            assert_eq!(
+                sorted.into_numeric_storage().expect("integer storage"),
+                NumericStorage::U64(vec![0, 9_007_199_254_740_993, u64::MAX])
+            );
+
+            let logical = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &[1.0, 0.0, 1.0],
+                    shape: &[3, 1],
+                })
+                .expect("upload logical");
+            runmat_accelerate_api::set_handle_logical(&logical, true);
+            let (sorted, _) = evaluate(Value::GpuTensor(logical), &[])
+                .expect("logical GPU sort")
+                .into_values();
+            let Value::GpuTensor(sorted_handle) = &sorted else {
+                panic!("expected resident logical output");
+            };
+            assert!(runmat_accelerate_api::handle_is_logical(sorted_handle));
+            let sorted = test_support::gather(sorted).expect("gather logical");
+            assert_eq!(sorted.materialize_f64(), vec![0.0, 1.0, 1.0]);
         });
     }
 
@@ -1269,7 +2248,7 @@ pub(crate) mod tests {
         let (cpu_sorted, cpu_indices) = cpu_eval.into_values();
 
         let gpu_view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
@@ -1287,18 +2266,43 @@ pub(crate) mod tests {
             Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).unwrap(),
             other => panic!("unexpected CPU indices value {other:?}"),
         };
-        let gpu_sorted_tensor = match gpu_sorted {
-            Value::Tensor(t) => t,
-            Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).unwrap(),
-            other => panic!("unexpected GPU sorted value {other:?}"),
-        };
-        let gpu_indices_tensor = match gpu_indices {
-            Value::Tensor(t) => t,
-            Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).unwrap(),
-            other => panic!("unexpected GPU indices value {other:?}"),
-        };
+        assert!(matches!(gpu_sorted, Value::GpuTensor(_)));
+        assert!(matches!(gpu_indices, Value::GpuTensor(_)));
+        let gpu_sorted_tensor = test_support::gather(gpu_sorted).expect("gather GPU sorted");
+        let gpu_indices_tensor = test_support::gather(gpu_indices).expect("gather GPU indices");
 
-        assert_eq!(gpu_sorted_tensor.data, cpu_sorted_tensor.data);
-        assert_eq!(gpu_indices_tensor.data, cpu_indices_tensor.data);
+        assert_eq!(
+            gpu_sorted_tensor.materialize_f64(),
+            cpu_sorted_tensor.materialize_f64()
+        );
+        assert_eq!(
+            gpu_indices_tensor.materialize_f64(),
+            cpu_indices_tensor.materialize_f64()
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn sort_wgpu_abs_ties_follow_phase() {
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let input = provider
+            .upload(&runmat_accelerate_api::HostTensorView {
+                data: &[-3.0, 3.0],
+                shape: &[2, 1],
+            })
+            .expect("upload");
+        let (sorted, indices) = evaluate(
+            Value::GpuTensor(input),
+            &[Value::from("ComparisonMethod"), Value::from("abs")],
+        )
+        .expect("wgpu sort")
+        .into_values();
+        let sorted = test_support::gather(sorted).expect("gather sorted");
+        assert_eq!(sorted.materialize_f64(), vec![3.0, -3.0]);
+        let indices = test_support::gather(indices).expect("gather indices");
+        assert_eq!(indices.materialize_f64(), vec![2.0, 1.0]);
     }
 }

@@ -714,7 +714,7 @@ mod tests {
     use crate::builtins::plotting::xlabel::xlabel_builtin;
     use crate::builtins::plotting::ylabel::ylabel_builtin;
     use futures::executor::block_on;
-    use runmat_builtins::{Tensor, Value};
+    use runmat_value::{Tensor, Value};
 
     fn setup_plot_tests() -> PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -725,14 +725,7 @@ mod tests {
     }
 
     fn tensor_from(data: &[f64]) -> Tensor {
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![data.len()],
-            rows: data.len(),
-            cols: 1,
-            dtype: runmat_builtins::NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), vec![data.len()]).expect("plot test vector")
     }
 
     #[test]

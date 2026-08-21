@@ -4,7 +4,7 @@
   "keywords": [
     "setpref"
   ],
-  "summary": "Set RunMat session preferences.",
+  "summary": "Store a named preference value for the current RunMat session.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -23,11 +23,12 @@
     "unit": "builtins::io::repl_fs::compat::tests",
     "integration": null
   },
-  "description": "Set RunMat session preferences.",
+  "description": "`setpref(group, preference, value)` stores a value under a textual group and preference name for the current RunMat session. Preference values retain their RunMat class, shape, and nested structure.",
   "behaviors": [
-    "Accepts MATLAB text inputs such as string scalars and character row vectors for path, name, or URL arguments where applicable.",
-    "Runs on the host using the active RunMat filesystem, environment, or HTTP abstraction as appropriate.",
-    "Reports MATLAB-style runtime errors for unsupported argument shapes or unavailable host capabilities."
+    "Group and preference names accept string scalars or character row vectors.",
+    "The value may use any supported datatype. All eight integer classes are cloned without changing class, shape, or payload.",
+    "Resident values gather through the owning provider before host-side session storage; the exact gathered class is retained.",
+    "Preferences currently live for the RunMat session. Durable cross-session preference storage is not yet implemented."
   ],
   "examples": [],
   "faqs": [],

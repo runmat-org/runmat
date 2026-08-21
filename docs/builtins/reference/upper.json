@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Runs on the CPU; GPU-resident inputs are gathered before conversion to keep MATLAB parity."
+    "notes": "Text is host-only; numeric resident handles reject without implicit text conversion or provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -161,6 +161,6 @@
   },
   "gpu_residency": "RunMat keeps text data in host memory, so you typically work with ordinary string and character arrays. When text originates from GPU computations (for example, numeric code points produced by kernels), gather those values to the host and convert them to text before calling `upper`.",
   "gpu_behavior": [
-    "`upper` executes on the CPU. Text values currently reside in host memory, so providers do not offer device kernels for this builtin. When you pass a container that still holds GPU handles (for example, a struct whose string fields were gathered lazily), RunMat gathers those handles before performing the conversion. If you store characters as numeric code points on the GPU, gather and convert them to text before calling `upper`."
+    "`upper` executes on host text. Numeric resident inputs reject before provider access; gather numeric code points and convert them to text explicitly before calling it."
   ]
 }

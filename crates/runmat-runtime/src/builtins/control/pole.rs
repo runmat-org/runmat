@@ -2,9 +2,15 @@
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -67,6 +73,25 @@ pub const POLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &POLE_ERRORS,
 };
+const POLE_INTEGER_MODEL_INDEX_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "J1,...,JN model-array indices",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target documents positive-integer model-array subscripts. They are structural selectors and do not enter pole computation.",
+    }];
+pub const POLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "P = pole(sys,integer_J1,...,integer_JN)",
+        inputs: &POLE_INTEGER_MODEL_INDEX_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The compatibility contract is exact one-based model selection. RunMat currently implements singular tf/ss objects only, so the broader model-array overload rejects before any integer conversion can occur.",
+    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::pole")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -102,6 +127,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "pole,poles,control system,stability,transfer function,state space,tf,ss",
     type_resolver(pole_type),
     descriptor(crate::builtins::control::pole::POLE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::control::pole::POLE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::control::pole"
 )]
 async fn pole_builtin(sys: Value) -> BuiltinResult<Value> {
@@ -138,7 +164,7 @@ async fn pole_builtin(sys: Value) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::Tensor;
+    use runmat_value::Tensor;
 
     #[test]
     fn pole_returns_roots_of_denominator() {
@@ -154,8 +180,14 @@ mod tests {
             panic!("expected real poles");
         };
         assert_eq!(poles.shape, vec![2, 1]);
-        assert!(poles.data.iter().any(|p| (*p + 1.0).abs() < 1.0e-8));
-        assert!(poles.data.iter().any(|p| (*p + 2.0).abs() < 1.0e-8));
+        assert!(poles
+            .materialize_f64()
+            .iter()
+            .any(|p| (*p + 1.0).abs() < 1.0e-8));
+        assert!(poles
+            .materialize_f64()
+            .iter()
+            .any(|p| (*p + 2.0).abs() < 1.0e-8));
     }
 
     #[test]
@@ -172,7 +204,10 @@ mod tests {
             panic!("expected real poles");
         };
         assert_eq!(poles.shape, vec![2, 1]);
-        assert!(poles.data.iter().all(|p| (*p + 1.0).abs() < 1.0e-8));
+        assert!(poles
+            .materialize_f64()
+            .iter()
+            .all(|p| (*p + 1.0).abs() < 1.0e-8));
     }
 
     #[test]
@@ -189,9 +224,18 @@ mod tests {
             panic!("expected complex poles");
         };
         assert_eq!(poles.shape, vec![2, 1]);
-        assert!(poles.data.iter().all(|(re, _)| re.abs() < 1.0e-8));
-        assert!(poles.data.iter().any(|(_, im)| (*im - 1.0).abs() < 1.0e-8));
-        assert!(poles.data.iter().any(|(_, im)| (*im + 1.0).abs() < 1.0e-8));
+        assert!(poles
+            .materialize_f64()
+            .iter()
+            .all(|(re, _)| re.abs() < 1.0e-8));
+        assert!(poles
+            .materialize_f64()
+            .iter()
+            .any(|(_, im)| (*im - 1.0).abs() < 1.0e-8));
+        assert!(poles
+            .materialize_f64()
+            .iter()
+            .any(|(_, im)| (*im + 1.0).abs() < 1.0e-8));
     }
 
     #[test]
@@ -210,13 +254,16 @@ mod tests {
             panic!("expected complex poles");
         };
         assert_eq!(poles.shape, vec![2, 1]);
-        assert!(poles.data.iter().all(|(re, _)| (*re + 0.25).abs() < 1.0e-8));
         assert!(poles
-            .data
+            .materialize_f64()
+            .iter()
+            .all(|(re, _)| (*re + 0.25).abs() < 1.0e-8));
+        assert!(poles
+            .materialize_f64()
             .iter()
             .any(|(_, im)| (*im - 1.984313483298443).abs() < 1.0e-8));
         assert!(poles
-            .data
+            .materialize_f64()
             .iter()
             .any(|(_, im)| (*im + 1.984313483298443).abs() < 1.0e-8));
     }

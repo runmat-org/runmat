@@ -342,7 +342,7 @@ impl Default for RootScanner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{Closure, HandleRef, Listener, ObjectInstance, StructValue};
+    use runmat_value::{Closure, HandleRef, Listener, ObjectInstance, StructValue};
 
     fn ptr_addr(ptr: GcHandle) -> usize {
         ptr.addr()

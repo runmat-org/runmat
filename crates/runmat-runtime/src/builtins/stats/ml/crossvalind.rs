@@ -5,9 +5,10 @@ use std::collections::BTreeMap;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, LogicalArray, StringArray, Tensor, Value};
 
 use crate::builtins::common::random;
 use crate::builtins::common::tensor;
@@ -336,16 +337,11 @@ fn parse_options(rest: &[Value], n: usize) -> BuiltinResult<Options> {
 }
 
 fn observation_count(value: &Value) -> BuiltinResult<usize> {
-    match value {
-        Value::Num(number) => positive_integer_number(*number, "n"),
-        Value::Int(integer) => positive_integer_number(integer.to_f64(), "n"),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
-            positive_integer_number(tensor.data[0], "n")
-        }
-        other => Err(invalid_argument(format!(
-            "crossvalind: observation count must be a positive scalar, got {other:?}"
-        ))),
-    }
+    positive_integer(value, "n").map_err(|_| {
+        invalid_argument(format!(
+            "crossvalind: observation count must be a positive scalar, got {value:?}"
+        ))
+    })
 }
 
 fn validate_n(n: usize) -> BuiltinResult<()> {
@@ -470,6 +466,16 @@ fn shuffled_indices(indices: &[usize]) -> BuiltinResult<Vec<usize>> {
 }
 
 fn holdout_count(value: &Value, n: usize) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer
+            .try_to_usize()
+            .filter(|count| *count > 0 && *count < n)
+            .ok_or_else(|| {
+                invalid_argument(
+                    "crossvalind: HoldOut must be a fraction in (0,1) or an integer in [1,n)",
+                )
+            });
+    }
     let raw = scalar_number(value, "HoldOut")?;
     if raw > 0.0 && raw < 1.0 {
         return Ok(((raw * n as f64).round() as usize).clamp(1, n.saturating_sub(1)));
@@ -519,9 +525,9 @@ fn classes_from_value(value: &Value, n: usize) -> BuiltinResult<Vec<Option<Strin
 }
 
 fn numeric_labels(tensor: &Tensor) -> BuiltinResult<Vec<Option<String>>> {
-    ensure_vector(&tensor.shape, tensor.data.len(), "Classes")?;
-    Ok(tensor
-        .data
+    let values = tensor::tensor_values_f64_cow(tensor);
+    ensure_vector(&tensor.shape, values.len(), "Classes")?;
+    Ok(values
         .iter()
         .map(|value| {
             if value.is_nan() {
@@ -588,12 +594,27 @@ fn grouped_indices(labels: &[Option<String>]) -> BTreeMap<String, Vec<usize>> {
 }
 
 fn positive_integer(value: &Value, label: &str) -> BuiltinResult<usize> {
+    if let Value::Int(integer) = value {
+        return integer
+            .try_to_usize()
+            .filter(|value| *value > 0)
+            .ok_or_else(|| {
+                invalid_argument(format!(
+                    "crossvalind: {label} must be a positive integer scalar"
+                ))
+            });
+    }
     let raw = scalar_number(value, label)?;
     positive_integer_number(raw, label)
 }
 
 fn positive_integer_number(raw: f64, label: &str) -> BuiltinResult<usize> {
-    if raw.is_finite() && raw.fract().abs() <= EPS && raw >= 1.0 && raw <= usize::MAX as f64 {
+    if raw.is_finite()
+        && raw.fract().abs() <= EPS
+        && raw >= 1.0
+        && raw <= usize::MAX as f64
+        && !(usize::BITS == 64 && raw == usize::MAX as f64)
+    {
         Ok(raw as usize)
     } else {
         Err(invalid_argument(format!(
@@ -607,7 +628,9 @@ fn scalar_number(value: &Value, label: &str) -> BuiltinResult<f64> {
         Value::Num(number) => Ok(*number),
         Value::Int(integer) => Ok(integer.to_f64()),
         Value::Bool(flag) => Ok(if *flag { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Ok(tensor::tensor_value_f64(tensor, 0))
+        }
         Value::LogicalArray(array) if array.data.len() == 1 => {
             Ok(if array.data[0] == 0 { 0.0 } else { 1.0 })
         }
@@ -651,6 +674,7 @@ fn logical_value(data: Vec<u8>, shape: Vec<usize>) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_value::IntegerStorage;
 
     fn call(args: Vec<Value>, outputs: Option<usize>) -> BuiltinResult<Value> {
         let _guard = crate::output_count::push_output_count(outputs);
@@ -666,7 +690,10 @@ mod tests {
 
     fn tensor_data(value: Value) -> Vec<f64> {
         match value {
-            Value::Tensor(tensor) => tensor.data,
+            Value::Tensor(tensor) => tensor
+                .into_numeric_storage()
+                .expect("valid tensor storage")
+                .materialize_f64(),
             Value::Num(number) => vec![number],
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -676,6 +703,26 @@ mod tests {
         match value {
             Value::OutputList(values) => values,
             other => panic!("expected output list, got {other:?}"),
+        }
+    }
+
+    fn int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, vec![rows, cols]).unwrap())
+    }
+
+    #[test]
+    fn holdout_reads_every_integer_storage_variant() {
+        for storage in [
+            IntegerStorage::I8(vec![2]),
+            IntegerStorage::I16(vec![2]),
+            IntegerStorage::I32(vec![2]),
+            IntegerStorage::I64(vec![2]),
+            IntegerStorage::U8(vec![2]),
+            IntegerStorage::U16(vec![2]),
+            IntegerStorage::U32(vec![2]),
+            IntegerStorage::U64(vec![2]),
+        ] {
+            assert_eq!(holdout_count(&int_tensor(storage, 1, 1), 6).unwrap(), 2);
         }
     }
 
@@ -736,8 +783,7 @@ mod tests {
     fn classes_option_stratifies_holdout() {
         let _rng_guard = random::test_guard();
         random::set_seed(13).expect("seed");
-        let classes =
-            Tensor::new(vec![1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0], vec![8, 1]).expect("classes");
+        let classes = int_tensor(IntegerStorage::U8(vec![1, 1, 1, 1, 2, 2, 2, 2]), 8, 1);
         let outputs = output_list(
             call(
                 vec![
@@ -745,7 +791,7 @@ mod tests {
                     Value::Num(8.0),
                     Value::Num(0.5),
                     Value::from("Classes"),
-                    Value::Tensor(classes),
+                    classes,
                 ],
                 Some(2),
             )
@@ -784,5 +830,49 @@ mod tests {
         )
         .expect_err("invalid holdout");
         assert_eq!(err.identifier(), Some("RunMat:crossvalind:InvalidArgument"));
+    }
+
+    #[test]
+    fn typed_integer_partition_counts_are_exact_and_lossy_f64_is_rejected() {
+        let typed_six = Value::Int(runmat_value::IntValue::U16(6));
+        assert_eq!(observation_count(&typed_six).unwrap(), 6);
+        let typed_tensor_six = int_tensor(IntegerStorage::U16(vec![6]), 1, 1);
+        assert_eq!(observation_count(&typed_tensor_six).unwrap(), 6);
+        assert_eq!(
+            positive_integer(&Value::Int(runmat_value::IntValue::U8(3)), "KFold").unwrap(),
+            3
+        );
+        assert_eq!(
+            positive_integer(&int_tensor(IntegerStorage::U8(vec![3]), 1, 1), "KFold").unwrap(),
+            3
+        );
+        assert_eq!(
+            holdout_count(&Value::Int(runmat_value::IntValue::U8(2)), 6).unwrap(),
+            2
+        );
+        assert_eq!(
+            holdout_count(&int_tensor(IntegerStorage::U8(vec![2]), 1, 1), 6).unwrap(),
+            2
+        );
+
+        let folds = crossvalind_compute(vec![
+            Value::from("KFold"),
+            typed_tensor_six,
+            int_tensor(IntegerStorage::U8(vec![3]), 1, 1),
+        ])
+        .unwrap();
+        let PartitionOutput::Folds(Value::Tensor(folds)) = folds else {
+            panic!("expected fold tensor");
+        };
+        assert_eq!(folds.shape, vec![6, 1]);
+
+        for value in [
+            Value::Int(runmat_value::IntValue::I8(-1)),
+            Value::Num(1.5),
+            Value::Num(usize::MAX as f64 + 1.0),
+        ] {
+            assert!(positive_integer(&value, "KFold").is_err());
+        }
+        assert!(holdout_count(&Value::Int(runmat_value::IntValue::I8(-1)), 6).is_err());
     }
 }

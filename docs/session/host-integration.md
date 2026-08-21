@@ -1,10 +1,3 @@
----
-title: "Host Integration"
-category: "Session Engine"
-section: "7.6"
-last_updated: "May 28, 2026"
----
-
 # Host Integration
 
 The session API is intentionally host-neutral. Different frontends wrap it differently, but they all submit source through `ExecutionRequest` and consume structured results.

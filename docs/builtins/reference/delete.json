@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Filesystem operations always execute on the host CPU. If path inputs reside on the GPU, RunMat gathers them before removing files."
+    "notes": "Filesystem operations execute on the host CPU. Resident arguments, including nested resident values, are rejected before provider or filesystem access."
   },
   "fusion": {
     "elementwise": false,
@@ -28,7 +28,7 @@
     "unit": "builtins::io::repl_fs::delete::tests",
     "integration": "builtins::io::repl_fs::delete::tests::delete_removes_files_with_wildcard"
   },
-  "description": "`delete(filename)` removes files, while `delete(obj)` invalidates handle objects or listeners. Supported filename forms, wildcard handling, and diagnostics follow MATLAB semantics.",
+  "description": "`delete(filename)` removes files without producing a MATLAB-facing output, while `delete(obj)` invalidates handle objects or listeners. `delete(___, \"ResolveSymbolicLinks\", tf)` controls whether a symbolic-link filename removes the link or its target.",
   "behaviors": [
     "Accepts individual paths, string arrays, cell arrays of character vectors, and char matrices. Each element targets one file.",
     "Accepts handle objects (`handle`) and event listeners, marking them invalid (`isvalid` returns `false`) without touching the filesystem when invoked with non-string inputs.",
@@ -38,6 +38,8 @@
     "Expands `~` to the user’s home directory and resolves relative paths against the current working folder (`pwd`).",
     "Treats empty character vectors or empty string scalars as invalid inputs and raises `RunMat:DELETE:EmptyFilename`.",
     "When passed an empty string array or empty cell array, the builtin performs no action and returns without error, just like MATLAB."
+    ,"`ResolveSymbolicLinks` accepts scalar logical values or exact numeric zero/one, including all eight integer classes. False removes the link itself; true removes the resolved file or empty-folder target and leaves the link. The option is rejected for handle deletion."
+    ,"Multiple targets are processed sequentially. If a later target fails, earlier successful deletions are not rolled back."
   ],
   "examples": [
     {
@@ -97,11 +99,11 @@
     },
     {
       "question": "How do GPU inputs behave?",
-      "answer": "Inputs on the GPU are gathered to the host automatically. No GPU kernels are launched."
+      "answer": "Resident inputs are rejected before provider or filesystem access. Paths and control values must already be host values."
     },
     {
       "question": "Does `delete` preserve symbolic links?",
-      "answer": "Yes. RunMat delegates to the operating system: deleting a symlink removes the link itself, not the target—matching MATLAB."
+      "answer": "By default, deleting a symbolic link removes the link itself. Set `ResolveSymbolicLinks` to logical true or exact numeric one to remove the resolved target instead; the link then remains."
     },
     {
       "question": "Can I detect failures programmatically?",
@@ -194,8 +196,8 @@
     "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/delete.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/delete.rs"
   },
-  "gpu_residency": "No. `delete` executes on the CPU. If a script accidentally wraps path strings in `gpuArray`, RunMat gathers the scalars before issuing filesystem calls. Keeping paths on the GPU provides no benefit.",
+  "gpu_residency": "No. `delete` executes on the CPU and rejects resident arguments before provider or filesystem access.",
   "gpu_behavior": [
-    "`delete` performs host-side filesystem I/O. When a path argument lives on the GPU (for example, `gpuArray(\"scratch.log\")`), RunMat gathers the scalar to CPU memory before touching the filesystem. Acceleration providers do not implement dedicated hooks for `delete`, so there are no GPU kernels or device transfers beyond the automatic gathering of inputs."
+    "`delete` performs host-side filesystem I/O. Acceleration providers do not implement a `delete` hook, and resident arguments are rejected without a download."
   ]
 }

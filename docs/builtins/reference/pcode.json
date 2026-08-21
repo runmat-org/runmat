@@ -55,7 +55,7 @@
       "input": "pcode src/worker.m -inplace"
     },
     {
-      "description": "Encode multiple files with the newer RunMat obfuscation label",
+      "description": "Encoding multiple files",
       "input": "pcode src/*.m helpers/*.m -R2022a"
     }
   ],

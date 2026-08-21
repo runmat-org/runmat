@@ -2,6 +2,7 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import * as defaultFs from "./fs/default.js";
 import {
   __internals,
+  executeProgramArtifact,
   initRunMat,
   renderFigureImage,
   exportFigureScene,
@@ -10,8 +11,15 @@ import {
   exportWorkspaceState,
   importWorkspaceState,
   resetPlotState,
+  resolveRunmatConfig,
+  patchRunmatConfig,
+  migrateLegacyRunmatConfig,
+  migrateLegacyRunmatConfigInto,
   createWorkspaceHoverProvider,
   createFusionPlanAdapter,
+  decodePackageLock,
+  encodePackageLock,
+  handoffFromFrozenProject,
   FEA_ANALYSIS_PROFILES,
   FEA_ANALYSIS_RUN_KINDS,
   FEA_ARTIFACT_MANIFEST_KIND,
@@ -248,6 +256,9 @@ interface NativeSession {
   gpuStatus(): GpuStatus;
   cancelExecution?: () => void;
   setInputHandler?: (handler: ((req: InputRequest) => unknown) | null) => void;
+  installProjectHandoff?: (handoff: unknown) => unknown;
+  clearProjectHandoff?: () => void;
+  projectRevision?: () => unknown | null;
 }
 
 const baseExecuteResult: ExecuteResult = {
@@ -329,6 +340,43 @@ describe("initRunMat wiring", () => {
 
     expect(captured).toHaveLength(1);
     expect(captured[0].telemetryConsent).toBe(false);
+  });
+
+  it("passes the browser execution host through without interpreting it", async () => {
+    const captured: any[] = [];
+    const executionHost = {
+      capabilities: { topology: "serial" as const, maxWorkers: 1 },
+      launch: vi.fn(async () => ({ outcome: "success" })),
+      cancel: vi.fn()
+    };
+    __internals.setNativeModuleOverride({
+      default: async () => {},
+      initRunMat: async (options: any) => {
+        captured.push(options);
+        return createMockNativeSession();
+      }
+    } as NativeModule);
+
+    await initRunMat({ executionHost, enableGpu: false });
+
+    expect(captured[0].executionHost).toBe(executionHost);
+  });
+
+  it("delegates exact program execution to the portable wasm export", async () => {
+    const execute = vi.fn(async (request) => ({
+      outcome: "success",
+      request
+    }));
+    __internals.setNativeModuleOverride({
+      default: async () => {},
+      initRunMat: async () => createMockNativeSession(),
+      executeProgramArtifact: execute
+    } as NativeModule);
+
+    await expect(executeProgramArtifact({ schemaVersion: 1 })).resolves.toEqual({
+      outcome: "success",
+      request: { schemaVersion: 1 }
+    });
   });
 
   it("passes telemetry id and exposes telemetryClientId()", async () => {
@@ -956,6 +1004,91 @@ describe("setFusionPlanEnabled", () => {
     const session = await initRunMat({ enableGpu: false });
     session.setFusionPlanEnabled(true);
     expect(spy).toHaveBeenCalledWith(true);
+  });
+});
+
+describe("browser project handoff and lock codecs", () => {
+  afterEach(() => {
+    __internals.setNativeModuleOverride(null);
+  });
+
+  it("keeps lock parsing and handoff construction in portable Rust exports", async () => {
+    const lock = { schema_version: 1 };
+    const handoff = { schema_version: 1, project: { graph: "fixed" } };
+    const native: NativeModule = {
+      default: async () => {},
+      initRunMat: async () => createMockNativeSession(),
+      decodePackageLock: vi.fn(() => lock),
+      encodePackageLock: vi.fn(() => "schema_version = 1\n"),
+      handoffFromFrozenProject: vi.fn(() => handoff)
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    await expect(decodePackageLock("schema_version = 1\n")).resolves.toBe(lock);
+    await expect(encodePackageLock(lock)).resolves.toBe("schema_version = 1\n");
+    await expect(handoffFromFrozenProject({ graph: "fixed" })).resolves.toBe(handoff);
+  });
+
+  it("installs and preserves project revision through the session boundary", async () => {
+    const install = vi.fn(() => ({ graph: "sha256:graph", sources: "sha256:sources" }));
+    const clear = vi.fn();
+    const revision = { graph: "sha256:graph", sources: "sha256:sources" };
+    const native: NativeModule = {
+      default: async () => {},
+      initRunMat: async () =>
+        createMockNativeSession({
+          installProjectHandoff: install,
+          clearProjectHandoff: clear,
+          projectRevision: () => revision
+        })
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    const session = await initRunMat({ enableGpu: false });
+    const handoff = { schema_version: 1, project: {} };
+    await expect(session.installProjectHandoff(handoff)).resolves.toEqual(revision);
+    await expect(session.projectRevision()).resolves.toEqual(revision);
+    await session.clearProjectHandoff();
+    expect(install).toHaveBeenCalledWith(handoff);
+    expect(clear).toHaveBeenCalledOnce();
+  });
+});
+
+describe("canonical config authority", () => {
+  afterEach(() => {
+    __internals.setNativeModuleOverride(null);
+  });
+
+  it("delegates resolve, patch, and migration to the Rust/WASM exports", async () => {
+    const resolved = {
+      desktop: { artifacts: { root: ".artifacts" } },
+      runtime: { accelerate: { enabled: true } },
+    };
+    const migration = {
+      source: '[desktop.artifacts]\nroot = ".artifacts"\n',
+      changed: true,
+      removedKeys: ["artifact_root"],
+    };
+    const native: NativeModule = {
+      default: async () => {},
+      initRunMat: async () => createMockNativeSession(),
+      resolveRunmatConfig: vi.fn(() => resolved),
+      patchRunmatConfig: vi.fn(() => "patched"),
+      migrateLegacyRunmatConfig: vi.fn(() => migration),
+      migrateLegacyRunmatConfigInto: vi.fn(() => migration),
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    await expect(resolveRunmatConfig("source", "toml")).resolves.toBe(resolved);
+    await expect(patchRunmatConfig("source", "toml", {})).resolves.toBe(
+      "patched"
+    );
+    await expect(
+      migrateLegacyRunmatConfig("source", "toml")
+    ).resolves.toBe(migration);
+    await expect(
+      migrateLegacyRunmatConfigInto("legacy", "canonical", "toml")
+    ).resolves.toBe(migration);
   });
 });
 

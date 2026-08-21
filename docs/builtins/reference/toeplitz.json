@@ -27,7 +27,9 @@
     "One-input real calls produce a symmetric Toeplitz matrix from the supplied first row.",
     "One-input complex calls use the supplied vector as the first row, conjugate the off-diagonal first column, and keep the main diagonal at `r(1)`.",
     "Two-input calls use the first column value for the main diagonal when `c(1)` and `r(1)` differ.",
-    "Matching dense real tensor classes `single`, `double`, `uint8`, `uint16`, and `uint32` are preserved.",
+    "Matching `single`, `double`, and all eight native integer classes are preserved exactly. Two integer inputs must use the same class; mixed integer classes and integer/floating mixtures are rejected instead of being silently converted.",
+    "Complex single and complex double inputs preserve their floating precision. With RunMat extensions enabled, native complex-integer storage is copied exactly when both components use one integer class.",
+    "Resident inputs gather only when the provider lacks a direct construction path, and the result is restored through the provider that owns the input.",
     "Matrix and nonnumeric inputs raise errors."
   ],
   "examples": [

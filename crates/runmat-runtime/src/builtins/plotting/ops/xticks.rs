@@ -1,11 +1,45 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_builtins::{
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use super::axis_ticks::{axis_ticks_builtin, TickAxis};
 use crate::builtins::plotting::type_resolvers::get_type;
+
+const XTICKS_INTEGER_AXES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "xticks-integer-axes-handle",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "Allow a typed-integer alias for an encoded axes handle",
+    error_identifier: Some("RunMat:compatibility:XticksIntegerAxesHandleExtension"),
+};
+pub const XTICKS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [XTICKS_INTEGER_AXES_EXTENSION];
+const XTICKS_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "ticks",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "All eight integer classes are documented for increasing tick vectors.",
+}];
+const XTICKS_INTEGER_AXES_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "ax",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer aliases for encoded axes handles are separately gated.",
+    }];
+pub const XTICKS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor { form: "ticks = xticks(integer_ticks)", inputs: &XTICKS_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Integer ticks are checked in their native class for strict increase before crossing the graphics coordinate boundary; queried values are double." },
+    BuiltinIntegerCapabilityDescriptor { form: "ticks = xticks(integer_ax, ticks)", inputs: &XTICKS_INTEGER_AXES_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Strict mode rejects the encoded-handle alias before graphics state access." },
+];
 
 const XTICKS_OUTPUT_TICKS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "ticks",
@@ -113,9 +147,21 @@ pub const XTICKS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     suppress_auto_output = true,
     type_resolver(get_type),
     descriptor(crate::builtins::plotting::xticks::XTICKS_DESCRIPTOR),
+    extensions(crate::builtins::plotting::xticks::XTICKS_EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::xticks::XTICKS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::xticks"
 )]
 pub fn xticks_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if args.len() == 2
+        && args
+            .first()
+            .is_some_and(crate::builtins::common::validation::value_has_native_integer_class)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &XTICKS_INTEGER_AXES_EXTENSION,
+            "xticks",
+        )?;
+    }
     axis_ticks_builtin("xticks", TickAxis::X, args)
 }
 
@@ -127,14 +173,8 @@ mod tests {
     use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
 
     fn tensor(data: Vec<f64>) -> Value {
-        Value::Tensor(runmat_builtins::Tensor {
-            rows: 1,
-            cols: data.len(),
-            shape: vec![1, data.len()],
-            data,
-            integer_data: None,
-            dtype: runmat_builtins::NumericDType::F64,
-        })
+        let len = data.len();
+        Value::Tensor(runmat_value::Tensor::new(data, vec![1, len]).expect("x tick row"))
     }
 
     #[test]
@@ -146,7 +186,9 @@ mod tests {
 
         let set = xticks_builtin(vec![tensor(vec![0.0, 2.5, 5.0])]).unwrap();
         assert_eq!(
-            runmat_builtins::Tensor::try_from(&set).unwrap().data,
+            runmat_value::Tensor::try_from(&set)
+                .unwrap()
+                .materialize_f64(),
             vec![0.0, 2.5, 5.0]
         );
         assert_eq!(
@@ -156,13 +198,17 @@ mod tests {
 
         let queried = xticks_builtin(Vec::new()).unwrap();
         assert_eq!(
-            runmat_builtins::Tensor::try_from(&queried).unwrap().data,
+            runmat_value::Tensor::try_from(&queried)
+                .unwrap()
+                .materialize_f64(),
             vec![0.0, 2.5, 5.0]
         );
         let ax = crate::builtins::plotting::gca::gca_builtin(Vec::new()).unwrap();
         let prop = get_builtin(vec![ax, Value::String("XTick".into())]).unwrap();
         assert_eq!(
-            runmat_builtins::Tensor::try_from(&prop).unwrap().data,
+            runmat_value::Tensor::try_from(&prop)
+                .unwrap()
+                .materialize_f64(),
             vec![0.0, 2.5, 5.0]
         );
 
@@ -211,7 +257,9 @@ mod tests {
         ]))
         .unwrap();
         let queried = xticks_builtin(Vec::new()).unwrap();
-        let ticks = runmat_builtins::Tensor::try_from(&queried).unwrap().data;
+        let ticks = runmat_value::Tensor::try_from(&queried)
+            .unwrap()
+            .materialize_f64();
 
         assert_eq!(ticks.first().copied(), Some(10.0));
         assert_eq!(ticks.last().copied(), Some(30.0));

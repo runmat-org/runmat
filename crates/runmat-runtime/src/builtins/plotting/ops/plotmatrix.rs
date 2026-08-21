@@ -2,10 +2,15 @@
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Type, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Tensor, Value};
 
 use super::histogram::histogram_builtin;
 use super::op_common::line_inputs::NumericInput;
@@ -16,9 +21,30 @@ use super::state::{
     select_axes_for_figure, FigureHandle,
 };
 use super::style::value_as_string;
+use crate::builtins::common::tensor as tensor_utils;
 use crate::BuiltinResult;
 
 const BUILTIN_NAME: &str = "plotmatrix";
+
+const PLOTMATRIX_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X/Y columns",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Matrix columns accept every integer class and are gathered by native storage before each scatter cell is constructed.",
+    }];
+pub const PLOTMATRIX_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "plotmatrix(integer_X [, integer_Y], ...)",
+        inputs: &PLOTMATRIX_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Column extraction preserves authoritative native storage and scatter source properties; histogram binning and rendering are explicit floating computation boundaries.",
+    }];
 
 type AxesTarget = Option<(FigureHandle, usize)>;
 type PlotMatrixArgs = (AxesTarget, Vec<Value>);
@@ -170,7 +196,7 @@ fn plotmatrix_type(_args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> Ty
 
 #[derive(Clone)]
 struct MatrixColumns {
-    columns: Vec<Vec<f64>>,
+    columns: Vec<Tensor>,
     observations: usize,
 }
 
@@ -191,6 +217,7 @@ struct PlotMatrixOutputs {
     suppress_auto_output = true,
     type_resolver(plotmatrix_type),
     descriptor(crate::builtins::plotting::plotmatrix::PLOTMATRIX_DESCRIPTOR),
+    integer_capabilities(crate::builtins::plotting::plotmatrix::PLOTMATRIX_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::plotmatrix"
 )]
 pub async fn plotmatrix_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -291,13 +318,13 @@ async fn matrix_columns(value: Value) -> BuiltinResult<MatrixColumns> {
     let tensor = NumericInput::from_value(value, BUILTIN_NAME)?
         .into_tensor_async(BUILTIN_NAME)
         .await?;
-    if tensor.data.is_empty() {
+    if tensor_utils::tensor_element_len(&tensor) == 0 {
         return Err(invalid("input matrices must be nonempty"));
     }
     let rows = tensor.rows();
     let cols = tensor.cols();
     let (observations, variables) = if rows == 1 || cols == 1 {
-        (tensor.data.len(), 1)
+        (tensor_utils::tensor_element_len(&tensor), 1)
     } else {
         (rows, cols)
     };
@@ -306,15 +333,22 @@ async fn matrix_columns(value: Value) -> BuiltinResult<MatrixColumns> {
     }
 
     let columns = if variables == 1 {
-        vec![tensor.data]
+        vec![tensor]
     } else {
         (0..variables)
             .map(|col| {
-                (0..observations)
-                    .map(|row| tensor.data[col * rows + row])
-                    .collect::<Vec<_>>()
+                let indices = (0..observations)
+                    .map(|row| col * rows + row)
+                    .collect::<Vec<_>>();
+                let storage = tensor
+                    .clone()
+                    .into_numeric_storage()
+                    .map_err(invalid)?
+                    .gather(&indices)
+                    .map_err(invalid)?;
+                Tensor::from_numeric_storage(storage, vec![observations, 1]).map_err(invalid)
             })
-            .collect::<Vec<_>>()
+            .collect::<BuiltinResult<Vec<_>>>()?
     };
     Ok(MatrixColumns {
         columns,
@@ -347,7 +381,7 @@ async fn render_plotmatrix(parsed: ParsedPlotMatrix) -> BuiltinResult<PlotMatrix
             if parsed.one_input && row == col {
                 let handle = histogram_builtin(vec![
                     Value::Num(ax_handle),
-                    vector_value(parsed.x.columns[row].clone()),
+                    Value::Tensor(parsed.x.columns[row].clone()),
                 ])
                 .await?;
                 hist_handles.push(handle);
@@ -355,8 +389,8 @@ async fn render_plotmatrix(parsed: ParsedPlotMatrix) -> BuiltinResult<PlotMatrix
             } else {
                 let mut rest = vec![
                     Value::Num(ax_handle),
-                    vector_value(parsed.x.columns[row].clone()),
-                    vector_value(parsed.y.columns[col].clone()),
+                    Value::Tensor(parsed.x.columns[row].clone()),
+                    Value::Tensor(parsed.y.columns[col].clone()),
                 ];
                 if let Some(style) = &parsed.style {
                     rest.push(Value::String(style.clone()));
@@ -403,14 +437,7 @@ fn vector_value(data: Vec<f64>) -> Value {
 }
 
 fn matrix_value(data: Vec<f64>, rows: usize, cols: usize) -> Value {
-    Value::Tensor(Tensor {
-        data,
-        rows,
-        cols,
-        shape: vec![rows, cols],
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    Value::Tensor(Tensor::new(data, vec![rows, cols]).expect("plotmatrix result"))
 }
 
 fn empty_matrix() -> Value {
@@ -440,6 +467,7 @@ mod tests {
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, clone_figure, reset_hold_state_for_run};
     use futures::executor::block_on;
+    use runmat_value::IntegerStorage;
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -447,6 +475,100 @@ mod tests {
         reset_hold_state_for_run();
         let _ = clear_figure(None);
         guard
+    }
+
+    fn cleared_int_value(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor");
+        Value::Tensor(tensor)
+    }
+
+    #[test]
+    fn matrix_columns_reads_typed_integer_storage_without_mirror() {
+        let columns = block_on(matrix_columns(cleared_int_value(
+            IntegerStorage::I16(vec![1, 2, 10, 20]),
+            2,
+            2,
+        )))
+        .expect("columns");
+
+        assert_eq!(columns.observations, 2);
+        assert_eq!(columns.columns.len(), 2);
+        assert_eq!(
+            columns.columns[0].integer_storage(),
+            Some(&IntegerStorage::I16(vec![1, 2]))
+        );
+        assert_eq!(
+            columns.columns[1].integer_storage(),
+            Some(&IntegerStorage::I16(vec![10, 20]))
+        );
+    }
+
+    #[test]
+    fn matrix_columns_preserve_every_integer_storage_class() {
+        let cases = [
+            (
+                IntegerStorage::I8(vec![1, 2, 3, 4]),
+                IntegerStorage::I8(vec![1, 2]),
+            ),
+            (
+                IntegerStorage::I16(vec![1, 2, 3, 4]),
+                IntegerStorage::I16(vec![1, 2]),
+            ),
+            (
+                IntegerStorage::I32(vec![1, 2, 3, 4]),
+                IntegerStorage::I32(vec![1, 2]),
+            ),
+            (
+                IntegerStorage::I64(vec![1, 2, 3, 4]),
+                IntegerStorage::I64(vec![1, 2]),
+            ),
+            (
+                IntegerStorage::U8(vec![1, 2, 3, 4]),
+                IntegerStorage::U8(vec![1, 2]),
+            ),
+            (
+                IntegerStorage::U16(vec![1, 2, 3, 4]),
+                IntegerStorage::U16(vec![1, 2]),
+            ),
+            (
+                IntegerStorage::U32(vec![1, 2, 3, 4]),
+                IntegerStorage::U32(vec![1, 2]),
+            ),
+            (
+                IntegerStorage::U64(vec![1, 2, 3, 4]),
+                IntegerStorage::U64(vec![1, 2]),
+            ),
+        ];
+        for (input, expected) in cases {
+            let columns = block_on(matrix_columns(cleared_int_value(input, 2, 2))).unwrap();
+            assert_eq!(columns.columns[0].integer_storage(), Some(&expected));
+        }
+    }
+
+    #[test]
+    fn plotmatrix_scatter_properties_preserve_wide_uint64_columns() {
+        let _guard = setup();
+        let wide = 9_007_199_254_740_993_u64;
+        let output = block_on(plotmatrix_builtin(vec![cleared_int_value(
+            IntegerStorage::U64(vec![wide, wide + 1, wide + 2, wide + 3]),
+            2,
+            2,
+        )]))
+        .unwrap();
+        let Value::Tensor(handles) = output else {
+            panic!("expected handle matrix")
+        };
+        let handle = handles.materialize_f64()[1];
+        let Value::Tensor(x_data) =
+            get_builtin(vec![Value::Num(handle), Value::from("XData")]).unwrap()
+        else {
+            panic!("expected XData tensor")
+        };
+        assert!(matches!(
+            x_data.integer_storage(),
+            Some(IntegerStorage::U64(values))
+                if values == &vec![wide, wide + 1] || values == &vec![wide + 2, wide + 3]
+        ));
     }
 
     #[test]
@@ -528,10 +650,10 @@ mod tests {
         let Value::Tensor(handles) = output else {
             panic!("expected scatter matrix");
         };
-        assert!(handles.data[1].is_finite());
+        assert!(handles.materialize_f64()[1].is_finite());
         assert_eq!(
             get_builtin(vec![
-                Value::Num(handles.data[1]),
+                Value::Num(handles.materialize_f64()[1]),
                 Value::String("Marker".into())
             ])
             .unwrap(),
@@ -572,14 +694,7 @@ mod tests {
     }
 
     fn matrix(data: Vec<f64>, rows: usize, cols: usize) -> Value {
-        Value::Tensor(Tensor {
-            data,
-            integer_data: None,
-            rows,
-            cols,
-            shape: vec![rows, cols],
-            dtype: runmat_builtins::NumericDType::F64,
-        })
+        Value::Tensor(Tensor::new(data, vec![rows, cols]).expect("plotmatrix test matrix"))
     }
 
     fn assert_tensor_shape(value: &Value, rows: usize, cols: usize) {
@@ -594,14 +709,14 @@ mod tests {
         let Value::Tensor(tensor) = value else {
             panic!("expected tensor");
         };
-        tensor.data[0]
+        tensor.materialize_f64()[0]
     }
 
-    fn tensor_data(value: &Value) -> &[f64] {
+    fn tensor_data(value: &Value) -> Vec<f64> {
         let Value::Tensor(tensor) = value else {
             panic!("expected tensor");
         };
-        &tensor.data
+        tensor.materialize_f64()
     }
 
     fn numeric_scalar(value: &Value) -> f64 {

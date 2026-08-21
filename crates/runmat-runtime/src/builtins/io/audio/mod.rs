@@ -4,12 +4,16 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, StructValue, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerClass, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor,
 };
 use runmat_filesystem as fs;
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntegerStorage, NumericDType, StructValue, Tensor, Value};
 
 use crate::builtins::common::fs::expand_user_path;
 use crate::builtins::common::spec::{
@@ -223,6 +227,50 @@ pub const AUDIOREAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &AUDIOREAD_ERRORS,
 };
 
+const AUDIOREAD_NATIVE_INTEGER_CLASSES: [BuiltinIntegerClass; 3] = [
+    BuiltinIntegerClass::Uint8,
+    BuiltinIntegerClass::Int16,
+    BuiltinIntegerClass::Int32,
+];
+const AUDIOREAD_NATIVE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "native_audio_payload",
+        classes: &AUDIOREAD_NATIVE_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "For documented integer-coded files, datatype=\"native\" returns uint8 for 8-bit unsigned PCM, int16 for 16-bit signed PCM, and int32 for 24-bit left-aligned or 32-bit signed PCM.",
+    }];
+const AUDIOREAD_REJECTED_INTEGER_SAMPLE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "samples",
+        classes: &[],
+        availability: BuiltinIntegerInputAvailability::Rejected,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented two-element sample range has data type double; typed-integer scalar or array controls reject rather than widening the public surface.",
+    }];
+pub const AUDIOREAD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "y = audioread(filename, ..., \"native\")",
+        inputs: &AUDIOREAD_NATIVE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Native integer samples are decoded directly into authoritative storage with file-format-dependent class and column-major N-by-C channel layout; Fs remains double.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "y = audioread(filename, integer_samples, datatype)",
+        inputs: &AUDIOREAD_REJECTED_INTEGER_SAMPLE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed-integer sample-range controls are not part of the documented double-only range contract and reject before filesystem I/O; audioread has no interactive GPU-array surface.",
+    },
+];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::audio")]
 pub const AUDIOREAD_GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "audioread",
@@ -319,18 +367,6 @@ fn map_audioinfo_control_flow(err: RuntimeError) -> RuntimeError {
     let message = err.message().to_string();
     let mut builder = build_runtime_error(message)
         .with_builtin(AUDIOINFO_BUILTIN_NAME)
-        .with_source(err);
-    if let Some(identifier) = identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    builder.build()
-}
-
-fn map_audioread_control_flow(err: RuntimeError) -> RuntimeError {
-    let identifier = err.identifier().map(|value| value.to_string());
-    let message = err.message().to_string();
-    let mut builder = build_runtime_error(message)
-        .with_builtin(AUDIOREAD_BUILTIN_NAME)
         .with_source(err);
     if let Some(identifier) = identifier {
         builder = builder.with_identifier(identifier);
@@ -445,21 +481,19 @@ async fn read_audioinfo_scan(path: &Path) -> BuiltinResult<AudioInfoScan> {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::audioread_type),
     descriptor(crate::builtins::io::audio::AUDIOREAD_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::audio::AUDIOREAD_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::audio"
 )]
 async fn audioread_builtin(filename: Value, args: Vec<Value>) -> BuiltinResult<Value> {
-    let filename = gather_if_needed_async(&filename)
-        .await
-        .map_err(map_audioread_control_flow)?;
-    let mut gathered_args = Vec::with_capacity(args.len());
-    for arg in args {
-        gathered_args.push(
-            gather_if_needed_async(&arg)
-                .await
-                .map_err(map_audioread_control_flow)?,
-        );
+    if matches!(&filename, Value::GpuTensor(_))
+        || args.iter().any(|arg| matches!(arg, Value::GpuTensor(_)))
+    {
+        return Err(audioread_error_with(
+            &AUDIOREAD_ERROR_ARGUMENT,
+            "audioread: gpuArray inputs are not supported",
+        ));
     }
-    let options = parse_audioread_options(&gathered_args)?;
+    let options = parse_audioread_options(&args)?;
     let path = resolve_audioread_path(&filename)?;
     let bytes = fs::read_async(&path).await.map_err(|err| {
         audioread_error_with_source(
@@ -581,8 +615,14 @@ fn parse_wave(bytes: &[u8]) -> Result<AudioMetadata, String> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct AudioreadOptions {
-    range: Option<(usize, usize)>,
+    range: Option<AudioSampleRange>,
     native: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AudioSampleRange {
+    first: usize,
+    last: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -634,33 +674,33 @@ fn parse_audioread_datatype(value: &str) -> BuiltinResult<bool> {
     }
 }
 
-fn parse_sample_range(value: &Value) -> BuiltinResult<(usize, usize)> {
-    let data: Vec<f64> = match value {
-        Value::Tensor(t) => t.data.clone(),
-        Value::Num(n) => vec![*n],
-        Value::Int(i) => vec![i.to_f64()],
-        _ => {
-            return Err(audioread_error_with(
-                &AUDIOREAD_ERROR_ARGUMENT,
-                "audioread: sample range must be a two-element numeric vector",
-            ));
-        }
-    };
-    if data.len() != 2 {
+fn parse_sample_range(value: &Value) -> BuiltinResult<AudioSampleRange> {
+    let Value::Tensor(tensor) = value else {
         return Err(audioread_error_with(
             &AUDIOREAD_ERROR_ARGUMENT,
-            "audioread: sample range must be [first last]",
+            "audioread: sample range must be a two-element double vector",
+        ));
+    };
+    if tensor.numeric_dtype() != NumericDType::F64 || tensor.len() != 2 {
+        return Err(audioread_error_with(
+            &AUDIOREAD_ERROR_ARGUMENT,
+            "audioread: sample range must be a two-element double vector",
         ));
     }
-    let first = parse_positive_integer(data[0], "first sample")?;
-    let last = parse_positive_integer(data[1], "last sample")?;
-    if first > last {
+    let values = tensor.materialize_f64();
+    let first = parse_positive_integer(values[0], "sample range")?;
+    let last = if values[1] == f64::INFINITY {
+        None
+    } else {
+        Some(parse_positive_integer(values[1], "sample range")?)
+    };
+    if last.is_some_and(|last| first > last) {
         return Err(audioread_error_with(
             &AUDIOREAD_ERROR_ARGUMENT,
             "audioread: sample range first sample must be less than or equal to last sample",
         ));
     }
-    Ok((first, last))
+    Ok(AudioSampleRange { first, last })
 }
 
 fn parse_positive_integer(value: f64, label: &str) -> BuiltinResult<usize> {
@@ -722,7 +762,8 @@ fn decode_wave_samples(bytes: &[u8], options: AudioreadOptions) -> Result<Decode
     }
     let total_frames = parsed.data_len / block_align;
     let (start_frame, end_frame_exclusive) = match options.range {
-        Some((first, last)) => {
+        Some(AudioSampleRange { first, last }) => {
+            let last = last.unwrap_or(total_frames);
             if last > total_frames {
                 return Err("sample range exceeds the available audio frames".to_string());
             }
@@ -731,33 +772,137 @@ fn decode_wave_samples(bytes: &[u8], options: AudioreadOptions) -> Result<Decode
         None => (0, total_frames),
     };
     let frame_count = end_frame_exclusive - start_frame;
+    let data = &bytes[parsed.data_offset..parsed.data_offset + parsed.data_len];
+    let shape = vec![frame_count, channels];
+    let samples = if options.native {
+        if let Some(storage) = native_pcm_storage(
+            fmt,
+            data,
+            channels,
+            start_frame,
+            end_frame_exclusive,
+            block_align,
+            bytes_per_channel,
+        )? {
+            Tensor::new_integer(storage, shape)
+                .map_err(|err| format!("decoded audio tensor shape is invalid: {err}"))?
+        } else {
+            let out = collect_wave_samples(
+                data,
+                channels,
+                start_frame,
+                end_frame_exclusive,
+                block_align,
+                bytes_per_channel,
+                |sample_bytes| decode_wave_sample(sample_bytes, fmt, true),
+            )?;
+            Tensor::new_with_dtype(out, shape, native_wave_dtype(fmt))
+                .map_err(|err| format!("decoded audio tensor shape is invalid: {err}"))?
+        }
+    } else {
+        let out = collect_wave_samples(
+            data,
+            channels,
+            start_frame,
+            end_frame_exclusive,
+            block_align,
+            bytes_per_channel,
+            |sample_bytes| decode_wave_sample(sample_bytes, fmt, false),
+        )?;
+        Tensor::new_with_dtype(out, shape, NumericDType::F64)
+            .map_err(|err| format!("decoded audio tensor shape is invalid: {err}"))?
+    };
+    Ok(DecodedAudio {
+        samples,
+        sample_rate: fmt.sample_rate as f64,
+    })
+}
+
+fn collect_wave_samples<T>(
+    data: &[u8],
+    channels: usize,
+    start_frame: usize,
+    end_frame_exclusive: usize,
+    block_align: usize,
+    bytes_per_channel: usize,
+    mut decode: impl FnMut(&[u8]) -> Result<T, String>,
+) -> Result<Vec<T>, String> {
+    let frame_count = end_frame_exclusive - start_frame;
     let sample_count = frame_count
         .checked_mul(channels)
         .ok_or_else(|| "decoded audio dimensions overflow platform limits".to_string())?;
     let mut out = Vec::with_capacity(sample_count);
-    let data = &bytes[parsed.data_offset..parsed.data_offset + parsed.data_len];
-    let native_dtype = if options.native {
-        native_wave_dtype(fmt)
-    } else {
-        NumericDType::F64
-    };
     for channel in 0..channels {
         for frame in start_frame..end_frame_exclusive {
             let sample_offset = frame
                 .checked_mul(block_align)
                 .and_then(|base| base.checked_add(channel * bytes_per_channel))
                 .ok_or_else(|| "sample offset overflows platform limits".to_string())?;
-            let sample_bytes = &data[sample_offset..sample_offset + bytes_per_channel];
-            let value = decode_wave_sample(sample_bytes, fmt, options.native)?;
-            out.push(value);
+            out.push(decode(
+                &data[sample_offset..sample_offset + bytes_per_channel],
+            )?);
         }
     }
-    let samples = Tensor::new_with_dtype(out, vec![frame_count, channels], native_dtype)
-        .map_err(|err| format!("decoded audio tensor shape is invalid: {err}"))?;
-    Ok(DecodedAudio {
-        samples,
-        sample_rate: fmt.sample_rate as f64,
-    })
+    Ok(out)
+}
+
+fn native_pcm_storage(
+    fmt: WaveFormat,
+    data: &[u8],
+    channels: usize,
+    start_frame: usize,
+    end_frame_exclusive: usize,
+    block_align: usize,
+    bytes_per_channel: usize,
+) -> Result<Option<IntegerStorage>, String> {
+    if fmt.effective_format_tag() != 0x0001 {
+        return Ok(None);
+    }
+    let storage = match fmt.effective_bits_per_sample() {
+        8 => IntegerStorage::U8(collect_wave_samples(
+            data,
+            channels,
+            start_frame,
+            end_frame_exclusive,
+            block_align,
+            bytes_per_channel,
+            |sample| Ok(sample[0]),
+        )?),
+        16 => IntegerStorage::I16(collect_wave_samples(
+            data,
+            channels,
+            start_frame,
+            end_frame_exclusive,
+            block_align,
+            bytes_per_channel,
+            |sample| Ok(i16::from_le_bytes([sample[0], sample[1]])),
+        )?),
+        // MATLAB returns 24-bit PCM as an int32 whose valid bits are left-aligned.
+        24 => IntegerStorage::I32(collect_wave_samples(
+            data,
+            channels,
+            start_frame,
+            end_frame_exclusive,
+            block_align,
+            bytes_per_channel,
+            |sample| Ok(sign_extend_24(sample) << 8),
+        )?),
+        32 => IntegerStorage::I32(collect_wave_samples(
+            data,
+            channels,
+            start_frame,
+            end_frame_exclusive,
+            block_align,
+            bytes_per_channel,
+            |sample| {
+                Ok(i32::from_le_bytes([
+                    sample[0], sample[1], sample[2], sample[3],
+                ]))
+            },
+        )?),
+        _ => return Ok(None),
+    };
+    Ok(Some(storage))
 }
 
 fn native_wave_dtype(fmt: WaveFormat) -> NumericDType {
@@ -1514,6 +1659,7 @@ mod tests {
     use runmat_time::unix_timestamp_ms;
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
+    #[cfg(not(target_arch = "wasm32"))]
     use std::sync::Arc;
 
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
@@ -1621,12 +1767,38 @@ mod tests {
         wav_with_payload(sample_rate, channels, 8, 1, samples_interleaved)
     }
 
+    fn pcm24_wav(sample_rate: u32, channels: u16, samples_interleaved: &[i32]) -> Vec<u8> {
+        let mut payload = Vec::new();
+        for sample in samples_interleaved {
+            assert!((-8_388_608..=8_388_607).contains(sample));
+            let bytes = sample.to_le_bytes();
+            payload.extend_from_slice(&bytes[..3]);
+        }
+        wav_with_payload(sample_rate, channels, 24, 1, &payload)
+    }
+
+    fn pcm32_wav(sample_rate: u32, channels: u16, samples_interleaved: &[i32]) -> Vec<u8> {
+        let mut payload = Vec::new();
+        for sample in samples_interleaved {
+            payload.extend_from_slice(&sample.to_le_bytes());
+        }
+        wav_with_payload(sample_rate, channels, 32, 1, &payload)
+    }
+
     fn float32_wav(sample_rate: u32, channels: u16, samples_interleaved: &[f32]) -> Vec<u8> {
         let mut payload = Vec::new();
         for sample in samples_interleaved {
             payload.extend_from_slice(&sample.to_le_bytes());
         }
         wav_with_payload(sample_rate, channels, 32, 3, &payload)
+    }
+
+    fn float64_wav(sample_rate: u32, channels: u16, samples_interleaved: &[f64]) -> Vec<u8> {
+        let mut payload = Vec::new();
+        for sample in samples_interleaved {
+            payload.extend_from_slice(&sample.to_le_bytes());
+        }
+        wav_with_payload(sample_rate, channels, 64, 3, &payload)
     }
 
     fn rf64_pcm16_wav(sample_rate: u32, channels: u16, samples_interleaved: &[i16]) -> Vec<u8> {
@@ -1833,10 +2005,10 @@ mod tests {
         );
 
         assert_eq!(y.shape, vec![3, 1]);
-        assert_eq!(y.dtype, NumericDType::F64);
-        assert_eq!(y.data[0], -1.0);
-        assert_eq!(y.data[1], 0.0);
-        assert!((y.data[2] - (32767.0 / 32768.0)).abs() < 1e-12);
+        assert_eq!(y.numeric_dtype(), NumericDType::F64);
+        assert_eq!(y.materialize_f64()[0], -1.0);
+        assert_eq!(y.materialize_f64()[1], 0.0);
+        assert!((y.materialize_f64()[2] - (32767.0 / 32768.0)).abs() < 1e-12);
         let _ = fs::remove_file(path);
     }
 
@@ -1867,10 +2039,10 @@ mod tests {
         );
 
         assert_eq!(y.shape, vec![2, 2]);
-        assert!((y.data[0] - (32767.0 / 32768.0)).abs() < 1e-12);
-        assert_eq!(y.data[1], 0.0);
-        assert_eq!(y.data[2], -1.0);
-        assert_eq!(y.data[3], 0.5);
+        assert!((y.materialize_f64()[0] - (32767.0 / 32768.0)).abs() < 1e-12);
+        assert_eq!(y.materialize_f64()[1], 0.0);
+        assert_eq!(y.materialize_f64()[2], -1.0);
+        assert_eq!(y.materialize_f64()[3], 0.5);
         let _ = fs::remove_file(path);
     }
 
@@ -1895,13 +2067,88 @@ mod tests {
         let y = tensor(outputs[0].clone());
         assert_eq!(outputs[1], Value::Num(22_050.0));
         assert_eq!(y.shape, vec![2, 1]);
-        assert_eq!(y.data, vec![-0.5, 0.0]);
+        assert_eq!(y.materialize_f64(), vec![-0.5, 0.0]);
         let _ = fs::remove_file(path);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn audioread_native_uint8_preserves_dtype_and_values() {
+    fn audioread_sample_range_accepts_documented_infinite_endpoint() {
+        let range = Tensor::new(vec![2.0, f64::INFINITY], vec![1, 2]).expect("range");
+        assert_eq!(
+            parse_sample_range(&Value::Tensor(range)).expect("sample range"),
+            AudioSampleRange {
+                first: 2,
+                last: None
+            }
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn audioread_sample_range_rejects_all_typed_integer_classes() {
+        let ranges = [
+            IntegerStorage::I8(vec![1, 2]),
+            IntegerStorage::I16(vec![1, 2]),
+            IntegerStorage::I32(vec![1, 2]),
+            IntegerStorage::I64(vec![1, 2]),
+            IntegerStorage::U8(vec![1, 2]),
+            IntegerStorage::U16(vec![1, 2]),
+            IntegerStorage::U32(vec![1, 2]),
+            IntegerStorage::U64(vec![1, 2]),
+        ];
+        for storage in ranges {
+            let range = Tensor::new_integer(storage, vec![1, 2]).expect("range");
+            let error =
+                parse_sample_range(&Value::Tensor(range)).expect_err("integer range must reject");
+            assert_eq!(error.identifier(), Some("RunMat:audioread:InvalidArgument"));
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn audioread_rejects_resident_inputs_before_provider_access() {
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 2],
+            device_id: 0,
+            buffer_id: 9_359_001,
+            descriptor: Default::default(),
+        });
+        let error = block_on(audioread_builtin(Value::from("unused.wav"), vec![resident]))
+            .expect_err("resident sample range must reject");
+        assert_eq!(error.identifier(), Some("RunMat:audioread:InvalidArgument"));
+        assert!(error
+            .message()
+            .contains("gpuArray inputs are not supported"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn audioread_infinite_endpoint_reads_through_last_frame() {
+        let _lock = runmat_filesystem::provider_override_lock();
+        let path = temp_path("wav");
+        fs::write(&path, pcm16_wav(8_000, 1, &[-4, 5, i16::MAX])).expect("write fixture");
+        let range = Tensor::new(vec![2.0, f64::INFINITY], vec![1, 2]).expect("sample range tensor");
+
+        let y = tensor(
+            block_on(audioread_builtin(
+                Value::from(path.to_string_lossy().into_owned()),
+                vec![Value::Tensor(range), Value::from("native")],
+            ))
+            .expect("audioread"),
+        );
+
+        assert_eq!(y.shape, vec![2, 1]);
+        assert_eq!(
+            y.integer_storage(),
+            Some(&IntegerStorage::I16(vec![5, i16::MAX]))
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn audioread_native_pcm8_uses_exact_uint8_storage() {
         let _lock = runmat_filesystem::provider_override_lock();
         let path = temp_path("wav");
         fs::write(&path, pcm8_wav(11_025, 1, &[0, 128, 255])).expect("write fixture");
@@ -1914,8 +2161,102 @@ mod tests {
             .expect("audioread"),
         );
 
-        assert_eq!(y.dtype, NumericDType::U8);
-        assert_eq!(y.data, vec![0.0, 128.0, 255.0]);
+        assert_eq!(y.materialize_f64(), vec![0.0, 128.0, 255.0]);
+        assert_eq!(
+            y.integer_storage(),
+            Some(&IntegerStorage::U8(vec![0, 128, 255]))
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn audioread_native_pcm16_preserves_exact_storage_and_channel_order() {
+        let _lock = runmat_filesystem::provider_override_lock();
+        let path = temp_path("wav");
+        fs::write(&path, pcm16_wav(44_100, 2, &[i16::MIN, i16::MAX, -2, 3]))
+            .expect("write fixture");
+
+        let y = tensor(
+            block_on(audioread_builtin(
+                Value::from(path.to_string_lossy().into_owned()),
+                vec![Value::from("native")],
+            ))
+            .expect("audioread"),
+        );
+
+        assert_eq!(y.shape, vec![2, 2]);
+        assert_eq!(
+            y.integer_storage(),
+            Some(&IntegerStorage::I16(vec![i16::MIN, -2, i16::MAX, 3]))
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn audioread_native_pcm16_preserves_exact_storage_for_sample_ranges() {
+        let _lock = runmat_filesystem::provider_override_lock();
+        let path = temp_path("wav");
+        fs::write(&path, pcm16_wav(8_000, 1, &[i16::MIN, -4, 5, i16::MAX])).expect("write fixture");
+
+        let y = tensor(
+            block_on(audioread_builtin(
+                Value::from(path.to_string_lossy().into_owned()),
+                vec![
+                    Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![1, 2]).expect("range")),
+                    Value::from("native"),
+                ],
+            ))
+            .expect("audioread"),
+        );
+
+        assert_eq!(y.shape, vec![2, 1]);
+        assert_eq!(y.integer_storage(), Some(&IntegerStorage::I16(vec![-4, 5])));
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn audioread_native_pcm24_left_aligns_into_exact_int32_storage() {
+        let _lock = runmat_filesystem::provider_override_lock();
+        let path = temp_path("wav");
+        fs::write(&path, pcm24_wav(8_000, 1, &[-8_388_608, 0, 8_388_607])).expect("write fixture");
+
+        let y = tensor(
+            block_on(audioread_builtin(
+                Value::from(path.to_string_lossy().into_owned()),
+                vec![Value::from("native")],
+            ))
+            .expect("audioread"),
+        );
+
+        assert_eq!(
+            y.integer_storage(),
+            Some(&IntegerStorage::I32(vec![i32::MIN, 0, 2_147_483_392]))
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn audioread_native_pcm32_preserves_int32_extrema() {
+        let _lock = runmat_filesystem::provider_override_lock();
+        let path = temp_path("wav");
+        fs::write(&path, pcm32_wav(8_000, 1, &[i32::MIN, 0, i32::MAX])).expect("write fixture");
+
+        let y = tensor(
+            block_on(audioread_builtin(
+                Value::from(path.to_string_lossy().into_owned()),
+                vec![Value::from("native")],
+            ))
+            .expect("audioread"),
+        );
+
+        assert_eq!(
+            y.integer_storage(),
+            Some(&IntegerStorage::I32(vec![i32::MIN, 0, i32::MAX]))
+        );
         let _ = fs::remove_file(path);
     }
 
@@ -1935,7 +2276,49 @@ mod tests {
         );
 
         assert_eq!(y.shape, vec![3, 1]);
-        assert_eq!(y.data, vec![-0.25, 0.0, 0.5]);
+        assert_eq!(y.materialize_f64(), vec![-0.25, 0.0, 0.5]);
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn audioread_native_float32_wave_remains_single() {
+        let _lock = runmat_filesystem::provider_override_lock();
+        let path = temp_path("wav");
+        fs::write(&path, float32_wav(48_000, 1, &[-0.25, 0.0, 0.5])).expect("write fixture");
+
+        let y = tensor(
+            block_on(audioread_builtin(
+                Value::from(path.to_string_lossy().into_owned()),
+                vec![Value::from("native")],
+            ))
+            .expect("audioread"),
+        );
+
+        assert_eq!(y.numeric_dtype(), NumericDType::F32);
+        assert!(y.integer_storage().is_none());
+        assert_eq!(y.materialize_f64(), vec![-0.25, 0.0, 0.5]);
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn audioread_native_float64_wave_remains_double() {
+        let _lock = runmat_filesystem::provider_override_lock();
+        let path = temp_path("wav");
+        fs::write(&path, float64_wav(48_000, 1, &[-0.25, 0.0, 0.5])).expect("write fixture");
+
+        let y = tensor(
+            block_on(audioread_builtin(
+                Value::from(path.to_string_lossy().into_owned()),
+                vec![Value::from("native")],
+            ))
+            .expect("audioread"),
+        );
+
+        assert_eq!(y.numeric_dtype(), NumericDType::F64);
+        assert!(y.integer_storage().is_none());
+        assert_eq!(y.materialize_f64(), vec![-0.25, 0.0, 0.5]);
         let _ = fs::remove_file(path);
     }
 
@@ -1960,7 +2343,7 @@ mod tests {
         let y = tensor(outputs[0].clone());
         assert_eq!(outputs[1], Value::Num(32_000.0));
         assert_eq!(y.shape, vec![2, 1]);
-        assert_eq!(y.data, vec![0.0, 0.5]);
+        assert_eq!(y.materialize_f64(), vec![0.0, 0.5]);
         let _ = fs::remove_file(path);
     }
 
@@ -1989,7 +2372,7 @@ mod tests {
         let y = tensor(outputs[0].clone());
         assert_eq!(outputs[1], Value::Num(16_000.0));
         assert_eq!(y.shape, vec![2, 1]);
-        assert_eq!(y.data, vec![0.0, 0.5]);
+        assert_eq!(y.materialize_f64(), vec![0.0, 0.5]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

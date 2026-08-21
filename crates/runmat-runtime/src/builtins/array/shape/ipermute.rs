@@ -20,9 +20,15 @@ use runmat_builtins::shape_rules::element_count_if_known;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type, Value,
+    ResolveContext, Type,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::ipermute")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -157,6 +163,15 @@ pub const IPERMUTE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &IPERMUTE_ERRORS,
 };
+const IPERMUTE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "B",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Every integer class is permuted structurally without changing class or values.",
+    }];
+pub const IPERMUTE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "A = ipermute(integer_B, order)", inputs: &IPERMUTE_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving, notes: "Host and resident integer storage is reordered exactly; provider fallback restores the result to the owning provider." }];
 
 #[runtime_builtin(
     name = "ipermute",
@@ -166,6 +181,7 @@ pub const IPERMUTE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "custom",
     type_resolver(ipermute_type),
     descriptor(crate::builtins::array::shape::ipermute::IPERMUTE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::array::shape::ipermute::IPERMUTE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::shape::ipermute"
 )]
 async fn ipermute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
@@ -194,7 +210,7 @@ async fn ipermute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Va
                 .map(Value::StringArray)?)
         }
         Value::CharArray(ca) => {
-            validate_rank("ipermute", &order_vec, 2)?;
+            validate_rank("ipermute", &order_vec, ca.shape.len())?;
             Ok(permute_char_array("ipermute", ca, &inverse)
                 .map(Value::CharArray)?)
         }
@@ -243,11 +259,14 @@ pub(crate) mod tests {
         block_on(super::ipermute_builtin(value, order))
     }
     use crate::builtins::array::shape::permute::{
-        parse_order_argument, permute_char_array, permute_gpu, permute_logical_array,
-        permute_string_array, permute_tensor,
+        parse_order_argument, permute_char_array, permute_complex_tensor, permute_gpu,
+        permute_logical_array, permute_string_array, permute_tensor,
     };
     use crate::builtins::common::{tensor, test_support};
-    use runmat_builtins::{CharArray, LogicalArray, StringArray, Tensor, Value};
+    use runmat_value::{
+        CharArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray,
+        Tensor, Value,
+    };
 
     #[test]
     fn ipermute_type_uses_order_len() {
@@ -285,10 +304,43 @@ pub(crate) mod tests {
         match (Value::Tensor(original_tensor), restored) {
             (Value::Tensor(orig), Value::Tensor(rest)) => {
                 assert_eq!(orig.shape, rest.shape);
-                assert_eq!(orig.data, rest.data);
+                assert_eq!(orig.materialize_f64(), rest.materialize_f64());
             }
             _ => panic!("expected tensor pair"),
         }
+    }
+
+    #[test]
+    fn ipermute_restores_typed_complex_integer_storage_exactly() {
+        let original = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![1, 2, 9_223_372_036_854_775_808, u64::MAX]),
+                IntegerStorage::U64(vec![5, 6, 7, 8]),
+            )
+            .expect("storage"),
+            vec![2, 2],
+        )
+        .expect("complex");
+        let order = make_tensor(&[2.0, 1.0], &[1, 2]);
+        let order_vec =
+            parse_order_argument("ipermute", Value::Tensor(order.clone())).expect("parse order");
+        let permuted = permute_complex_tensor("ipermute", original, &order_vec).expect("permute");
+        let value = ipermute_builtin(Value::ComplexTensor(permuted), Value::Tensor(order))
+            .expect("ipermute");
+
+        let Value::ComplexTensor(output) = value else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(
+            output
+                .integer_storage()
+                .as_ref()
+                .map(|storage| (&storage.real, &storage.imag)),
+            Some((
+                &IntegerStorage::U64(vec![1, 2, 9_223_372_036_854_775_808, u64::MAX]),
+                &IntegerStorage::U64(vec![5, 6, 7, 8]),
+            ))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -349,7 +401,7 @@ pub(crate) mod tests {
             let host = make_tensor(&(0..24).map(|n| n as f64).collect::<Vec<_>>(), &[2, 3, 4]);
             let order = make_tensor(&[3.0, 1.0, 2.0], &[1, 3]);
             let view = runmat_accelerate_api::HostTensorView {
-                data: &host.data,
+                data: &host.materialize_f64(),
                 shape: &host.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -360,7 +412,7 @@ pub(crate) mod tests {
             let restored = ipermute_builtin(permuted, Value::Tensor(order)).expect("ipermute gpu");
             let gathered = test_support::gather(restored).expect("gather");
             assert_eq!(gathered.shape, host.shape);
-            assert_eq!(gathered.data, host.data);
+            assert_eq!(gathered.materialize_f64(), host.materialize_f64());
         });
     }
 
@@ -413,7 +465,7 @@ pub(crate) mod tests {
         let cpu = ipermute_builtin(permuted, Value::Tensor(order.clone())).expect("cpu ipermute");
 
         let view = runmat_accelerate_api::HostTensorView {
-            data: &host.data,
+            data: &host.materialize_f64(),
             shape: &host.shape,
         };
         let handle = provider.upload(&view).expect("upload");
@@ -425,7 +477,7 @@ pub(crate) mod tests {
         match cpu {
             Value::Tensor(ct) => {
                 assert_eq!(ct.shape, gathered.shape);
-                assert_eq!(ct.data, gathered.data);
+                assert_eq!(ct.materialize_f64(), gathered.materialize_f64());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -470,7 +522,7 @@ pub(crate) mod tests {
         match restored {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 5, 1]);
-                assert_eq!(out.data, row.data);
+                assert_eq!(out.materialize_f64(), row.materialize_f64());
             }
             Value::Num(n) => {
                 panic!("expected tensor result, got scalar {n}");

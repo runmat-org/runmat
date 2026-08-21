@@ -10,7 +10,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Host-side compatibility builtin; GPU-resident inputs are gathered before execution."
+    "notes": "HTTP and file execution is host-side. Automatically resident values gather transparently; explicit gpuArray input requires RunMat mode."
   },
   "fusion": {
     "elementwise": false,
@@ -23,14 +23,33 @@
     "unit": "builtins::io::http::compat::tests",
     "integration": null
   },
-  "description": "Download URL content into a file.",
+  "description": "`websave` downloads an HTTP or HTTPS response to a file and returns the saved filename.",
   "behaviors": [
     "Downloads HTTP or HTTPS URL content through the shared RunMat HTTP transport and writes it through the active filesystem provider.",
-    "Supports a leading weboptions-style struct for Timeout, UserAgent, and HeaderFields.",
-    "Treats trailing name-value pairs as URL query parameters, with Timeout and UserAgent handled as request options.",
+    "The filename and URL are host text values. Native integer and resident numeric values are rejected for these roles.",
+    "Query names are text. Query values may be text, numeric, or logical scalars or vectors; native integers are formatted exactly and vectors use comma-separated formatting.",
+    "A final options structure can supply `Timeout`, `UserAgent`, and `HeaderFields`. The default timeout is 5 seconds, and an integer timeout is read exactly.",
+    "RunMat also recognizes direct `Timeout` and `UserAgent` name-value pairs as request options.",
     "Rejects unpaired or unsupported option shapes instead of silently ignoring them."
   ],
-  "examples": [],
-  "faqs": [],
-  "links": []
+  "examples": [
+    {
+      "description": "Download a file with a query value",
+      "input": "saved = websave(\"report.json\", \"https://api.example.com/report\", \"id\", uint64(42))"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does websave require a manual gather?",
+      "answer": "No manual gather is needed for automatically resident query values. Explicit gpuArray input is a named RunMat extension and is rejected before provider access in MATLAB-compatible mode."
+    }
+  ],
+  "links": [
+    { "label": "weboptions", "url": "./weboptions" },
+    { "label": "webread", "url": "./webread" }
+  ],
+  "gpu_residency": "The network request and saved result are host-side. Automatically resident values can gather transparently; explicit gpuArray input requires RunMat mode.",
+  "gpu_behavior": [
+    "The request path gathers automatically resident query values through their owning provider. Explicit gpuArray input crosses the `websave-explicit-gpu-input` extension gate before any gather."
+  ]
 }

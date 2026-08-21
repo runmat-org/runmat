@@ -1,6 +1,6 @@
 #[cfg(target_arch = "wasm32")]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
-use runmat_builtins::Value;
+use runmat_value::Value;
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
@@ -18,7 +18,7 @@ fn zeros_ones_variants() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn sum_prod_mean_any_all_variants() {
-    let a = runmat_builtins::Tensor::new(vec![1.0, 0.0, 3.0, 4.0], vec![2, 2]).unwrap();
+    let a = runmat_value::Tensor::new(vec![1.0, 0.0, 3.0, 4.0], vec![2, 2]).unwrap();
     let v = Value::Tensor(a);
     for name in ["sum", "prod", "mean", "any", "all"] {
         let _ = runmat_runtime::call_builtin(name, std::slice::from_ref(&v)).unwrap();
@@ -30,7 +30,7 @@ fn sum_prod_mean_any_all_variants() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn max_min_variants() {
-    let a = runmat_builtins::Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+    let a = runmat_value::Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
     let v = Value::Tensor(a);
     let _ = runmat_runtime::call_builtin("max", &[Value::Num(3.0), Value::Num(5.0)]).unwrap();
     let _ = runmat_runtime::call_builtin("min", &[Value::Num(3.0), Value::Num(5.0)]).unwrap();
@@ -43,7 +43,7 @@ fn max_min_variants() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn find_variants() {
-    let a = runmat_builtins::Tensor::new(vec![0.0, 2.0, 0.0, 4.0], vec![2, 2]).unwrap();
+    let a = runmat_value::Tensor::new(vec![0.0, 2.0, 0.0, 4.0], vec![2, 2]).unwrap();
     let v = Value::Tensor(a);
     let _ = runmat_runtime::call_builtin("find", std::slice::from_ref(&v)).unwrap();
     let _ = runmat_runtime::call_builtin("find", &[v.clone(), Value::Num(1.0)]).unwrap();
@@ -110,16 +110,15 @@ fn degree_trig_builtins_return_matlab_exact_values() {
 #[test]
 fn mode_builtin_dispatches_for_majority_and_ties() {
     let majority =
-        runmat_builtins::Tensor::new(vec![1.0, 2.0, 2.0, 3.0, 3.0, 3.0, 4.0], vec![7, 1]).unwrap();
+        runmat_value::Tensor::new(vec![1.0, 2.0, 2.0, 3.0, 3.0, 3.0, 4.0], vec![7, 1]).unwrap();
     let result = runmat_runtime::call_builtin("mode", &[Value::Tensor(majority)]).unwrap();
     assert_eq!(result, Value::Num(3.0));
 
-    let ties = runmat_builtins::Tensor::new(vec![1.0, 1.0, 2.0, 2.0], vec![1, 4]).unwrap();
+    let ties = runmat_value::Tensor::new(vec![1.0, 1.0, 2.0, 2.0], vec![1, 4]).unwrap();
     let tied_result = runmat_runtime::call_builtin("mode", &[Value::Tensor(ties)]).unwrap();
     assert_eq!(tied_result, Value::Num(1.0));
 
-    let across =
-        runmat_builtins::Tensor::new(vec![1.0, 2.0, 3.0, 2.0, 3.0, 2.0], vec![2, 3]).unwrap();
+    let across = runmat_value::Tensor::new(vec![1.0, 2.0, 3.0, 2.0, 3.0, 2.0], vec![2, 3]).unwrap();
     let all_result =
         runmat_runtime::call_builtin("mode", &[Value::Tensor(across), Value::from("all")]).unwrap();
     assert_eq!(all_result, Value::Num(2.0));

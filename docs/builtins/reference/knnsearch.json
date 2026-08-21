@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": ["f64"],
     "broadcasting": "none",
-    "notes": "GPU inputs are gathered to host. Nearest-neighbor search runs on CPU."
+    "notes": "Supported floating gpuArray input gathers through its owning provider for CPU nearest-neighbor search and restores numeric or tied-cell outputs to that provider. Explicit residency cannot silently become host residency."
   },
   "fusion": {
     "elementwise": false,
@@ -36,7 +36,9 @@
     "Supported distance metrics are `\"euclidean\"`, `\"squaredeuclidean\"`, `\"cityblock\"`, `\"chebychev\"`, `\"minkowski\"`, `\"seuclidean\"`, `\"mahalanobis\"`, `\"cosine\"`, `\"correlation\"`, `\"hamming\"`, `\"jaccard\"`, and `\"spearman\"`. Fast Euclidean aliases are accepted and evaluated with the exact Euclidean implementation.",
     "`\"P\"`, `\"Scale\"`, and `\"Cov\"` provide metric parameters for Minkowski, standardized Euclidean, and Mahalanobis distances respectively.",
     "`\"IncludeTies\",true` returns `size(Y,1)` by 1 cell arrays whose elements contain all neighbors tied at the K-th distance. Tied outputs are sorted by distance even when `\"SortIndices\",false` is supplied.",
-    "`\"NSMethod\"`, `\"BucketSize\"`, `\"CacheSize\"`, and `\"SortIndices\"` are parsed for compatibility. `\"NSMethod\",\"kdtree\"` is accepted only for Euclidean, cityblock, Chebychev, and Minkowski distances. RunMat currently evaluates nearest neighbors exhaustively and returns sorted neighbors."
+    "`\"NSMethod\"`, `\"BucketSize\"`, `\"CacheSize\"`, and `\"SortIndices\"` are parsed for compatibility. `\"NSMethod\",\"kdtree\"` is accepted only for Euclidean, cityblock, Chebychev, and Minkowski distances. RunMat currently evaluates nearest neighbors exhaustively and returns sorted neighbors.",
+    "Typed-integer X, Y, K, BucketSize, metric parameters, and logical controls are independently gated RunMat extensions. Structural roles decode exactly; numerical distance roles must be exactly representable at the binary64 boundary.",
+    "MATLAB-compatible explicit gpuArray calls require NSMethod='exhaustive', the default IncludeTies and SortIndices values, and no fast-distance metric alias. Automatic residency remains transparent."
   ],
   "examples": [
     {

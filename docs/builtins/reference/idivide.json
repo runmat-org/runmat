@@ -8,7 +8,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "matlab",
-    "notes": "gpuArray integer tensors are gathered to the host integer division path."
+    "notes": "Supported gpuArray integer tensors use exact owner-aware fallback and return class-preserving resident output."
   },
   "fusion": {
     "elementwise": false,
@@ -23,13 +23,13 @@
   },
   "description": "`idivide(A,B)` divides integer `A` by integer `B` and returns a quotient in the class of `A`. `idivide(A,B,rounding)` selects the rounding rule.",
   "behaviors": [
-    "Supports scalar signed and unsigned integer values, plus dense `uint8`, `uint16`, and `uint32` tensors.",
+    "Supports scalar and dense arrays in all eight signed and unsigned integer classes.",
     "A scalar double operand is accepted when the other operand has a non-64-bit integer class; the result keeps the integer class.",
     "Dense tensor inputs use MATLAB-compatible scalar expansion when one input is scalar.",
     "Rounding modes are `fix` (default), `floor`, `ceil`, and `round`.",
     "The integer classes of `A` and `B` must match unless one operand is an allowed scalar double.",
     "Division by zero, two-double calls, double operands with `int64` or `uint64`, unsupported classes, incompatible shapes, and quotient overflow raise errors.",
-    "Signed dense integer arrays are not representable in RunMat's current tensor value model; signed scalar integer values are supported."
+    "Resident inputs must share one owning provider; control arguments do not select output residency."
   ],
   "examples": [
     {

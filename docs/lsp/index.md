@@ -1,10 +1,3 @@
----
-title: "Language Server Protocol (LSP)"
-category: "Language Server Protocol (LSP)"
-section: "10.0"
-last_updated: "May 28, 2026"
----
-
 # Language Server Protocol (LSP)
 
 `runmat-lsp` provides editor services for MATLAB/RunMat source: diagnostics, hover documentation, completion, signature help, semantic highlighting, go-to-definition, references, symbols, and formatting.

@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "No GPU kernel is registered for this compatibility builtin; GPU-resident inputs are gathered to host memory before evaluation."
+    "notes": "No GPU kernel is needed. Non-character values, including resident integer arrays, pass through unchanged without provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -28,24 +28,31 @@
     "unit": "builtins::strings::core::compat::tests",
     "integration": null
   },
-  "description": "out = convertCharsToStrings(value) - Convert character arrays and cellstr values to string arrays.",
+  "description": "[out1, ...] = convertCharsToStrings(value1, ...) - Convert character arrays and cellstr values to string arrays.",
   "signatures": [
     {
-      "label": "out = convertCharsToStrings(value)",
+      "label": "[out1, ...] = convertCharsToStrings(value1, ...)",
       "inputs": [
         {
-          "name": "value",
+          "name": "text",
           "ty": "Any",
           "arity": "Required",
           "default": null,
-          "description": "Input value."
+          "description": "First input value."
+        },
+        {
+          "name": "arg",
+          "ty": "Any",
+          "arity": "Variadic",
+          "default": null,
+          "description": "Additional input values."
         }
       ],
       "outputs": [
         {
           "name": "out",
           "ty": "Any",
-          "arity": "Required",
+          "arity": "Variadic",
           "default": null,
           "description": "Output value."
         }
@@ -53,10 +60,12 @@
     }
   ],
   "behaviors": [
-    "Convert character arrays and cellstr values to string arrays."
+    "A character array converts to one string scalar by concatenating its columns; a cell array consisting entirely of character vectors converts to a same-size string array.",
+    "Variadic inputs convert independently to corresponding variadic outputs.",
+    "Every other datatype is returned identically, including exact integer storage and resident provider ownership."
   ],
   "examples": [
-    "convertCharsToStrings(char matrix) returns one string per character row."
+    "convertCharsToStrings(char matrix) returns one string scalar formed by concatenating the matrix columns."
   ],
   "faqs": [],
   "links": [

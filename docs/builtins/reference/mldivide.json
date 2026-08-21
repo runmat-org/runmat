@@ -39,7 +39,7 @@
   "description": "`X = A \\ B` (or `mldivide(A, B)`) solves `A * X = B`. Square/nonsingular, rectangular, and rank-deficient solve paths follow MATLAB left-division semantics.",
   "behaviors": [
     "Scalars divide exactly: `s \\ B` scales `B` by `1/s`, while `A \\ s` requires `A` to be scalar.",
-    "Logical and integer inputs are promoted to double precision before solving.",
+    "Logical matrix inputs are promoted to double precision. Integer participation is limited to the documented scalar-left form: same-class integer operands or an integer array with a scalar double use exact element-wise division and preserve the integer class; integer matrix solving is rejected.",
     "Purely real operands return real outputs; any complex operand promotes the computation (and result) to complex arithmetic.",
     "Inputs must behave like 2-D matrices; trailing singleton dimensions are allowed.",
     "The number of rows must agree (`size(A, 1) == size(B, 1)`), otherwise RunMat raises the MATLAB error `\"Matrix dimensions must agree.\"`",
@@ -87,7 +87,7 @@
     },
     {
       "question": "How are logical or integer arrays treated?",
-      "answer": "They are promoted to double precision (`true → 1`, `false → 0`) before solving, matching MATLAB semantics."
+      "answer": "Logical matrices are promoted to double. Integer inputs are accepted only when the left operand is scalar, where `A \\ B` is equivalent to `B ./ A`, preserves the integer class, and retains resident output on the source provider."
     },
     {
       "question": "How does RunMat handle NaN or Inf values?",
@@ -144,7 +144,7 @@
     "label": "`crates/runmat-runtime/src/builtins/math/linalg/ops/mldivide.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/ops/mldivide.rs"
   },
-  "gpu_residency": "No manual residency management is required. If both operands already live on the GPU and the active provider implements `mldivide`, the solve stays on the device. When the provider falls back to the host (as the current WGPU backend does), RunMat gathers data, executes the same SVD solver used by the CPU implementation, and re-uploads the result so subsequent GPU work continues seamlessly.",
+  "gpu_residency": "No manual residency management is required. If both operands already live on the GPU and the active provider implements `mldivide`, the solve stays on the device. When the provider falls back to the host (as the current WGPU backend does), RunMat gathers data, executes the same SVD solver used by the CPU implementation, and re-uploads the result so subsequent GPU work continues seamlessly. Exact integer scalar-left fallback likewise restores its integer result to the first resident input owner.",
   "gpu_behavior": [
     "When a gpuArray provider is active, RunMat first offers the solve to its `mldivide` hook. The current WGPU provider downloads the operands to the host, executes the shared SVD-based solver, then uploads the result back to the device so downstream GPU pipelines keep their residency. If no provider is available—or a provider declines the request—RunMat gathers gpuArray inputs to the host, performs the solve there, and returns a host tensor."
   ]

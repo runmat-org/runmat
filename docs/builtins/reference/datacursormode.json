@@ -13,7 +13,7 @@
   "tests": {
     "unit": "builtins::plotting::datacursormode::tests"
   },
-  "description": "`datacursormode` toggles or configures MATLAB-compatible data cursor mode state. It returns a live data cursor manager object whose common properties can be read or updated through `get` and `set`.",
+  "description": "`datacursormode` toggles or configures figure-level data cursor mode state. It returns a live data cursor manager object whose supported properties can be read or updated through `get` and `set`.",
   "syntax": [
     "datacursormode",
     "datacursormode(option)",
@@ -47,7 +47,10 @@
   ],
   "notes": [
     "Statement-form `datacursormode()` toggles data cursor mode. Output-form `dcm = datacursormode()` returns a data cursor manager object.",
-    "The data cursor manager object supports `Enable`, `SnapToDataVertex`, `DisplayStyle`, `UpdateFcn`, and `FigureHandle` properties."
+    "The data cursor manager object supports `Enable`, `SnapToDataVertex`, `DisplayStyle`, `Interpreter`, `UpdateFcn`, and read-only `Figure` properties. `UpdateFcn` accepts an empty value or a function handle.",
+    "RunMat numeric and typed-integer figure aliases require `datacursormode-numeric-handle-alias`. Native Figure-object admission is not implemented, and the manager's read-only `Figure` property currently exposes RunMat's numeric figure alias rather than a native Figure object.",
+    "The undocumented `ok` result from command forms requires `datacursormode-status-output`.",
+    "Broad numeric truthiness and yes/no aliases require `datacursormode-onoff-aliases`; strict Enable accepts on/off or scalar numeric/logical zero and one, while strict SnapToDataVertex accepts on/off text."
   ],
   "gpu_residency": "`datacursormode` mutates plotting interaction metadata only. It does not gather or copy GPU-resident plot data.",
   "related": [
@@ -63,6 +66,11 @@
       "label": "set",
       "url": "./set"
     }
+  ],
+  "limitations": [
+    "R2025a `datacursormode(ax, option)` is not yet implemented because RunMat currently stores data-cursor interaction mode per figure rather than per axes.",
+    "The read-only `Figure` property is currently a numeric RunMat alias, not a native Figure object; numeric target forms are extension-only and are intentionally absent from the public signature metadata.",
+    "UpdateFcn is stored on the manager object but is not yet invoked by graphics-host data-tip interaction callbacks."
   ],
   "implemented_in": [
     {

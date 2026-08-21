@@ -1,8 +1,8 @@
 //! Global constants registered into the runtime (variables, not functions).
 //! This replaces legacy registrations in `src/constants.rs`.
 
-use runmat_builtins::Value;
 use runmat_macros::register_constant;
+use runmat_value::Value;
 
 // Numeric constants
 register_constant!(
@@ -48,3 +48,19 @@ register_constant!("NaN", Value::Num(f64::NAN), "crate::builtins::constants");
 register_constant!("true", Value::Bool(true), "crate::builtins::constants");
 
 register_constant!("false", Value::Bool(false), "crate::builtins::constants");
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn runtime_and_static_constant_identity_sets_match() {
+        let runtime = runmat_builtins::constants()
+            .into_iter()
+            .map(|constant| constant.name)
+            .collect::<std::collections::BTreeSet<_>>();
+        let catalog = runmat_builtins::builtin_constant_catalog_entries()
+            .iter()
+            .map(|constant| constant.name)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(runtime, catalog);
+    }
+}

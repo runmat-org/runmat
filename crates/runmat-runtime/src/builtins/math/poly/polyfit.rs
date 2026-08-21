@@ -4,11 +4,15 @@ use log::{trace, warn};
 use num_complex::Complex64;
 use runmat_accelerate_api::ProviderPolyfitResult;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, StructValue, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::dispatcher;
@@ -195,6 +199,105 @@ pub const POLYFIT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &POLYFIT_ERRORS,
 };
 
+const POLYFIT_INTEGER_X_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "polyfit-integer-x",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "polyfit accepts typed-integer sample locations as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PolyfitIntegerXExtension"),
+};
+const POLYFIT_INTEGER_Y_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "polyfit-integer-y",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "polyfit accepts typed-integer sample values as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PolyfitIntegerYExtension"),
+};
+const POLYFIT_INTEGER_WEIGHTS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "polyfit-integer-weights",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "polyfit accepts typed-integer observation weights as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PolyfitIntegerWeightsExtension"),
+};
+pub const POLYFIT_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    POLYFIT_INTEGER_X_EXTENSION,
+    POLYFIT_INTEGER_Y_EXTENSION,
+    POLYFIT_INTEGER_WEIGHTS_EXTENSION,
+];
+
+const POLYFIT_INTEGER_X_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double sample locations; RunMat admits typed integers only after exact binary64 conversion is proved.",
+    }];
+const POLYFIT_INTEGER_Y_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double fitted values; RunMat admits typed integers only at its checked least-squares boundary.",
+    }];
+const POLYFIT_INTEGER_DEGREE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "n",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public degree is a nonnegative integer scalar. Native integer scalars are decoded directly to usize and never materialized through binary64.",
+    }];
+const POLYFIT_INTEGER_WEIGHTS_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "weights",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The implemented weighted overload is a RunMat extension and typed weights cross its checked binary64 least-squares boundary.",
+    }];
+pub const POLYFIT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "p = polyfit(integer_X,Y,n,___)",
+        inputs: &POLYFIT_INTEGER_X_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer X is independently gated before provider dispatch and QR fitting.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "p = polyfit(X,integer_Y,n,___)",
+        inputs: &POLYFIT_INTEGER_Y_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer Y is independently gated before provider dispatch and QR fitting.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "p = polyfit(X,Y,integer_n,___)",
+        inputs: &POLYFIT_INTEGER_DEGREE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "Degree remains exact and structural; it selects Vandermonde width but does not enter numeric fitting data.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "p = polyfit(X,Y,n,integer_weights)",
+        inputs: &POLYFIT_INTEGER_WEIGHTS_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer weights are independently gated before weighted least squares.",
+    },
+];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::polyfit")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "polyfit",
@@ -255,6 +358,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     type_resolver(polyfit_type),
     descriptor(crate::builtins::math::poly::polyfit::POLYFIT_DESCRIPTOR),
+    extensions(crate::builtins::math::poly::polyfit::POLYFIT_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::poly::polyfit::POLYFIT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::poly::polyfit"
 )]
 async fn polyfit_builtin(
@@ -289,6 +394,35 @@ pub async fn evaluate(
     degree: Value,
     rest: &[Value],
 ) -> BuiltinResult<PolyfitEval> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&x, "polyfit")?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&y, "polyfit")?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&degree, "polyfit")?;
+    for value in rest {
+        crate::builtins::common::validation::reject_typed_complex_integer(value, "polyfit")?;
+    }
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &x,
+        &POLYFIT_INTEGER_X_EXTENSION,
+        BUILTIN_NAME,
+        "X",
+    )
+    .await?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &y,
+        &POLYFIT_INTEGER_Y_EXTENSION,
+        BUILTIN_NAME,
+        "Y",
+    )
+    .await?;
+    if let Some(weights) = rest.first() {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            weights,
+            &POLYFIT_INTEGER_WEIGHTS_EXTENSION,
+            BUILTIN_NAME,
+            "weights",
+        )
+        .await?;
+    }
     let deg = parse_degree(&degree)?;
 
     if let Some(eval) = try_gpu_polyfit(&x, &y, deg, rest).await? {
@@ -465,16 +599,12 @@ impl PolyfitEval {
 }
 
 fn parse_degree(value: &Value) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer.try_to_usize().ok_or_else(|| {
+            polyfit_argument_error("polyfit: degree must be a non-negative integer")
+        });
+    }
     match value {
-        Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < 0 {
-                return Err(polyfit_argument_error(
-                    "polyfit: degree must be a non-negative integer",
-                ));
-            }
-            Ok(raw as usize)
-        }
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(polyfit_argument_error("polyfit: degree must be finite"));
@@ -488,9 +618,16 @@ fn parse_degree(value: &Value) -> BuiltinResult<usize> {
                     "polyfit: degree must be a non-negative integer",
                 ));
             }
+            if !fits_platform_usize(rounded) {
+                return Err(polyfit_argument_error(
+                    "polyfit: degree exceeds platform limits",
+                ));
+            }
             Ok(rounded as usize)
         }
-        Value::Tensor(t) if tensor::is_scalar_tensor(t) => parse_degree(&Value::Num(t.data[0])),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
+            parse_degree(&Value::Num(tensor::tensor_value_f64(t, 0)))
+        }
         Value::LogicalArray(l) if l.len() == 1 => {
             parse_degree(&Value::Num(if l.data[0] != 0 { 1.0 } else { 0.0 }))
         }
@@ -500,17 +637,21 @@ fn parse_degree(value: &Value) -> BuiltinResult<usize> {
     }
 }
 
+fn fits_platform_usize(value: f64) -> bool {
+    value < usize::MAX as f64 || (usize::BITS < 64 && value == usize::MAX as f64)
+}
+
 #[async_recursion::async_recursion(?Send)]
 async fn real_vector(context: &str, label: &str, value: Value) -> BuiltinResult<Vec<f64>> {
     match value {
-        Value::Tensor(mut tensor) => {
+        Value::Tensor(tensor) => {
             ensure_vector_shape(context, label, &tensor.shape)?;
-            Ok(tensor.data.drain(..).collect())
+            Ok(tensor::tensor_values_f64(&tensor))
         }
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical).map_err(polyfit_error)?;
             ensure_vector_shape(context, label, &tensor.shape)?;
-            Ok(tensor.data)
+            Ok(tensor::tensor_values_f64(&tensor))
         }
         Value::Num(n) => Ok(vec![n]),
         Value::Int(i) => Ok(vec![i.to_f64()]),
@@ -536,21 +677,23 @@ async fn complex_vector(
     value: Value,
 ) -> BuiltinResult<(Vec<Complex64>, bool)> {
     match value {
-        Value::Tensor(mut tensor) => {
+        Value::Tensor(tensor) => {
             ensure_vector_shape(context, label, &tensor.shape)?;
             let all_real = true;
-            let data = tensor
-                .data
-                .drain(..)
+            let data = tensor::tensor_values_f64(&tensor)
+                .into_iter()
                 .map(|x| Complex64::new(x, 0.0))
                 .collect();
             Ok((data, all_real))
         }
         Value::ComplexTensor(tensor) => {
             ensure_vector_shape(context, label, &tensor.shape)?;
-            let is_complex = tensor.data.iter().any(|&(_, im)| im.abs() > EPS);
+            let is_complex = tensor
+                .materialize_f64()
+                .iter()
+                .any(|&(_, im)| im.abs() > EPS);
             let data = tensor
-                .data
+                .materialize_f64()
                 .into_iter()
                 .map(|(re, im)| Complex64::new(re, im))
                 .collect::<Vec<_>>();
@@ -560,8 +703,7 @@ async fn complex_vector(
             let tensor = tensor::logical_to_tensor(&logical).map_err(polyfit_error)?;
             ensure_vector_shape(context, label, &tensor.shape)?;
             Ok((
-                tensor
-                    .data
+                tensor::tensor_values_f64(&tensor)
                     .iter()
                     .map(|&x| Complex64::new(x, 0.0))
                     .collect(),
@@ -1017,8 +1159,41 @@ pub fn polyfit_host_real_for_provider(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn degree_parser_preserves_representable_uint64() {
+        assert_eq!(
+            parse_degree(&Value::Int(IntValue::U64(u64::MAX))).ok(),
+            usize::try_from(u64::MAX).ok()
+        );
+        assert!(parse_degree(&Value::Int(IntValue::I64(-1))).is_err());
+    }
+
+    #[test]
+    fn degree_parser_reads_typed_integer_scalar_storage_exactly() {
+        let degree =
+            Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).expect("typed degree");
+
+        assert_eq!(parse_degree(&Value::Tensor(degree)).unwrap(), 3);
+
+        let negative = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
+            .expect("negative degree");
+        assert!(parse_degree(&Value::Tensor(negative)).is_err());
+    }
+
+    #[test]
+    fn degree_parser_rejects_unrepresentable_double_boundary() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        assert!(parse_degree(&Value::Num(boundary)).is_err());
+    }
+
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage};
 
     fn assert_error_contains(err: crate::RuntimeError, needle: &str) {
         assert!(
@@ -1026,6 +1201,30 @@ pub(crate) mod tests {
             "expected error containing '{needle}', got '{}'",
             err.message()
         );
+    }
+
+    #[test]
+    fn polyfit_rejects_typed_complex_integer_inputs() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let typed_complex = Value::ComplexTensor(
+            ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::I64(vec![i64::MAX]),
+                    IntegerStorage::I64(vec![-1]),
+                )
+                .expect("storage"),
+                vec![1, 1],
+            )
+            .expect("tensor"),
+        );
+        let err = evaluate(
+            typed_complex,
+            Value::Num(1.0),
+            Value::Int(IntValue::I32(0)),
+            &[],
+        )
+        .expect_err("typed complex integer input must reject");
+        assert_error_contains(err, "complex numbers with integer types");
     }
 
     fn evaluate(
@@ -1074,15 +1273,41 @@ pub(crate) mod tests {
         let eval = evaluate(
             Value::Tensor(x),
             Value::Tensor(y),
-            Value::Int(runmat_builtins::IntValue::I32(1)),
+            Value::Int(runmat_value::IntValue::I32(1)),
             &[],
         )
         .expect("polyfit");
         match eval.coefficients() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert!((t.data[0] - 1.5).abs() < 1e-10);
-                assert!((t.data[1] - 2.0).abs() < 1e-10);
+                assert!((t.materialize_f64()[0] - 1.5).abs() < 1e-10);
+                assert!((t.materialize_f64()[1] - 2.0).abs() < 1e-10);
+            }
+            other => panic!("expected tensor coefficients, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn polyfit_typed_integer_vectors_degree_and_weights_cross_double_boundary_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let x = Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 2, 3]), vec![4, 1]).unwrap();
+        let y = Tensor::new_integer(IntegerStorage::I16(vec![2, 4, 6, 8]), vec![4, 1]).unwrap();
+        let degree = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
+        let weights =
+            Tensor::new_integer(IntegerStorage::U16(vec![1, 1, 1, 1]), vec![1, 4]).unwrap();
+        let eval = evaluate(
+            Value::Tensor(x),
+            Value::Tensor(y),
+            Value::Tensor(degree),
+            &[Value::Tensor(weights)],
+        )
+        .expect("polyfit");
+        match eval.coefficients() {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![1, 2]);
+                assert!((t.materialize_f64()[0] - 2.0).abs() < 1e-10);
+                assert!((t.materialize_f64()[1] - 2.0).abs() < 1e-10);
+                assert!(t.integer_storage().is_none());
             }
             other => panic!("expected tensor coefficients, got {other:?}"),
         }
@@ -1096,7 +1321,7 @@ pub(crate) mod tests {
         let eval = evaluate(
             Value::Tensor(x),
             Value::Tensor(y),
-            Value::Int(runmat_builtins::IntValue::I32(2)),
+            Value::Int(runmat_value::IntValue::I32(2)),
             &[],
         )
         .expect("polyfit");
@@ -1111,8 +1336,8 @@ pub(crate) mod tests {
         match eval.mu() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert!((t.data[0]).abs() < 1e-10);
-                assert!(t.data[1].abs() > 0.0);
+                assert!((t.materialize_f64()[0]).abs() < 1e-10);
+                assert!(t.materialize_f64()[1].abs() > 0.0);
             }
             other => panic!("expected tensor mu, got {other:?}"),
         }
@@ -1127,14 +1352,14 @@ pub(crate) mod tests {
         let eval_unweighted = evaluate(
             Value::Tensor(x.clone()),
             Value::Tensor(y.clone()),
-            Value::Int(runmat_builtins::IntValue::I32(2)),
+            Value::Int(runmat_value::IntValue::I32(2)),
             &[],
         )
         .expect("polyfit");
         let eval_weighted = evaluate(
             Value::Tensor(x),
             Value::Tensor(y),
-            Value::Int(runmat_builtins::IntValue::I32(2)),
+            Value::Int(runmat_value::IntValue::I32(2)),
             &[Value::Tensor(weights)],
         )
         .expect("polyfit");
@@ -1146,7 +1371,7 @@ pub(crate) mod tests {
     fn accepts_logical_degree_scalar() {
         let x = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
         let y = Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap();
-        let logical = runmat_builtins::LogicalArray::new(vec![1], vec![1, 1]).unwrap();
+        let logical = runmat_value::LogicalArray::new(vec![1], vec![1, 1]).unwrap();
         let eval = evaluate(
             Value::Tensor(x),
             Value::Tensor(y),
@@ -1177,7 +1402,7 @@ pub(crate) mod tests {
         let err = evaluate(
             Value::Tensor(x),
             Value::Tensor(y),
-            Value::Int(runmat_builtins::IntValue::I32(2)),
+            Value::Int(runmat_value::IntValue::I32(2)),
             &[Value::Tensor(weights)],
         )
         .expect_err("polyfit should reject infinite weights");
@@ -1191,19 +1416,19 @@ pub(crate) mod tests {
             let x = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
             let y = Tensor::new(vec![1.0, 3.0, 7.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &x.data,
+                data: &x.materialize_f64(),
                 shape: &x.shape,
             };
             let x_handle = provider.upload(&view).expect("upload");
             let view_y = runmat_accelerate_api::HostTensorView {
-                data: &y.data,
+                data: &y.materialize_f64(),
                 shape: &y.shape,
             };
             let y_handle = provider.upload(&view_y).expect("upload");
             let eval = evaluate(
                 Value::GpuTensor(x_handle),
                 Value::GpuTensor(y_handle),
-                Value::Int(runmat_builtins::IntValue::I32(2)),
+                Value::Int(runmat_value::IntValue::I32(2)),
                 &[],
             )
             .expect("polyfit");
@@ -1220,15 +1445,15 @@ pub(crate) mod tests {
             let weights = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
 
             let x_view = runmat_accelerate_api::HostTensorView {
-                data: &x.data,
+                data: &x.materialize_f64(),
                 shape: &x.shape,
             };
             let y_view = runmat_accelerate_api::HostTensorView {
-                data: &y.data,
+                data: &y.materialize_f64(),
                 shape: &y.shape,
             };
             let w_view = runmat_accelerate_api::HostTensorView {
-                data: &weights.data,
+                data: &weights.materialize_f64(),
                 shape: &weights.shape,
             };
 
@@ -1239,7 +1464,7 @@ pub(crate) mod tests {
             let cpu_eval = evaluate(
                 Value::Tensor(x.clone()),
                 Value::Tensor(y.clone()),
-                Value::Int(runmat_builtins::IntValue::I32(2)),
+                Value::Int(runmat_value::IntValue::I32(2)),
                 &[Value::Tensor(weights.clone())],
             )
             .expect("cpu polyfit");
@@ -1247,7 +1472,7 @@ pub(crate) mod tests {
             let gpu_eval = evaluate(
                 Value::GpuTensor(x_handle.clone()),
                 Value::GpuTensor(y_handle.clone()),
-                Value::Int(runmat_builtins::IntValue::I32(2)),
+                Value::Int(runmat_value::IntValue::I32(2)),
                 &[Value::GpuTensor(w_handle.clone())],
             )
             .expect("gpu polyfit with weights");
@@ -1280,18 +1505,18 @@ pub(crate) mod tests {
         let cpu_eval = evaluate(
             Value::Tensor(x.clone()),
             Value::Tensor(y.clone()),
-            Value::Int(runmat_builtins::IntValue::I32(2)),
+            Value::Int(runmat_value::IntValue::I32(2)),
             &[],
         )
         .expect("cpu polyfit");
 
         let trait_provider = runmat_accelerate_api::provider().expect("wgpu provider registered");
         let x_view = runmat_accelerate_api::HostTensorView {
-            data: &x.data,
+            data: &x.materialize_f64(),
             shape: &x.shape,
         };
         let y_view = runmat_accelerate_api::HostTensorView {
-            data: &y.data,
+            data: &y.materialize_f64(),
             shape: &y.shape,
         };
         let x_handle = trait_provider.upload(&x_view).expect("upload x");
@@ -1300,7 +1525,7 @@ pub(crate) mod tests {
         let gpu_eval = evaluate(
             Value::GpuTensor(x_handle.clone()),
             Value::GpuTensor(y_handle.clone()),
-            Value::Int(runmat_builtins::IntValue::I32(2)),
+            Value::Int(runmat_value::IntValue::I32(2)),
             &[],
         )
         .expect("gpu polyfit");
@@ -1317,7 +1542,11 @@ pub(crate) mod tests {
             other => panic!("expected tensor coefficients, got {other:?}"),
         };
         assert_eq!(cpu_coeff.shape, gpu_coeff.shape);
-        for (a, b) in cpu_coeff.data.iter().zip(gpu_coeff.data.iter()) {
+        for (a, b) in cpu_coeff
+            .materialize_f64()
+            .iter()
+            .zip(gpu_coeff.materialize_f64().iter())
+        {
             assert!((a - b).abs() < 1e-9, "coeff mismatch {a} vs {b}");
         }
 
@@ -1330,7 +1559,11 @@ pub(crate) mod tests {
             other => panic!("expected tensor mu, got {other:?}"),
         };
         assert_eq!(cpu_mu.shape, gpu_mu.shape);
-        for (a, b) in cpu_mu.data.iter().zip(gpu_mu.data.iter()) {
+        for (a, b) in cpu_mu
+            .materialize_f64()
+            .iter()
+            .zip(gpu_mu.materialize_f64().iter())
+        {
             assert!((a - b).abs() < 1e-9, "mu mismatch {a} vs {b}");
         }
 
@@ -1351,7 +1584,11 @@ pub(crate) mod tests {
             other => panic!("expected tensor R, got {other:?}"),
         };
         assert_eq!(cpu_r.shape, gpu_r.shape);
-        for (a, b) in cpu_r.data.iter().zip(gpu_r.data.iter()) {
+        for (a, b) in cpu_r
+            .materialize_f64()
+            .iter()
+            .zip(gpu_r.materialize_f64().iter())
+        {
             assert!((a - b).abs() < 1e-9, "R mismatch {a} vs {b}");
         }
         let cpu_df = match cpu_stats.fields.get("df").expect("df present") {
@@ -1382,7 +1619,7 @@ pub(crate) mod tests {
         let err = evaluate(
             Value::Tensor(x),
             Value::Tensor(y),
-            Value::Int(runmat_builtins::IntValue::I32(1)),
+            Value::Int(runmat_value::IntValue::I32(1)),
             &[],
         )
         .expect_err("polyfit should reject mismatched vector lengths");
@@ -1397,7 +1634,7 @@ pub(crate) mod tests {
         let err = evaluate(
             Value::Tensor(x),
             Value::Tensor(y),
-            Value::Int(runmat_builtins::IntValue::I32(1)),
+            Value::Int(runmat_value::IntValue::I32(1)),
             &[],
         )
         .expect_err("polyfit should reject non-vector X");
@@ -1413,7 +1650,7 @@ pub(crate) mod tests {
         let err = evaluate(
             Value::Tensor(x),
             Value::Tensor(y),
-            Value::Int(runmat_builtins::IntValue::I32(2)),
+            Value::Int(runmat_value::IntValue::I32(2)),
             &[Value::Tensor(weights)],
         )
         .expect_err("polyfit should reject mismatched weights");
@@ -1429,7 +1666,7 @@ pub(crate) mod tests {
         let err = evaluate(
             Value::Tensor(x),
             Value::Tensor(y),
-            Value::Int(runmat_builtins::IntValue::I32(2)),
+            Value::Int(runmat_value::IntValue::I32(2)),
             &[Value::Tensor(weights)],
         )
         .expect_err("polyfit should reject negative weights");
@@ -1445,7 +1682,7 @@ pub(crate) mod tests {
         let eval = evaluate(
             Value::Tensor(x),
             Value::ComplexTensor(complex_values),
-            Value::Int(runmat_builtins::IntValue::I32(2)),
+            Value::Int(runmat_value::IntValue::I32(2)),
             &[],
         )
         .expect("polyfit complex");

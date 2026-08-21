@@ -15,9 +15,9 @@
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
-    "precisions": ["logical", "f64"],
+    "precisions": ["logical", "f32", "f64"],
     "broadcasting": "none",
-    "notes": "GPU inputs are gathered to host. Partition construction is metadata-oriented and runs on CPU."
+    "notes": "Current RunMat construction gathers resident inputs and runs on CPU. This is not claimed as complete compatibility with the newer GPU stratification and custom-partition surface introduced in the compatibility target."
   },
   "fusion": {
     "elementwise": false,
@@ -32,7 +32,7 @@
   },
   "description": "`cvpartition` creates a `cvpartition` object for K-fold, holdout, leave-one-out, resubstitution, or custom cross-validation masks. Use `training` and `test` to extract logical masks.",
   "behaviors": [
-    "`cvpartition(n,'KFold',k)` creates `k` deterministic round-robin folds for `n` observations, with `k` in the interval `[2,n)`.",
+    "`cvpartition(n,'KFold',k)` creates `k` randomly assigned balanced folds for `n` observations, with `k` in the interval `[2,n)`, using RunMat's current runtime RNG state.",
     "`cvpartition(stratvar,'KFold',k)` and `cvpartition(stratvar,'Holdout',p)` stratify by default. Use `'Stratify',false` to partition only by observation order.",
     "`cvpartition(n,'Holdout',p)` accepts a fraction in `(0,1)` or an integer count in `[1,n)`.",
     "`cvpartition(n,'Leaveout')` creates one test set per observation.",
@@ -40,7 +40,10 @@
     "`cvpartition('CustomPartition',testSets)` accepts a logical vector or matrix whose columns are test sets, or a positive-integer vector whose values identify test-set numbers.",
     "Numeric stratification labels containing `NaN` are treated as missing; those rows remain in `NumObservations` but are false in returned training and test masks.",
     "The returned object exposes `NumObservations`, `NumTestSets`, `TestSize`, `TrainSize`, `Type`, `IsCustom`, `IsGrouped`, and `IsStratified` properties.",
-    "Fold assignment is deterministic for reproducibility; it does not attempt to reproduce MATLAB's RNG-dependent exact fold order."
+    "Typed-integer `n`, KFold or Holdout controls, stratification labels, and custom test sets are four independently gated RunMat extensions. Documented single, double, and logical forms remain accepted as appropriate to each argument.",
+    "The `Stratify` value uses documented logical scalars in compatibility mode; numeric, integer, text, and other broad boolean aliases require the `cvpartition-nonlogical-stratify-option` extension.",
+    "Random partitions respect RunMat's runtime RNG: the same seed reproduces the same masks, while different seeds can change assignment without changing fold-size invariants.",
+    "General compatibility gaps remain for R2025a `GroupingVariables`, tall-array holdout, the compatibility target's GPU stratification and custom partitions, and portions of object summary and repartition behavior."
   ],
   "examples": [
     {
@@ -62,7 +65,7 @@
   "faqs": [
     {
       "question": "Does RunMat randomize partitions?",
-      "answer": "No. RunMat uses deterministic fold and holdout assignment so results are reproducible across runs."
+      "answer": "Yes. K-fold and holdout assignment consumes RunMat's runtime RNG; set the seed to reproduce masks."
     },
     {
       "question": "How do I get masks for all folds?",

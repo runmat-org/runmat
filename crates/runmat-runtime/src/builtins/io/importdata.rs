@@ -1,23 +1,49 @@
 //! MATLAB-compatible `importdata` builtin for legacy text imports.
 
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, StructValue, Tensor, Value,
 };
 use runmat_filesystem as fs;
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, StructValue, Tensor, Value};
 
 use crate::builtins::common::fs::expand_user_path;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+use crate::builtins::common::tensor;
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "importdata";
+
+const IMPORTDATA_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "headerlinesIn",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented nonnegative scalar header count accepts single, double, and all eight integer classes; logical is excluded and typed values are parsed exactly before file access.",
+    }];
+pub const IMPORTDATA_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[A,delimiterOut,headerlinesOut] = importdata(filename,delimiterIn,integer_headerlinesIn)",
+        inputs: &IMPORTDATA_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Header count is structural and does not determine imported payload class. Text numeric data is double; helper-format payloads retain their own documented classes. This implementation remains a host text-import boundary.",
+    }];
 
 const IMPORTDATA_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "A",
@@ -26,6 +52,29 @@ const IMPORTDATA_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor 
     default: None,
     description: "Imported numeric matrix or import structure.",
 }];
+const IMPORTDATA_ALL_OUTPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Imported numeric matrix or import structure.",
+    },
+    BuiltinParamDescriptor {
+        name: "delimiterOut",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Detected or requested text delimiter.",
+    },
+    BuiltinParamDescriptor {
+        name: "headerlinesOut",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Number of imported header lines.",
+    },
+];
 const IMPORTDATA_INPUTS_FILENAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "filename",
     ty: BuiltinParamType::StringScalar,
@@ -72,7 +121,7 @@ const IMPORTDATA_INPUTS_DELIMITER_HEADER: [BuiltinParamDescriptor; 3] = [
         description: "Number of header lines to skip.",
     },
 ];
-const IMPORTDATA_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+const IMPORTDATA_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
     BuiltinSignatureDescriptor {
         label: "A = importdata(filename)",
         inputs: &IMPORTDATA_INPUTS_FILENAME,
@@ -87,6 +136,12 @@ const IMPORTDATA_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
         label: "A = importdata(filename, delimiterIn, headerlinesIn)",
         inputs: &IMPORTDATA_INPUTS_DELIMITER_HEADER,
         outputs: &IMPORTDATA_OUTPUTS,
+    },
+    BuiltinSignatureDescriptor {
+        label:
+            "[A, delimiterOut, headerlinesOut] = importdata(filename, delimiterIn, headerlinesIn)",
+        inputs: &IMPORTDATA_INPUTS_DELIMITER_HEADER,
+        outputs: &IMPORTDATA_ALL_OUTPUTS,
     },
 ];
 
@@ -116,7 +171,7 @@ const IMPORTDATA_ERRORS: [BuiltinErrorDescriptor; 3] = [
 
 pub const IMPORTDATA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &IMPORTDATA_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &IMPORTDATA_ERRORS,
 };
@@ -180,18 +235,6 @@ where
     builder.build()
 }
 
-fn map_control_flow(err: RuntimeError) -> RuntimeError {
-    let identifier = err.identifier().map(|value| value.to_string());
-    let message = err.message().to_string();
-    let mut builder = build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .with_source(err);
-    if let Some(identifier) = identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    builder.build()
-}
-
 #[runtime_builtin(
     name = "importdata",
     category = "io/import",
@@ -200,30 +243,30 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::importdata_type),
     descriptor(crate::builtins::io::importdata::IMPORTDATA_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::importdata::IMPORTDATA_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::importdata"
 )]
 async fn importdata_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if rest.len() > 2 {
         return Err(importdata_error(&IMPORTDATA_ERROR_ARGUMENT));
     }
-    let filename = gather_if_needed_async(&filename)
-        .await
-        .map_err(map_control_flow)?;
+    if crate::dispatcher::value_contains_gpu(&filename)
+        || rest.iter().any(crate::dispatcher::value_contains_gpu)
+    {
+        return Err(importdata_error_with(
+            &IMPORTDATA_ERROR_ARGUMENT,
+            "importdata: interactive gpuArray arguments are not supported",
+        ));
+    }
     let path = resolve_path(&filename)?;
 
     let delimiter = if let Some(value) = rest.first() {
-        let gathered = gather_if_needed_async(value)
-            .await
-            .map_err(map_control_flow)?;
-        Some(parse_delimiter_arg(&gathered)?)
+        Some(parse_delimiter_arg(value)?)
     } else {
         None
     };
     let header_lines = if let Some(value) = rest.get(1) {
-        let gathered = gather_if_needed_async(value)
-            .await
-            .map_err(map_control_flow)?;
-        Some(parse_header_lines(&gathered)?)
+        Some(parse_header_lines(value)?)
     } else {
         None
     };
@@ -235,7 +278,28 @@ async fn importdata_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<
             err,
         )
     })?;
-    import_text_data(&text, delimiter.as_deref(), header_lines)
+    let imported = import_text_data(&text, delimiter.as_deref(), header_lines)?;
+    if let Some(output_count) = crate::output_count::current_output_count() {
+        if output_count == 0 {
+            return Ok(Value::OutputList(Vec::new()));
+        }
+        let outputs = vec![
+            imported.value,
+            Value::CharArray(runmat_value::CharArray::new_row(&imported.delimiter)),
+            Value::Num(imported.header_lines as f64),
+        ];
+        return Ok(crate::output_count::output_list_with_padding(
+            output_count,
+            outputs,
+        ));
+    }
+    Ok(imported.value)
+}
+
+struct ImportTextResult {
+    value: Value,
+    delimiter: String,
+    header_lines: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -250,7 +314,7 @@ fn import_text_data(
     text: &str,
     delimiter: Option<&str>,
     header_lines: Option<usize>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<ImportTextResult> {
     let lines: Vec<&str> = text.lines().collect();
     let nonempty: Vec<(usize, &str)> = lines
         .iter()
@@ -259,14 +323,22 @@ fn import_text_data(
         .filter(|(_, line)| !line.trim().is_empty())
         .collect();
     if nonempty.is_empty() {
-        return Ok(Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).map_err(
-            |err| importdata_error_with(&IMPORTDATA_ERROR_PARSE, format!("importdata: {err}")),
-        )?));
+        return Ok(ImportTextResult {
+            value: Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).map_err(|err| {
+                importdata_error_with(&IMPORTDATA_ERROR_PARSE, format!("importdata: {err}"))
+            })?),
+            delimiter: delimiter.unwrap_or_default().to_string(),
+            header_lines: header_lines.unwrap_or(0),
+        });
     }
 
     let delimiter = delimiter
         .map(Delimiter::Explicit)
         .unwrap_or_else(|| detect_delimiter(nonempty.iter().map(|(_, line)| *line)));
+    let delimiter_out = match &delimiter {
+        Delimiter::Whitespace => " ".to_string(),
+        Delimiter::Explicit(value) => (*value).to_string(),
+    };
     let records: Vec<(usize, Vec<String>)> = nonempty
         .iter()
         .map(|(idx, line)| (*idx, split_record(line, &delimiter)))
@@ -292,7 +364,11 @@ fn import_text_data(
         && imported.colheaders.is_empty()
         && imported.rowheaders.is_empty()
     {
-        return Ok(Value::Tensor(tensor));
+        return Ok(ImportTextResult {
+            value: Value::Tensor(tensor),
+            delimiter: delimiter_out,
+            header_lines: data_start,
+        });
     }
 
     let mut out = StructValue::new();
@@ -306,7 +382,11 @@ fn import_text_data(
     if !imported.rowheaders.is_empty() {
         out.insert("rowheaders", cell_from_col(&imported.rowheaders)?);
     }
-    Ok(Value::Struct(out))
+    Ok(ImportTextResult {
+        value: Value::Struct(out),
+        delimiter: delimiter_out,
+        header_lines: data_start,
+    })
 }
 
 fn parse_numeric_records(
@@ -558,10 +638,18 @@ fn parse_delimiter_arg(value: &Value) -> BuiltinResult<String> {
 }
 
 fn parse_header_lines(value: &Value) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer.try_to_usize().ok_or_else(|| {
+            importdata_error_with(
+                &IMPORTDATA_ERROR_ARGUMENT,
+                "importdata: headerlinesIn must be a nonnegative integer scalar",
+            )
+        });
+    }
+
     let raw = match value {
         Value::Num(n) => *n,
-        Value::Int(i) => i.to_i64() as f64,
-        Value::Tensor(t) if t.data.len() == 1 => t.data[0],
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => tensor::tensor_value_f64(t, 0),
         _ => {
             return Err(importdata_error_with(
                 &IMPORTDATA_ERROR_ARGUMENT,
@@ -575,7 +663,20 @@ fn parse_header_lines(value: &Value) -> BuiltinResult<usize> {
             "importdata: headerlinesIn must be a nonnegative integer scalar",
         ));
     }
-    Ok(raw as usize)
+    if raw > usize::MAX.saturating_sub(1) as f64 {
+        return Err(importdata_error_with(
+            &IMPORTDATA_ERROR_ARGUMENT,
+            "importdata: headerlinesIn is too large",
+        ));
+    }
+    let parsed = raw.round() as usize;
+    if parsed as f64 != raw || parsed == usize::MAX {
+        return Err(importdata_error_with(
+            &IMPORTDATA_ERROR_ARGUMENT,
+            "importdata: headerlinesIn is too large",
+        ));
+    }
+    Ok(parsed)
 }
 
 fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
@@ -687,11 +788,11 @@ mod tests {
             .unwrap_or_else(|| panic!("missing {name}"))
     }
 
-    fn tensor_data(value: &Value) -> (&[f64], &[usize]) {
+    fn tensor_data(value: &Value) -> (Vec<f64>, Vec<usize>) {
         let Value::Tensor(tensor) = value else {
             panic!("expected tensor");
         };
-        (&tensor.data, &tensor.shape)
+        (tensor.materialize_f64(), tensor.shape.clone())
     }
 
     fn cell_text(value: &Value, row: usize, col: usize) -> String {
@@ -745,6 +846,83 @@ mod tests {
         assert_eq!(shape, &[2, 2]);
         assert_eq!(data, &[1.0, 3.0, 2.0, 4.0]);
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn importdata_headerlines_reads_typed_integer_storage_exactly() {
+        let header_lines =
+            Tensor::new_integer(runmat_value::IntegerStorage::U16(vec![2]), vec![1, 1])
+                .expect("header lines");
+        assert_eq!(
+            parse_header_lines(&Value::Tensor(header_lines)).expect("header lines"),
+            2
+        );
+
+        let negative = Tensor::new_integer(runmat_value::IntegerStorage::I16(vec![-1]), vec![1, 1])
+            .expect("negative header lines");
+        assert!(parse_header_lines(&Value::Tensor(negative)).is_err());
+
+        assert_eq!(
+            parse_header_lines(&Value::Int(runmat_value::IntValue::U64(u64::MAX))).ok(),
+            usize::try_from(u64::MAX).ok()
+        );
+        assert!(parse_header_lines(&Value::Num(1.0e300)).is_err());
+    }
+
+    #[test]
+    fn importdata_headerlines_typed_integer_tensors_ignore_poisoned_f64_mirrors() {
+        let classes = [
+            runmat_value::IntegerStorage::I8(vec![2]),
+            runmat_value::IntegerStorage::I16(vec![2]),
+            runmat_value::IntegerStorage::I32(vec![2]),
+            runmat_value::IntegerStorage::I64(vec![2]),
+            runmat_value::IntegerStorage::U8(vec![2]),
+            runmat_value::IntegerStorage::U16(vec![2]),
+            runmat_value::IntegerStorage::U32(vec![2]),
+            runmat_value::IntegerStorage::U64(vec![2]),
+        ];
+
+        for storage in classes {
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("header lines");
+            assert_eq!(parse_header_lines(&Value::Tensor(tensor)).unwrap(), 2);
+        }
+    }
+
+    #[test]
+    fn importdata_returns_documented_delimiter_and_header_count_outputs() {
+        let path = write_fixture("csv", "name,value\na,1\nb,2\n");
+        let _outputs = crate::output_count::push_output_count(Some(3));
+        let result = block_on(importdata_builtin(
+            Value::from(path.to_string_lossy().into_owned()),
+            Vec::new(),
+        ))
+        .expect("importdata outputs");
+        let Value::OutputList(outputs) = result else {
+            panic!("expected three outputs");
+        };
+        assert_eq!(outputs.len(), 3);
+        assert_eq!(
+            outputs[1],
+            Value::CharArray(runmat_value::CharArray::new_row(","))
+        );
+        assert_eq!(outputs[2], Value::Num(1.0));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn importdata_rejects_resident_controls_before_provider_or_file_access() {
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 98,
+            buffer_id: 419_001,
+            descriptor: Default::default(),
+        });
+        let error = block_on(importdata_builtin(resident, Vec::new()))
+            .expect_err("resident filename must reject");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:importdata:InvalidArgument")
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

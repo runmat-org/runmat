@@ -1,7 +1,7 @@
-use runmat_builtins::Value;
 use runmat_gc::{
     gc_register_root, gc_unregister_root, GlobalRoot, RootId, StackRoot, VariableArrayRoot,
 };
+use runmat_value::Value;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 

@@ -1,15 +1,15 @@
 {
   "title": "array2timetable",
   "category": "table",
-  "keywords": ["array2timetable", "array", "timetable", "RowTimes"],
+  "keywords": ["array2timetable", "timetable", "RowTimes", "SampleRate", "TimeStep", "StartTime", "VariableNames", "DimensionNames"],
   "summary": "Convert an array into a timetable.",
   "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Inputs are gathered before timetable materialization."},
   "fusion": {"elementwise": false, "reduction": false, "max_inputs": 3, "constants": "inline"},
   "requires_feature": null,
-  "tested": {"unit": "builtins::table::tests"},
-  "description": "`array2timetable(A, 'RowTimes', times)` splits array columns into timetable variables.",
-  "behaviors": ["`\"VariableNames\"`, `\"RowNames\"`, and `\"RowTimes\"` are supported.", "If row times are omitted, sequential numeric row times are generated."],
-  "examples": [{"description": "Array to timetable", "input": "TT = array2timetable([10;20], 'RowTimes', [1;2])", "output": "TT = timetable object"}],
+  "tested": {"unit": "builtins::table::tests", "integration": "crates/runmat-vm/tests/tables_timetables.rs"},
+  "description": "`array2timetable(X, timingName, timingValue)` splits a homogeneous two-dimensional array into timetable variables by column. Native integer columns preserve the exact class and values of `X`.",
+  "behaviors": ["Exactly one of `\"RowTimes\"`, `\"SampleRate\"`, or `\"TimeStep\"` is required. Explicit row times must be an M-by-1 datetime or duration vector.", "`\"StartTime\"` applies to `\"SampleRate\"` and `\"TimeStep\"`; a calendar-duration step requires a datetime start. `\"VariableNames\"` and `\"DimensionNames\"` follow current table naming rules, while `\"RowNames\"` is not an `array2timetable` option.", "All eight integer classes are preserved exactly when supplied as `X` and are accepted as positive scalar sample rates.", "Interactive resident GPU arguments are mode-gated RunMat extensions. They gather exact typed storage before timetable construction and reject in MATLAB-compatible mode."],
+  "examples": [{"description": "Create a timetable at two samples per second", "input": "TT = array2timetable(int16([10;20]), 'SampleRate', 2)", "output": "TT = 2x1 timetable"}],
   "links": [{"label": "timetable", "url": "./timetable"}, {"label": "array2table", "url": "./array2table"}],
-  "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}
+  "source": {"label": "`crates/runmat-runtime/src/builtins/table/builtins/timetable.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/builtins/timetable.rs"}
 }

@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": ["f64"],
     "broadcasting": "none",
-    "notes": "GPU inputs are gathered to host. Decoding runs on CPU."
+    "notes": "Decoding runs on the CPU. Automatic residency gathers transparently; explicit gpuArray host fallback is a declared RunMat extension."
   },
   "fusion": {
     "elementwise": false,
@@ -25,17 +25,17 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::stats::summary::encoding::tests",
-    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+    "integration": "crates/runmat-vm/tests/integer_label_and_text_control_semantics.rs"
   },
   "description": "`onehotdecode(B,classes,featureDim)` chooses the maximum value along `featureDim` and maps the index to `classes`.",
   "behaviors": [
     "The length of `classes` must match the size of `B` along `featureDim`.",
-    "`B` must be numeric or logical with non-`NaN` values in the range `[0,1]`; `NaN` entries are ignored while choosing the maximum class.",
+    "The documented encoded array `B` accepts single or double values in `[0,1]`; a checked integer or logical zero-one array is a declared RunMat extension.",
     "Ties are resolved by the first class along `featureDim`, matching MATLAB-style first-maximum behavior.",
     "The decoded output keeps the encoded shape with the feature dimension set to 1.",
     "By default the decoded output is categorical and preserves the supplied class order as the category order.",
-    "An optional typename can request `double`, `logical`, `string`, `cellstr`, or `categorical` output; `OutputType` is also accepted as a RunMat extension.",
-    "Numeric output requires numeric classes, and logical output requires logical classes."
+    "A positional typename can request `double`, `single`, any of the eight integer classes, `string`, or `categorical`. Logical and cell-string output are declared RunMat extensions, as are `OutputType` and `Typename` name-value aliases.",
+    "Numeric classes retain exact native values through class selection and requested native output conversion, including adjacent 64-bit labels above `flintmax`."
   ],
   "examples": [
     {

@@ -5,9 +5,17 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CellArray, CharArray, ComplexTensor, LogicalArray, NumericScalar, StringArray, Tensor, Value,
+};
+use runmat_value::{IntValue, SparseTensor};
 
 use crate::builtins::common::gpu_helpers;
 use crate::{build_runtime_error, RuntimeError};
@@ -73,6 +81,9 @@ pub const ISEQUALN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ISEQUAL_ERRORS,
 };
+const ISEQUAL_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "A", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Variadic numeric inputs compare by value across classes; exact integer storage is never preconverted to floating point." }];
+pub const ISEQUAL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "tf = isequal(integer_A, B, ...)", inputs: &ISEQUAL_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Predicate, output_class: BuiltinIntegerOutputClassRule::Logical, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Same-shape numeric values compare class-insensitively using exact signed/unsigned/integer/floating ordering; resident values gather exactly and return a host logical scalar." }];
+pub const ISEQUALN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "tf = isequaln(integer_A, B, ...)", inputs: &ISEQUAL_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Predicate, output_class: BuiltinIntegerOutputClassRule::Logical, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Shares exact class-insensitive numeric equality with isequal while treating corresponding floating missing values as equal." }];
 
 /// Compares all input values for equality.
 ///
@@ -85,6 +96,7 @@ pub const ISEQUALN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     keywords = "isequal,equality,comparison,logical",
     accel = "cpu",
     descriptor(crate::builtins::logical::rel::isequal::ISEQUAL_DESCRIPTOR),
+    integer_capabilities(crate::builtins::logical::rel::isequal::ISEQUAL_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::logical::rel::isequal"
 )]
 async fn isequal_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -99,6 +111,7 @@ async fn isequal_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     keywords = "isequaln,equality,comparison,nan,logical",
     accel = "cpu",
     descriptor(crate::builtins::logical::rel::isequal::ISEQUALN_DESCRIPTOR),
+    integer_capabilities(crate::builtins::logical::rel::isequal::ISEQUALN_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::logical::rel::isequal"
 )]
 async fn isequaln_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -137,7 +150,14 @@ async fn equality_builtin(
 async fn gather_value(value: Value, builtin_name: &'static str) -> crate::BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor_async(&handle)
+            let owner = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+                equality_error_with_detail(
+                    builtin_name,
+                    &ISEQUAL_ERROR_INTERNAL,
+                    "no acceleration provider owns the resident input",
+                )
+            })?;
+            gpu_helpers::download_value_preserving_residency_async(owner, &handle)
                 .await
                 .map_err(|err| {
                     equality_error_with_detail(
@@ -145,8 +165,7 @@ async fn gather_value(value: Value, builtin_name: &'static str) -> crate::Builti
                         &ISEQUAL_ERROR_INTERNAL,
                         err.to_string(),
                     )
-                })?;
-            Ok(Value::Tensor(tensor))
+                })
         }
         other => Ok(other),
     }
@@ -155,40 +174,45 @@ async fn gather_value(value: Value, builtin_name: &'static str) -> crate::Builti
 /// Compare two values for equality (same size, class, and content).
 /// NaN values are NOT considered equal.
 fn values_equal(a: &Value, b: &Value, nan_equal: bool) -> bool {
+    if let (Some(a), Some(b)) = (real_numeric_view(a), real_numeric_view(b)) {
+        return real_numeric_views_equal(&a, &b, nan_equal);
+    }
+    if let (Some(real), Value::ComplexTensor(complex)) = (real_numeric_view(a), b) {
+        return real_complex_equal(&real, complex, nan_equal);
+    }
+    if let (Value::ComplexTensor(complex), Some(real)) = (a, real_numeric_view(b)) {
+        return real_complex_equal(&real, complex, nan_equal);
+    }
     match (a, b) {
-        // Numeric scalars
-        (Value::Num(x), Value::Num(y)) => floats_equal(*x, *y, nan_equal),
-        (Value::Bool(x), Value::Bool(y)) => x == y,
-        (Value::Int(x), Value::Int(y)) => x == y,
-
         // Complex scalars
         (Value::Complex(ar, ai), Value::Complex(br, bi)) => {
             floats_equal(*ar, *br, nan_equal) && floats_equal(*ai, *bi, nan_equal)
         }
-        (Value::Num(x), Value::Complex(br, bi)) => {
-            floats_equal(*x, *br, nan_equal) && floats_equal(*bi, 0.0, nan_equal)
+        (a, Value::Complex(br, bi)) if real_numeric_view(a).is_some() => {
+            let real = real_numeric_view(a).expect("guarded real numeric value");
+            real.shape() == vec![1, 1]
+                && numeric_scalars_equal(real.value_at(0), NumericScalar::F64(*br), nan_equal)
+                && numeric_scalars_equal(
+                    NumericScalar::F64(*bi),
+                    NumericScalar::F64(0.0),
+                    nan_equal,
+                )
         }
-        (Value::Complex(ar, ai), Value::Num(y)) => {
-            floats_equal(*ar, *y, nan_equal) && floats_equal(*ai, 0.0, nan_equal)
+        (Value::Complex(ar, ai), b) if real_numeric_view(b).is_some() => {
+            let real = real_numeric_view(b).expect("guarded real numeric value");
+            real.shape() == vec![1, 1]
+                && numeric_scalars_equal(NumericScalar::F64(*ar), real.value_at(0), nan_equal)
+                && numeric_scalars_equal(
+                    NumericScalar::F64(*ai),
+                    NumericScalar::F64(0.0),
+                    nan_equal,
+                )
         }
-
-        // Tensors
-        (Value::Tensor(a), Value::Tensor(b)) => tensors_equal(a, b, nan_equal),
-        (Value::Tensor(t), Value::Num(n)) => scalar_tensor_equal(t, *n, nan_equal),
-        (Value::Num(n), Value::Tensor(t)) => scalar_tensor_equal(t, *n, nan_equal),
 
         // Complex tensors
         (Value::ComplexTensor(a), Value::ComplexTensor(b)) => {
             complex_tensors_equal(a, b, nan_equal)
         }
-
-        // Logical arrays
-        (Value::LogicalArray(a), Value::LogicalArray(b)) => logical_arrays_equal(a, b),
-        (Value::Bool(x), Value::LogicalArray(a)) => scalar_logical_equal(a, *x),
-        (Value::LogicalArray(a), Value::Bool(x)) => scalar_logical_equal(a, *x),
-
-        // Character arrays
-        (Value::CharArray(a), Value::CharArray(b)) => char_arrays_equal(a, b),
 
         // Strings
         (Value::String(a), Value::String(b)) => a == b,
@@ -211,62 +235,150 @@ fn values_equal(a: &Value, b: &Value, nan_equal: bool) -> bool {
     }
 }
 
+enum RealNumericView<'a> {
+    Scalar(NumericScalar),
+    Tensor(&'a Tensor),
+    Logical(&'a LogicalArray),
+    Char(&'a CharArray),
+    Sparse(&'a SparseTensor),
+}
+
+impl RealNumericView<'_> {
+    fn shape(&self) -> Vec<usize> {
+        match self {
+            Self::Scalar(_) => vec![1, 1],
+            Self::Tensor(value) => value.shape.clone(),
+            Self::Logical(value) => value.shape.clone(),
+            Self::Char(value) => vec![value.rows, value.cols],
+            Self::Sparse(value) => vec![value.rows, value.cols],
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            Self::Scalar(_) => 1,
+            Self::Tensor(value) => value.len(),
+            Self::Logical(value) => value.data.len(),
+            Self::Char(value) => value.data.len(),
+            Self::Sparse(value) => value.rows.saturating_mul(value.cols),
+        }
+    }
+
+    fn value_at(&self, index: usize) -> NumericScalar {
+        match self {
+            Self::Scalar(value) => *value,
+            Self::Tensor(value) => value
+                .numeric_value_at(index)
+                .expect("numeric view index validated by length"),
+            Self::Logical(value) => NumericScalar::U8(u8::from(value.data[index] != 0)),
+            Self::Char(value) => NumericScalar::U32(value.data[index] as u32),
+            Self::Sparse(value) => sparse_numeric_value_at(value, index),
+        }
+    }
+}
+
+fn real_numeric_view(value: &Value) -> Option<RealNumericView<'_>> {
+    match value {
+        Value::Num(value) => Some(RealNumericView::Scalar(NumericScalar::F64(*value))),
+        Value::Int(value) => Some(RealNumericView::Scalar(NumericScalar::from(value.clone()))),
+        Value::Bool(value) => Some(RealNumericView::Scalar(NumericScalar::U8(u8::from(*value)))),
+        Value::Tensor(value) => Some(RealNumericView::Tensor(value)),
+        Value::LogicalArray(value) => Some(RealNumericView::Logical(value)),
+        Value::CharArray(value) => Some(RealNumericView::Char(value)),
+        Value::SparseTensor(value) => Some(RealNumericView::Sparse(value)),
+        _ => None,
+    }
+}
+
+fn sparse_numeric_value_at(value: &SparseTensor, index: usize) -> NumericScalar {
+    let row = index % value.rows.max(1);
+    let col = index / value.rows.max(1);
+    let start = value.col_ptrs.get(col).copied().unwrap_or(0);
+    let end = value.col_ptrs.get(col + 1).copied().unwrap_or(start);
+    match value.row_indices[start..end].binary_search(&row) {
+        Ok(offset) => value
+            .numeric_value_at(start + offset)
+            .expect("validated sparse stored index"),
+        Err(_) => NumericScalar::F64(0.0),
+    }
+}
+
+fn real_complex_equal(
+    real: &RealNumericView<'_>,
+    complex: &ComplexTensor,
+    nan_equal: bool,
+) -> bool {
+    if real.shape() != complex.shape || real.len() != complex.len() {
+        return false;
+    }
+    (0..real.len()).all(|index| {
+        let (complex_real, complex_imag) = complex
+            .numeric_value_at(index)
+            .expect("complex tensor index validated by length");
+        numeric_scalars_equal(real.value_at(index), complex_real, nan_equal)
+            && numeric_scalars_equal(complex_imag, NumericScalar::F64(0.0), nan_equal)
+    })
+}
+
+fn real_numeric_views_equal(
+    a: &RealNumericView<'_>,
+    b: &RealNumericView<'_>,
+    nan_equal: bool,
+) -> bool {
+    if a.shape() != b.shape() || a.len() != b.len() {
+        return false;
+    }
+    (0..a.len()).all(|index| numeric_scalars_equal(a.value_at(index), b.value_at(index), nan_equal))
+}
+
 fn floats_equal(a: f64, b: f64, nan_equal: bool) -> bool {
     a == b || (nan_equal && a.is_nan() && b.is_nan())
 }
 
-fn tensors_equal(a: &Tensor, b: &Tensor, nan_equal: bool) -> bool {
-    if a.dtype != b.dtype || a.shape != b.shape {
-        return false;
+fn numeric_scalars_equal(a: NumericScalar, b: NumericScalar, nan_equal: bool) -> bool {
+    match (a.into_int_value(), b.into_int_value()) {
+        (Some(a), Some(b)) => {
+            return crate::builtins::logical::rel::integer_comparison::compare_integer_values(a, b)
+                == std::cmp::Ordering::Equal;
+        }
+        (Some(a), None) => return integer_equals_float(a, b),
+        (None, Some(b)) => return integer_equals_float(b, a),
+        (None, None) => {}
     }
-    if a.data.len() != b.data.len() {
-        return false;
+    match (a, b) {
+        (NumericScalar::F64(a), NumericScalar::F64(b)) => floats_equal(a, b, nan_equal),
+        (NumericScalar::F32(a), NumericScalar::F32(b)) => {
+            a == b || (nan_equal && a.is_nan() && b.is_nan())
+        }
+        (NumericScalar::F64(a), NumericScalar::F32(b)) => floats_equal(a, f64::from(b), nan_equal),
+        (NumericScalar::F32(a), NumericScalar::F64(b)) => floats_equal(f64::from(a), b, nan_equal),
+        _ => unreachable!("integer cases returned above"),
     }
-    // NaN != NaN in isequal (use isequaln for NaN equality)
-    a.data
-        .iter()
-        .zip(b.data.iter())
-        .all(|(x, y)| floats_equal(*x, *y, nan_equal))
 }
 
-fn scalar_tensor_equal(t: &Tensor, n: f64, nan_equal: bool) -> bool {
-    if t.dtype != runmat_builtins::NumericDType::F64 || t.data.len() != 1 {
-        return false;
-    }
-    floats_equal(t.data[0], n, nan_equal)
+fn integer_equals_float(integer: IntValue, float: NumericScalar) -> bool {
+    let float = match float {
+        NumericScalar::F64(value) => value,
+        NumericScalar::F32(value) => f64::from(value),
+        _ => unreachable!("integer argument separated before mixed comparison"),
+    };
+    crate::builtins::logical::rel::integer_comparison::integer_f64_order(integer, float)
+        == Some(std::cmp::Ordering::Equal)
 }
 
 fn complex_tensors_equal(a: &ComplexTensor, b: &ComplexTensor, nan_equal: bool) -> bool {
-    if a.shape != b.shape {
+    if a.shape != b.shape || a.len() != b.len() {
         return false;
     }
-    if a.data.len() != b.data.len() {
-        return false;
-    }
-    a.data
-        .iter()
-        .zip(b.data.iter())
-        .all(|((ar, ai), (br, bi))| {
-            floats_equal(*ar, *br, nan_equal) && floats_equal(*ai, *bi, nan_equal)
-        })
-}
-
-fn logical_arrays_equal(a: &LogicalArray, b: &LogicalArray) -> bool {
-    if a.shape != b.shape {
-        return false;
-    }
-    a.data == b.data
-}
-
-fn scalar_logical_equal(a: &LogicalArray, x: bool) -> bool {
-    if a.data.len() != 1 {
-        return false;
-    }
-    (a.data[0] != 0) == x
-}
-
-fn char_arrays_equal(a: &CharArray, b: &CharArray) -> bool {
-    a.rows == b.rows && a.cols == b.cols && a.data == b.data
+    (0..a.len()).all(|index| {
+        let (ar, ai) = a
+            .numeric_value_at(index)
+            .expect("complex tensor index validated by length");
+        let (br, bi) = b
+            .numeric_value_at(index)
+            .expect("complex tensor index validated by length");
+        numeric_scalars_equal(ar, br, nan_equal) && numeric_scalars_equal(ai, bi, nan_equal)
+    })
 }
 
 fn string_arrays_equal(a: &StringArray, b: &StringArray) -> bool {
@@ -287,19 +399,18 @@ fn cells_equal(a: &CellArray, b: &CellArray, nan_equal: bool) -> bool {
 }
 
 fn structs_equal(
-    a: &runmat_builtins::StructValue,
-    b: &runmat_builtins::StructValue,
+    a: &runmat_value::StructValue,
+    b: &runmat_value::StructValue,
     nan_equal: bool,
 ) -> bool {
     if a.fields.len() != b.fields.len() {
         return false;
     }
-    a.fields
-        .iter()
-        .zip(b.fields.iter())
-        .all(|((key_a, val_a), (key_b, val_b))| {
-            key_a == key_b && values_equal(val_a, val_b, nan_equal)
-        })
+    a.fields.iter().all(|(key, value)| {
+        b.fields
+            .get(key)
+            .is_some_and(|other| values_equal(value, other, nan_equal))
+    })
 }
 
 fn equality_error(
@@ -330,7 +441,7 @@ fn equality_error_with_detail(
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::CellArray;
+    use runmat_value::{CellArray, ComplexTensor, IntegerComplexStorage, IntegerStorage};
 
     fn run_isequal(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(isequal_builtin(args))
@@ -338,6 +449,63 @@ pub(crate) mod tests {
 
     fn run_isequaln(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(isequaln_builtin(args))
+    }
+
+    fn typed_complex_u64(real: u64, imag: u64) -> ComplexTensor {
+        ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![real]),
+                IntegerStorage::U64(vec![imag]),
+            )
+            .expect("matching components"),
+            vec![1, 1],
+        )
+        .expect("typed complex")
+    }
+
+    #[test]
+    fn numeric_equality_is_class_insensitive_without_losing_wide_integers() {
+        let signed = Tensor::new_integer(IntegerStorage::I64(vec![255]), vec![1, 1]).unwrap();
+        let unsigned = Tensor::new_integer(IntegerStorage::U8(vec![255]), vec![1, 1]).unwrap();
+        assert_eq!(
+            run_isequal(vec![Value::Tensor(signed), Value::Tensor(unsigned)]).unwrap(),
+            Value::Bool(true)
+        );
+
+        let wide = (1_u64 << 53) + 1;
+        let exact = Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).unwrap();
+        let rounded = Tensor::new(vec![wide as f64], vec![1, 1]).unwrap();
+        assert_eq!(
+            run_isequal(vec![Value::Tensor(exact), Value::Tensor(rounded)]).unwrap(),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            run_isequal(vec![Value::Bool(true), Value::Num(1.0)]).unwrap(),
+            Value::Bool(true)
+        );
+    }
+
+    #[test]
+    fn real_complex_and_sparse_numeric_values_compare_across_classes() {
+        let wide = u64::MAX;
+        let real = Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).unwrap();
+        let complex = typed_complex_u64(wide, 0);
+        assert_eq!(
+            run_isequal(vec![Value::Tensor(real), Value::ComplexTensor(complex)]).unwrap(),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            run_isequal(vec![Value::Int(IntValue::I32(1)), Value::Complex(1.0, 0.0)]).unwrap(),
+            Value::Bool(true)
+        );
+        let sparse =
+            SparseTensor::new_integer(2, 1, vec![0, 1], vec![1], IntegerStorage::U64(vec![wide]))
+                .unwrap();
+        let dense = Tensor::new_integer(IntegerStorage::U64(vec![0, wide]), vec![2, 1]).unwrap();
+        assert_eq!(
+            run_isequal(vec![Value::SparseTensor(sparse), Value::Tensor(dense)]).unwrap(),
+            Value::Bool(true)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -457,6 +625,25 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[test]
+    fn isequal_and_isequaln_compare_single_storage_without_widening_class() {
+        let left = Tensor::from_f32(vec![0.1, f32::NAN], vec![1, 2]).unwrap();
+        let right = Tensor::from_f32(vec![0.1, f32::NAN], vec![1, 2]).unwrap();
+
+        assert_eq!(
+            run_isequal(vec![
+                Value::Tensor(left.clone()),
+                Value::Tensor(right.clone())
+            ])
+            .expect("isequal"),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            run_isequaln(vec![Value::Tensor(left), Value::Tensor(right)]).expect("isequaln"),
+            Value::Bool(true)
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isequal_strings() {
@@ -486,26 +673,76 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn isequal_bool_and_num_have_different_classes() {
+    fn isequal_bool_and_num_compare_by_numeric_value() {
         let result = run_isequal(vec![Value::Bool(true), Value::Num(1.0)]).expect("isequal");
-        assert_eq!(result, Value::Bool(false));
+        assert_eq!(result, Value::Bool(true));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn isequal_tensor_dtype_must_match() {
+    fn isequal_tensor_numeric_classes_compare_by_value() {
         let double_tensor =
-            Tensor::new_with_dtype(vec![1.0], vec![1, 1], runmat_builtins::NumericDType::F64)
-                .unwrap();
+            Tensor::new_with_dtype(vec![1.0], vec![1, 1], runmat_value::NumericDType::F64).unwrap();
         let uint32_tensor =
-            Tensor::new_with_dtype(vec![1.0], vec![1, 1], runmat_builtins::NumericDType::U32)
-                .unwrap();
+            Tensor::new_with_dtype(vec![1.0], vec![1, 1], runmat_value::NumericDType::U32).unwrap();
         let result = run_isequal(vec![
             Value::Tensor(double_tensor),
             Value::Tensor(uint32_tensor),
         ])
         .expect("isequal");
-        assert_eq!(result, Value::Bool(false));
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn isequal_integer_tensor_values_are_compared_exactly() {
+        let same_left = Tensor::new_integer(
+            IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
+            vec![1, 2],
+        )
+        .expect("left integer tensor");
+        let same_right = Tensor::new_integer(
+            IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
+            vec![1, 2],
+        )
+        .expect("right integer tensor");
+        let different = Tensor::new_integer(
+            IntegerStorage::U64(vec![(1_u64 << 53), u64::MAX]),
+            vec![1, 2],
+        )
+        .expect("different integer tensor");
+
+        assert_eq!(
+            run_isequal(vec![Value::Tensor(same_left), Value::Tensor(same_right)])
+                .expect("isequal same"),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            run_isequal(vec![
+                Value::Tensor(different),
+                Value::Tensor(
+                    Tensor::new_integer(
+                        IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
+                        vec![1, 2],
+                    )
+                    .expect("comparison tensor"),
+                ),
+            ])
+            .expect("isequal different"),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn isequal_integer_tensor_classes_compare_exact_values() {
+        let unsigned = Tensor::new_integer(IntegerStorage::U64(vec![255]), vec![1, 1])
+            .expect("unsigned integer tensor");
+        let signed = Tensor::new_integer(IntegerStorage::I64(vec![255]), vec![1, 1])
+            .expect("signed integer tensor");
+
+        assert_eq!(
+            run_isequal(vec![Value::Tensor(unsigned), Value::Tensor(signed)]).expect("isequal"),
+            Value::Bool(true)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -514,5 +751,26 @@ pub(crate) mod tests {
         let result =
             run_isequal(vec![Value::Complex(1.0, 2.0), Value::Complex(1.0, 2.0)]).expect("isequal");
         assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn isequal_typed_complex_integer_compares_exact_components() {
+        let left = typed_complex_u64(u64::MAX, 1_u64 << 63);
+        let same = left.clone();
+        let different = typed_complex_u64(u64::MAX - 1, 1_u64 << 63);
+
+        assert_eq!(
+            run_isequal(vec![Value::ComplexTensor(left), Value::ComplexTensor(same)])
+                .expect("isequal"),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            run_isequal(vec![
+                Value::ComplexTensor(different),
+                Value::ComplexTensor(typed_complex_u64(u64::MAX, 1_u64 << 63)),
+            ])
+            .expect("isequal"),
+            Value::Bool(false)
+        );
     }
 }

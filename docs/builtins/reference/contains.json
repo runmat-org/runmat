@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "matlab",
-    "notes": "Runs on the CPU; when inputs reside on the GPU RunMat gathers them automatically so behaviour matches MATLAB."
+    "notes": "Runs on the CPU. RunMat has no resident text-array representation; resident numeric values reject as nontext before provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -80,7 +80,7 @@
     },
     {
       "question": "How do I ignore letter case?",
-      "answer": "Specify `'IgnoreCase', true` (or `'on'`) after the pattern argument. The option is case-insensitive, so `'ignorecase'` also works. The default is `false`, matching MATLAB."
+      "answer": "Specify `'IgnoreCase', true` after the pattern argument. The option name is case-insensitive and the default is `false`. Positional, numeric, and textual flag conveniences are available only in RunMat compatibility mode."
     },
     {
       "question": "What happens with empty patterns?",
@@ -96,7 +96,7 @@
     },
     {
       "question": "Does `contains` run on the GPU?",
-      "answer": "No. The builtin executes on the CPU. If inputs reside on the GPU (for example, after other accelerated operations), RunMat gathers them automatically so behaviour matches MATLAB."
+      "answer": "No. The builtin executes on the CPU, and RunMat has no GPU-resident text representation. Numeric gpuArray values reject as nontext before provider access."
     },
     {
       "question": "Does `contains` preserve the input shape?",
@@ -129,8 +129,8 @@
     "label": "`crates/runmat-runtime/src/builtins/strings/search/contains.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/search/contains.rs"
   },
-  "gpu_residency": "You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB).\n\n`contains` always executes on the host, but RunMat's runtime automatically gathers any GPU-resident inputs before evaluating the text search so behaviour is identical to MATLAB. You can still call `gpuArray` manually for compatibility with legacy MATLAB code; the runtime will gather those inputs just in time when `contains` runs.",
+  "gpu_residency": "`contains` executes on host text values. RunMat currently has no GPU-resident string representation, so a numeric gpuArray is rejected as nontext before any provider download.",
   "gpu_behavior": [
-    "`contains` performs host-side text comparisons. When invoked with data that currently resides on the GPU, RunMat gathers the inputs before executing the search so that results match MATLAB exactly. No provider hooks are required for this builtin."
+    "`contains` performs host-side text comparisons and registers no provider hook. Resident numeric inputs reject before provider access because they are not text values."
   ]
 }

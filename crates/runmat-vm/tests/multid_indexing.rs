@@ -11,14 +11,14 @@ fn reshape_and_index_3d_element() {
     // A(1,2,2) with column-major reshape(2,3,2) is 9 in MATLAB semantics
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 9.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 9.0).abs() < 1e-9)));
 }
 
 /// MATLAB only drops *trailing* singleton dimensions. A(:, 2, :) on 3×4×5 → [3, 1, 5].
 #[test]
 fn slice_3d_non_trailing_singleton_shape() {
     let vars = execute_source("A = reshape(1:60, 3, 4, 5); S = A(:, 2, :);").unwrap();
-    let runmat_builtins::Value::Tensor(t) = &vars[1] else {
+    let runmat_value::Value::Tensor(t) = &vars[1] else {
         panic!("expected S tensor, got {:?}", vars[1]);
     };
     assert_eq!(
@@ -32,7 +32,7 @@ fn slice_3d_non_trailing_singleton_shape() {
 #[test]
 fn slice_3d_leading_scalars_shape() {
     let vars = execute_source("A = reshape(1:60, 3, 4, 5); S = A(1, 1, :);").unwrap();
-    let runmat_builtins::Value::Tensor(t) = &vars[1] else {
+    let runmat_value::Value::Tensor(t) = &vars[1] else {
         panic!("expected S tensor, got {:?}", vars[1]);
     };
     assert_eq!(
@@ -45,7 +45,7 @@ fn slice_3d_leading_scalars_shape() {
 #[test]
 fn slice_3d_trailing_singleton_dropped_for_vector_index() {
     let vars = execute_source("A = reshape(1:24, 3, 4, 2); S = A(:, :, [2]);").unwrap();
-    let runmat_builtins::Value::Tensor(t) = &vars[1] else {
+    let runmat_value::Value::Tensor(t) = &vars[1] else {
         panic!("expected S tensor, got {:?}", vars[1]);
     };
     assert_eq!(
@@ -58,7 +58,7 @@ fn slice_3d_trailing_singleton_dropped_for_vector_index() {
 #[test]
 fn slice_3d_trailing_singleton_dropped_for_scalar_index() {
     let vars = execute_source("A = reshape(1:24, 3, 4, 2); S = A(:, :, 2);").unwrap();
-    let runmat_builtins::Value::Tensor(t) = &vars[1] else {
+    let runmat_value::Value::Tensor(t) = &vars[1] else {
         panic!("expected S tensor, got {:?}", vars[1]);
     };
     assert_eq!(
@@ -72,10 +72,10 @@ fn slice_3d_trailing_singleton_dropped_for_scalar_index() {
 fn mixed_selectors_basic_2d_range() {
     let vars = execute_source("A=[1 2 3; 4 5 6; 7 8 9]; sub = A(1:2, 2);").unwrap();
     // Should select first two rows of column 2: [2;5]
-    let runmat_builtins::Value::Tensor(t) = &vars[1] else {
+    let runmat_value::Value::Tensor(t) = &vars[1] else {
         panic!("expected sub tensor, got {:?}", vars[1]);
     };
-    assert_eq!(t.data, vec![2.0, 5.0]);
+    assert_eq!(t.materialize_f64(), vec![2.0, 5.0]);
 }
 
 #[test]
@@ -85,11 +85,11 @@ fn logical_mask_rows_select() {
     let sel = vars
         .iter()
         .rev()
-        .find(|v| matches!(v, runmat_builtins::Value::Tensor(_)))
+        .find(|v| matches!(v, runmat_value::Value::Tensor(_)))
         .unwrap();
-    if let runmat_builtins::Value::Tensor(t) = sel {
+    if let runmat_value::Value::Tensor(t) = sel {
         assert_eq!(t.shape, vec![2, 2]);
-        assert_eq!(t.data, vec![1.0, 5.0, 2.0, 6.0]);
+        assert_eq!(t.materialize_f64(), vec![1.0, 5.0, 2.0, 6.0]);
     }
 }
 
@@ -98,7 +98,35 @@ fn slice_assignment_column_and_row() {
     let src = "A=[1 2 3; 4 5 6]; A(:,2) = [8;9]; A(1,:) = [7 7 7];";
     let vars = execute_source(src).unwrap();
     // Final A should be [7 7 7; 4 9 6] -> column-major data [7 4 7 9 7 6]
-    assert!(vars.iter().any(|value| matches!(value, runmat_builtins::Value::Tensor(tensor) if tensor.data == vec![7.0, 4.0, 7.0, 9.0, 7.0, 6.0])));
+    assert!(vars.iter().any(|value| matches!(value, runmat_value::Value::Tensor(tensor) if tensor.materialize_f64() == vec![7.0, 4.0, 7.0, 9.0, 7.0, 6.0])));
+}
+
+#[test]
+fn indexed_assignment_rejects_nonscalar_singleton_expansion() {
+    let error = execute_source("A = uint8([0 0; 0 0]); A(:, :) = uint8([5 6]);")
+        .expect_err("nonscalar singleton expansion must reject");
+    assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
+
+    let vars = execute_source(
+        "A = uint8([0 0; 0 0]); \
+         A(:, :) = uint8([1 2; 3 4]); \
+         exact = A; \
+         A(:, :) = uint8(9); \
+         scalar = A;",
+    )
+    .expect("exact and scalar indexed assignment");
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_value::Value::Tensor(tensor)
+            if tensor.integer_storage()
+                == Some(&runmat_value::IntegerStorage::U8(vec![1, 3, 2, 4]))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_value::Value::Tensor(tensor)
+            if tensor.integer_storage()
+                == Some(&runmat_value::IntegerStorage::U8(vec![9, 9, 9, 9]))
+    )));
 }
 
 #[test]
@@ -109,7 +137,7 @@ fn slice_assignment_3d_entire_slice() {
     let a = vars
         .iter()
         .filter_map(|v| {
-            if let runmat_builtins::Value::Tensor(t) = v {
+            if let runmat_value::Value::Tensor(t) = v {
                 Some(t)
             } else {
                 None
@@ -130,7 +158,7 @@ fn slice_assignment_3d_entire_slice() {
         for c in 1..=cols {
             for r in 1..=rows {
                 let idx = (r - 1) + (c - 1) * rows + (p - 1) * rows * cols;
-                gathered.push(a.data[idx]);
+                gathered.push(a.materialize_f64()[idx]);
             }
         }
         assert_eq!(gathered, second_slice_vals);
@@ -146,13 +174,13 @@ fn gpu_slice_assignment_and_range_indexing() {
     let b_tensor = vars
         .into_iter()
         .filter_map(|value| match value {
-            runmat_builtins::Value::Tensor(tensor) => Some(tensor),
+            runmat_value::Value::Tensor(tensor) => Some(tensor),
             _ => None,
         })
-        .find(|tensor| tensor.data == vec![8.0, 9.0])
+        .find(|tensor| tensor.materialize_f64() == vec![8.0, 9.0])
         .expect("B tensor");
 
-    assert_eq!(b_tensor.data, vec![8.0, 9.0]);
+    assert_eq!(b_tensor.materialize_f64(), vec![8.0, 9.0]);
 }
 
 #[test]
@@ -164,13 +192,13 @@ fn gpu_range_end_indexing() {
     let b_tensor = vars
         .into_iter()
         .filter_map(|value| match value {
-            runmat_builtins::Value::Tensor(tensor) => Some(tensor),
+            runmat_value::Value::Tensor(tensor) => Some(tensor),
             _ => None,
         })
-        .find(|tensor| tensor.data == vec![2.0, 5.0])
+        .find(|tensor| tensor.materialize_f64() == vec![2.0, 5.0])
         .expect("B tensor");
 
-    assert_eq!(b_tensor.data, vec![2.0, 5.0]);
+    assert_eq!(b_tensor.materialize_f64(), vec![2.0, 5.0]);
 }
 
 #[test]
@@ -182,11 +210,51 @@ fn gpu_range_end_assignment() {
     let b_tensor = vars
         .into_iter()
         .filter_map(|value| match value {
-            runmat_builtins::Value::Tensor(tensor) => Some(tensor),
+            runmat_value::Value::Tensor(tensor) => Some(tensor),
             _ => None,
         })
-        .find(|tensor| tensor.data == vec![9.0, 9.0, 9.0, 4.0])
+        .find(|tensor| tensor.materialize_f64() == vec![9.0, 9.0, 9.0, 4.0])
         .expect("B tensor");
 
-    assert_eq!(b_tensor.data, vec![9.0, 9.0, 9.0, 4.0]);
+    assert_eq!(b_tensor.materialize_f64(), vec![9.0, 9.0, 9.0, 4.0]);
+}
+
+#[test]
+fn gpu_integer_short_linear_logical_mask_preserves_residency_and_class() {
+    runmat_accelerate::simple_provider::register_inprocess_provider();
+    let vars = execute_source(
+        "A = gpuArray(uint64([10 20 30 40])); \
+         mask = logical([1 0 1]); \
+         B = gather(A(mask)); \
+         A(mask) = uint64([7 9]); \
+         C = gather(A);",
+    )
+    .expect("gpu short logical read and assignment");
+
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_value::Value::Tensor(tensor)
+            if tensor.shape == vec![2, 1]
+                && tensor.integer_storage()
+                    == Some(&runmat_value::IntegerStorage::U64(vec![10, 30]))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_value::Value::Tensor(tensor)
+            if tensor.shape == vec![1, 4]
+                && tensor.integer_storage()
+                    == Some(&runmat_value::IntegerStorage::U64(vec![7, 20, 9, 40]))
+    )));
+}
+
+#[test]
+fn gpu_integer_indexed_assignment_rejects_nonscalar_singleton_expansion() {
+    runmat_accelerate::simple_provider::register_inprocess_provider();
+    let error = execute_source(
+        "A = gpuArray(uint8([0 0; 0 0])); \
+         rhs = gpuArray(uint8([5 6])); \
+         A(:, :) = rhs;",
+    )
+    .expect_err("gpu nonscalar singleton expansion must reject");
+    assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
 }

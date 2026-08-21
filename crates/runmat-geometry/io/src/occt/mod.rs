@@ -17,7 +17,35 @@ use runmat_geometry_core::{
 use std::collections::BTreeMap;
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+pub(crate) mod evaluator;
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+mod evaluator_bindings;
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+mod evaluator_mass;
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+mod evaluator_pcurve;
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+mod evaluator_surface;
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+mod evaluator_trim;
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+mod exact_healing_projection;
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+mod exact_persistent_names;
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+mod exact_projection;
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+mod exact_projection_evaluators;
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+mod exact_projection_identity;
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+mod exact_projection_interfaces;
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+mod exact_projection_occurrence;
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
 mod ffi;
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+mod import_validation;
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
 mod native;
 #[cfg(all(target_arch = "wasm32", feature = "occt-wasm-host"))]
@@ -163,6 +191,31 @@ pub(crate) fn import_cad_topology(
     context: &GeometryImportContext,
 ) -> Result<Option<OcctCadTopology>, GeometryImportError> {
     native::import_cad_topology(path, bytes, format, options, context).map(Some)
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+pub(crate) fn import_exact_cad_shape(
+    path: &str,
+    bytes: &[u8],
+    format: OcctCadFormat,
+    options: &crate::exact::ExactCadImportOptions,
+    context: &GeometryImportContext,
+) -> Result<crate::exact::ImportedExactCad, GeometryImportError> {
+    native::import_exact_cad_shape(path, bytes, format, options, context)
+}
+
+#[cfg(not(all(not(target_arch = "wasm32"), feature = "occt-native")))]
+pub(crate) fn import_exact_cad_shape(
+    path: &str,
+    bytes: &[u8],
+    format: OcctCadFormat,
+    options: &crate::exact::ExactCadImportOptions,
+    context: &GeometryImportContext,
+) -> Result<crate::exact::ImportedExactCad, GeometryImportError> {
+    let _ = (path, bytes, format, options, context);
+    Err(GeometryImportError::BackendUnavailable(
+        "exact CAD import requires a native OCCT host".into(),
+    ))
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "occt-wasm-host"))]

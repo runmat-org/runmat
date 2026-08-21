@@ -3,9 +3,10 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, StringArray, Value,
 };
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, StringArray, Value};
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 use crate::builtins::common::map_control_flow_with_builtin;
@@ -13,7 +14,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
+use crate::builtins::strings::common::{
+    char_row_to_string_slice, contains_numeric_or_resident_text_input, is_missing_string,
+};
 use crate::builtins::strings::type_resolvers::text_concat_type;
 use crate::{
     build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
@@ -128,6 +131,12 @@ pub const STRCAT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &STRCAT_ERRORS,
+};
+
+pub const STRCAT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "strcat concatenates character arrays, string arrays, and cell arrays of character vectors. Numeric, integer, and provider-resident values reject before provider access without implicit text conversion.",
 };
 
 fn map_flow(err: RuntimeError) -> RuntimeError {
@@ -354,6 +363,7 @@ fn cell_element_to_text(value: &Value) -> BuiltinResult<TextElement> {
     accel = "sink",
     type_resolver(text_concat_type),
     descriptor(crate::builtins::strings::transform::strcat::STRCAT_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::transform::strcat::STRCAT_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::transform::strcat"
 )]
 async fn strcat_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -365,6 +375,9 @@ async fn strcat_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
     let mut output_kind = OutputKind::Char;
 
     for value in rest {
+        if contains_numeric_or_resident_text_input(&value) {
+            return Err(strcat_error(&STRCAT_ERROR_INVALID_INPUT));
+        }
         let gathered = gather_if_needed_async(&value).await.map_err(map_flow)?;
         let operand = TextOperand::from_value(gathered)?;
         output_kind = output_kind.update(operand.kind);
@@ -487,9 +500,10 @@ pub(crate) mod tests {
     use super::*;
     #[cfg(feature = "wgpu")]
     use crate::builtins::common::test_support;
+    use runmat_builtins::{ResolveContext, Type};
     #[cfg(feature = "wgpu")]
-    use runmat_builtins::Tensor;
-    use runmat_builtins::{CellArray, CharArray, IntValue, ResolveContext, StringArray, Type};
+    use runmat_value::Tensor;
+    use runmat_value::{CellArray, CharArray, IntValue, StringArray};
 
     fn run_strcat(rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(strcat_builtin(rest))
@@ -759,7 +773,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");

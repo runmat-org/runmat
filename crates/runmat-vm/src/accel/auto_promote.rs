@@ -1,5 +1,5 @@
-use runmat_builtins::Value;
 use runmat_runtime::RuntimeError;
+use runmat_value::Value;
 
 #[derive(Clone, Copy)]
 pub enum AutoBinaryOp {

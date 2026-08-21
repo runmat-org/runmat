@@ -2,7 +2,7 @@ use runmat_accelerate::precision::ensure_provider_supports_dtype;
 use runmat_accelerate_api::{
     AccelDownloadFuture, AccelProvider, GpuTensorHandle, HostTensorView, ProviderPrecision,
 };
-use runmat_builtins::NumericDType;
+use runmat_value::NumericDType;
 
 struct F32TestProvider;
 
@@ -59,4 +59,27 @@ fn f64_inputs_disallowed_on_f32_provider_without_downcast() {
         err.contains("refusing implicit downcast"),
         "unexpected error message: {err}"
     );
+}
+
+#[test]
+fn integer_inputs_are_rejected_until_provider_integer_kernels_exist() {
+    let provider = F32TestProvider;
+    for dtype in [
+        NumericDType::I8,
+        NumericDType::I16,
+        NumericDType::I32,
+        NumericDType::I64,
+        NumericDType::U8,
+        NumericDType::U16,
+        NumericDType::U32,
+        NumericDType::U64,
+    ] {
+        let err = ensure_provider_supports_dtype(&provider, dtype)
+            .expect_err("integer kernels must not be silently accepted");
+        assert!(
+            err.contains(dtype.class_name()),
+            "unexpected error for {}: {err}",
+            dtype.class_name()
+        );
+    }
 }

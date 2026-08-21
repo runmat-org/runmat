@@ -1,10 +1,3 @@
----
-title: "Geometry"
-category: "FEA"
-section: "13.2"
-last_updated: "June 22, 2026"
----
-
 # Geometry
 
 Geometry is the first object in the FEA workflow. Before a model can have materials, loads, constraints, or domains, RunMat needs a structured `geometry.Asset`.

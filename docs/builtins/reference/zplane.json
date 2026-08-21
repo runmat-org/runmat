@@ -32,7 +32,8 @@
     "`zplane(z, p, k)` accepts explicit zero and pole locations; the gain is validated for compatibility and does not affect marker placement.",
     "`zplane(sos)` accepts a second-order-section matrix with six columns `[b0 b1 b2 a0 a1 a2]` and plots all section roots.",
     "The plot uses equal axis scaling, grid lines, the unit circle, and symmetric limits large enough to include all finite zeros and poles.",
-    "When assigned, `h = zplane(...)` returns a row vector of graphics handles for the guide lines and marker plots."
+    "When assigned, `h = zplane(...)` returns a row vector of graphics handles for the guide lines and marker plots.",
+    "The numeric input contract is single or double. RunMat mode additionally accepts native integer coefficients, locations, SOS entries, and gains through a checked conversion into the floating root and graphics domain."
   ],
   "examples": [
     {

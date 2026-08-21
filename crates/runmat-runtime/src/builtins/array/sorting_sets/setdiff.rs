@@ -1,24 +1,27 @@
 //! MATLAB-compatible `setdiff` builtin with GPU-aware semantics for RunMat.
 //!
 //! Provides element-wise and row-wise set difference with optional stable
-//! ordering. GPU tensors are gathered to host memory today, but the builtin is
-//! registered as a residency sink so future providers can implement device-side
-//! kernels without impacting behaviour.
+//! ordering. GPU tensors use a provider hook or typed host fallback, then public
+//! outputs are restored to the owning provider.
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
-use runmat_accelerate_api::{
-    GpuTensorHandle, GpuTensorStorage, HostTensorOwned, SetdiffOptions, SetdiffOrder, SetdiffResult,
-};
+use runmat_accelerate_api::{GpuTensorHandle, SetdiffOptions, SetdiffOrder, SetdiffResult};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, StringArray, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericDType,
+    NumericStorage, StringArray, Tensor, Value,
+};
 
-use super::type_resolvers::set_values_output_type;
+use super::{float_order::SetFloat, integer_order, type_resolvers::set_values_output_type};
 use crate::build_runtime_error;
 use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::gpu_helpers;
@@ -28,6 +31,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::sorting_sets::setdiff")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -37,12 +41,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[ProviderHook::Custom("setdiff")],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: true,
-    notes: "Providers may implement `setdiff`; until then tensors are gathered and processed on the host.",
+    notes: "Providers may implement `setdiff`; exact typed fallback gathers when needed and restores difference values plus double indices to the input owner.",
 };
 
 #[runmat_macros::register_fusion_spec(
@@ -184,6 +188,13 @@ const SETDIFF_ERROR_UNSUPPORTED_INPUT_TYPE: BuiltinErrorDescriptor = BuiltinErro
     message: "setdiff: unsupported input type",
 };
 
+const SETDIFF_ERROR_NUMERIC_CLASS_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETDIFF.NUMERIC_CLASS_MISMATCH",
+    identifier: Some("RunMat:setdiff:NumericClassMismatch"),
+    when: "Numeric inputs have incompatible nondouble classes.",
+    message: "setdiff: numeric inputs must have the same class, except double may be combined with one nondouble class",
+};
+
 const SETDIFF_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.SETDIFF.INVALID_ARGUMENT",
     identifier: Some("RunMat:setdiff:InvalidArgument"),
@@ -198,15 +209,28 @@ const SETDIFF_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "setdiff: internal operation failed",
 };
 
-const SETDIFF_ERRORS: [BuiltinErrorDescriptor; 7] = [
+const SETDIFF_ERRORS: [BuiltinErrorDescriptor; 8] = [
     SETDIFF_ERROR_LEGACY_OPTION_UNSUPPORTED,
     SETDIFF_ERROR_CONFLICTING_ORDER_OPTIONS,
     SETDIFF_ERROR_UNKNOWN_OPTION,
     SETDIFF_ERROR_ROWS_COLUMN_MISMATCH,
     SETDIFF_ERROR_UNSUPPORTED_INPUT_TYPE,
+    SETDIFF_ERROR_NUMERIC_CLASS_MISMATCH,
     SETDIFF_ERROR_INVALID_ARGUMENT,
     SETDIFF_ERROR_INTERNAL,
 ];
+
+const SETDIFF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[C, ia] = setdiff(integer_A, integer_B, options)",
+        inputs: &super::BINARY_SET_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "C preserves A's integer class, including when B is double; ia is one-based double. GPU supports integer classes through 32 bits and restores outputs after typed fallback.",
+    }];
 
 pub const SETDIFF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SETDIFF_SIGNATURES,
@@ -243,24 +267,47 @@ fn setdiff_internal_error(message: impl Into<String>) -> crate::RuntimeError {
     sink = true,
     type_resolver(set_values_output_type),
     descriptor(crate::builtins::array::sorting_sets::setdiff::SETDIFF_DESCRIPTOR),
+    integer_capabilities(SETDIFF_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::sorting_sets::setdiff"
 )]
 async fn setdiff_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 2) {
+        return Err(setdiff_error_with(
+            &SETDIFF_ERROR_INVALID_ARGUMENT,
+            "setdiff: too many output arguments; maximum is 2",
+        ));
+    }
+    let provider = super::set_output_provider(&a, &b);
     let eval = evaluate(a, b, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::OutputList(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![eval.into_values_value()]));
+            let outputs = super::restore_set_outputs(
+                provider,
+                BUILTIN_NAME,
+                vec![eval.into_values_value()],
+                setdiff_internal_error,
+            )?;
+            return Ok(Value::OutputList(outputs));
         }
         let (values, ia) = eval.into_pair();
-        return Ok(crate::output_count::output_list_with_padding(
-            out_count,
+        let outputs = super::restore_set_outputs(
+            provider,
+            BUILTIN_NAME,
             vec![values, ia],
-        ));
+            setdiff_internal_error,
+        )?;
+        return Ok(Value::OutputList(outputs));
     }
-    Ok(eval.into_values_value())
+    let mut outputs = super::restore_set_outputs(
+        provider,
+        BUILTIN_NAME,
+        vec![eval.into_values_value()],
+        setdiff_internal_error,
+    )?;
+    Ok(outputs.pop().expect("setdiff output"))
 }
 
 /// Evaluate the `setdiff` builtin once and expose all outputs.
@@ -269,7 +316,19 @@ pub async fn evaluate(
     b: Value,
     rest: &[Value],
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&a, "setdiff")?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&b, "setdiff")?;
     let opts = parse_options(rest)?;
+    for value in [&a, &b] {
+        if let Value::GpuTensor(handle) = value {
+            if super::is_unsupported_set_gpu_integer(handle) {
+                return Err(setdiff_error_with(
+                    &SETDIFF_ERROR_UNSUPPORTED_INPUT_TYPE,
+                    "setdiff: resident 64-bit integer inputs are not supported",
+                ));
+            }
+        }
+    }
     match (a, b) {
         (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {
             setdiff_gpu_pair(handle_a, handle_b, &opts).await
@@ -352,7 +411,9 @@ async fn setdiff_gpu_pair(
     handle_b: GpuTensorHandle,
     opts: &SetdiffOptions,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle_a)
+        .or_else(runmat_accelerate_api::provider)
+    {
         match provider.setdiff(&handle_a, &handle_b, opts).await {
             Ok(result) => return SetdiffEvaluation::from_setdiff_result(result),
             Err(_) => {
@@ -444,11 +505,142 @@ fn setdiff_numeric(
     b: Tensor,
     opts: &SetdiffOptions,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
-    if opts.rows {
-        setdiff_numeric_rows(a, b, opts)
-    } else {
-        setdiff_numeric_elements(a, b, opts)
+    let a_dtype = a.numeric_dtype();
+    let b_dtype = b.numeric_dtype();
+    if let (Some(a_storage), Some(b_storage)) = (a.integer_storage(), b.integer_storage()) {
+        if a_storage.class_name() == b_storage.class_name() {
+            return if opts.rows {
+                setdiff_integer_rows(a_storage, a.shape.clone(), b_storage, b.shape.clone(), opts)
+            } else {
+                setdiff_integer_elements(a_storage, b_storage, opts)
+            };
+        }
+        return Err(setdiff_error(&SETDIFF_ERROR_NUMERIC_CLASS_MISMATCH));
     }
+    match (a.integer_storage(), b.integer_storage()) {
+        (Some(storage), None) if b_dtype == NumericDType::F64 => {
+            let target = IntegerTarget::from_storage(storage);
+            let b = target.cast_tensor(b).map_err(setdiff_internal_error)?;
+            return setdiff_numeric(a, b, opts);
+        }
+        _ => {}
+    }
+    if a_dtype != b_dtype && a_dtype != NumericDType::F64 && b_dtype != NumericDType::F64 {
+        return Err(setdiff_error(&SETDIFF_ERROR_NUMERIC_CLASS_MISMATCH));
+    }
+    let a_shape = a.shape.clone();
+    let b_shape = b.shape.clone();
+    let a_storage = a
+        .into_numeric_storage()
+        .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
+    let b_storage = b
+        .into_numeric_storage()
+        .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
+    match (a_storage, b_storage) {
+        (NumericStorage::F64(a), NumericStorage::F64(b)) => {
+            setdiff_floating(a, a_shape, b, b_shape, opts)
+        }
+        (NumericStorage::F32(a), NumericStorage::F32(b)) => {
+            setdiff_floating(a, a_shape, b, b_shape, opts)
+        }
+        (a, b) => setdiff_promoted_f64(a, a_shape, b, b_shape, opts),
+    }
+}
+
+fn setdiff_promoted_f64(
+    a: NumericStorage,
+    a_shape: Vec<usize>,
+    b: NumericStorage,
+    b_shape: Vec<usize>,
+    opts: &SetdiffOptions,
+) -> crate::BuiltinResult<SetdiffEvaluation> {
+    setdiff_floating(
+        a.materialize_f64(),
+        a_shape,
+        b.materialize_f64(),
+        b_shape,
+        opts,
+    )
+}
+
+fn setdiff_floating<T: SetFloat>(
+    a: Vec<T>,
+    a_shape: Vec<usize>,
+    b: Vec<T>,
+    b_shape: Vec<usize>,
+    opts: &SetdiffOptions,
+) -> crate::BuiltinResult<SetdiffEvaluation> {
+    if opts.rows {
+        setdiff_floating_rows(a, a_shape, b, b_shape, opts)
+    } else {
+        setdiff_floating_elements(a, b, opts)
+    }
+}
+
+fn setdiff_integer_elements(
+    a: &IntegerStorage,
+    b: &IntegerStorage,
+    opts: &SetdiffOptions,
+) -> crate::BuiltinResult<SetdiffEvaluation> {
+    let b_values: HashSet<_> = b.exact_values().into_iter().collect();
+    let mut seen = HashSet::new();
+    let mut entries = Vec::<IntegerDiffEntry>::new();
+    for (index, value) in a.exact_values().into_iter().enumerate() {
+        if b_values.contains(&value) || !seen.insert(value.clone()) {
+            continue;
+        }
+        let order_rank = entries.len();
+        entries.push(IntegerDiffEntry {
+            value,
+            index,
+            order_rank,
+        });
+    }
+    assemble_integer_setdiff(entries, a, opts)
+}
+
+fn setdiff_integer_rows(
+    a_storage: &IntegerStorage,
+    a_shape: Vec<usize>,
+    b_storage: &IntegerStorage,
+    b_shape: Vec<usize>,
+    opts: &SetdiffOptions,
+) -> crate::BuiltinResult<SetdiffEvaluation> {
+    if a_shape.len() != 2 || b_shape.len() != 2 {
+        return Err(setdiff_internal_error(
+            "setdiff: 'rows' option requires 2-D numeric matrices",
+        ));
+    }
+    if a_shape[1] != b_shape[1] {
+        return Err(setdiff_error(&SETDIFF_ERROR_ROWS_COLUMN_MISMATCH));
+    }
+    let (rows_a, rows_b, cols) = (a_shape[0], b_shape[0], a_shape[1]);
+    let a_values = a_storage.exact_values();
+    let b_values = b_storage.exact_values();
+    let b_rows: HashSet<Vec<IntValue>> = (0..rows_b)
+        .map(|row| {
+            (0..cols)
+                .map(|col| b_values[row + col * rows_b].clone())
+                .collect()
+        })
+        .collect();
+    let mut seen = HashSet::new();
+    let mut entries = Vec::<IntegerRowDiffEntry>::new();
+    for row in 0..rows_a {
+        let row_data: Vec<_> = (0..cols)
+            .map(|col| a_values[row + col * rows_a].clone())
+            .collect();
+        if b_rows.contains(&row_data) || !seen.insert(row_data.clone()) {
+            continue;
+        }
+        let order_rank = entries.len();
+        entries.push(IntegerRowDiffEntry {
+            row_data,
+            row_index: row,
+            order_rank,
+        });
+    }
+    assemble_integer_row_setdiff(entries, a_storage, opts, cols)
 }
 
 /// Helper exposed for acceleration providers handling numeric tensors entirely on the host.
@@ -460,22 +652,22 @@ pub fn setdiff_numeric_from_tensors(
     setdiff_numeric(a, b, opts)
 }
 
-fn setdiff_numeric_elements(
-    a: Tensor,
-    b: Tensor,
+fn setdiff_floating_elements<T: SetFloat>(
+    a_values: Vec<T>,
+    b_values: Vec<T>,
     opts: &SetdiffOptions,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
     let mut b_keys: HashSet<u64> = HashSet::new();
-    for &value in &b.data {
-        b_keys.insert(canonicalize_f64(value));
+    for &value in &b_values {
+        b_keys.insert(value.canonical_key());
     }
 
     let mut seen: HashMap<u64, usize> = HashMap::new();
-    let mut entries = Vec::<NumericDiffEntry>::new();
+    let mut entries = Vec::<FloatingDiffEntry<T>>::new();
     let mut order_counter = 0usize;
 
-    for (idx, &value) in a.data.iter().enumerate() {
-        let key = canonicalize_f64(value);
+    for (idx, &value) in a_values.iter().enumerate() {
+        let key = value.canonical_key();
         if b_keys.contains(&key) {
             continue;
         }
@@ -483,7 +675,7 @@ fn setdiff_numeric_elements(
             continue;
         }
         let entry_idx = entries.len();
-        entries.push(NumericDiffEntry {
+        entries.push(FloatingDiffEntry {
             value,
             index: idx,
             order_rank: order_counter,
@@ -492,55 +684,57 @@ fn setdiff_numeric_elements(
         order_counter += 1;
     }
 
-    assemble_numeric_setdiff(entries, opts)
+    assemble_floating_setdiff(entries, opts)
 }
 
-fn setdiff_numeric_rows(
-    a: Tensor,
-    b: Tensor,
+fn setdiff_floating_rows<T: SetFloat>(
+    a_values: Vec<T>,
+    a_shape: Vec<usize>,
+    b_values: Vec<T>,
+    b_shape: Vec<usize>,
     opts: &SetdiffOptions,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
-    if a.shape.len() != 2 || b.shape.len() != 2 {
+    if a_shape.len() != 2 || b_shape.len() != 2 {
         return Err(setdiff_internal_error(
             "setdiff: 'rows' option requires 2-D numeric matrices",
         ));
     }
-    if a.shape[1] != b.shape[1] {
+    if a_shape[1] != b_shape[1] {
         return Err(setdiff_error(&SETDIFF_ERROR_ROWS_COLUMN_MISMATCH));
     }
 
-    let rows_a = a.shape[0];
-    let rows_b = b.shape[0];
-    let cols = a.shape[1];
+    let rows_a = a_shape[0];
+    let rows_b = b_shape[0];
+    let cols = a_shape[1];
 
-    let mut b_keys: HashSet<NumericRowKey> = HashSet::new();
+    let mut b_keys: HashSet<FloatingRowKey> = HashSet::new();
     for r in 0..rows_b {
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_b;
-            row_values.push(b.data[idx]);
+            row_values.push(b_values[idx]);
         }
-        b_keys.insert(NumericRowKey::from_slice(&row_values));
+        b_keys.insert(FloatingRowKey::from_slice(&row_values));
     }
 
-    let mut seen: HashSet<NumericRowKey> = HashSet::new();
-    let mut entries = Vec::<NumericRowDiffEntry>::new();
+    let mut seen: HashSet<FloatingRowKey> = HashSet::new();
+    let mut entries = Vec::<FloatingRowDiffEntry<T>>::new();
     let mut order_counter = 0usize;
 
     for r in 0..rows_a {
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_a;
-            row_values.push(a.data[idx]);
+            row_values.push(a_values[idx]);
         }
-        let key = NumericRowKey::from_slice(&row_values);
+        let key = FloatingRowKey::from_slice(&row_values);
         if b_keys.contains(&key) {
             continue;
         }
         if !seen.insert(key) {
             continue;
         }
-        entries.push(NumericRowDiffEntry {
+        entries.push(FloatingRowDiffEntry {
             row_data: row_values,
             row_index: r,
             order_rank: order_counter,
@@ -548,7 +742,7 @@ fn setdiff_numeric_rows(
         order_counter += 1;
     }
 
-    assemble_numeric_row_setdiff(entries, opts, cols)
+    assemble_floating_row_setdiff(entries, opts, cols)
 }
 
 fn setdiff_complex(
@@ -556,28 +750,64 @@ fn setdiff_complex(
     b: ComplexTensor,
     opts: &SetdiffOptions,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
+    let a_shape = a.shape.clone();
+    let b_shape = b.shape.clone();
+    match (a.into_complex_storage(), b.into_complex_storage()) {
+        (ComplexStorage::F64(a), ComplexStorage::F64(b)) => {
+            setdiff_floating_complex(a, a_shape, b, b_shape, opts)
+        }
+        (ComplexStorage::F32(a), ComplexStorage::F32(b)) => {
+            setdiff_floating_complex(a, a_shape, b, b_shape, opts)
+        }
+        (a, b) => setdiff_promoted_complex_f64(a, a_shape, b, b_shape, opts),
+    }
+}
+
+fn setdiff_promoted_complex_f64(
+    a: ComplexStorage,
+    a_shape: Vec<usize>,
+    b: ComplexStorage,
+    b_shape: Vec<usize>,
+    opts: &SetdiffOptions,
+) -> crate::BuiltinResult<SetdiffEvaluation> {
+    setdiff_floating_complex(
+        a.materialize_f64(),
+        a_shape,
+        b.materialize_f64(),
+        b_shape,
+        opts,
+    )
+}
+
+fn setdiff_floating_complex<T: SetFloat>(
+    a: Vec<(T, T)>,
+    a_shape: Vec<usize>,
+    b: Vec<(T, T)>,
+    b_shape: Vec<usize>,
+    opts: &SetdiffOptions,
+) -> crate::BuiltinResult<SetdiffEvaluation> {
     if opts.rows {
-        setdiff_complex_rows(a, b, opts)
+        setdiff_complex_rows(a, a_shape, b, b_shape, opts)
     } else {
         setdiff_complex_elements(a, b, opts)
     }
 }
 
-fn setdiff_complex_elements(
-    a: ComplexTensor,
-    b: ComplexTensor,
+fn setdiff_complex_elements<T: SetFloat>(
+    a: Vec<(T, T)>,
+    b: Vec<(T, T)>,
     opts: &SetdiffOptions,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
     let mut b_keys: HashSet<ComplexKey> = HashSet::new();
-    for &value in &b.data {
+    for &value in &b {
         b_keys.insert(ComplexKey::new(value));
     }
 
     let mut seen: HashSet<ComplexKey> = HashSet::new();
-    let mut entries = Vec::<ComplexDiffEntry>::new();
+    let mut entries = Vec::<ComplexDiffEntry<T>>::new();
     let mut order_counter = 0usize;
 
-    for (idx, &value) in a.data.iter().enumerate() {
+    for (idx, &value) in a.iter().enumerate() {
         let key = ComplexKey::new(value);
         if b_keys.contains(&key) {
             continue;
@@ -596,36 +826,38 @@ fn setdiff_complex_elements(
     assemble_complex_setdiff(entries, opts)
 }
 
-fn setdiff_complex_rows(
-    a: ComplexTensor,
-    b: ComplexTensor,
+fn setdiff_complex_rows<T: SetFloat>(
+    a: Vec<(T, T)>,
+    a_shape: Vec<usize>,
+    b: Vec<(T, T)>,
+    b_shape: Vec<usize>,
     opts: &SetdiffOptions,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
-    if a.shape.len() != 2 || b.shape.len() != 2 {
+    if a_shape.len() != 2 || b_shape.len() != 2 {
         return Err(setdiff_internal_error(
             "setdiff: 'rows' option requires 2-D complex matrices",
         ));
     }
-    if a.shape[1] != b.shape[1] {
+    if a_shape[1] != b_shape[1] {
         return Err(setdiff_error(&SETDIFF_ERROR_ROWS_COLUMN_MISMATCH));
     }
 
-    let rows_a = a.shape[0];
-    let rows_b = b.shape[0];
-    let cols = a.shape[1];
+    let rows_a = a_shape[0];
+    let rows_b = b_shape[0];
+    let cols = a_shape[1];
 
     let mut b_keys: HashSet<Vec<ComplexKey>> = HashSet::new();
     for r in 0..rows_b {
         let mut key_row = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_b;
-            key_row.push(ComplexKey::new(b.data[idx]));
+            key_row.push(ComplexKey::new(b[idx]));
         }
         b_keys.insert(key_row);
     }
 
     let mut seen: HashSet<Vec<ComplexKey>> = HashSet::new();
-    let mut entries = Vec::<ComplexRowDiffEntry>::new();
+    let mut entries = Vec::<ComplexRowDiffEntry<T>>::new();
     let mut order_counter = 0usize;
 
     for r in 0..rows_a {
@@ -633,7 +865,7 @@ fn setdiff_complex_rows(
         let mut key_row = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_a;
-            let value = a.data[idx];
+            let value = a[idx];
             row_values.push(value);
             key_row.push(ComplexKey::new(value));
         }
@@ -855,14 +1087,14 @@ fn setdiff_string_rows(
     assemble_string_row_setdiff(entries, opts, cols)
 }
 
-fn assemble_numeric_setdiff(
-    entries: Vec<NumericDiffEntry>,
+fn assemble_floating_setdiff<T: SetFloat>(
+    entries: Vec<FloatingDiffEntry<T>>,
     opts: &SetdiffOptions,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
     let mut order: Vec<usize> = (0..entries.len()).collect();
     match opts.order {
         SetdiffOrder::Sorted => {
-            order.sort_by(|&lhs, &rhs| compare_f64(entries[lhs].value, entries[rhs].value));
+            order.sort_by(|&lhs, &rhs| entries[lhs].value.compare(entries[rhs].value));
         }
         SetdiffOrder::Stable => {
             order.sort_by_key(|&idx| entries[idx].order_rank);
@@ -877,8 +1109,9 @@ fn assemble_numeric_setdiff(
         ia.push((entry.index + 1) as f64);
     }
 
-    let value_tensor = Tensor::new(values, vec![order.len(), 1])
-        .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
+    let value_tensor =
+        Tensor::from_numeric_storage(T::numeric_storage(values), vec![order.len(), 1])
+            .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![order.len(), 1])
         .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
 
@@ -888,8 +1121,40 @@ fn assemble_numeric_setdiff(
     ))
 }
 
-fn assemble_numeric_row_setdiff(
-    entries: Vec<NumericRowDiffEntry>,
+fn assemble_integer_setdiff(
+    entries: Vec<IntegerDiffEntry>,
+    storage: &IntegerStorage,
+    opts: &SetdiffOptions,
+) -> crate::BuiltinResult<SetdiffEvaluation> {
+    let mut order: Vec<_> = (0..entries.len()).collect();
+    match opts.order {
+        SetdiffOrder::Sorted => order.sort_by(|&a, &b| {
+            integer_order::compare(&entries[a].value, &entries[b].value, false, false)
+        }),
+        SetdiffOrder::Stable => order.sort_by_key(|&index| entries[index].order_rank),
+    }
+    let values: Vec<_> = order
+        .iter()
+        .map(|&index| entries[index].value.clone())
+        .collect();
+    let ia: Vec<_> = order
+        .iter()
+        .map(|&index| (entries[index].index + 1) as f64)
+        .collect();
+    let values = Tensor::new_integer(
+        storage
+            .from_exact_values_like(values)
+            .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?,
+        vec![order.len(), 1],
+    )
+    .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
+    let ia = Tensor::new(ia, vec![order.len(), 1])
+        .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
+    Ok(SetdiffEvaluation::new(Value::Tensor(values), ia))
+}
+
+fn assemble_floating_row_setdiff<T: SetFloat>(
+    entries: Vec<FloatingRowDiffEntry<T>>,
     opts: &SetdiffOptions,
     cols: usize,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
@@ -897,7 +1162,7 @@ fn assemble_numeric_row_setdiff(
     match opts.order {
         SetdiffOrder::Sorted => {
             order.sort_by(|&lhs, &rhs| {
-                compare_numeric_rows(&entries[lhs].row_data, &entries[rhs].row_data)
+                compare_floating_rows(&entries[lhs].row_data, &entries[rhs].row_data)
             });
         }
         SetdiffOrder::Stable => {
@@ -906,7 +1171,7 @@ fn assemble_numeric_row_setdiff(
     }
 
     let unique_rows = order.len();
-    let mut values = vec![0.0f64; unique_rows * cols];
+    let mut values = vec![T::default(); unique_rows * cols];
     let mut ia = Vec::with_capacity(unique_rows);
 
     for (row_pos, &entry_idx) in order.iter().enumerate() {
@@ -918,8 +1183,9 @@ fn assemble_numeric_row_setdiff(
         ia.push((entry.row_index + 1) as f64);
     }
 
-    let value_tensor = Tensor::new(values, vec![unique_rows, cols])
-        .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
+    let value_tensor =
+        Tensor::from_numeric_storage(T::numeric_storage(values), vec![unique_rows, cols])
+            .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![unique_rows, 1])
         .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
 
@@ -929,8 +1195,50 @@ fn assemble_numeric_row_setdiff(
     ))
 }
 
-fn assemble_complex_setdiff(
-    entries: Vec<ComplexDiffEntry>,
+fn assemble_integer_row_setdiff(
+    entries: Vec<IntegerRowDiffEntry>,
+    storage: &IntegerStorage,
+    opts: &SetdiffOptions,
+    cols: usize,
+) -> crate::BuiltinResult<SetdiffEvaluation> {
+    let mut order: Vec<_> = (0..entries.len()).collect();
+    match opts.order {
+        SetdiffOrder::Sorted => order.sort_by(|&a, &b| {
+            for (left, right) in entries[a].row_data.iter().zip(&entries[b].row_data) {
+                let ordering = integer_order::compare(left, right, false, false);
+                if ordering != Ordering::Equal {
+                    return ordering;
+                }
+            }
+            Ordering::Equal
+        }),
+        SetdiffOrder::Stable => order.sort_by_key(|&index| entries[index].order_rank),
+    }
+    let rows = order.len();
+    let mut values = Vec::with_capacity(rows * cols);
+    for col in 0..cols {
+        for &index in &order {
+            values.push(entries[index].row_data[col].clone());
+        }
+    }
+    let ia: Vec<_> = order
+        .iter()
+        .map(|&index| (entries[index].row_index + 1) as f64)
+        .collect();
+    let values = Tensor::new_integer(
+        storage
+            .from_exact_values_like(values)
+            .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?,
+        vec![rows, cols],
+    )
+    .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
+    let ia = Tensor::new(ia, vec![rows, 1])
+        .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
+    Ok(SetdiffEvaluation::new(Value::Tensor(values), ia))
+}
+
+fn assemble_complex_setdiff<T: SetFloat>(
+    entries: Vec<ComplexDiffEntry<T>>,
     opts: &SetdiffOptions,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
     let mut order: Vec<usize> = (0..entries.len()).collect();
@@ -951,19 +1259,22 @@ fn assemble_complex_setdiff(
         ia.push((entry.index + 1) as f64);
     }
 
-    let value_tensor = ComplexTensor::new(values, vec![order.len(), 1])
-        .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
+    let value_tensor =
+        ComplexTensor::from_complex_storage(T::complex_storage(values), vec![order.len(), 1])
+            .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![order.len(), 1])
         .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
 
-    Ok(SetdiffEvaluation::new(
-        complex_tensor_into_value(value_tensor),
-        ia_tensor,
-    ))
+    let value = if value_tensor.as_f32_slice().is_some() {
+        Value::ComplexTensor(value_tensor)
+    } else {
+        complex_tensor_into_value(value_tensor)
+    };
+    Ok(SetdiffEvaluation::new(value, ia_tensor))
 }
 
-fn assemble_complex_row_setdiff(
-    entries: Vec<ComplexRowDiffEntry>,
+fn assemble_complex_row_setdiff<T: SetFloat>(
+    entries: Vec<ComplexRowDiffEntry<T>>,
     opts: &SetdiffOptions,
     cols: usize,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
@@ -980,7 +1291,7 @@ fn assemble_complex_row_setdiff(
     }
 
     let unique_rows = order.len();
-    let mut values = vec![(0.0f64, 0.0f64); unique_rows * cols];
+    let mut values = vec![(T::default(), T::default()); unique_rows * cols];
     let mut ia = Vec::with_capacity(unique_rows);
 
     for (row_pos, &entry_idx) in order.iter().enumerate() {
@@ -992,15 +1303,18 @@ fn assemble_complex_row_setdiff(
         ia.push((entry.row_index + 1) as f64);
     }
 
-    let value_tensor = ComplexTensor::new(values, vec![unique_rows, cols])
-        .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
+    let value_tensor =
+        ComplexTensor::from_complex_storage(T::complex_storage(values), vec![unique_rows, cols])
+            .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![unique_rows, 1])
         .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
 
-    Ok(SetdiffEvaluation::new(
-        complex_tensor_into_value(value_tensor),
-        ia_tensor,
-    ))
+    let value = if value_tensor.as_f32_slice().is_some() {
+        Value::ComplexTensor(value_tensor)
+    } else {
+        complex_tensor_into_value(value_tensor)
+    };
+    Ok(SetdiffEvaluation::new(value, ia_tensor))
 }
 
 fn assemble_char_setdiff(
@@ -1152,29 +1466,43 @@ fn assemble_string_row_setdiff(
 }
 
 #[derive(Clone, Copy, Debug)]
-struct NumericDiffEntry {
-    value: f64,
+struct FloatingDiffEntry<T> {
+    value: T,
     index: usize,
     order_rank: usize,
 }
 
 #[derive(Clone, Debug)]
-struct NumericRowDiffEntry {
-    row_data: Vec<f64>,
+struct IntegerDiffEntry {
+    value: IntValue,
+    index: usize,
+    order_rank: usize,
+}
+
+#[derive(Clone, Debug)]
+struct FloatingRowDiffEntry<T> {
+    row_data: Vec<T>,
+    row_index: usize,
+    order_rank: usize,
+}
+
+#[derive(Clone, Debug)]
+struct IntegerRowDiffEntry {
+    row_data: Vec<IntValue>,
     row_index: usize,
     order_rank: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
-struct ComplexDiffEntry {
-    value: (f64, f64),
+struct ComplexDiffEntry<T> {
+    value: (T, T),
     index: usize,
     order_rank: usize,
 }
 
 #[derive(Clone, Debug)]
-struct ComplexRowDiffEntry {
-    row_data: Vec<(f64, f64)>,
+struct ComplexRowDiffEntry<T> {
+    row_data: Vec<(T, T)>,
     row_index: usize,
     order_rank: usize,
 }
@@ -1208,11 +1536,11 @@ struct StringRowDiffEntry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct NumericRowKey(Vec<u64>);
+struct FloatingRowKey(Vec<u64>);
 
-impl NumericRowKey {
-    fn from_slice(values: &[f64]) -> Self {
-        NumericRowKey(values.iter().map(|&v| canonicalize_f64(v)).collect())
+impl FloatingRowKey {
+    fn from_slice<T: SetFloat>(values: &[T]) -> Self {
+        FloatingRowKey(values.iter().map(|&value| value.canonical_key()).collect())
     }
 }
 
@@ -1223,10 +1551,10 @@ struct ComplexKey {
 }
 
 impl ComplexKey {
-    fn new(value: (f64, f64)) -> Self {
+    fn new<T: SetFloat>(value: (T, T)) -> Self {
         Self {
-            re: canonicalize_f64(value.0),
-            im: canonicalize_f64(value.1),
+            re: value.0.canonical_key(),
+            im: value.1.canonical_key(),
         }
     }
 }
@@ -1271,16 +1599,8 @@ impl SetdiffEvaluation {
         let values_tensor = tensor::value_into_tensor_for("setdiff", values)
             .map_err(|e| setdiff_internal_error(e))?;
         Ok(SetdiffResult {
-            values: HostTensorOwned {
-                data: values_tensor.data,
-                shape: values_tensor.shape,
-                storage: GpuTensorStorage::Real,
-            },
-            ia: HostTensorOwned {
-                data: ia.data,
-                shape: ia.shape,
-                storage: GpuTensorStorage::Real,
-            },
+            values: tensor::tensor_into_host_f64_owned(values_tensor),
+            ia: tensor::tensor_into_host_f64_owned(ia),
         })
     }
 
@@ -1302,33 +1622,9 @@ impl SetdiffEvaluation {
     }
 }
 
-fn canonicalize_f64(value: f64) -> u64 {
-    if value.is_nan() {
-        0x7ff8_0000_0000_0000u64
-    } else if value == 0.0 {
-        0u64
-    } else {
-        value.to_bits()
-    }
-}
-
-fn compare_f64(a: f64, b: f64) -> Ordering {
-    if a.is_nan() {
-        if b.is_nan() {
-            Ordering::Equal
-        } else {
-            Ordering::Greater
-        }
-    } else if b.is_nan() {
-        Ordering::Less
-    } else {
-        a.partial_cmp(&b).unwrap_or(Ordering::Equal)
-    }
-}
-
-fn compare_numeric_rows(a: &[f64], b: &[f64]) -> Ordering {
+fn compare_floating_rows<T: SetFloat>(a: &[T], b: &[T]) -> Ordering {
     for (lhs, rhs) in a.iter().zip(b.iter()) {
-        let ord = compare_f64(*lhs, *rhs);
+        let ord = lhs.compare(*rhs);
         if ord != Ordering::Equal {
             return ord;
         }
@@ -1336,11 +1632,11 @@ fn compare_numeric_rows(a: &[f64], b: &[f64]) -> Ordering {
     Ordering::Equal
 }
 
-fn complex_is_nan(value: (f64, f64)) -> bool {
+fn complex_is_nan<T: SetFloat>(value: (T, T)) -> bool {
     value.0.is_nan() || value.1.is_nan()
 }
 
-fn compare_complex(a: (f64, f64), b: (f64, f64)) -> Ordering {
+fn compare_complex<T: SetFloat>(a: (T, T), b: (T, T)) -> Ordering {
     match (complex_is_nan(a), complex_is_nan(b)) {
         (true, true) => Ordering::Equal,
         (true, false) => Ordering::Greater,
@@ -1348,20 +1644,20 @@ fn compare_complex(a: (f64, f64), b: (f64, f64)) -> Ordering {
         (false, false) => {
             let mag_a = a.0.hypot(a.1);
             let mag_b = b.0.hypot(b.1);
-            let mag_cmp = compare_f64(mag_a, mag_b);
+            let mag_cmp = mag_a.compare(mag_b);
             if mag_cmp != Ordering::Equal {
                 return mag_cmp;
             }
-            let re_cmp = compare_f64(a.0, b.0);
+            let re_cmp = a.0.compare(b.0);
             if re_cmp != Ordering::Equal {
                 return re_cmp;
             }
-            compare_f64(a.1, b.1)
+            a.1.compare(b.1)
         }
     }
 }
 
-fn compare_complex_rows(a: &[(f64, f64)], b: &[(f64, f64)]) -> Ordering {
+fn compare_complex_rows<T: SetFloat>(a: &[(T, T)], b: &[(T, T)]) -> Ordering {
     for (lhs, rhs) in a.iter().zip(b.iter()) {
         let ord = compare_complex(*lhs, *rhs);
         if ord != Ordering::Equal {
@@ -1396,7 +1692,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{CharArray, ResolveContext, StringArray, Tensor, Type, Value};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{CharArray, StringArray, Tensor, Value};
 
     fn evaluate_sync(
         a: Value,
@@ -1404,6 +1701,47 @@ pub(crate) mod tests {
         rest: &[Value],
     ) -> crate::BuiltinResult<SetdiffEvaluation> {
         futures::executor::block_on(evaluate(a, b, rest))
+    }
+
+    fn builtin_sync(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        futures::executor::block_on(setdiff_builtin(a, b, rest))
+    }
+
+    #[test]
+    fn registered_builtin_restores_resident_outputs_and_rejects_excess_arity() {
+        test_support::with_test_provider(|provider| {
+            let left = Tensor::new_integer(IntegerStorage::I32(vec![7, 2, 9]), vec![3, 1]).unwrap();
+            let right = Tensor::new_integer(IntegerStorage::I32(vec![2, 7]), vec![2, 1]).unwrap();
+            let left =
+                Value::GpuTensor(gpu_helpers::upload_tensor(provider, &left).expect("upload left"));
+            let right = Value::GpuTensor(
+                gpu_helpers::upload_tensor(provider, &right).expect("upload right"),
+            );
+
+            {
+                let _guard = crate::output_count::push_output_count(Some(2));
+                let Value::OutputList(outputs) =
+                    builtin_sync(left, right, Vec::new()).expect("resident setdiff")
+                else {
+                    panic!("expected output list");
+                };
+                assert_eq!(outputs.len(), 2);
+                assert!(outputs
+                    .iter()
+                    .all(|output| matches!(output, Value::GpuTensor(_))));
+                assert_eq!(
+                    test_support::gather(outputs[0].clone())
+                        .expect("gather values")
+                        .integer_storage(),
+                    Some(&IntegerStorage::I32(vec![9]))
+                );
+            }
+
+            let _guard = crate::output_count::push_output_count(Some(3));
+            let err = builtin_sync(Value::Num(1.0), Value::Num(1.0), Vec::new())
+                .expect_err("excess outputs must fail");
+            assert_eq!(err.identifier(), SETDIFF_ERROR_INVALID_ARGUMENT.identifier);
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1415,12 +1753,145 @@ pub(crate) mod tests {
         match eval.values_value() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 1]);
-                assert_eq!(t.data, vec![5.0]);
+                assert_eq!(t.materialize_f64(), vec![5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
         let ia = tensor::value_into_tensor_for("setdiff", eval.ia_value()).expect("ia tensor");
-        assert_eq!(ia.data, vec![1.0]);
+        assert_eq!(ia.materialize_f64(), vec![1.0]);
+    }
+
+    #[test]
+    fn setdiff_preserves_native_single_elements_and_rows() {
+        let a = Tensor::from_f32(vec![5.0, 7.0, 1.0], vec![3, 1]).unwrap();
+        let b = Tensor::from_f32(vec![7.0, 1.0], vec![2, 1]).unwrap();
+        let values = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
+            .expect("single setdiff")
+            .into_values_value();
+        let Value::Tensor(values) = values else {
+            panic!("expected native single values");
+        };
+        assert_eq!(
+            values.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![5.0])
+        );
+
+        let a = Tensor::from_f32(vec![1.0, 3.0, 1.0, 2.0, 4.0, 2.0], vec![3, 2]).unwrap();
+        let b = Tensor::from_f32(vec![3.0, 4.0], vec![1, 2]).unwrap();
+        let values = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
+            .expect("single row setdiff")
+            .into_values_value();
+        let Value::Tensor(values) = values else {
+            panic!("expected native single rows");
+        };
+        assert_eq!(values.shape, vec![1, 2]);
+        assert_eq!(
+            values.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![1.0, 2.0])
+        );
+    }
+
+    #[test]
+    fn setdiff_preserves_native_complex_single_elements_and_rows() {
+        let a = ComplexTensor::from_f32(vec![(1.0, 1.0), (2.0, 0.0)], vec![2, 1]).unwrap();
+        let b = ComplexTensor::from_f32(vec![(2.0, 0.0)], vec![1, 1]).unwrap();
+        let values = evaluate_sync(Value::ComplexTensor(a), Value::ComplexTensor(b), &[])
+            .expect("complex single setdiff")
+            .into_values_value();
+        let Value::ComplexTensor(values) = values else {
+            panic!("expected native complex single value");
+        };
+        assert_eq!(values.as_f32_slice(), Some(&[(1.0, 1.0)][..]));
+
+        let a = ComplexTensor::from_f32(
+            vec![
+                (1.0, 0.0),
+                (3.0, 0.0),
+                (1.0, 0.0),
+                (2.0, 1.0),
+                (4.0, 1.0),
+                (2.0, 1.0),
+            ],
+            vec![3, 2],
+        )
+        .unwrap();
+        let b = ComplexTensor::from_f32(vec![(3.0, 0.0), (4.0, 1.0)], vec![1, 2]).unwrap();
+        let values = evaluate_sync(
+            Value::ComplexTensor(a),
+            Value::ComplexTensor(b),
+            &[Value::from("rows")],
+        )
+        .expect("complex single row setdiff")
+        .into_values_value();
+        let Value::ComplexTensor(values) = values else {
+            panic!("expected native complex single rows");
+        };
+        assert_eq!(values.shape, vec![1, 2]);
+        assert_eq!(values.as_f32_slice(), Some(&[(1.0, 0.0), (2.0, 1.0)][..]));
+    }
+
+    #[test]
+    fn setdiff_preserves_exact_integer_elements_and_rows() {
+        let a = Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993]),
+            vec![3, 1],
+        )
+        .expect("input");
+        let b = Tensor::new_integer(runmat_value::IntegerStorage::U64(vec![0]), vec![1, 1])
+            .expect("input");
+        let (values, ia) = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
+            .expect("setdiff")
+            .into_pair();
+        let Value::Tensor(values) = values else {
+            panic!("exact values");
+        };
+        assert_eq!(
+            values.integer_storage(),
+            Some(&runmat_value::IntegerStorage::U64(vec![
+                9_007_199_254_740_993,
+                u64::MAX
+            ]))
+        );
+        let ia = tensor::value_into_tensor_for("setdiff", ia).expect("indices");
+        assert_eq!(ia.materialize_f64(), vec![3.0, 1.0]);
+
+        let a = Tensor::new_integer(
+            runmat_value::IntegerStorage::I64(vec![i64::MAX, 4, 0, 2]),
+            vec![2, 2],
+        )
+        .expect("rows input");
+        let b = Tensor::new_integer(
+            runmat_value::IntegerStorage::I64(vec![i64::MAX, 0]),
+            vec![1, 2],
+        )
+        .expect("rows input");
+        let (values, ia) =
+            evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
+                .expect("setdiff rows")
+                .into_pair();
+        let Value::Tensor(values) = values else {
+            panic!("exact row values");
+        };
+        assert_eq!(
+            values.integer_storage(),
+            Some(&runmat_value::IntegerStorage::I64(vec![4, 2]))
+        );
+        let ia = tensor::value_into_tensor_for("setdiff", ia).expect("row indices");
+        assert_eq!(ia.materialize_f64(), vec![2.0]);
+    }
+
+    #[test]
+    fn setdiff_rejects_mixed_nondouble_integer_classes() {
+        let a = Tensor::new_integer(runmat_value::IntegerStorage::U16(vec![7, 2, 9]), vec![3, 1])
+            .expect("input");
+        let b = Tensor::new_integer(runmat_value::IntegerStorage::I32(vec![2]), vec![1, 1])
+            .expect("input");
+        let error = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
+            .expect_err("mixed integer classes must reject");
+        assert_eq!(
+            error.identifier(),
+            SETDIFF_ERROR_NUMERIC_CLASS_MISMATCH.identifier
+        );
     }
 
     #[test]
@@ -1455,12 +1926,12 @@ pub(crate) mod tests {
         match eval.values_value() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 1]);
-                assert_eq!(t.data, vec![2.0]);
+                assert_eq!(t.materialize_f64(), vec![2.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
         let ia = tensor::value_into_tensor_for("setdiff", eval.ia_value()).expect("ia tensor");
-        assert_eq!(ia.data, vec![2.0]);
+        assert_eq!(ia.materialize_f64(), vec![2.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1473,12 +1944,12 @@ pub(crate) mod tests {
         match eval.values_value() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.data, vec![1.0, 2.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
         let ia = tensor::value_into_tensor_for("setdiff", eval.ia_value()).expect("ia tensor");
-        assert_eq!(ia.data, vec![1.0]);
+        assert_eq!(ia.materialize_f64(), vec![1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1488,9 +1959,9 @@ pub(crate) mod tests {
         let b = Tensor::new(vec![f64::NAN], vec![1, 1]).unwrap();
         let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[]).expect("setdiff");
         let values = tensor::value_into_tensor_for("setdiff", eval.values_value()).expect("values");
-        assert_eq!(values.data, vec![2.0, 3.0]);
+        assert_eq!(values.materialize_f64(), vec![2.0, 3.0]);
         let ia = tensor::value_into_tensor_for("setdiff", eval.ia_value()).expect("ia tensor");
-        assert_eq!(ia.data, vec![2.0, 3.0]);
+        assert_eq!(ia.materialize_f64(), vec![2.0, 3.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1508,7 +1979,7 @@ pub(crate) mod tests {
             other => panic!("expected char array, got {other:?}"),
         }
         let ia = tensor::value_into_tensor_for("setdiff", eval.ia_value()).expect("ia tensor");
-        assert_eq!(ia.data, vec![3.0]);
+        assert_eq!(ia.materialize_f64(), vec![3.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1548,7 +2019,7 @@ pub(crate) mod tests {
             other => panic!("expected string array, got {other:?}"),
         }
         let ia = tensor::value_into_tensor_for("setdiff", eval.ia_value()).expect("ia tensor");
-        assert_eq!(ia.data, vec![1.0]);
+        assert_eq!(ia.materialize_f64(), vec![1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1615,11 +2086,11 @@ pub(crate) mod tests {
             let tensor_a = Tensor::new(vec![10.0, 4.0, 6.0, 4.0], vec![4, 1]).unwrap();
             let tensor_b = Tensor::new(vec![6.0, 4.0, 2.0], vec![3, 1]).unwrap();
             let view_a = HostTensorView {
-                data: &tensor_a.data,
+                data: &tensor_a.materialize_f64(),
                 shape: &tensor_a.shape,
             };
             let view_b = HostTensorView {
-                data: &tensor_b.data,
+                data: &tensor_b.materialize_f64(),
                 shape: &tensor_b.shape,
             };
             let handle_a = provider.upload(&view_a).expect("upload a");
@@ -1628,12 +2099,12 @@ pub(crate) mod tests {
                 .expect("setdiff");
             match eval.values_value() {
                 Value::Tensor(t) => {
-                    assert_eq!(t.data, vec![10.0]);
+                    assert_eq!(t.materialize_f64(), vec![10.0]);
                 }
                 other => panic!("expected tensor result, got {other:?}"),
             }
             let ia = tensor::value_into_tensor_for("setdiff", eval.ia_value()).expect("ia tensor");
-            assert_eq!(ia.data, vec![1.0]);
+            assert_eq!(ia.materialize_f64(), vec![1.0]);
         });
     }
 
@@ -1654,11 +2125,11 @@ pub(crate) mod tests {
 
         let provider = runmat_accelerate_api::provider().expect("provider");
         let view_a = HostTensorView {
-            data: &a.data,
+            data: &a.materialize_f64(),
             shape: &a.shape,
         };
         let view_b = HostTensorView {
-            data: &b.data,
+            data: &b.materialize_f64(),
             shape: &b.shape,
         };
         let handle_a = provider.upload(&view_a).expect("upload A");
@@ -1668,9 +2139,9 @@ pub(crate) mod tests {
         let gpu_values = tensor::value_into_tensor_for("setdiff", gpu_eval.values_value()).unwrap();
         let gpu_ia = tensor::value_into_tensor_for("setdiff", gpu_eval.ia_value()).unwrap();
 
-        assert_eq!(gpu_values.data, cpu_values.data);
+        assert_eq!(gpu_values.materialize_f64(), cpu_values.materialize_f64());
         assert_eq!(gpu_values.shape, cpu_values.shape);
-        assert_eq!(gpu_ia.data, cpu_ia.data);
+        assert_eq!(gpu_ia.materialize_f64(), cpu_ia.materialize_f64());
         assert_eq!(gpu_ia.shape, cpu_ia.shape);
     }
 }

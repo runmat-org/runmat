@@ -41,41 +41,6 @@ pub fn setfield_type(args: &[Type], _context: &ResolveContext) -> Type {
         .unwrap_or(Type::Unknown)
 }
 
-pub fn struct_type(args: &[Type], _context: &ResolveContext) -> Type {
-    if args.is_empty() {
-        return Type::Struct { known_fields: None };
-    }
-
-    if args.len() == 1 {
-        return match &args[0] {
-            Type::Struct { .. } => args[0].clone(),
-            Type::Cell {
-                element_type: Some(element_type),
-                ..
-            } if matches!(**element_type, Type::Struct { .. }) => {
-                Type::cell_of((**element_type).clone())
-            }
-            Type::Tensor { .. } | Type::Logical { .. } => Type::Unknown,
-            Type::Unknown => Type::Unknown,
-            _ => Type::Unknown,
-        };
-    }
-
-    if !args.len().is_multiple_of(2) {
-        return Type::Unknown;
-    }
-
-    if args.iter().any(|ty| matches!(ty, Type::Unknown)) {
-        return Type::Unknown;
-    }
-
-    if args.iter().any(|ty| matches!(ty, Type::Cell { .. })) {
-        return Type::cell_of(Type::Struct { known_fields: None });
-    }
-
-    Type::Struct { known_fields: None }
-}
-
 pub fn structfun_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Unknown
 }
@@ -178,14 +143,6 @@ mod tests {
                 }],
                 &ResolveContext::new(Vec::new()),
             ),
-            Type::Struct { known_fields: None }
-        );
-    }
-
-    #[test]
-    fn struct_type_empty_args_returns_struct() {
-        assert_eq!(
-            struct_type(&[], &ResolveContext::new(Vec::new())),
             Type::Struct { known_fields: None }
         );
     }

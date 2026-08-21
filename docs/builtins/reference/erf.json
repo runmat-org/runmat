@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Uses the provider unary_erf hook for real GPU tensors and falls back to host evaluation when the hook is unavailable."
+    "notes": "Uses the provider unary_erf hook for real GPU tensors and restores host fallback results to the input's owning provider when the hook is unavailable."
   },
   "fusion": {
     "elementwise": false,
@@ -34,9 +34,8 @@
   "behaviors": [
     "`erf(X)` applies the error function element-by-element while preserving the input tensor shape.",
     "Double inputs return double results; single tensors preserve single dtype metadata with single-rounded output values.",
-    "Scalar integer, logical, and character inputs are promoted through RunMat's ordinary numeric coercion path for compatibility with existing elementwise builtins.",
-    "Complex, string, and sparse inputs produce stable `RunMat:erf:InvalidInput` errors.",
-    "Real GPU tensors stay on device when the provider implements `unary_erf`; otherwise RunMat gathers the tensor, evaluates on the host, and returns a host value with the computed results."
+    "Integer, logical, character, complex, string, sparse, table, and timetable inputs are not part of the documented surface and produce stable `RunMat:erf:InvalidInput` errors.",
+    "Real GPU tensors stay on the input's owning provider after direct execution or host fallback; malformed provider results are rejected rather than admitted as resident values."
   ],
   "examples": [
     {

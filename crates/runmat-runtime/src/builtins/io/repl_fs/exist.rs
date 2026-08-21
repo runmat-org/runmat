@@ -4,11 +4,15 @@
 //! builtin, class, or other entity is available in the current session.
 
 use runmat_builtins::{
-    builtin_functions, lookup_method, BuiltinCompletionPolicy, BuiltinDescriptor,
-    BuiltinErrorDescriptor, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    builtin_functions, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
+    BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+#[cfg(test)]
+use runmat_types::MemberAccess;
+use runmat_value::Value;
 
 use crate::builtins::common::fs::contains_wildcards;
 use crate::builtins::common::path_search::{
@@ -23,7 +27,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::exist")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -38,7 +42,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Filesystem and workspace lookup run on the host; arguments are gathered from the GPU when necessary.",
+    notes: "Filesystem and workspace lookup run on the host; resident numeric arguments are invalid text and reject before provider access.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::exist")]
@@ -55,7 +59,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 const BUILTIN_NAME: &str = "exist";
 
 const EXIST_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "code",
+    name: "typeID",
     ty: BuiltinParamType::NumericScalar,
     arity: BuiltinParamArity::Required,
     default: None,
@@ -63,7 +67,7 @@ const EXIST_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
 }];
 const EXIST_INPUTS_NAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "name",
-    ty: BuiltinParamType::Any,
+    ty: BuiltinParamType::StringScalar,
     arity: BuiltinParamArity::Required,
     default: None,
     description: "Variable/function/file/class name to query.",
@@ -71,7 +75,7 @@ const EXIST_INPUTS_NAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
 const EXIST_INPUTS_NAME_TYPE: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "name",
-        ty: BuiltinParamType::Any,
+        ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Required,
         default: None,
         description: "Variable/function/file/class name to query.",
@@ -81,44 +85,54 @@ const EXIST_INPUTS_NAME_TYPE: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Query kind: var|file|dir|builtin|class|handle|method|mex|pcode|simulink|thunk|lib|java.",
+        description: "Documented query kind: builtin|class|dir|file|var.",
     },
 ];
-const EXIST_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+const EXIST_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
     BuiltinSignatureDescriptor {
-        label: "code = exist(name)",
+        label: "exist name",
+        inputs: &EXIST_INPUTS_NAME,
+        outputs: &[],
+    },
+    BuiltinSignatureDescriptor {
+        label: "exist name searchType",
+        inputs: &EXIST_INPUTS_NAME_TYPE,
+        outputs: &[],
+    },
+    BuiltinSignatureDescriptor {
+        label: "typeID = exist(name)",
         inputs: &EXIST_INPUTS_NAME,
         outputs: &EXIST_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "code = exist(name, type)",
+        label: "typeID = exist(name, searchType)",
         inputs: &EXIST_INPUTS_NAME_TYPE,
         outputs: &EXIST_OUTPUT,
     },
 ];
 const EXIST_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.EXIST.TOO_MANY_INPUTS",
-    identifier: None,
+    identifier: Some("RunMat:exist:TooManyInputs"),
     when: "More than two total input arguments are provided.",
     message: "exist: too many input arguments",
 };
 const EXIST_ERROR_NAME_ARG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.EXIST.NAME_ARG",
-    identifier: None,
+    identifier: Some("RunMat:exist:InvalidName"),
     when: "Name input is not a character vector or string scalar/array scalar.",
     message: "exist: name must be a character vector or string scalar",
 };
 const EXIST_ERROR_TYPE_ARG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.EXIST.TYPE_ARG",
-    identifier: None,
+    identifier: Some("RunMat:exist:InvalidTypeArgument"),
     when: "Type input is not a character vector or string scalar/array scalar.",
     message: "exist: type must be a character vector or string scalar",
 };
 const EXIST_ERROR_INVALID_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.EXIST.INVALID_TYPE",
-    identifier: None,
+    identifier: Some("RunMat:exist:InvalidType"),
     when: "Type input is not one of the supported exist query types.",
-    message: "exist: invalid type. Type must be one of 'var', 'variable', 'file', 'dir', 'directory', 'folder', 'builtin', 'built-in', 'class', 'handle', 'method', 'mex', 'pcode', 'simulink', 'thunk', 'lib', 'library', or 'java'",
+    message: "exist: invalid type. Type must be one of 'builtin', 'class', 'dir', 'file', or 'var'",
 };
 const EXIST_ERRORS: [BuiltinErrorDescriptor; 4] = [
     EXIST_ERROR_TOO_MANY_INPUTS,
@@ -131,6 +145,27 @@ pub const EXIST_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &EXIST_ERRORS,
+};
+
+const EXIST_SEARCH_TYPE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "exist-search-type-extension",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "exist selectors and aliases beyond builtin, class, dir, file, and var are RunMat extensions",
+    error_identifier: Some("RunMat:compatibility:ExistSearchTypeExtension"),
+};
+const EXIST_NONTEXT_HANDLE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "exist-nontext-handle-query",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "exist(handleObject, 'handle') with a nontext first argument is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ExistNontextHandleExtension"),
+};
+pub const EXIST_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [EXIST_SEARCH_TYPE_EXTENSION, EXIST_NONTEXT_HANDLE_EXTENSION];
+pub const EXIST_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "exist accepts textual name and searchType inputs only; all eight integer classes, logical values, and resident numeric handles reject before lookup or provider access. Its integer-valued typeID output remains a documented host double scalar, not typed-integer storage.",
 };
 
 fn exist_error(message: impl Into<String>) -> RuntimeError {
@@ -147,17 +182,6 @@ fn exist_error_row(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     builder.build()
 }
 
-fn map_control_flow(err: RuntimeError) -> RuntimeError {
-    let identifier = err.identifier().map(str::to_string);
-    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
-        .with_builtin(BUILTIN_NAME)
-        .with_source(err);
-    if let Some(identifier) = identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    builder.build()
-}
-
 #[runtime_builtin(
     name = "exist",
     category = "io/repl_fs",
@@ -166,6 +190,8 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::exist_type),
     descriptor(crate::builtins::io::repl_fs::exist::EXIST_DESCRIPTOR),
+    extensions(crate::builtins::io::repl_fs::exist::EXIST_EXTENSIONS),
+    integer_audit(crate::builtins::io::repl_fs::exist::EXIST_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::repl_fs::exist"
 )]
 async fn exist_builtin(name: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -173,29 +199,34 @@ async fn exist_builtin(name: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         return Err(exist_error_row(&EXIST_ERROR_TOO_MANY_INPUTS));
     }
 
-    let name_host = gather_if_needed_async(&name)
-        .await
-        .map_err(map_control_flow)?;
-    let type_value = match rest.first() {
-        Some(value) => Some(
-            gather_if_needed_async(value)
-                .await
-                .map_err(map_control_flow)?,
-        ),
-        None => None,
-    };
+    if crate::dispatcher::value_contains_gpu(&name) {
+        return Err(exist_error_row(&EXIST_ERROR_NAME_ARG));
+    }
+    if rest
+        .first()
+        .is_some_and(crate::dispatcher::value_contains_gpu)
+    {
+        return Err(exist_error_row(&EXIST_ERROR_TYPE_ARG));
+    }
+    let type_value = rest.first();
 
     let query = type_value
-        .as_ref()
         .map(parse_type_argument)
         .transpose()?
         .unwrap_or(ExistQuery::Any);
 
     let result = match query {
-        ExistQuery::Handle => exist_handle(&name_host),
+        ExistQuery::Handle if value_to_string(&name).is_none() => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &EXIST_NONTEXT_HANDLE_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+            exist_handle(&name)
+        }
+        ExistQuery::Handle => ExistResultKind::NotFound,
         _ => {
-            let text = value_to_string(&name_host)
-                .ok_or_else(|| exist_error_row(&EXIST_ERROR_NAME_ARG))?;
+            let text =
+                value_to_string(&name).ok_or_else(|| exist_error_row(&EXIST_ERROR_NAME_ARG))?;
             exist_for_query(&text, query).await?
         }
     };
@@ -252,23 +283,39 @@ impl ExistResultKind {
 
 fn parse_type_argument(value: &Value) -> BuiltinResult<ExistQuery> {
     let text = value_to_string(value).ok_or_else(|| exist_error_row(&EXIST_ERROR_TYPE_ARG))?;
-    match text.trim().to_ascii_lowercase().as_str() {
-        "" => Ok(ExistQuery::Any),
-        "var" | "variable" => Ok(ExistQuery::Var),
+    match text.trim() {
+        "var" => Ok(ExistQuery::Var),
         "file" => Ok(ExistQuery::File),
-        "dir" | "directory" | "folder" => Ok(ExistQuery::Dir),
-        "builtin" | "built-in" => Ok(ExistQuery::Builtin),
+        "dir" => Ok(ExistQuery::Dir),
+        "builtin" => Ok(ExistQuery::Builtin),
         "class" => Ok(ExistQuery::Class),
-        "mex" => Ok(ExistQuery::Mex),
-        "pcode" | "p" => Ok(ExistQuery::Pcode),
-        "handle" => Ok(ExistQuery::Handle),
-        "method" => Ok(ExistQuery::Method),
-        "simulink" => Ok(ExistQuery::Simulink),
-        "thunk" => Ok(ExistQuery::Thunk),
-        "lib" | "library" => Ok(ExistQuery::Lib),
-        "java" => Ok(ExistQuery::Java),
-        _ => Err(exist_error_row(&EXIST_ERROR_INVALID_TYPE)),
+        raw => parse_extension_type(raw),
     }
+}
+
+fn parse_extension_type(raw: &str) -> BuiltinResult<ExistQuery> {
+    let query = match raw.to_ascii_lowercase().as_str() {
+        "" => ExistQuery::Any,
+        "var" | "variable" => ExistQuery::Var,
+        "file" => ExistQuery::File,
+        "dir" | "directory" | "folder" => ExistQuery::Dir,
+        "builtin" | "built-in" => ExistQuery::Builtin,
+        "class" => ExistQuery::Class,
+        "mex" => ExistQuery::Mex,
+        "pcode" | "p" => ExistQuery::Pcode,
+        "handle" => ExistQuery::Handle,
+        "method" => ExistQuery::Method,
+        "simulink" => ExistQuery::Simulink,
+        "thunk" => ExistQuery::Thunk,
+        "lib" | "library" => ExistQuery::Lib,
+        "java" => ExistQuery::Java,
+        _ => return Err(exist_error_row(&EXIST_ERROR_INVALID_TYPE)),
+    };
+    crate::compatibility::ensure_builtin_extension_enabled(
+        &EXIST_SEARCH_TYPE_EXTENSION,
+        BUILTIN_NAME,
+    )?;
+    Ok(query)
 }
 
 async fn exist_for_query(name: &str, query: ExistQuery) -> BuiltinResult<ExistResultKind> {
@@ -298,9 +345,15 @@ async fn exist_for_query(name: &str, query: ExistQuery) -> BuiltinResult<ExistRe
         } else {
             ExistResultKind::NotFound
         }),
-        ExistQuery::File => Ok(detect_file_kind(name)
-            .await?
-            .unwrap_or(ExistResultKind::NotFound)),
+        ExistQuery::File => {
+            if directory_exists(name).await? {
+                Ok(ExistResultKind::Directory)
+            } else {
+                Ok(detect_file_kind(name)
+                    .await?
+                    .unwrap_or(ExistResultKind::NotFound))
+            }
+        }
         ExistQuery::Mex => Ok(
             if path_find_file_with_extensions(name, MEX_EXTENSIONS, "exist")
                 .await
@@ -373,14 +426,14 @@ async fn evaluate_default(name: &str) -> BuiltinResult<ExistResultKind> {
     if builtin_exists(name) {
         return Ok(ExistResultKind::Builtin);
     }
+    if directory_exists(name).await? {
+        return Ok(ExistResultKind::Directory);
+    }
     if class_exists(name).await? {
         return Ok(ExistResultKind::Class);
     }
     if let Some(kind) = detect_file_kind(name).await? {
         return Ok(kind);
-    }
-    if directory_exists(name).await? {
-        return Ok(ExistResultKind::Directory);
     }
     Ok(ExistResultKind::NotFound)
 }
@@ -417,7 +470,7 @@ fn builtin_exists(name: &str) -> bool {
 }
 
 async fn class_exists(name: &str) -> BuiltinResult<bool> {
-    if runmat_builtins::get_class(name).is_some() {
+    if crate::class_registry::get_class(name).is_some() {
         return Ok(true);
     }
     if class_folder_exists(name).await? {
@@ -446,7 +499,7 @@ async fn class_file_exists(name: &str) -> BuiltinResult<bool> {
 
 fn method_exists(name: &str) -> bool {
     if let Some((class_name, method_name)) = split_method_name(name) {
-        lookup_method(&class_name, &method_name).is_some()
+        crate::class_registry::lookup_method(&class_name, &method_name).is_some()
     } else {
         false
     }
@@ -522,9 +575,9 @@ fn split_method_name(name: &str) -> Option<(String, String)> {
 pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
-    use runmat_builtins::{Access, ClassDef, MethodDef, Value};
     use runmat_filesystem as vfs;
     use runmat_thread_local::runmat_thread_local;
+    use runmat_value::{IntValue, Value};
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::env;
@@ -553,8 +606,10 @@ pub(crate) mod tests {
             .iter()
             .map(|sig| sig.label)
             .collect();
-        assert!(labels.contains(&"code = exist(name)"));
-        assert!(labels.contains(&"code = exist(name, type)"));
+        assert!(labels.contains(&"exist name"));
+        assert!(labels.contains(&"exist name searchType"));
+        assert!(labels.contains(&"typeID = exist(name)"));
+        assert!(labels.contains(&"typeID = exist(name, searchType)"));
     }
 
     fn workspace_guard() -> std::sync::MutexGuard<'static, ()> {
@@ -647,6 +702,7 @@ pub(crate) mod tests {
     #[test]
     fn exist_detects_files_and_mex() {
         let (_guard, _lock) = test_guard();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         ensure_test_resolver();
 
         let temp = tempdir().expect("tempdir");
@@ -683,6 +739,10 @@ pub(crate) mod tests {
 
         let any = exist_builtin(Value::from("data"), Vec::new()).expect("exist");
         assert_eq!(any, Value::Num(7.0));
+
+        let file =
+            exist_builtin(Value::from("data"), vec![Value::from("file")]).expect("exist file");
+        assert_eq!(file, Value::Num(7.0));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -708,6 +768,12 @@ pub(crate) mod tests {
             exist_builtin(Value::from("Widget"), vec![Value::from("class")]).expect("exist");
         assert_eq!(widget, Value::Num(8.0));
 
+        futures::executor::block_on(vfs::create_dir_async("Widget"))
+            .expect("create colliding folder");
+        let default_widget =
+            exist_builtin(Value::from("Widget"), Vec::new()).expect("folder wins over class file");
+        assert_eq!(default_widget, Value::Num(7.0));
+
         let gizmo =
             exist_builtin(Value::from("pkg.Gizmo"), vec![Value::from("class")]).expect("exist pkg");
         assert_eq!(gizmo, Value::Num(8.0));
@@ -732,10 +798,62 @@ pub(crate) mod tests {
         assert_eq!(err.message(), EXIST_ERROR_NAME_ARG.message);
     }
 
+    #[test]
+    fn exist_rejects_all_integer_classes_and_logical_inputs() {
+        let (_guard, _lock) = test_guard();
+        for value in [
+            IntValue::I8(1),
+            IntValue::I16(1),
+            IntValue::I32(1),
+            IntValue::I64(1),
+            IntValue::U8(1),
+            IntValue::U16(1),
+            IntValue::U32(1),
+            IntValue::U64(u64::MAX),
+        ] {
+            let err =
+                exist_builtin(Value::Int(value), Vec::new()).expect_err("integer name must reject");
+            assert_eq!(err.message(), EXIST_ERROR_NAME_ARG.message);
+        }
+        let err =
+            exist_builtin(Value::Bool(true), Vec::new()).expect_err("logical name must reject");
+        assert_eq!(err.message(), EXIST_ERROR_NAME_ARG.message);
+    }
+
+    #[test]
+    fn exist_rejects_resident_numeric_name_without_provider_access() {
+        let (_guard, _lock) = test_guard();
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+            descriptor: Default::default(),
+        });
+        let err = exist_builtin(resident, Vec::new()).expect_err("resident name must reject");
+        assert_eq!(err.message(), EXIST_ERROR_NAME_ARG.message);
+        assert!(!err.message().contains("provider"));
+    }
+
+    #[test]
+    fn strict_mode_gates_nonpublic_search_types() {
+        let (_guard, _lock) = test_guard();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        for selector in ["variable", "folder", "built-in", "mex", "handle", "method"] {
+            let err = exist_builtin(Value::from("name"), vec![Value::from(selector)])
+                .expect_err("selector extension must be gated");
+            assert_eq!(
+                err.identifier(),
+                EXIST_SEARCH_TYPE_EXTENSION.error_identifier,
+                "selector {selector}"
+            );
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exist_handle_returns_zero_for_non_handle() {
         let (_guard, _lock) = test_guard();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
 
         let value =
             exist_builtin(Value::Num(17.0), vec![Value::from("handle")]).expect("exist handle");
@@ -746,29 +864,30 @@ pub(crate) mod tests {
     #[test]
     fn exist_method_uses_registered_class_metadata_including_inheritance() {
         let (_guard, _lock) = test_guard();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
 
         let parent_name = unique_class_name("existParent");
         let child_name = unique_class_name("existChild");
         let mut parent_methods = HashMap::new();
         parent_methods.insert(
             "parentOnly".to_string(),
-            MethodDef {
+            crate::class_registry::RuntimeMethod {
                 name: "parentOnly".to_string(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: "parent_only_impl".to_string(),
                 implicit_class_argument: None,
             },
         );
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: parent_name.clone(),
             parent: None,
             properties: HashMap::new(),
             methods: parent_methods,
         });
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: child_name.clone(),
             parent: Some(parent_name.clone()),
             properties: HashMap::new(),

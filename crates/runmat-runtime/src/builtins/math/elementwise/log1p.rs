@@ -5,22 +5,27 @@
 //! and falls back to host computation whenever complex results are required or device support is
 //! missing, mirroring MATLAB behavior.
 
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+#[cfg(test)]
+use runmat_value::IntValue;
+use runmat_value::{CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value};
 
+use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
-    FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
-    ResidencyPolicy, ScalarType, ShapeRequirements,
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
+    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::type_resolvers::numeric_unary_type;
-use crate::dispatcher::download_handle_async;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const IMAG_EPS: f64 = 1e-12;
@@ -47,24 +52,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "log1p",
     shape: ShapeRequirements::BroadcastCompatible,
     constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: Some(FusionKernelTemplate {
-        scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx
-                .inputs
-                .first()
-                .ok_or(FusionError::MissingInput(0))?;
-            let one = match ctx.scalar_ty {
-                ScalarType::F32 => "1.0".to_string(),
-                ScalarType::F64 => "f64(1.0)".to_string(),
-                other => return Err(FusionError::UnsupportedPrecision(other)),
-            };
-            Ok(format!("log({input} + {one})"))
-        },
-    }),
+    elementwise: None,
     reduction: None,
-    emits_nan: false,
-    notes: "Fusion planner emits WGSL `log(x + 1)` sequences; providers may substitute fused kernels when available.",
+    emits_nan: true,
+    notes: "Fusion is disabled because raw log(x+1) loses log1p accuracy and real inputs can require complex promotion.",
 };
 
 const BUILTIN_NAME: &str = "log1p";
@@ -101,6 +92,45 @@ const LOG1P_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "log1p: internal error",
 };
 const LOG1P_ERRORS: [BuiltinErrorDescriptor; 2] = [LOG1P_ERROR_INVALID_INPUT, LOG1P_ERROR_INTERNAL];
+const LOG1P_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "log1p-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "log1p with integer input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Log1pIntegerInputExtension"),
+};
+const LOG1P_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "log1p-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "log1p with logical input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Log1pLogicalInputExtension"),
+};
+const LOG1P_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "log1p-character-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "log1p with character input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Log1pCharacterInputExtension"),
+};
+const LOG1P_EXPLICIT_GPU_COMPLEX_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "log1p-explicit-real-gpu-complex-promotion",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "complex promotion from an explicit real gpuArray is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:Log1pExplicitGpuComplexExtension"),
+    };
+pub const LOG1P_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    LOG1P_INTEGER_INPUT_EXTENSION,
+    LOG1P_LOGICAL_INPUT_EXTENSION,
+    LOG1P_CHARACTER_INPUT_EXTENSION,
+    LOG1P_EXPLICIT_GPU_COMPLEX_EXTENSION,
+];
+const LOG1P_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "X",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "Accepted only in RunMat mode and inside the exact binary64 integer interval.",
+}];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "Y = log1p(integer_X)", inputs: &LOG1P_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving, notes: "Resident integer input is downloaded exactly through its owner before double-domain computation." }];
 pub const LOG1P_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &LOG1P_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -134,16 +164,22 @@ fn log1p_error_with_detail(
     accel = "unary",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::elementwise::log1p::LOG1P_DESCRIPTOR),
+    extensions(LOG1P_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::elementwise::log1p::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::elementwise::log1p"
 )]
 async fn log1p_builtin(value: Value) -> BuiltinResult<Value> {
+    ensure_log1p_extensions(&value).await?;
     match value {
         Value::GpuTensor(handle) => log1p_gpu(handle).await,
         Value::Complex(re, im) => {
             let (real, imag) = log1p_complex_parts(re, im);
             Ok(Value::Complex(real, imag))
         }
-        Value::ComplexTensor(ct) => log1p_complex_tensor(ct),
+        Value::ComplexTensor(ct) => {
+            crate::builtins::common::validation::reject_typed_complex_integer_tensor(&ct, "log1p")?;
+            log1p_complex_tensor(ct)
+        }
         Value::CharArray(ca) => log1p_char_array(ca),
         Value::String(_) | Value::StringArray(_) => Err(log1p_error_with_detail(
             &LOG1P_ERROR_INVALID_INPUT,
@@ -153,20 +189,83 @@ async fn log1p_builtin(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-async fn log1p_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        // Fast path: try device op first; if unsupported, fall back to complex-domain check
-        if let Ok(out) = provider.unary_log1p(&handle).await {
-            return Ok(Value::GpuTensor(out));
+async fn ensure_log1p_extensions(value: &Value) -> BuiltinResult<()> {
+    let integer = matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(t) if t.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(h) if runmat_accelerate_api::handle_integer_type(h).is_some());
+    if integer {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &LOG1P_INTEGER_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+        if !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(value)
+            .await?
+        {
+            return Err(log1p_error_with_detail(
+                &LOG1P_ERROR_INVALID_INPUT,
+                "integer input lies outside the exact binary64 interval",
+            ));
         }
+    }
+    if crate::builtins::common::validation::value_has_logical_class(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &LOG1P_LOGICAL_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if matches!(value, Value::CharArray(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &LOG1P_CHARACTER_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
+}
+
+async fn log1p_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+        log1p_error_with_detail(
+            &LOG1P_ERROR_INTERNAL,
+            "GPU provider unavailable for input owner",
+        )
+    })?;
+    if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
+        let gathered =
+            gpu_helpers::download_value_preserving_residency_async(provider, &handle).await?;
+        let result = log1p_real(gathered)?;
+        return gpu_helpers::restore_class_preserving_value(&handle, result, BUILTIN_NAME);
+    }
+    if runmat_accelerate_api::handle_is_logical(&handle)
+        || runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved
+    {
+        let gathered =
+            gpu_helpers::download_value_preserving_residency_async(provider, &handle).await?;
+        let result = match gathered {
+            Value::ComplexTensor(ct) => log1p_complex_tensor(ct)?,
+            other => log1p_real(other)?,
+        };
+        return gpu_helpers::restore_class_preserving_value(&handle, result, BUILTIN_NAME);
+    }
+    {
         match detect_gpu_requires_complex(provider, &handle).await {
             Ok(true) => {
-                let tensor = gpu_helpers::gather_tensor_async(&handle)
-                    .await
-                    .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-                return log1p_tensor(tensor);
+                if runmat_accelerate_api::handle_is_explicit(&handle) {
+                    crate::compatibility::ensure_builtin_extension_enabled(
+                        &LOG1P_EXPLICIT_GPU_COMPLEX_EXTENSION,
+                        BUILTIN_NAME,
+                    )?;
+                }
+                let gathered =
+                    gpu_helpers::download_value_preserving_residency_async(provider, &handle)
+                        .await?;
+                let result = log1p_real(gathered)?;
+                return gpu_helpers::restore_class_preserving_value(&handle, result, BUILTIN_NAME);
             }
-            Ok(false) => {}
+            Ok(false) => {
+                if let Ok(out) = provider.unary_log1p(&handle).await {
+                    return validate_log1p_gpu_output(provider, &handle, out);
+                }
+            }
             Err(err) => {
                 if err.message() == "interaction pending..." {
                     return Err(builtin_error("interaction pending..."));
@@ -174,10 +273,49 @@ async fn log1p_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             }
         }
     }
-    let tensor = gpu_helpers::gather_tensor_async(&handle)
-        .await
-        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-    log1p_tensor(tensor)
+    let gathered =
+        gpu_helpers::download_value_preserving_residency_async(provider, &handle).await?;
+    let result = log1p_real(gathered)?;
+    if matches!(result, Value::Complex(_, _) | Value::ComplexTensor(_))
+        && runmat_accelerate_api::handle_is_explicit(&handle)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &LOG1P_EXPLICIT_GPU_COMPLEX_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    gpu_helpers::restore_class_preserving_value(&handle, result, BUILTIN_NAME)
+}
+
+fn validate_log1p_gpu_output(
+    provider: &'static dyn AccelProvider,
+    source: &GpuTensorHandle,
+    out: GpuTensorHandle,
+) -> BuiltinResult<Value> {
+    let valid = !gpu_helpers::same_gpu_handle(source, &out)
+        && out.shape == source.shape
+        && out.device_id == source.device_id
+        && gpu_helpers::exact_provider_for_handle(&out)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+        && runmat_accelerate_api::handle_storage(&out) == GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_precision(&out)
+            == runmat_accelerate_api::handle_precision(source)
+        && runmat_accelerate_api::handle_integer_type(&out).is_none()
+        && !runmat_accelerate_api::handle_is_logical(&out);
+    if !valid {
+        gpu_helpers::free_unprotected_exact_owner(&out, &[source]);
+        return Err(log1p_error_with_detail(
+            &LOG1P_ERROR_INTERNAL,
+            "provider returned malformed log1p output",
+        ));
+    }
+    let mut out = out;
+    runmat_accelerate_api::set_handle_provenance(
+        &mut out,
+        runmat_accelerate_api::handle_provenance(source)
+            .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
+    );
+    Ok(gpu_helpers::resident_gpu_value(out))
 }
 
 async fn detect_gpu_requires_complex(
@@ -188,11 +326,28 @@ async fn detect_gpu_requires_complex(
         .reduce_min(handle)
         .await
         .map_err(|e| builtin_error(format!("log1p: reduce_min failed: {e}")))?;
-    let download = download_handle_async(provider, &min_handle)
+    if gpu_helpers::same_gpu_handle(&min_handle, handle) {
+        return Err(builtin_error("log1p: reduce_min aliased its input"));
+    }
+    if min_handle.device_id != handle.device_id
+        || gpu_helpers::exact_provider_for_handle(&min_handle)
+            .is_none_or(|owner| !std::ptr::eq(owner, provider))
+        || runmat_accelerate_api::handle_storage(&min_handle) != GpuTensorStorage::Real
+    {
+        gpu_helpers::free_unprotected_exact_owner(&min_handle, &[handle]);
+        return Err(builtin_error(
+            "log1p: reduce_min returned a malformed handle",
+        ));
+    }
+    let host = provider
+        .download(&min_handle)
         .await
         .map_err(|e| builtin_error(format!("log1p: reduce_min download failed: {e}")));
-    let _ = provider.free(&min_handle);
-    let host = download?;
+    gpu_helpers::free_unprotected_exact_owner(&min_handle, &[handle]);
+    let host = host?;
+    if host.shape.iter().product::<usize>() != 1 {
+        return Err(builtin_error("log1p: reduce_min returned a non-scalar"));
+    }
     if host.data.iter().any(|&v| v.is_nan()) {
         return Err(builtin_error("log1p: reduce_min result contained NaN"));
     }
@@ -207,10 +362,21 @@ fn log1p_real(value: Value) -> BuiltinResult<Value> {
 
 fn log1p_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     let shape = tensor.shape.clone();
-    let mut entries = Vec::with_capacity(tensor.data.len());
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|e| builtin_error(format!("log1p: {e}")))?;
+    match storage {
+        NumericStorage::F64(values) => log1p_real_f64_values(values, shape),
+        NumericStorage::F32(values) => log1p_real_f32_values(values, shape),
+        storage => log1p_real_f64_values(promote_integer_storage_to_log1p_domain(storage), shape),
+    }
+}
+
+fn log1p_real_f64_values(values: Vec<f64>, shape: Vec<usize>) -> BuiltinResult<Value> {
+    let mut entries = Vec::with_capacity(values.len());
     let mut has_imag = false;
 
-    for &v in &tensor.data {
+    for v in values {
         let sum = 1.0 + v;
         if sum.is_nan() {
             entries.push((f64::NAN, 0.0));
@@ -234,41 +400,100 @@ fn log1p_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     }
 
     if has_imag {
-        if entries.len() == 1 {
-            let (re, im) = entries[0];
-            Ok(Value::Complex(re, im))
-        } else {
-            let tensor = ComplexTensor::new(entries, shape)
-                .map_err(|e| builtin_error(format!("log1p: {e}")))?;
-            Ok(Value::ComplexTensor(tensor))
-        }
+        let tensor = ComplexTensor::from_complex_storage(ComplexStorage::F64(entries), shape)
+            .map_err(|e| builtin_error(format!("log1p: {e}")))?;
+        Ok(complex_tensor_into_value(tensor))
     } else {
         let data: Vec<f64> = entries.into_iter().map(|(re, _)| re).collect();
-        let tensor = Tensor::new(data, shape).map_err(|e| builtin_error(format!("log1p: {e}")))?;
+        let tensor = Tensor::from_numeric_storage(NumericStorage::F64(data), shape)
+            .map_err(|e| builtin_error(format!("log1p: {e}")))?;
+        Ok(tensor::tensor_into_value(tensor))
+    }
+}
+
+fn log1p_real_f32_values(values: Vec<f32>, shape: Vec<usize>) -> BuiltinResult<Value> {
+    let mut entries = Vec::with_capacity(values.len());
+    let mut has_imag = false;
+    for value in values {
+        let sum = 1.0 + value;
+        if sum.is_nan() {
+            entries.push((f32::NAN, 0.0));
+        } else if sum < 0.0 {
+            let (mut real, mut imag) = log1p_complex_parts_f32(value, 0.0);
+            if real.abs() < IMAG_EPS as f32 {
+                real = 0.0;
+            }
+            if imag.abs() < IMAG_EPS as f32 {
+                imag = 0.0;
+            }
+            has_imag |= imag != 0.0;
+            entries.push((real, imag));
+        } else {
+            entries.push((value.ln_1p(), 0.0));
+        }
+    }
+    if has_imag {
+        let tensor = ComplexTensor::from_complex_storage(ComplexStorage::F32(entries), shape)
+            .map_err(|e| builtin_error(format!("log1p: {e}")))?;
+        Ok(complex_tensor_into_value(tensor))
+    } else {
+        let values = entries.into_iter().map(|(real, _)| real).collect();
+        let tensor = Tensor::from_numeric_storage(NumericStorage::F32(values), shape)
+            .map_err(|e| builtin_error(format!("log1p: {e}")))?;
         Ok(tensor::tensor_into_value(tensor))
     }
 }
 
 fn log1p_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let mut data = Vec::with_capacity(ct.data.len());
-    for &(re, im) in &ct.data {
-        let (mut real_part, mut imag_part) = log1p_complex_parts(re, im);
-        if real_part.abs() < IMAG_EPS {
-            real_part = 0.0;
+    let shape = ct.shape.clone();
+    let storage = match ct.into_complex_storage() {
+        ComplexStorage::F64(values) => ComplexStorage::F64(
+            values
+                .into_iter()
+                .map(|(real, imag)| {
+                    let (mut real, mut imag) = log1p_complex_parts(real, imag);
+                    if real.abs() < IMAG_EPS {
+                        real = 0.0;
+                    }
+                    if imag.abs() < IMAG_EPS {
+                        imag = 0.0;
+                    }
+                    (real, imag)
+                })
+                .collect(),
+        ),
+        ComplexStorage::F32(values) => ComplexStorage::F32(
+            values
+                .into_iter()
+                .map(|(real, imag)| {
+                    let (mut real, mut imag) = log1p_complex_parts_f32(real, imag);
+                    if real.abs() < IMAG_EPS as f32 {
+                        real = 0.0;
+                    }
+                    if imag.abs() < IMAG_EPS as f32 {
+                        imag = 0.0;
+                    }
+                    (real, imag)
+                })
+                .collect(),
+        ),
+        ComplexStorage::Integer(_) => {
+            return Err(log1p_error_with_detail(
+                &LOG1P_ERROR_INVALID_INPUT,
+                "typed complex integer input is not supported",
+            ))
         }
-        if imag_part.abs() < IMAG_EPS {
-            imag_part = 0.0;
-        }
-        data.push((real_part, imag_part));
-    }
-    if data.len() == 1 {
-        let (re, im) = data[0];
-        Ok(Value::Complex(re, im))
-    } else {
-        let tensor = ComplexTensor::new(data, ct.shape.clone())
-            .map_err(|e| builtin_error(format!("log1p: {e}")))?;
-        Ok(Value::ComplexTensor(tensor))
-    }
+    };
+    let tensor = ComplexTensor::from_complex_storage(storage, shape)
+        .map_err(|e| builtin_error(format!("log1p: {e}")))?;
+    Ok(complex_tensor_into_value(tensor))
+}
+
+fn promote_integer_storage_to_log1p_domain(storage: NumericStorage) -> Vec<f64> {
+    storage
+        .into_integer_storage()
+        .expect("log1p integer-promotion boundary received floating storage")
+        .to_f64_vec()
 }
 
 fn log1p_char_array(ca: CharArray) -> BuiltinResult<Value> {
@@ -290,16 +515,44 @@ fn log1p_complex_parts(re: f64, im: f64) -> (f64, f64) {
     }
 }
 
+fn log1p_complex_parts_f32(re: f32, im: f32) -> (f32, f32) {
+    let shifted_re = re + 1.0;
+    let magnitude = shifted_re.hypot(im);
+    if magnitude == 0.0 {
+        (f32::NEG_INFINITY, 0.0)
+    } else {
+        (magnitude.ln(), im.atan2(shifted_re))
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{LogicalArray, ResolveContext, Tensor, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntegerStorage, LogicalArray, Tensor};
     use std::f64::consts::PI;
 
     fn log1p_builtin(value: Value) -> BuiltinResult<Value> {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         block_on(super::log1p_builtin(value))
+    }
+
+    #[test]
+    fn log1p_integer_extension_is_rejected_in_matlab_mode() {
+        let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(super::log1p_builtin(Value::Int(IntValue::I64(1))))
+            .expect_err("integer log1p is a RunMat extension");
+        assert_eq!(
+            error.identifier(),
+            LOG1P_INTEGER_INPUT_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn log1p_fusion_is_disabled_to_preserve_near_zero_accuracy() {
+        assert!(FUSION_SPEC.elementwise.is_none());
     }
 
     #[test]
@@ -310,6 +563,115 @@ pub(crate) mod tests {
             .map(|sig| sig.label)
             .collect();
         assert!(labels.contains(&"Y = log1p(X)"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn log1p_reads_typed_integer_tensor_storage_exactly() {
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 3]), vec![3, 1])
+            .expect("integer tensor");
+
+        let result = log1p_builtin(Value::Tensor(tensor)).expect("log1p");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![3, 1]);
+                let expected = [0.0, 2.0f64.ln(), 4.0f64.ln()];
+                for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
+                    assert!((actual - expected).abs() < 1e-12);
+                }
+                assert!(out.integer_storage().is_none());
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn log1p_less_than_negative_one_typed_integer_promotes_to_complex_from_storage() {
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![-2, 0]), vec![1, 2])
+            .expect("integer tensor");
+
+        let result = log1p_builtin(Value::Tensor(tensor)).expect("log1p");
+        match result {
+            Value::ComplexTensor(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.materialize_f64()[0].0, 0.0);
+                assert!((out.materialize_f64()[0].1 - std::f64::consts::PI).abs() < 1e-12);
+                assert_eq!(out.materialize_f64()[1], (0.0, 0.0));
+            }
+            other => panic!("expected complex tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn log1p_preserves_native_single_real_complex_negative_and_empty_storage() {
+        let tensor = Tensor::from_f32(vec![0.0, 0.5], vec![2, 1]).unwrap();
+        let Value::Tensor(output) = log1p_builtin(Value::Tensor(tensor)).expect("log1p") else {
+            panic!("expected single real tensor");
+        };
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![0.0, 0.5_f32.ln_1p()])
+        );
+
+        let tensor = Tensor::from_f32(vec![-2.0, 1.0], vec![1, 2]).unwrap();
+        let Value::ComplexTensor(output) = log1p_builtin(Value::Tensor(tensor)).expect("log1p")
+        else {
+            panic!("expected complex single tensor");
+        };
+        assert_eq!(
+            output.as_f32_slice(),
+            Some(
+                &[
+                    log1p_complex_parts_f32(-2.0, 0.0),
+                    log1p_complex_parts_f32(1.0, 0.0),
+                ][..]
+            )
+        );
+
+        let complex = ComplexTensor::from_f32(vec![(1.0, 1.0)], vec![1, 1]).unwrap();
+        let Value::ComplexTensor(output) =
+            log1p_builtin(Value::ComplexTensor(complex)).expect("log1p")
+        else {
+            panic!("one-element complex single must retain class");
+        };
+        assert_eq!(
+            output.as_f32_slice(),
+            Some(&[log1p_complex_parts_f32(1.0, 1.0)][..])
+        );
+
+        let empty = ComplexTensor::from_f32(Vec::new(), vec![0, 3]).unwrap();
+        let Value::ComplexTensor(output) =
+            log1p_builtin(Value::ComplexTensor(empty)).expect("log1p")
+        else {
+            panic!("expected empty complex single tensor");
+        };
+        assert_eq!(output.shape, vec![0, 3]);
+        assert_eq!(output.as_f32_slice(), Some(&[][..]));
+    }
+
+    #[test]
+    fn log1p_integer_gpu_gathers_exact_storage_before_floating_domain() {
+        test_support::with_test_provider(|provider| {
+            let wide = 9_007_199_254_740_992_u64;
+            let tensor =
+                Tensor::new_integer(IntegerStorage::U64(vec![0, wide]), vec![1, 2]).unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
+            let Value::GpuTensor(output) = log1p_builtin(Value::GpuTensor(handle)).expect("log1p")
+            else {
+                panic!("expected restored GPU tensor");
+            };
+            let Value::Tensor(output) = futures::executor::block_on(
+                gpu_helpers::download_value_preserving_residency_async(provider, &output),
+            )
+            .expect("download log1p result") else {
+                panic!("expected real tensor result");
+            };
+            assert_eq!(
+                output.into_numeric_storage().unwrap(),
+                NumericStorage::F64(vec![0.0, (wide as f64).ln_1p()])
+            );
+        });
     }
 
     #[test]
@@ -392,7 +754,7 @@ pub(crate) mod tests {
                     (0.0, PI),
                     ((4.0f64).ln(), 0.0),
                 ];
-                for ((re, im), (er, ei)) in ct.data.iter().zip(expected.iter()) {
+                for ((re, im), (er, ei)) in ct.materialize_f64().iter().zip(expected.iter()) {
                     assert!((re - er).abs() < 1e-12);
                     assert!((im - ei).abs() < 1e-12);
                 }
@@ -425,7 +787,7 @@ pub(crate) mod tests {
                 assert_eq!(t.shape, vec![1, 3]);
                 for (idx, ch) in ['A', 'B', 'C'].into_iter().enumerate() {
                     let expected = (ch as u32 as f64).ln_1p();
-                    assert!((t.data[idx] - expected).abs() < 1e-12);
+                    assert!((t.materialize_f64()[idx] - expected).abs() < 1e-12);
                 }
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -448,15 +810,19 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, -0.25, 0.5, 2.0], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = log1p_builtin(Value::GpuTensor(handle)).expect("log1p");
             let gathered = test_support::gather(result).expect("gather");
-            let expected: Vec<f64> = tensor.data.iter().map(|&v| v.ln_1p()).collect();
+            let expected: Vec<f64> = tensor
+                .materialize_f64()
+                .iter()
+                .map(|&v| v.ln_1p())
+                .collect();
             assert_eq!(gathered.shape, vec![4, 1]);
-            for (out, exp) in gathered.data.iter().zip(expected.iter()) {
+            for (out, exp) in gathered.materialize_f64().iter().zip(expected.iter()) {
                 assert!((out - exp).abs() < 1e-12);
             }
         });
@@ -480,8 +846,8 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                assert!((t.data[0] - 0.0).abs() < 1e-12);
-                assert!((t.data[1] - 2.0f64.ln()).abs() < 1e-12);
+                assert!((t.materialize_f64()[0] - 0.0).abs() < 1e-12);
+                assert!((t.materialize_f64()[1] - 2.0f64.ln()).abs() < 1e-12);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -493,21 +859,25 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![-2.0, -3.0], vec![2, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let result = log1p_builtin(Value::GpuTensor(handle)).expect("log1p");
-            match result {
-                Value::ComplexTensor(ct) => {
-                    assert_eq!(ct.shape, vec![2, 1]);
-                    let expected = [(0.0, PI), ((2.0f64).ln(), PI)];
-                    for ((re, im), (er, ei)) in ct.data.iter().zip(expected.iter()) {
-                        assert!((re - er).abs() < 1e-12);
-                        assert!((im - ei).abs() < 1e-12);
-                    }
-                }
-                other => panic!("expected complex tensor result, got {other:?}"),
+            let Value::GpuTensor(result) = log1p_builtin(Value::GpuTensor(handle)).expect("log1p")
+            else {
+                panic!("expected restored GPU result");
+            };
+            let Value::ComplexTensor(ct) = futures::executor::block_on(
+                gpu_helpers::download_value_preserving_residency_async(provider, &result),
+            )
+            .expect("download complex result") else {
+                panic!("expected complex tensor result");
+            };
+            assert_eq!(ct.shape, vec![2, 1]);
+            let expected = [(0.0, PI), ((2.0f64).ln(), PI)];
+            for ((re, im), (er, ei)) in ct.materialize_f64().iter().zip(expected.iter()) {
+                assert!((re - er).abs() < 1e-12);
+                assert!((im - ei).abs() < 1e-12);
             }
         });
     }
@@ -516,19 +886,18 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn log1p_wgpu_matches_cpu() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        ) else {
+            return;
+        };
         let tensor = Tensor::new(vec![0.0, -0.25, 0.25, 1.0], vec![4, 1]).unwrap();
         let cpu = log1p_real(Value::Tensor(tensor.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
-        let handle = runmat_accelerate_api::provider()
-            .unwrap()
-            .upload(&view)
-            .unwrap();
+        let handle = provider.upload(&view).unwrap();
         let gpu = block_on(log1p_gpu(handle)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
@@ -538,7 +907,7 @@ pub(crate) mod tests {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
                 };
-                for (a, b) in gt.data.iter().zip(ct.data.iter()) {
+                for (a, b) in gt.materialize_f64().iter().zip(ct.materialize_f64().iter()) {
                     assert!((a - b).abs() < tol, "|{} - {}| >= {}", a, b, tol);
                 }
             }

@@ -33,8 +33,7 @@
   "description": "`Y = realsqrt(X)` computes `sqrt(X)` for real nonnegative inputs. Unlike `sqrt`, it rejects negative real values and complex inputs instead of producing complex results.",
   "behaviors": [
     "`realsqrt(X)` applies the operation element-wise and preserves the input shape.",
-    "Logical values convert to doubles (`true -> 1.0`, `false -> 0.0`) before the square root is taken.",
-    "Character arrays are interpreted as their numeric code points and return dense double tensors.",
+    "Only real single and double numeric inputs are accepted. Logical, character, and every integer class reject before numeric coercion or provider dispatch.",
     "Sparse inputs preserve sparsity: stored values are square-rooted and unstored zeros remain zero.",
     "Negative real values raise a domain error because the result would be complex.",
     "Complex scalar and complex tensor inputs are rejected, even if their imaginary parts are zero.",

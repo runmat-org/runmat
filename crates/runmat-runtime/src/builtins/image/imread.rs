@@ -7,9 +7,9 @@ use image::{DynamicImage, ImageFormat};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericDType, Tensor, Value};
 use url::Url;
 
 use crate::builtins::common::spec::{
@@ -795,8 +795,9 @@ where
     } else {
         vec![rows, cols, output_channels]
     };
-    Tensor::new_with_dtype(data, shape, dtype)
-        .map_err(|err| imread_error_with_detail(&IMREAD_ERROR_SHAPE, &err))
+    let tensor = Tensor::new(data, shape)
+        .map_err(|err| imread_error_with_detail(&IMREAD_ERROR_SHAPE, &err))?;
+    Ok(tensor::coerce_tensor_dtype(tensor, dtype))
 }
 
 fn alpha_from_interleaved<T>(
@@ -820,8 +821,9 @@ where
             data[dest_index] = raw[source_index].into();
         }
     }
-    Tensor::new_with_dtype(data, vec![rows, cols], dtype)
-        .map_err(|err| imread_error_with_detail(&IMREAD_ERROR_SHAPE, &err))
+    let tensor = Tensor::new(data, vec![rows, cols])
+        .map_err(|err| imread_error_with_detail(&IMREAD_ERROR_SHAPE, &err))?;
+    Ok(tensor::coerce_tensor_dtype(tensor, dtype))
 }
 
 fn empty_tensor_value() -> BuiltinResult<Value> {
@@ -834,6 +836,7 @@ fn empty_tensor_value() -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use image::{ImageBuffer, ImageOutputFormat, Luma, Rgb, RgbImage, Rgba, RgbaImage};
+    use runmat_value::IntegerStorage;
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};
     use std::sync::Arc;
@@ -882,10 +885,12 @@ mod tests {
             panic!("expected tensor, got {result:?}");
         };
         assert_eq!(tensor.shape, vec![2, 2, 3]);
-        assert_eq!(tensor.dtype, NumericDType::U8);
+        assert_eq!(tensor.numeric_dtype(), NumericDType::U8);
         assert_eq!(
-            tensor.data,
-            vec![10.0, 70.0, 40.0, 100.0, 20.0, 80.0, 50.0, 110.0, 30.0, 90.0, 60.0, 120.0]
+            tensor.integer_storage(),
+            Some(&IntegerStorage::U8(vec![
+                10, 70, 40, 100, 20, 80, 50, 110, 30, 90, 60, 120
+            ]))
         );
     }
 
@@ -907,8 +912,11 @@ mod tests {
         match &outputs[0] {
             Value::Tensor(rgb) => {
                 assert_eq!(rgb.shape, vec![1, 2, 3]);
-                assert_eq!(rgb.dtype, NumericDType::U8);
-                assert_eq!(rgb.data, vec![1.0, 5.0, 2.0, 6.0, 3.0, 7.0]);
+                assert_eq!(rgb.numeric_dtype(), NumericDType::U8);
+                assert_eq!(
+                    rgb.integer_storage(),
+                    Some(&IntegerStorage::U8(vec![1, 5, 2, 6, 3, 7]))
+                );
             }
             other => panic!("expected rgb tensor, got {other:?}"),
         }
@@ -919,8 +927,11 @@ mod tests {
         match &outputs[2] {
             Value::Tensor(alpha) => {
                 assert_eq!(alpha.shape, vec![1, 2]);
-                assert_eq!(alpha.dtype, NumericDType::U8);
-                assert_eq!(alpha.data, vec![4.0, 8.0]);
+                assert_eq!(alpha.numeric_dtype(), NumericDType::U8);
+                assert_eq!(
+                    alpha.integer_storage(),
+                    Some(&IntegerStorage::U8(vec![4, 8]))
+                );
             }
             other => panic!("expected alpha tensor, got {other:?}"),
         }
@@ -1074,8 +1085,11 @@ mod tests {
             panic!("expected tensor, got {result:?}");
         };
         assert_eq!(tensor.shape, vec![2, 2]);
-        assert_eq!(tensor.dtype, NumericDType::U16);
-        assert_eq!(tensor.data, vec![1.0, 300.0, 2.0, 65535.0]);
+        assert_eq!(tensor.numeric_dtype(), NumericDType::U16);
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::U16(vec![1, 300, 2, 65535]))
+        );
     }
 
     #[test]
@@ -1092,7 +1106,7 @@ mod tests {
             panic!("expected tensor, got {result:?}");
         };
         assert_eq!(tensor.shape, vec![2, 2, 3]);
-        assert_eq!(tensor.dtype, NumericDType::U8);
+        assert_eq!(tensor.numeric_dtype(), NumericDType::U8);
     }
 
     fn http_response(status: u16, reason: &str, content_type: &str, body: &[u8]) -> Vec<u8> {

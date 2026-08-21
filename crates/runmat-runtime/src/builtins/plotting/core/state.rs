@@ -1,11 +1,11 @@
 use glam::Vec4;
 use once_cell::sync::OnceCell;
-use runmat_builtins::Tensor;
 use runmat_plot::plots::{
     surface::ColorMap, surface::ShadingMode, AxesKind, Figure, LegendStyle, LineStyle, PlotElement,
     TextStyle,
 };
 use runmat_thread_local::runmat_thread_local;
+use runmat_value::Tensor;
 use std::cell::RefCell;
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
@@ -503,13 +503,14 @@ pub struct HistogramHandleState {
     pub bin_edges: Vec<f64>,
     pub raw_counts: Vec<f64>,
     pub normalization: String,
+    pub normalization_denominator: f64,
     pub display_name: Option<String>,
     pub metadata: HistogramHandleMetadata,
 }
 
 #[derive(Clone, Debug)]
 pub struct HistogramHandleMetadata {
-    pub data: Option<Vec<f64>>,
+    pub data: Option<Tensor>,
     pub display_style: String,
     pub face_color: String,
     pub face_alpha: f64,
@@ -553,10 +554,12 @@ pub struct Histogram2HandleState {
     pub x_bin_edges: Vec<f64>,
     pub y_bin_edges: Vec<f64>,
     pub normalization: String,
+    pub normalization_denominator: f64,
     pub display_style: crate::builtins::plotting::histogram2::Histogram2DisplayStyle,
     pub show_empty_bins: bool,
     pub face_alpha: f64,
     pub display_name: Option<String>,
+    pub data: Option<Tensor>,
 }
 
 #[derive(Clone, Debug)]
@@ -602,6 +605,8 @@ pub struct ImageHandleState {
     pub figure: FigureHandle,
     pub axes_index: usize,
     pub plot_index: usize,
+    pub c_data: Option<Tensor>,
+    pub c_data_mapping: String,
 }
 
 #[derive(Clone, Debug)]
@@ -612,6 +617,7 @@ pub struct HeatmapHandleState {
     pub x_labels: Vec<String>,
     pub y_labels: Vec<String>,
     pub color_data: Tensor,
+    pub color_limits: Option<Tensor>,
 }
 
 #[derive(Clone, Debug)]
@@ -622,12 +628,12 @@ pub struct BinscatterHandleState {
     pub values: Tensor,
     pub x_bin_edges: Vec<f64>,
     pub y_bin_edges: Vec<f64>,
-    pub x_data: Vec<f64>,
-    pub y_data: Vec<f64>,
+    pub x_data: Tensor,
+    pub y_data: Tensor,
     pub num_bins: [usize; 2],
     pub auto_bins: bool,
-    pub x_limits_option: Option<(f64, f64)>,
-    pub y_limits_option: Option<(f64, f64)>,
+    pub x_limits_option: Option<Tensor>,
+    pub y_limits_option: Option<Tensor>,
     pub x_limits: (f64, f64),
     pub y_limits: (f64, f64),
     pub show_empty_bins: bool,
@@ -680,6 +686,7 @@ pub struct FunctionContourHandleState {
     pub x_range: (f64, f64),
     pub y_range: (f64, f64),
     pub function: FunctionSurfaceFunctionRef,
+    pub fill: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -694,6 +701,7 @@ pub struct TextAnnotationHandleState {
     pub figure: FigureHandle,
     pub axes_index: usize,
     pub annotation_index: usize,
+    pub position_source: Option<runmat_plot::plots::NumericPlotData>,
 }
 
 #[derive(Clone, Debug)]
@@ -703,6 +711,9 @@ pub struct TextScatterHandleState {
     pub annotation_indices: Vec<usize>,
     pub marker_plot_index: Option<usize>,
     pub is_3d: bool,
+    pub x_data: runmat_plot::plots::NumericPlotData,
+    pub y_data: runmat_plot::plots::NumericPlotData,
+    pub z_data: Option<runmat_plot::plots::NumericPlotData>,
     pub text_data: Vec<String>,
     pub text_density_percentage: f64,
     pub max_text_length: usize,
@@ -763,6 +774,8 @@ pub struct StackedPlotHandleState {
     pub line_labels: Vec<String>,
     pub x_data: Vec<f64>,
     pub y_data: Vec<Vec<f64>>,
+    pub x_source: Option<Tensor>,
+    pub y_sources: Vec<Tensor>,
     pub display_variables: Vec<String>,
     pub source_table: Option<StackedSourceTableSnapshot>,
     pub x_variable: Vec<String>,
@@ -891,6 +904,7 @@ impl PlotChildHandleState {
                 bin_edges: state.bin_edges.clone(),
                 raw_counts: state.raw_counts.clone(),
                 normalization: state.normalization.clone(),
+                normalization_denominator: state.normalization_denominator,
                 display_name: state.display_name.clone(),
                 metadata: state.metadata.clone(),
             }),
@@ -903,10 +917,12 @@ impl PlotChildHandleState {
                 x_bin_edges: state.x_bin_edges.clone(),
                 y_bin_edges: state.y_bin_edges.clone(),
                 normalization: state.normalization.clone(),
+                normalization_denominator: state.normalization_denominator,
                 display_style: state.display_style,
                 show_empty_bins: state.show_empty_bins,
                 face_alpha: state.face_alpha,
                 display_name: state.display_name.clone(),
+                data: state.data.clone(),
             }),
             Self::Line(_) => Self::Line(SimplePlotHandleState {
                 figure,
@@ -991,10 +1007,12 @@ impl PlotChildHandleState {
                 plot_index,
                 is_3d: state.is_3d,
             }),
-            Self::Image(_) => Self::Image(ImageHandleState {
+            Self::Image(state) => Self::Image(ImageHandleState {
                 figure,
                 axes_index,
                 plot_index,
+                c_data: state.c_data.clone(),
+                c_data_mapping: state.c_data_mapping.clone(),
             }),
             Self::Heatmap(state) => Self::Heatmap(HeatmapHandleState {
                 figure,
@@ -1003,6 +1021,7 @@ impl PlotChildHandleState {
                 x_labels: state.x_labels.clone(),
                 y_labels: state.y_labels.clone(),
                 color_data: state.color_data.clone(),
+                color_limits: state.color_limits.clone(),
             }),
             Self::Binscatter(state) => Self::Binscatter(BinscatterHandleState {
                 figure,
@@ -1015,8 +1034,8 @@ impl PlotChildHandleState {
                 y_data: state.y_data.clone(),
                 num_bins: state.num_bins,
                 auto_bins: state.auto_bins,
-                x_limits_option: state.x_limits_option,
-                y_limits_option: state.y_limits_option,
+                x_limits_option: state.x_limits_option.clone(),
+                y_limits_option: state.y_limits_option.clone(),
                 x_limits: state.x_limits,
                 y_limits: state.y_limits,
                 show_empty_bins: state.show_empty_bins,
@@ -1040,6 +1059,7 @@ impl PlotChildHandleState {
                 x_range: state.x_range,
                 y_range: state.y_range,
                 function: state.function.clone(),
+                fill: state.fill,
             }),
             Self::Area(_) => Self::Area(AreaHandleState {
                 figure,
@@ -1738,12 +1758,13 @@ pub fn set_zlabel_for_axes(
     Ok(object_handle)
 }
 
-pub fn add_text_annotation_for_axes(
+pub fn add_text_annotation_for_axes_with_source(
     handle: FigureHandle,
     axes_index: usize,
     position: glam::Vec3,
     text: &str,
     style: TextStyle,
+    position_source: Option<runmat_plot::plots::NumericPlotData>,
 ) -> Result<f64, FigureError> {
     let (annotation_index, figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
         state
@@ -1751,10 +1772,11 @@ pub fn add_text_annotation_for_axes(
             .add_axes_text_annotation(axes_index, position, text.to_string(), style)
     })?;
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(register_text_annotation_handle(
+    Ok(register_text_annotation_handle_with_source(
         handle,
         axes_index,
         annotation_index,
+        position_source,
     ))
 }
 
@@ -1765,8 +1787,8 @@ pub fn set_text_annotation_properties_for_axes(
     text: Option<String>,
     position: Option<glam::Vec3>,
     style: Option<TextStyle>,
-) -> Result<f64, FigureError> {
-    let (object_handle, figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
         if let Some(text) = text {
             state
                 .figure
@@ -1782,10 +1804,9 @@ pub fn set_text_annotation_properties_for_axes(
                 .figure
                 .set_axes_text_annotation_style(axes_index, annotation_index, style);
         }
-        register_text_annotation_handle(handle, axes_index, annotation_index)
     })?;
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(object_handle)
+    Ok(())
 }
 
 pub fn toggle_box() -> bool {
@@ -3461,18 +3482,16 @@ pub fn toggle_colorbar() -> bool {
     enabled
 }
 
-pub fn set_colormap(colormap: ColorMap) {
-    set_colormap_with_length(colormap, DEFAULT_COLORMAP_LENGTH);
-}
-
 pub fn set_colormap_with_length(colormap: ColorMap, length: usize) {
     let (handle, figure_clone) = {
         let mut reg = registry();
         let handle = reg.current;
+        let direct_images = direct_image_limits_updates(&reg.plot_children, handle, None);
         let state = get_state_mut(&mut reg, handle);
         let axes = state.active_axes;
         state.figure.set_axes_colormap(axes, colormap);
         state.colormap_lengths.insert(axes, length);
+        refresh_direct_image_limits(&direct_images, axes, length, &mut state.figure);
         state.revision = state.revision.wrapping_add(1);
         (handle, state.figure.clone())
     };
@@ -3484,14 +3503,87 @@ pub fn set_colormap_for_axes(
     axes_index: usize,
     colormap: ColorMap,
 ) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+    set_colormap_for_axes_with_length(handle, axes_index, colormap, DEFAULT_COLORMAP_LENGTH)
+}
+
+pub fn set_colormap_for_axes_with_length(
+    handle: FigureHandle,
+    axes_index: usize,
+    colormap: ColorMap,
+    length: usize,
+) -> Result<(), FigureError> {
+    with_axes_target_mut(handle, axes_index, |state| {
         state.figure.set_axes_colormap(axes_index, colormap);
-        state
-            .colormap_lengths
-            .insert(axes_index, DEFAULT_COLORMAP_LENGTH);
+        state.colormap_lengths.insert(axes_index, length);
     })?;
+    let figure_clone = {
+        let mut reg = registry();
+        let direct_images =
+            direct_image_limits_updates(&reg.plot_children, handle, Some(axes_index));
+        if let Some(state) = reg.figures.get_mut(&handle) {
+            refresh_direct_image_limits(&direct_images, axes_index, length, &mut state.figure);
+            state.figure.clone()
+        } else {
+            return Err(FigureError::InvalidHandle(handle.0));
+        }
+    };
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
     Ok(())
+}
+
+fn direct_image_limits_updates(
+    children: &HashMap<u64, PlotChildHandleState>,
+    figure: FigureHandle,
+    axes_index: Option<usize>,
+) -> Vec<(usize, usize, bool)> {
+    children
+        .values()
+        .filter_map(|child| match child {
+            PlotChildHandleState::Image(image)
+                if image.figure == figure
+                    && axes_index.is_none_or(|axes| image.axes_index == axes)
+                    && image.c_data_mapping == "direct" =>
+            {
+                Some((
+                    image.axes_index,
+                    image.plot_index,
+                    image
+                        .c_data
+                        .as_ref()
+                        .is_some_and(|tensor| tensor.integer_storage().is_some()),
+                ))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn refresh_direct_image_limits(
+    direct_images: &[(usize, usize, bool)],
+    axes_index: usize,
+    length: usize,
+    plot_figure: &mut Figure,
+) {
+    for &(_, plot_index, integer) in direct_images
+        .iter()
+        .filter(|(axes, _, _)| *axes == axes_index)
+    {
+        if let Some(runmat_plot::plots::figure::PlotElement::Surface(surface)) =
+            plot_figure.get_plot_mut(plot_index)
+        {
+            surface.set_color_limits(Some(
+                crate::builtins::plotting::image::direct_colormap_limits(integer, length),
+            ));
+        }
+    }
+}
+
+pub fn colormap_length_for_axes(handle: FigureHandle, axes_index: usize) -> usize {
+    let reg = registry();
+    reg.figures
+        .get(&handle)
+        .and_then(|state| state.colormap_lengths.get(&axes_index).copied())
+        .unwrap_or(DEFAULT_COLORMAP_LENGTH)
 }
 
 pub fn current_colormap_length() -> usize {
@@ -3629,6 +3721,7 @@ pub fn register_histogram_handle(
     bin_edges: Vec<f64>,
     raw_counts: Vec<f64>,
     normalization: String,
+    normalization_denominator: f64,
     metadata: HistogramHandleMetadata,
 ) -> f64 {
     let mut reg = registry();
@@ -3643,6 +3736,7 @@ pub fn register_histogram_handle(
             bin_edges,
             raw_counts,
             normalization,
+            normalization_denominator,
             display_name: None,
             metadata,
         }),
@@ -3660,10 +3754,12 @@ pub fn register_histogram2_handle(
     x_bin_edges: Vec<f64>,
     y_bin_edges: Vec<f64>,
     normalization: String,
+    normalization_denominator: f64,
     display_style: crate::builtins::plotting::histogram2::Histogram2DisplayStyle,
     show_empty_bins: bool,
     face_alpha: f64,
     display_name: Option<String>,
+    data: Option<Tensor>,
 ) -> f64 {
     let mut reg = registry();
     let id = reg.next_plot_child_handle;
@@ -3679,10 +3775,12 @@ pub fn register_histogram2_handle(
             x_bin_edges,
             y_bin_edges,
             normalization,
+            normalization_denominator,
             display_style,
             show_empty_bins,
             face_alpha,
             display_name,
+            data,
         }),
     );
     id as f64
@@ -3807,14 +3905,27 @@ pub fn register_quiver3_handle(figure: FigureHandle, axes_index: usize, plot_ind
     })
 }
 
-pub fn register_image_handle(figure: FigureHandle, axes_index: usize, plot_index: usize) -> f64 {
-    register_simple_plot_handle(figure, axes_index, plot_index, |state| {
+pub fn register_image_handle(
+    figure: FigureHandle,
+    axes_index: usize,
+    plot_index: usize,
+    c_data: Option<Tensor>,
+    c_data_mapping: impl Into<String>,
+) -> f64 {
+    let mut reg = registry();
+    let id = reg.next_plot_child_handle;
+    reg.next_plot_child_handle += 1;
+    reg.plot_children.insert(
+        id,
         PlotChildHandleState::Image(ImageHandleState {
-            figure: state.figure,
-            axes_index: state.axes_index,
-            plot_index: state.plot_index,
-        })
-    })
+            figure,
+            axes_index,
+            plot_index,
+            c_data,
+            c_data_mapping: c_data_mapping.into(),
+        }),
+    );
+    id as f64
 }
 
 pub fn register_heatmap_handle(
@@ -3824,6 +3935,7 @@ pub fn register_heatmap_handle(
     x_labels: Vec<String>,
     y_labels: Vec<String>,
     color_data: Tensor,
+    color_limits: Option<Tensor>,
 ) -> f64 {
     let mut reg = registry();
     let id = reg.next_plot_child_handle;
@@ -3837,9 +3949,24 @@ pub fn register_heatmap_handle(
             x_labels,
             y_labels,
             color_data,
+            color_limits,
         }),
     );
     id as f64
+}
+
+pub fn set_heatmap_color_limits(handle: f64, limits: Tensor) -> Result<(), FigureError> {
+    if !handle.is_finite() || handle <= 0.0 {
+        return Err(FigureError::InvalidPlotObjectHandle);
+    }
+    let mut reg = registry();
+    match reg.plot_children.get_mut(&(handle.round() as u64)) {
+        Some(PlotChildHandleState::Heatmap(state)) => {
+            state.color_limits = Some(limits);
+            Ok(())
+        }
+        _ => Err(FigureError::InvalidPlotObjectHandle),
+    }
 }
 
 pub fn register_binscatter_handle(
@@ -3849,12 +3976,12 @@ pub fn register_binscatter_handle(
     values: Tensor,
     x_bin_edges: Vec<f64>,
     y_bin_edges: Vec<f64>,
-    x_data: Vec<f64>,
-    y_data: Vec<f64>,
+    x_data: Tensor,
+    y_data: Tensor,
     num_bins: [usize; 2],
     auto_bins: bool,
-    x_limits_option: Option<(f64, f64)>,
-    y_limits_option: Option<(f64, f64)>,
+    x_limits_option: Option<Tensor>,
+    y_limits_option: Option<Tensor>,
     show_empty_bins: bool,
     face_alpha: f64,
     display_name: Option<String>,
@@ -3930,6 +4057,7 @@ pub fn register_function_contour_handle(
     x_range: (f64, f64),
     y_range: (f64, f64),
     function: FunctionSurfaceFunctionRef,
+    fill: bool,
 ) -> f64 {
     let mut reg = registry();
     let id = reg.next_plot_child_handle;
@@ -3944,6 +4072,7 @@ pub fn register_function_contour_handle(
             x_range,
             y_range,
             function,
+            fill,
         }),
     );
     id as f64
@@ -4032,10 +4161,11 @@ pub fn register_pie_handle(figure: FigureHandle, axes_index: usize, plot_index: 
     register_simple_plot_handle(figure, axes_index, plot_index, PlotChildHandleState::Pie)
 }
 
-pub fn register_text_annotation_handle(
+pub fn register_text_annotation_handle_with_source(
     figure: FigureHandle,
     axes_index: usize,
     annotation_index: usize,
+    position_source: Option<runmat_plot::plots::NumericPlotData>,
 ) -> f64 {
     let mut reg = registry();
     let id = reg.next_plot_child_handle;
@@ -4046,9 +4176,29 @@ pub fn register_text_annotation_handle(
             figure,
             axes_index,
             annotation_index,
+            position_source,
         }),
     );
     id as f64
+}
+
+pub fn update_text_annotation_position_source(
+    figure: FigureHandle,
+    axes_index: usize,
+    annotation_index: usize,
+    position_source: runmat_plot::plots::NumericPlotData,
+) {
+    let mut reg = registry();
+    for state in reg.plot_children.values_mut() {
+        if let PlotChildHandleState::Text(text) = state {
+            if text.figure == figure
+                && text.axes_index == axes_index
+                && text.annotation_index == annotation_index
+            {
+                text.position_source = Some(position_source.clone());
+            }
+        }
+    }
 }
 
 pub fn register_textscatter_handle(state: TextScatterHandleState) -> f64 {
@@ -4239,7 +4389,6 @@ where
 
 #[derive(Clone, Copy, Debug)]
 pub enum CopyParentTarget {
-    Figure(FigureHandle),
     Axes(FigureHandle, usize),
 }
 
@@ -4301,13 +4450,7 @@ pub fn copy_plot_child_to_parent(
             .cloned()
             .ok_or(FigureError::InvalidPlotObjectHandle)?;
 
-        let (target_figure, target_axes) = match target {
-            CopyParentTarget::Figure(figure) => {
-                let axes_index = get_state_mut(&mut reg, figure).active_axes;
-                (figure, axes_index)
-            }
-            CopyParentTarget::Axes(figure, axes_index) => (figure, axes_index),
-        };
+        let CopyParentTarget::Axes(target_figure, target_axes) = target;
 
         let (new_plot_index, figure_clone) = {
             let target_state = get_state_mut(&mut reg, target_figure);
@@ -4430,6 +4573,30 @@ pub fn update_histogram2_handle_for_plot(
     match state.ok_or(FigureError::InvalidPlotObjectHandle)? {
         PlotChildHandleState::Histogram2(hist) => {
             updater(hist);
+            Ok(())
+        }
+        _ => Err(FigureError::InvalidPlotObjectHandle),
+    }
+}
+
+pub fn update_image_handle_for_plot(
+    figure: FigureHandle,
+    axes_index: usize,
+    plot_index: usize,
+    updater: impl FnOnce(&mut ImageHandleState),
+) -> Result<(), FigureError> {
+    let mut reg = registry();
+    let state = reg.plot_children.values_mut().find(|state| match state {
+        PlotChildHandleState::Image(image) => {
+            image.figure == figure
+                && image.axes_index == axes_index
+                && image.plot_index == plot_index
+        }
+        _ => false,
+    });
+    match state.ok_or(FigureError::InvalidPlotObjectHandle)? {
+        PlotChildHandleState::Image(image) => {
+            updater(image);
             Ok(())
         }
         _ => Err(FigureError::InvalidPlotObjectHandle),
@@ -4643,8 +4810,10 @@ pub fn append_points_to_animated_line(
             match z {
                 None => match plot {
                     PlotElement::Line(line) => {
-                        let mut next_x = std::mem::take(&mut line.x_data);
-                        let mut next_y = std::mem::take(&mut line.y_data);
+                        let (mut next_x, mut next_y) = line
+                            .host_xy_f64()
+                            .map_err(|err| format!("failed to read animated line: {err}"))?
+                            .ok_or_else(|| "animated line data is unavailable".to_string())?;
                         next_x.extend(x);
                         next_y.extend(y);
                         trim_oldest_xy(handle.maximum_num_points, &mut next_x, &mut next_y);
@@ -4664,8 +4833,10 @@ pub fn append_points_to_animated_line(
                             return Err("3-D animated lines do not support marker properties yet"
                                 .to_string());
                         }
-                        let mut next_x = std::mem::take(&mut line.x_data);
-                        let mut next_y = std::mem::take(&mut line.y_data);
+                        let (mut next_x, mut next_y) = line
+                            .host_xy_f64()
+                            .map_err(|err| format!("failed to read animated line: {err}"))?
+                            .ok_or_else(|| "animated line data is unavailable".to_string())?;
                         let mut next_z = vec![0.0; next_x.len()];
                         next_x.extend(x);
                         next_y.extend(y);
@@ -4687,9 +4858,10 @@ pub fn append_points_to_animated_line(
                         became_3d = true;
                     }
                     PlotElement::Line3(line) => {
-                        let mut next_x = std::mem::take(&mut line.x_data);
-                        let mut next_y = std::mem::take(&mut line.y_data);
-                        let mut next_z = std::mem::take(&mut line.z_data);
+                        let (mut next_x, mut next_y, mut next_z) = line
+                            .host_xyz_f64()
+                            .map_err(|err| format!("failed to read animated line: {err}"))?
+                            .ok_or_else(|| "animated line data is unavailable".to_string())?;
                         next_x.extend(x);
                         next_y.extend(y);
                         next_z.extend(z);
@@ -4741,16 +4913,19 @@ pub fn set_animated_line_maximum_num_points(
                 .ok_or_else(|| "invalid animated line handle".to_string())?;
             match plot {
                 PlotElement::Line(line) => {
-                    let mut x = std::mem::take(&mut line.x_data);
-                    let mut y = std::mem::take(&mut line.y_data);
+                    let (mut x, mut y) = line
+                        .host_xy_f64()
+                        .map_err(|err| format!("failed to read animated line: {err}"))?
+                        .ok_or_else(|| "animated line data is unavailable".to_string())?;
                     trim_oldest_xy(maximum_num_points, &mut x, &mut y);
                     line.update_data(x, y)
                         .map_err(|err| format!("failed to update animated line: {err}"))?;
                 }
                 PlotElement::Line3(line) => {
-                    let mut x = std::mem::take(&mut line.x_data);
-                    let mut y = std::mem::take(&mut line.y_data);
-                    let mut z = std::mem::take(&mut line.z_data);
+                    let (mut x, mut y, mut z) = line
+                        .host_xyz_f64()
+                        .map_err(|err| format!("failed to read animated line: {err}"))?
+                        .ok_or_else(|| "animated line data is unavailable".to_string())?;
                     trim_oldest_xyz(maximum_num_points, &mut x, &mut y, &mut z);
                     line.update_data(x, y, z)
                         .map_err(|err| format!("failed to update animated line: {err}"))?;

@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": ["f64"],
     "broadcasting": "none",
-    "notes": "GPU inputs are gathered to host. Clustering runs on CPU because it is iterative and metadata-heavy."
+    "notes": "Supported floating gpuArray input gathers through its owning provider for iterative CPU clustering and restores every numeric output to that provider. Explicit residency cannot silently become host residency."
   },
   "fusion": {
     "elementwise": false,
@@ -39,7 +39,9 @@
     "`Display` is accepted for script compatibility. `OnlinePhase=\"on\"` runs an additional bounded batch-refinement phase in the CPU runtime.",
     "`Options` accepts statset-style structs. `MaxIter` and `Display` fields are honored; parallel stream fields are rejected when enabled because RunMat's CPU implementation is single-process.",
     "For `\"cityblock\"` and `\"hamming\"`, RunMat updates centroids with component-wise medians. Other distances use mean centroids in the metric's transformed space.",
-    "Outputs are `idx`, centroid matrix `C`, per-cluster distance sums `sumd`, and the observation-by-cluster distance matrix `D`."
+    "Outputs are `idx`, centroid matrix `C`, per-cluster distance sums `sumd`, and the observation-by-cluster distance matrix `D`.",
+    "Typed-integer observation data, cluster counts, numeric starts, iteration controls, and numeric parallel toggles are role-specific RunMat extensions. Structural controls decode exactly; numerical solver inputs must be exactly representable at the binary64 boundary.",
+    "Automatic residency may gather transparently. A documented explicit floating gpuArray call preserves output provider ownership and residency or returns an error."
   ],
   "examples": [
     {

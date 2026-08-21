@@ -34,6 +34,7 @@
     "String scalars, character vectors, and single-element string arrays are accepted as field names.",
     "`struct()` returns a scalar struct with no fields, while `struct([])` yields a `0×0` struct array.",
     "When any value input is a cell array, every cell array input must share the same size. Non-cell inputs are replicated across every element of the resulting struct array.",
+    "Numeric field values retain their exact class, shape, and storage. GPU-resident field values remain resident handles rather than being gathered during construction.",
     "Passing an existing struct or struct array (`struct(S)`) creates a deep copy; the original data is untouched."
   ],
   "examples": [

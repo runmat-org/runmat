@@ -7,14 +7,15 @@ use serde::Serialize;
 use serde_wasm_bindgen;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Once;
 use wasm_bindgen::prelude::*;
 
 use crate::core::analysis::{
     analyze_document_with_compat_and_source_async, completion_at, definition_locations_at_async,
     diagnostics_for_document, document_symbols as core_document_symbols, formatting_edits,
-    hover_at, references_locations_at_async, semantic_tokens_full, semantic_tokens_lexical,
-    signature_help_at, CompatMode, DocumentAnalysis,
+    hover_at, quick_information_at, references_locations_at_async, semantic_document_facts,
+    semantic_tokens_full, semantic_tokens_lexical, signature_help_at, CompatMode, DocumentAnalysis,
 };
 use crate::core::workspace::workspace_symbols_with_project_async;
 
@@ -76,6 +77,81 @@ pub fn builtin_inventory_counts() -> JsValue {
     let consts = runmat_builtins::constants().len();
     let registered = runmat_builtins::wasm_registry::is_registered();
     serde_wasm_bindgen::to_value(&(funcs, docs, consts, registered)).unwrap_or(JsValue::NULL)
+}
+
+#[wasm_bindgen(js_name = "projectHandoff")]
+pub async fn project_handoff(source_path: String) -> Result<JsValue, JsValue> {
+    let frozen = runmat_package::discover_frozen_project_from_async(
+        Path::new(&source_path),
+        Default::default(),
+    )
+    .await
+    .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let Some(frozen) = frozen else {
+        return Ok(JsValue::NULL);
+    };
+    let handoff = runmat_package::FrozenProjectHandoff::new(frozen);
+    handoff
+        .validate()
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    to_js(&handoff)
+}
+
+#[wasm_bindgen(js_name = "projectRevision")]
+pub async fn project_revision(source_path: String) -> Result<JsValue, JsValue> {
+    let frozen = runmat_package::discover_frozen_project_from_async(
+        Path::new(&source_path),
+        Default::default(),
+    )
+    .await
+    .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let Some(frozen) = frozen else {
+        return Ok(JsValue::NULL);
+    };
+    let handoff = runmat_package::FrozenProjectHandoff::new(frozen);
+    handoff
+        .validate()
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    to_js(&handoff.revision())
+}
+
+#[wasm_bindgen(js_name = "validateProjectHandoff")]
+pub fn validate_project_handoff(value: JsValue) -> Result<JsValue, JsValue> {
+    let handoff: runmat_package::FrozenProjectHandoff = serde_wasm_bindgen::from_value(value)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    handoff
+        .validate()
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    to_js(&handoff.revision())
+}
+
+#[wasm_bindgen(js_name = "installProjectHandoff")]
+pub fn install_project_handoff(value: JsValue) -> Result<JsValue, JsValue> {
+    let handoff: runmat_package::FrozenProjectHandoff = serde_wasm_bindgen::from_value(value)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let revision = crate::core::project::ProjectContext::install_handoff(handoff)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    to_js(&revision)
+}
+
+#[wasm_bindgen(js_name = "clearProjectHandoff")]
+pub fn clear_project_handoff() {
+    crate::core::project::ProjectContext::clear_installed_handoff();
+}
+
+/// Discover tests from the exact frozen run snapshot supplied by the browser
+/// coordinator. This intentionally does not consult the installed project or
+/// mutable editor store, so runtime and LSP consumers cannot observe different
+/// graph/source revisions.
+#[wasm_bindgen(js_name = "discoverTests")]
+pub fn discover_tests(value: JsValue) -> Result<JsValue, JsValue> {
+    ensure_builtins_registered();
+    let snapshot: runmat_test::discovery::FrozenTestRunSnapshot =
+        serde_wasm_bindgen::from_value(value)
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let compat = COMPAT_MODE.with(|mode| mode.get());
+    let discovery = runmat_static_analysis::testing::discover_frozen_tests(&snapshot, compat);
+    to_js(&discovery)
 }
 
 #[wasm_bindgen]
@@ -210,6 +286,34 @@ pub fn hover(_uri: String, _line: u32, _character: u32) -> Result<JsValue, JsVal
         Some(h) => to_js(&h),
         None => Ok(JsValue::NULL),
     }
+}
+
+#[wasm_bindgen(js_name = "quickInformation")]
+pub fn quick_information(uri: String, line: u32, character: u32) -> Result<JsValue, JsValue> {
+    ensure_builtins_registered();
+    let entry = DOCS.with(|documents| documents.borrow().docs.get(&uri).cloned());
+    let Some(document) = entry else {
+        return Ok(JsValue::NULL);
+    };
+    let Some(analysis) = document.analysis.as_ref() else {
+        return Ok(JsValue::NULL);
+    };
+    let position = Position::new(line, character);
+    quick_information_at(&document.text, analysis, &position)
+        .map_or(Ok(JsValue::NULL), |information| to_js(&information))
+}
+
+#[wasm_bindgen(js_name = "semanticFacts")]
+pub fn semantic_facts(uri: String) -> Result<JsValue, JsValue> {
+    ensure_builtins_registered();
+    let entry = DOCS.with(|documents| documents.borrow().docs.get(&uri).cloned());
+    let Some(document) = entry else {
+        return Ok(JsValue::NULL);
+    };
+    let Some(analysis) = document.analysis.as_ref() else {
+        return Ok(JsValue::NULL);
+    };
+    semantic_document_facts(analysis).map_or(Ok(JsValue::NULL), to_js)
 }
 
 #[wasm_bindgen]
@@ -351,4 +455,147 @@ pub fn set_compat_mode(mode: String) {
         _ => CompatMode::Matlab,
     };
     COMPAT_MODE.with(|c| c.set(parsed));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_types::{ValueFact, ValueKindFact};
+    use wasm_bindgen_test::*;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    #[wasm_bindgen_test(async)]
+    async fn wave_facts_match_the_native_program_point_product() {
+        let uri = "file:///rm1068-wave.m".to_string();
+        let source = crate::core::semantic::fixtures::WAVE_SOURCE;
+        open_document(uri.clone(), source.to_string()).await;
+        let value = semantic_facts(uri).expect("portable semantic facts");
+        let facts: runmat_static_analysis::semantic::SemanticDocumentFacts =
+            serde_wasm_bindgen::from_value(value).expect("deserialize semantic facts");
+        facts
+            .validate_current()
+            .expect("current browser fact revision");
+
+        for (needle, dimensions) in crate::core::semantic::fixtures::WAVE_EXPECTATIONS {
+            let offset = source
+                .find(needle)
+                .unwrap_or_else(|| panic!("missing {needle}"));
+            let position = crate::core::position::offset_to_position(source, offset);
+            let value = quick_information(
+                "file:///rm1068-wave.m".to_string(),
+                position.line,
+                position.character,
+            )
+            .expect("quick information payload");
+            let information: runmat_static_analysis::semantic::SemanticQuickInformation =
+                serde_wasm_bindgen::from_value(value).expect("deserialize quick information");
+            let fact = information
+                .observation
+                .and_then(|observation| observation.fact)
+                .unwrap_or_else(|| panic!("missing fact for {needle}"));
+            assert_eq!(
+                fact.shape.known_dims(),
+                Some(dimensions.iter().copied().map(Some).collect()),
+                "wrong browser shape for {needle}: {fact:?}"
+            );
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn complete_value_taxonomy_round_trips_through_the_browser_boundary() {
+        use std::collections::BTreeMap;
+
+        let unknown = || ValueFact::unknown(runmat_types::DynamicReason::Unspecified);
+        let kinds = vec![
+            ValueKindFact::Never,
+            ValueKindFact::Unknown,
+            ValueKindFact::Void,
+            ValueKindFact::Numeric(runmat_types::NumericFact {
+                class: runmat_types::NumericClass::Double,
+                domain: runmat_types::NumericDomain::Complex,
+            }),
+            ValueKindFact::Logical,
+            ValueKindFact::Character,
+            ValueKindFact::String,
+            ValueKindFact::Symbolic,
+            ValueKindFact::Cell(runmat_types::CellFact {
+                element: Box::new(unknown()),
+                elements: vec![unknown()],
+                elements_complete: true,
+            }),
+            ValueKindFact::Struct(runmat_types::StructFact {
+                fields: BTreeMap::new(),
+                fields_complete: true,
+            }),
+            ValueKindFact::Object(runmat_types::ObjectFact {
+                class: None,
+                runtime_class: None,
+                properties: BTreeMap::new(),
+                properties_complete: false,
+                handle_semantics: None,
+            }),
+            ValueKindFact::ClassReference(runmat_types::ClassReferenceFact {
+                class: None,
+                runtime_class: None,
+            }),
+            ValueKindFact::Callable(runmat_types::CallableFact {
+                identity: None,
+                parameters: vec![unknown()],
+                parameters_complete: false,
+                outputs: vec![unknown()],
+                outputs_complete: false,
+                variadic_inputs: true,
+                variadic_outputs: true,
+                captures: Vec::new(),
+                captures_complete: true,
+            }),
+            ValueKindFact::OutputList(runmat_types::OutputListFact {
+                outputs: vec![unknown()],
+                variadic: true,
+            }),
+            ValueKindFact::Exception(runmat_types::ExceptionFact {
+                identifier: Some("RunMat:test".to_string()),
+            }),
+            ValueKindFact::Execution(runmat_types::ExecutionFact::Future {
+                output: Box::new(unknown()),
+                state: runmat_types::FutureStateFact::Lazy,
+            }),
+            ValueKindFact::Execution(runmat_types::ExecutionFact::Task {
+                output: Box::new(unknown()),
+                spawn_safety: runmat_types::SpawnSafetyFact::RequiresIsolation,
+            }),
+            ValueKindFact::Execution(runmat_types::ExecutionFact::Pool),
+            ValueKindFact::Execution(runmat_types::ExecutionFact::Job {
+                output: Box::new(unknown()),
+            }),
+            ValueKindFact::Distributed(runmat_types::DistributedFact {
+                id: runmat_types::DistributedValueId {
+                    function: runmat_types::ProgramFunctionId(1),
+                    ordinal: 2,
+                },
+                owner: runmat_types::ParallelRegionId(runmat_types::RegionId {
+                    function: runmat_types::ProgramFunctionId(1),
+                    ordinal: 3,
+                }),
+                scheme: Some(runmat_types::DistributionScheme::Replicated),
+                value: Box::new(unknown()),
+                materializable: true,
+            }),
+            ValueKindFact::Foreign(runmat_types::ForeignFact {
+                family: "java".to_string(),
+                type_name: Some("java.lang.String".to_string()),
+                type_version: None,
+                ownership: runmat_types::ForeignOwnershipFact::Owned,
+                affinity: runmat_types::ForeignAffinityFact::AnyThread,
+                lifetime: runmat_types::ForeignLifetimeFact::Session,
+            }),
+        ];
+        let facts = kinds.into_iter().map(ValueFact::scalar).collect::<Vec<_>>();
+
+        let javascript = serde_wasm_bindgen::to_value(&facts).expect("serialize taxonomy");
+        let round_trip: Vec<ValueFact> =
+            serde_wasm_bindgen::from_value(javascript).expect("deserialize taxonomy");
+        assert_eq!(round_trip, facts);
+    }
 }

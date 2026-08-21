@@ -7,17 +7,19 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, NumericDType, StructValue, Tensor, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
 };
 use runmat_filesystem::OpenOptions;
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, StructValue, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::replay::limits::ReplayLimits;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -29,6 +31,32 @@ const SAVEFIG: &str = "savefig";
 const OPENFIG: &str = "openfig";
 const HGSAVE: &str = "hgsave";
 const HGLOAD: &str = "hgload";
+
+pub const HGSAVE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "hgsave accepts host graphics handles, a textual filename, and textual version tokens; numeric array contents are not an integer computation surface and resident tensors are rejected without gather.",
+};
+pub const HGLOAD_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "hgload accepts a textual filename and an optional property structure and returns opaque graphics handles plus property metadata; it has no direct integer data or control argument.",
+};
+pub const OPENFIG_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "openfig accepts a textual filename plus textual copy/visibility options and returns opaque figure handles; it has no direct integer data or control role, and resident numeric arguments reject before provider access or file I/O.",
+};
+pub const SAVEAS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "saveas accepts a host graphics object, textual filename, and textual format token; numeric figure handles are opaque double identifiers rather than integer computation inputs, and resident numeric arguments reject before provider access or file I/O.",
+};
+pub const SAVEFIG_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "savefig accepts host Figure objects, textual filenames, and textual version tokens; typed-integer arrays are not figure handles and resident numeric arguments reject before provider access or file I/O.",
+};
 
 const DEFAULT_WIDTH: u32 = 800;
 const DEFAULT_HEIGHT: u32 = 600;
@@ -305,9 +333,11 @@ fn handle_type(_args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> Type {
     accel = "metadata",
     type_resolver(bool_type),
     descriptor(crate::builtins::plotting::figure_persistence::SAVEAS_DESCRIPTOR),
+    integer_audit(crate::builtins::plotting::figure_persistence::SAVEAS_INTEGER_AUDIT),
     builtin_path = "crate::builtins::plotting::figure_persistence"
 )]
 pub async fn saveas_builtin(args: Vec<Value>) -> BuiltinResult<bool> {
+    reject_resident_persistence_arguments(&args, SAVEAS)?;
     let args = gather_values(&args, SAVEAS).await?;
     let request = parse_saveas_args(&args)?;
     match request.format {
@@ -330,9 +360,11 @@ pub async fn saveas_builtin(args: Vec<Value>) -> BuiltinResult<bool> {
     accel = "metadata",
     type_resolver(bool_type),
     descriptor(crate::builtins::plotting::figure_persistence::SAVEFIG_DESCRIPTOR),
+    integer_audit(crate::builtins::plotting::figure_persistence::SAVEFIG_INTEGER_AUDIT),
     builtin_path = "crate::builtins::plotting::figure_persistence"
 )]
 pub async fn savefig_builtin(args: Vec<Value>) -> BuiltinResult<bool> {
+    reject_resident_persistence_arguments(&args, SAVEFIG)?;
     let args = gather_values(&args, SAVEFIG).await?;
     let request = parse_savefig_args(&args, SAVEFIG)?;
     save_figures(&request.output_path, &request.figures, SAVEFIG).await?;
@@ -347,10 +379,10 @@ pub async fn savefig_builtin(args: Vec<Value>) -> BuiltinResult<bool> {
     suppress_auto_output = true,
     type_resolver(handle_type),
     descriptor(crate::builtins::plotting::figure_persistence::OPENFIG_DESCRIPTOR),
+    integer_audit(crate::builtins::plotting::figure_persistence::OPENFIG_INTEGER_AUDIT),
     builtin_path = "crate::builtins::plotting::figure_persistence"
 )]
 pub async fn openfig_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let args = gather_values(&args, OPENFIG).await?;
     let request = parse_openfig_args(&args, OPENFIG)?;
     let handles = open_figures(&request, OPENFIG).await?;
     Ok(handles_value(&handles))
@@ -366,10 +398,10 @@ pub async fn openfig_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     accel = "metadata",
     type_resolver(bool_type),
     descriptor(crate::builtins::plotting::figure_persistence::HGSAVE_DESCRIPTOR),
+    integer_audit(crate::builtins::plotting::figure_persistence::HGSAVE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::plotting::figure_persistence"
 )]
 pub async fn hgsave_builtin(args: Vec<Value>) -> BuiltinResult<bool> {
-    let args = gather_values(&args, HGSAVE).await?;
     let request = parse_savefig_args(&args, HGSAVE)?;
     save_figures(&request.output_path, &request.figures, HGSAVE).await?;
     Ok(true)
@@ -382,10 +414,10 @@ pub async fn hgsave_builtin(args: Vec<Value>) -> BuiltinResult<bool> {
     keywords = "hgload,figure load,graphics,fig",
     type_resolver(handle_type),
     descriptor(crate::builtins::plotting::figure_persistence::HGLOAD_DESCRIPTOR),
+    integer_audit(crate::builtins::plotting::figure_persistence::HGLOAD_INTEGER_AUDIT),
     builtin_path = "crate::builtins::plotting::figure_persistence"
 )]
 pub async fn hgload_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let args = gather_values(&args, HGLOAD).await?;
     let (request, overrides) = parse_hgload_args(&args)?;
     let handles = open_figures(&request, HGLOAD).await?;
     let old_values = apply_hgload_overrides(&handles, overrides.as_ref())?;
@@ -411,6 +443,25 @@ async fn gather_values(values: &[Value], builtin: &'static str) -> BuiltinResult
         })?);
     }
     Ok(out)
+}
+
+fn reject_resident_persistence_arguments(
+    values: &[Value],
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    if values.iter().any(|value| {
+        crate::builtins::common::validation::value_has_native_integer_class(value)
+            || matches!(value, Value::GpuTensor(_))
+    }) {
+        return Err(persistence_error(
+            &ERROR_INVALID_ARGUMENT,
+            builtin,
+            format!(
+                "{builtin}: typed integer and gpuArray values are not valid figure, filename, or format arguments"
+            ),
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -506,6 +557,14 @@ fn parse_savefig_args(args: &[Value], builtin: &'static str) -> BuiltinResult<Sa
         ));
     }
 
+    if builtin == HGSAVE && args.iter().any(typed_integer_handle_value) {
+        return Err(persistence_error(
+            &ERROR_INVALID_ARGUMENT,
+            builtin,
+            "hgsave: typed integer values are not graphics handles",
+        ));
+    }
+
     let mut idx = 0usize;
     let figures =
         if args.len() >= 2 && !is_version_token(&args[0]) && !is_probable_filename(&args[0]) {
@@ -536,6 +595,13 @@ fn parse_savefig_args(args: &[Value], builtin: &'static str) -> BuiltinResult<Sa
         figures,
         output_path,
     })
+}
+
+fn typed_integer_handle_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
 }
 
 fn parse_openfig_args(args: &[Value], builtin: &'static str) -> BuiltinResult<OpenFigRequest> {
@@ -627,17 +693,18 @@ fn top_level_figures_from_value(
 ) -> BuiltinResult<Vec<FigureHandle>> {
     match value {
         Value::Tensor(tensor) => {
-            if tensor.data.is_empty() {
+            let values = tensor_utils::tensor_values_f64_cow(tensor);
+            if values.is_empty() {
                 return Err(persistence_error(
                     &ERROR_INVALID_ARGUMENT,
                     builtin,
                     format!("{builtin}: figure handle array cannot be empty"),
                 ));
             }
-            let mut seen = HashSet::with_capacity(tensor.data.len());
-            let mut figures = Vec::with_capacity(tensor.data.len());
-            for handle in &tensor.data {
-                let value = Value::Num(*handle);
+            let mut seen = HashSet::with_capacity(values.len());
+            let mut figures = Vec::with_capacity(values.len());
+            for &handle in values.iter() {
+                let value = Value::Num(handle);
                 let figure = parent_figure_from_value(&value, builtin)?;
                 if seen.insert(figure) {
                     figures.push(figure);
@@ -1087,14 +1154,13 @@ fn handles_value(handles: &[FigureHandle]) -> Value {
     if handles.len() == 1 {
         Value::Num(handles[0].as_u32() as f64)
     } else {
-        Value::Tensor(Tensor {
-            data: handles.iter().map(|h| h.as_u32() as f64).collect(),
-            integer_data: None,
-            shape: vec![1, handles.len()],
-            rows: 1,
-            cols: handles.len(),
-            dtype: NumericDType::F64,
-        })
+        Value::Tensor(
+            Tensor::new(
+                handles.iter().map(|h| h.as_u32() as f64).collect(),
+                vec![1, handles.len()],
+            )
+            .expect("figure handle row"),
+        )
     }
 }
 
@@ -1276,14 +1342,7 @@ mod tests {
     }
 
     fn tensor(data: &[f64]) -> Tensor {
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![data.len()],
-            rows: data.len(),
-            cols: 1,
-            dtype: NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), vec![data.len()]).expect("persistence test vector")
     }
 
     fn temp_path(stem: &str) -> PathBuf {
@@ -1304,6 +1363,68 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(labels.contains(&"ok = saveas(fig, filename)"));
         assert!(labels.contains(&"ok = saveas(fig, filename, formattype)"));
+    }
+
+    #[test]
+    fn figure_load_and_save_forms_are_explicitly_integer_inapplicable() {
+        for audit in [
+            OPENFIG_INTEGER_AUDIT,
+            HGSAVE_INTEGER_AUDIT,
+            HGLOAD_INTEGER_AUDIT,
+        ] {
+            assert_eq!(audit.kind, BuiltinIntegerAuditKind::NotApplicable);
+            assert!(audit.canonical_builtin.is_none());
+        }
+        for name in [OPENFIG, HGSAVE, HGLOAD] {
+            let builtin = runmat_builtins::builtin_function_by_name(name)
+                .expect("registered graphics persistence builtin");
+            assert_eq!(
+                builtin.integer_audit.map(|audit| audit.kind),
+                Some(BuiltinIntegerAuditKind::NotApplicable),
+                "{name}"
+            );
+            assert!(builtin.integer_capabilities.is_empty(), "{name}");
+        }
+    }
+
+    #[test]
+    fn hgload_and_hgsave_reject_resident_numeric_arguments_without_provider_access() {
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+            descriptor: Default::default(),
+        });
+        assert!(block_on(hgload_builtin(vec![resident.clone()])).is_err());
+        assert!(block_on(hgsave_builtin(vec![resident, Value::from("unused.fig")])).is_err());
+    }
+
+    #[test]
+    fn openfig_rejects_resident_filename_without_provider_access() {
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+            descriptor: Default::default(),
+        });
+        let error = block_on(openfig_builtin(vec![resident])).expect_err("resident filename");
+
+        assert_eq!(error.identifier(), ERROR_INVALID_ARGUMENT.identifier);
+    }
+
+    #[test]
+    fn hgsave_rejects_typed_integer_handle_spellings() {
+        for value in [
+            Value::Int(runmat_value::IntValue::U64(1)),
+            Value::Tensor(
+                Tensor::new_integer(runmat_value::IntegerStorage::U64(vec![1]), vec![1, 1])
+                    .unwrap(),
+            ),
+        ] {
+            let error = block_on(hgsave_builtin(vec![value, Value::from("unused.fig")]))
+                .expect_err("typed integer handles are outside hgsave's contract");
+            assert_eq!(error.identifier(), ERROR_INVALID_ARGUMENT.identifier);
+        }
     }
 
     #[test]
@@ -1333,19 +1454,14 @@ mod tests {
 
     #[test]
     fn savefig_round_trips_multiple_figures() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = setup();
         let first = figure_builtin(vec![]).expect("figure one");
         block_on(plot_builtin(vec![Value::Tensor(tensor(&[1.0, 2.0, 3.0]))])).expect("plot one");
         let second = figure_builtin(vec![Value::String("next".into())]).expect("figure two");
         block_on(plot_builtin(vec![Value::Tensor(tensor(&[3.0, 2.0, 1.0]))])).expect("plot two");
-        let handles = Value::Tensor(Tensor {
-            data: vec![first, second],
-            integer_data: None,
-            shape: vec![1, 2],
-            rows: 1,
-            cols: 2,
-            dtype: NumericDType::F64,
-        });
+        let handles =
+            Value::Tensor(Tensor::new(vec![first, second], vec![1, 2]).expect("figure handle row"));
 
         let path = temp_path("multi");
         let _ = std::fs::remove_file(&path);
@@ -1365,8 +1481,32 @@ mod tests {
         let Value::Tensor(tensor) = value else {
             panic!("expected handle tensor");
         };
-        assert_eq!(tensor.data.len(), 2);
+        assert_eq!(tensor.materialize_f64().len(), 2);
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn savefig_rejects_typed_integer_handle_arrays_before_io() {
+        let _guard = setup();
+        let first = figure_builtin(vec![]).expect("figure one");
+        let handles = Tensor::new_integer(
+            runmat_value::IntegerStorage::I64(vec![first as i64]),
+            vec![1, 1],
+        )
+        .expect("handle tensor");
+
+        let path = temp_path("integer_handles");
+        let _ = std::fs::remove_file(&path);
+        let error = block_on(savefig_builtin(vec![
+            Value::Tensor(handles),
+            Value::String(path.to_string_lossy().into_owned()),
+        ]))
+        .expect_err("typed integer graphics handles must reject");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:figurePersistence:InvalidArgument")
+        );
+        assert!(!path.exists());
     }
 
     #[test]
@@ -1374,14 +1514,8 @@ mod tests {
         let _guard = setup();
         let fig = figure_builtin(vec![]).expect("figure");
         block_on(plot_builtin(vec![Value::Tensor(tensor(&[1.0, 2.0, 3.0]))])).expect("plot");
-        let handles = Value::Tensor(Tensor {
-            data: vec![fig, fig],
-            integer_data: None,
-            shape: vec![1, 2],
-            rows: 1,
-            cols: 2,
-            dtype: NumericDType::F64,
-        });
+        let handles =
+            Value::Tensor(Tensor::new(vec![fig, fig], vec![1, 2]).expect("figure handle row"));
 
         let path = temp_path("dedupe");
         let _ = std::fs::remove_file(&path);

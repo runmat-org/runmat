@@ -1,5 +1,6 @@
 use runmat_parser::{
-    Attr, BinOp, ClassMember, Expr, FunctionArgumentsBlockKind, LValue, Program, Span, Stmt, UnOp,
+    Attr, BinOp, ClassMember, Expr, FunctionArgumentsBlockKind, LValue, Program, Span, SpmdHeader,
+    Stmt, UnOp,
 };
 
 mod parse;
@@ -13,8 +14,61 @@ fn assert_program_eq(actual: Program, expected: Program) {
     assert_eq!(strip_program(&actual), strip_program(&expected));
 }
 
+#[test]
+fn parses_parallel_region_controls_without_erasing_syntax() {
+    let program =
+        parse("parfor (i = 1:n, 4); y = i; end; spmd (2, 8); z = labindex; end; spmd (6); end; spmd (pool, 1, 4); end")
+            .unwrap();
+    assert_eq!(program.body.len(), 4);
+    assert!(matches!(
+        &program.body[0],
+        Stmt::ParFor {
+            var,
+            maximum_workers: Some(Expr::Number(value, _)),
+            body,
+            ..
+        } if var == "i" && value == "4" && body.len() == 1
+    ));
+    assert!(matches!(
+        &program.body[1],
+        Stmt::Spmd {
+            header: SpmdHeader::Two(Expr::Number(minimum, _), Expr::Number(maximum, _)),
+            body,
+            ..
+        } if minimum == "2" && maximum == "8" && body.len() == 1
+    ));
+    assert!(matches!(
+        &program.body[2],
+        Stmt::Spmd {
+            header: SpmdHeader::One(Expr::Number(exact, _)),
+            ..
+        } if exact == "6"
+    ));
+    assert!(matches!(
+        &program.body[3],
+        Stmt::Spmd {
+            header: SpmdHeader::Three(
+                Expr::Ident(pool, _),
+                Expr::Number(minimum, _),
+                Expr::Number(maximum, _),
+            ),
+            ..
+        } if pool == "pool" && minimum == "1" && maximum == "4"
+    ));
+}
+
+#[test]
+fn rejects_malformed_parallel_controls() {
+    assert!(parse("parfor (i = 1:4, 2; end").is_err());
+    assert!(parse("parfor i = 1:4, 2; end").is_err());
+    assert!(parse("spmd (); end").is_err());
+    assert!(parse("spmd (2, 4; end").is_err());
+    assert!(parse("spmd (pool, 1, 2, 3); end").is_err());
+}
+
 fn strip_program(program: &Program) -> Program {
     Program {
+        sections: vec![],
         body: program.body.iter().map(strip_stmt).collect(),
     }
 }
@@ -67,6 +121,33 @@ fn strip_stmt(stmt: &Stmt) -> Stmt {
         } => Stmt::For {
             var: var.clone(),
             expr: strip_expr(expr),
+            body: body.iter().map(strip_stmt).collect(),
+            span: Span::default(),
+        },
+        Stmt::ParFor {
+            var,
+            expr,
+            maximum_workers,
+            body,
+            ..
+        } => Stmt::ParFor {
+            var: var.clone(),
+            expr: strip_expr(expr),
+            maximum_workers: maximum_workers.as_ref().map(strip_expr),
+            body: body.iter().map(strip_stmt).collect(),
+            span: Span::default(),
+        },
+        Stmt::Spmd { header, body, .. } => Stmt::Spmd {
+            header: match header {
+                SpmdHeader::Default => SpmdHeader::Default,
+                SpmdHeader::One(value) => SpmdHeader::One(strip_expr(value)),
+                SpmdHeader::Two(first, second) => {
+                    SpmdHeader::Two(strip_expr(first), strip_expr(second))
+                }
+                SpmdHeader::Three(first, second, third) => {
+                    SpmdHeader::Three(strip_expr(first), strip_expr(second), strip_expr(third))
+                }
+            },
             body: body.iter().map(strip_stmt).collect(),
             span: Span::default(),
         },
@@ -149,6 +230,7 @@ fn strip_stmt(stmt: &Stmt) -> Stmt {
 fn strip_expr(expr: &Expr) -> Expr {
     match expr {
         Expr::Number(value, _) => Expr::Number(value.clone(), Span::default()),
+        Expr::IntegerLiteral(value, _) => Expr::IntegerLiteral(value.clone(), Span::default()),
         Expr::String(value, _) => Expr::String(value.clone(), Span::default()),
         Expr::Ident(value, _) => Expr::Ident(value.clone(), Span::default()),
         Expr::EndKeyword(_) => Expr::EndKeyword(Span::default()),
@@ -286,25 +368,68 @@ fn strip_rows(rows: &[Vec<Expr>]) -> Vec<Vec<Expr>> {
 
 fn strip_class_member(member: &ClassMember) -> ClassMember {
     match member {
-        ClassMember::Properties { attributes, names } => ClassMember::Properties {
+        ClassMember::Properties {
+            attributes, names, ..
+        } => ClassMember::Properties {
             attributes: strip_attrs(attributes),
-            names: names.clone(),
+            names: names
+                .iter()
+                .cloned()
+                .map(|mut declaration| {
+                    declaration.span = Span::default();
+                    declaration
+                })
+                .collect(),
+            span: Span::default(),
         },
-        ClassMember::Methods { attributes, body } => ClassMember::Methods {
+        ClassMember::Methods {
+            attributes, body, ..
+        } => ClassMember::Methods {
             attributes: strip_attrs(attributes),
             body: body.iter().map(strip_stmt).collect(),
+            span: Span::default(),
         },
-        ClassMember::Events { attributes, names } => ClassMember::Events {
+        ClassMember::Events {
+            attributes, names, ..
+        } => ClassMember::Events {
             attributes: strip_attrs(attributes),
-            names: names.clone(),
+            names: names
+                .iter()
+                .cloned()
+                .map(|mut declaration| {
+                    declaration.span = Span::default();
+                    declaration
+                })
+                .collect(),
+            span: Span::default(),
         },
-        ClassMember::Enumeration { attributes, names } => ClassMember::Enumeration {
+        ClassMember::Enumeration {
+            attributes, names, ..
+        } => ClassMember::Enumeration {
             attributes: strip_attrs(attributes),
-            names: names.clone(),
+            names: names
+                .iter()
+                .cloned()
+                .map(|mut declaration| {
+                    declaration.span = Span::default();
+                    declaration
+                })
+                .collect(),
+            span: Span::default(),
         },
-        ClassMember::Arguments { attributes, names } => ClassMember::Arguments {
+        ClassMember::Arguments {
+            attributes, names, ..
+        } => ClassMember::Arguments {
             attributes: strip_attrs(attributes),
-            names: names.clone(),
+            names: names
+                .iter()
+                .cloned()
+                .map(|mut declaration| {
+                    declaration.span = Span::default();
+                    declaration
+                })
+                .collect(),
+            span: Span::default(),
         },
     }
 }
@@ -315,6 +440,7 @@ fn strip_attrs(attrs: &[Attr]) -> Vec<Attr> {
         .map(|attr| Attr {
             name: attr.name.clone(),
             value: attr.value.clone(),
+            span: Span::default(),
         })
         .collect()
 }
@@ -325,6 +451,7 @@ fn parse_expression() {
     assert_program_eq(
         program,
         Program {
+            sections: vec![],
             body: vec![expr_stmt(
                 binary_boxed(
                     Box::new(num("1".to_string())),
@@ -347,6 +474,7 @@ fn parse_assignment() {
     assert_program_eq(
         program,
         Program {
+            sections: vec![],
             body: vec![assign(
                 "x".to_string(),
                 binary_boxed(
@@ -366,6 +494,7 @@ fn parse_struct_aggregate_literal() {
     assert_program_eq(
         program,
         Program {
+            sections: vec![],
             body: vec![assign(
                 "x".to_string(),
                 Expr::StructLiteral(
@@ -387,6 +516,7 @@ fn parse_object_aggregate_literal() {
     assert_program_eq(
         program,
         Program {
+            sections: vec![],
             body: vec![assign(
                 "p".to_string(),
                 Expr::ObjectLiteral(
@@ -409,6 +539,7 @@ fn precedence_and_associativity() {
     assert_program_eq(
         program,
         Program {
+            sections: vec![],
             body: vec![expr_stmt(
                 binary_boxed(
                     Box::new(binary_boxed(
@@ -431,6 +562,7 @@ fn parentheses_override_precedence() {
     assert_program_eq(
         program,
         Program {
+            sections: vec![],
             body: vec![expr_stmt(
                 binary_boxed(
                     Box::new(num("1".to_string())),
@@ -453,6 +585,7 @@ fn multiple_statements() {
     assert_program_eq(
         program,
         Program {
+            sections: vec![],
             body: vec![
                 assign("x".to_string(), num("1".to_string()), true), // Has semicolon
                 assign("y".to_string(), num("2".to_string()), true), // Has semicolon
@@ -467,6 +600,7 @@ fn trailing_semicolon_is_allowed() {
     assert_program_eq(
         program,
         Program {
+            sections: vec![],
             body: vec![expr_stmt(
                 binary_boxed(
                     Box::new(num("1".to_string())),
@@ -593,6 +727,7 @@ fn power_is_right_associative() {
     assert_program_eq(
         program,
         Program {
+            sections: vec![],
             body: vec![expr_stmt(
                 binary_boxed(
                     Box::new(num("2".to_string())),
@@ -615,6 +750,7 @@ fn unary_minus_precedence() {
     assert_program_eq(
         program,
         Program {
+            sections: vec![],
             body: vec![expr_stmt(
                 binary_boxed(
                     Box::new(unary_boxed(UnOp::Minus, Box::new(num("1".to_string())))),
@@ -633,6 +769,7 @@ fn unary_minus_with_power() {
     assert_program_eq(
         program,
         Program {
+            sections: vec![],
             body: vec![expr_stmt(
                 unary_boxed(
                     UnOp::Minus,
@@ -654,6 +791,7 @@ fn parse_simple_matrix() {
     assert_program_eq(
         program,
         Program {
+            sections: vec![],
             body: vec![expr_stmt(
                 tensor(vec![
                     vec![num("1".to_string()), num("2".to_string())],
@@ -671,6 +809,7 @@ fn parse_empty_matrix() {
     assert_program_eq(
         program,
         Program {
+            sections: vec![],
             body: vec![expr_stmt(tensor(vec![]), false)],
         },
     );
@@ -682,6 +821,7 @@ fn matrix_with_expressions() {
     assert_program_eq(
         program,
         Program {
+            sections: vec![],
             body: vec![expr_stmt(
                 tensor(vec![vec![
                     binary_boxed(
@@ -707,6 +847,7 @@ fn nested_matrix_literal() {
     assert_program_eq(
         program,
         Program {
+            sections: vec![],
             body: vec![expr_stmt(
                 tensor(vec![vec![
                     num("1".to_string()),
@@ -776,6 +917,7 @@ fn left_division_operator() {
     assert_program_eq(
         program,
         Program {
+            sections: vec![],
             body: vec![expr_stmt(
                 binary_boxed(
                     Box::new(num("4".to_string())),
@@ -794,6 +936,7 @@ fn elementwise_power_operator() {
     assert_program_eq(
         program,
         Program {
+            sections: vec![],
             body: vec![expr_stmt(
                 binary_boxed(
                     Box::new(num("3".to_string())),
@@ -812,6 +955,7 @@ fn parse_if_else_statement() {
     assert_program_eq(
         program,
         Program {
+            sections: vec![],
             body: vec![Stmt::If {
                 cond: ident("x".to_string()),
                 then_body: vec![assign("y".to_string(), num("1".to_string()), true)],
@@ -829,6 +973,7 @@ fn parse_for_loop() {
     assert_program_eq(
         program,
         Program {
+            sections: vec![],
             body: vec![Stmt::For {
                 var: "i".to_string(),
                 expr: range(
@@ -849,6 +994,7 @@ fn parse_function_definition() {
     assert_program_eq(
         program,
         Program {
+            sections: vec![],
             body: vec![Stmt::Function {
                 name: "add".to_string(),
                 params: vec!["x".to_string()],
@@ -1219,6 +1365,7 @@ fn parse_array_indexing() {
     assert_program_eq(
         program,
         Program {
+            sections: vec![],
             body: vec![expr_stmt(
                 func_call(
                     "A".to_string(),
@@ -1236,6 +1383,7 @@ fn parse_string_literal() {
     assert_program_eq(
         program,
         Program {
+            sections: vec![],
             body: vec![expr_stmt(string("'hello world'".to_string()), false)],
         },
     );
@@ -1247,6 +1395,7 @@ fn parse_function_call_with_string() {
     assert_program_eq(
         program,
         Program {
+            sections: vec![],
             body: vec![expr_stmt(
                 func_call("fprintf".to_string(), vec![string("'test'".to_string())]),
                 false,

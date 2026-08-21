@@ -3,20 +3,90 @@
 use std::collections::VecDeque;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{StructValue, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-const DEFAULT_TIMEOUT_SECONDS: f64 = 60.0;
+const DEFAULT_TIMEOUT_SECONDS: f64 = 5.0;
+const MAX_TIMEOUT_SECONDS: f64 = 2147.483647;
 const BUILTIN_NAME: &str = "weboptions";
+
+const STRUCT_COPY_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "weboptions-struct-copy",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "copying and overriding an existing weboptions-compatible struct is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:WeboptionsStructCopyExtension"),
+};
+const QUERY_PARAMETERS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "weboptions-query-parameters",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "the QueryParameters property on weboptions is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:WeboptionsQueryParametersExtension"),
+};
+const EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "weboptions-explicit-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "passing explicit gpuArray values to host-only weboptions is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:WeboptionsExplicitGpuInputExtension"),
+};
+pub const WEBOPTIONS_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    STRUCT_COPY_EXTENSION,
+    QUERY_PARAMETERS_EXTENSION,
+    EXPLICIT_GPU_EXTENSION,
+];
+
+const TIMEOUT_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Timeout",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Every integer class is accepted as a positive scalar timeout when its value lies within the documented timeout range.",
+    }];
+const KEY_VALUE_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "KeyValue",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "A scalar key value retains its exact signedness, width, and value in the options object until HTTP header serialization.",
+    }];
+pub const WEBOPTIONS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "options = weboptions('Timeout', integer_seconds)",
+        inputs: &TIMEOUT_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The documented positive numeric scalar crosses a bounded duration boundary. Explicit gpuArray values are separately gated before gather; automatic residency gathers transparently.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "options = weboptions('KeyName', name, 'KeyValue', integer_value)",
+        inputs: &KEY_VALUE_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The documented numeric key value remains exact in the host options object and is rendered directly from authoritative integer storage by request consumers.",
+    },
+];
 
 const WEBOPTIONS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "options",
@@ -193,9 +263,40 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::weboptions_type),
     descriptor(crate::builtins::io::http::weboptions::WEBOPTIONS_DESCRIPTOR),
+    extensions(crate::builtins::io::http::weboptions::WEBOPTIONS_EXTENSIONS),
+    integer_capabilities(crate::builtins::io::http::weboptions::WEBOPTIONS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::http::weboptions"
 )]
 async fn weboptions_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if rest
+        .iter()
+        .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &EXPLICIT_GPU_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if matches!(rest.first(), Some(Value::Struct(_))) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &STRUCT_COPY_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    for pair in rest.windows(2) {
+        if expect_string_scalar(
+            &pair[0],
+            "weboptions: option names must be character vectors or string scalars",
+            &WEBOPTIONS_ERROR_INVALID_OPTION_NAME,
+        )
+        .is_ok_and(|name| name.eq_ignore_ascii_case("QueryParameters"))
+        {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &QUERY_PARAMETERS_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
+    }
     let mut gathered = Vec::with_capacity(rest.len());
     for value in rest {
         gathered.push(gather_if_needed_async(&value).await.map_err(|flow| {
@@ -274,6 +375,8 @@ fn default_options_struct() -> StructValue {
     out.fields.insert("UserAgent".to_string(), Value::from(""));
     out.fields.insert("Username".to_string(), Value::from(""));
     out.fields.insert("Password".to_string(), Value::from(""));
+    out.fields.insert("KeyName".to_string(), Value::from(""));
+    out.fields.insert("KeyValue".to_string(), Value::from(""));
     out.fields
         .insert("RequestMethod".to_string(), Value::from("auto"));
     out.fields
@@ -308,15 +411,46 @@ fn set_option_field(options: &mut StructValue, name: &str, value: &Value) -> Bui
                 "weboptions: Timeout must be a finite, positive scalar",
                 &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
             )?;
-            if !seconds.is_finite() || seconds <= 0.0 {
+            if seconds <= 0.0 || (seconds.is_finite() && seconds > MAX_TIMEOUT_SECONDS) {
                 return Err(weboptions_error_with(
                     &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
-                    "weboptions: Timeout must be a finite, positive scalar",
+                    "weboptions: Timeout must be a positive numeric scalar within the supported range or Inf",
                 ));
             }
             options
                 .fields
                 .insert("Timeout".to_string(), Value::Num(seconds));
+            Ok(())
+        }
+        "keyname" => {
+            let key = expect_string_scalar(
+                value,
+                "weboptions: KeyName must be a character vector or string scalar",
+                &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
+            )?;
+            options
+                .fields
+                .insert("KeyName".to_string(), Value::from(key));
+            Ok(())
+        }
+        "keyvalue" => {
+            if !matches!(
+                value,
+                Value::String(_)
+                    | Value::CharArray(_)
+                    | Value::StringArray(_)
+                    | Value::Num(_)
+                    | Value::Int(_)
+                    | Value::Bool(_)
+            ) && !matches!(value, Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor))
+                && !matches!(value, Value::LogicalArray(array) if array.len() == 1)
+            {
+                return Err(weboptions_error_with(
+                    &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
+                    "weboptions: KeyValue must be a text, numeric, or logical scalar",
+                ));
+            }
+            options.fields.insert("KeyValue".to_string(), value.clone());
             Ok(())
         }
         "headerfields" => {
@@ -584,8 +718,8 @@ fn numeric_scalar(
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Tensor(tensor) => {
-            if tensor.data.len() == 1 {
-                Ok(tensor.data[0])
+            if tensor::is_scalar_tensor(tensor) {
+                Ok(tensor::tensor_value_f64(tensor, 0))
             } else {
                 Err(weboptions_error_with(error, context))
             }
@@ -616,7 +750,7 @@ pub(crate) mod tests {
     use std::thread;
 
     use crate::call_builtin_async;
-    use runmat_builtins::CellArray;
+    use runmat_value::CellArray;
 
     fn spawn_server<F>(handler: F) -> String
     where
@@ -733,6 +867,65 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn weboptions_timeout_reads_typed_integer_tensor_storage_exactly() {
+        let timeout = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U16(vec![2026]),
+            vec![1, 1],
+        )
+        .expect("typed timeout");
+
+        let result = run_weboptions(vec![Value::from("Timeout"), Value::Tensor(timeout)])
+            .expect("weboptions timeout");
+        let Value::Struct(options) = result else {
+            panic!("expected options struct");
+        };
+        assert_eq!(
+            options.fields.get("Timeout").and_then(|v| match v {
+                Value::Num(n) => Some(*n),
+                _ => None,
+            }),
+            Some(2026.0)
+        );
+    }
+
+    #[test]
+    fn weboptions_preserves_exact_integer_key_value() {
+        let value = Value::Int(runmat_value::IntValue::U64(u64::MAX));
+        let result = run_weboptions(vec![
+            Value::from("KeyName"),
+            Value::from("sequence"),
+            Value::from("KeyValue"),
+            value.clone(),
+        ])
+        .expect("integer key value");
+        let Value::Struct(options) = result else {
+            panic!("expected options struct");
+        };
+        assert_eq!(options.fields.get("KeyValue"), Some(&value));
+    }
+
+    #[test]
+    fn weboptions_runmat_only_forms_are_independently_gated() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let query_error = run_weboptions(vec![
+            Value::from("QueryParameters"),
+            Value::Struct(StructValue::new()),
+        ])
+        .expect_err("query property gate");
+        assert_eq!(
+            query_error.identifier(),
+            Some("RunMat:compatibility:WeboptionsQueryParametersExtension")
+        );
+
+        let copy_error =
+            run_weboptions(vec![Value::Struct(StructValue::new())]).expect_err("struct copy gate");
+        assert_eq!(
+            copy_error.identifier(),
+            Some("RunMat:compatibility:WeboptionsStructCopyExtension")
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn weboptions_overrides_timeout_and_headers() {
@@ -775,6 +968,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn weboptions_updates_existing_struct() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let base = run_weboptions(vec![Value::from("ContentType"), Value::from("json")])
             .expect("base weboptions");
         let args = vec![base, Value::from("Timeout"), Value::Num(15.0)];
@@ -829,7 +1023,7 @@ pub(crate) mod tests {
                 .expect_err("timeout should reject nonpositive values"),
         );
         assert!(
-            err.contains("Timeout must be a finite, positive scalar"),
+            err.contains("Timeout must be a positive numeric scalar"),
             "unexpected error: {err}"
         );
     }

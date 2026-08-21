@@ -7,10 +7,11 @@ use std::path::{Path, PathBuf};
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
-use runmat_hir::RUN_BUILTIN_NAME;
 use runmat_macros::runtime_builtin;
+use runmat_types::RUN_BUILTIN_NAME;
+use runmat_value::Value;
 
 use crate::builtins::common::fs::path_to_string;
 use crate::builtins::common::path_search::{
@@ -297,7 +298,7 @@ mod tests {
     use crate::builtins::common::path_state::{current_path_string, set_path_string};
     use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
     use futures::executor::block_on;
-    use runmat_builtins::CharArray;
+    use runmat_value::CharArray;
     use std::env;
     use std::path::{Path, PathBuf};
 

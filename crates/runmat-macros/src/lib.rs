@@ -45,6 +45,10 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     let mut type_resolver_path: Option<syn::Path> = None;
     let mut type_resolver_ctx_path: Option<syn::Path> = None;
     let mut descriptor_path: Option<syn::Path> = None;
+    let mut extensions_path: Option<syn::Path> = None;
+    let mut integer_capabilities_path: Option<syn::Path> = None;
+    let mut integer_audit_path: Option<syn::Path> = None;
+    let mut binding_variant_lit: Option<LitStr> = None;
     let mut sink_flag = false;
     let mut suppress_auto_output_flag = false;
     for arg in args {
@@ -90,6 +94,12 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                         builtin_path_lit = Some(ls);
                     } else {
                         panic!("builtin_path must be a string literal");
+                    }
+                } else if path.is_ident("binding_variant") {
+                    if let Lit::Str(ls) = lit {
+                        binding_variant_lit = Some(ls);
+                    } else {
+                        panic!("binding_variant must be a string literal");
                     }
                 } else if path.is_ident("type_resolver") {
                     if let Lit::Str(ls) = lit {
@@ -143,6 +153,39 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                     panic!("descriptor expects a path argument");
                 }
             }
+            NestedMeta::Meta(Meta::List(list)) if list.path.is_ident("extensions") => {
+                if list.nested.len() != 1 {
+                    panic!("extensions expects exactly one path argument");
+                }
+                let nested = list.nested.first().unwrap();
+                if let NestedMeta::Meta(Meta::Path(path)) = nested {
+                    extensions_path = Some(path.clone());
+                } else {
+                    panic!("extensions expects a path argument");
+                }
+            }
+            NestedMeta::Meta(Meta::List(list)) if list.path.is_ident("integer_capabilities") => {
+                if list.nested.len() != 1 {
+                    panic!("integer_capabilities expects exactly one path argument");
+                }
+                let nested = list.nested.first().unwrap();
+                if let NestedMeta::Meta(Meta::Path(path)) = nested {
+                    integer_capabilities_path = Some(path.clone());
+                } else {
+                    panic!("integer_capabilities expects a path argument");
+                }
+            }
+            NestedMeta::Meta(Meta::List(list)) if list.path.is_ident("integer_audit") => {
+                if list.nested.len() != 1 {
+                    panic!("integer_audit expects exactly one path argument");
+                }
+                let nested = list.nested.first().unwrap();
+                if let NestedMeta::Meta(Meta::Path(path)) = nested {
+                    integer_audit_path = Some(path.clone());
+                } else {
+                    panic!("integer_audit expects a path argument");
+                }
+            }
             _ => {}
         }
     }
@@ -190,7 +233,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     let is_last_variadic = param_types
         .last()
         .map(|ty| {
-            // crude detection: type path starts with Vec and inner type is runmat_builtins::Value or Value
+            // crude detection: type path starts with Vec and inner type is runmat_value::Value or Value
             if let syn::Type::Path(tp) = ty {
                 if tp
                     .path
@@ -236,10 +279,10 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
         // Collect the rest into Vec<Value>
         let last_ident = &param_idents[param_len - 1];
         stmts.push(quote! {
-            let #last_ident : Vec<runmat_builtins::Value> = {
+            let #last_ident : Vec<runmat_value::Value> = {
                 let mut v = Vec::new();
                 for j in (#param_len-1)..args.len() {
-                    let item : runmat_builtins::Value = std::convert::TryInto::try_into(&args[j])?;
+                    let item : runmat_value::Value = std::convert::TryInto::try_into(&args[j])?;
                     v.push(item);
                 }
                 v
@@ -264,7 +307,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     };
 
     let wrapper = quote! {
-        fn #wrapper_ident(args: &[runmat_builtins::Value]) -> runmat_builtins::BuiltinFuture {
+        fn #wrapper_ident(args: &[runmat_value::Value]) -> runmat_builtins::BuiltinFuture {
             #![allow(unused_variables)]
             let args = args.to_vec();
             Box::pin(async move {
@@ -285,7 +328,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                 }
                 #(#conv_stmts)*
                 let value = #call_expr;
-                Ok(runmat_builtins::Value::from(value))
+                Ok(runmat_value::Value::from(value))
             })
         }
     };
@@ -353,6 +396,21 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     } else {
         quote! { None }
     };
+    let extensions_expr = if let Some(path) = extensions_path.as_ref() {
+        quote! { &#path }
+    } else {
+        quote! { &[] }
+    };
+    let integer_capabilities_expr = if let Some(path) = integer_capabilities_path.as_ref() {
+        quote! { &#path }
+    } else {
+        quote! { &[] }
+    };
+    let integer_audit_expr = if let Some(path) = integer_audit_path.as_ref() {
+        quote! { Some(&#path) }
+    } else {
+        quote! { None }
+    };
 
     let builtin_expr = quote! {
         runmat_builtins::BuiltinFunction::new(
@@ -368,8 +426,36 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
             #accel_slice,
             #sink_bool,
             #suppress_auto_output_bool,
-        ).with_descriptor_option(#descriptor_expr)
+        )
+        .with_descriptor_option(#descriptor_expr)
+        .with_extensions(#extensions_expr)
+        .with_integer_capabilities(#integer_capabilities_expr)
+        .with_integer_audit(#integer_audit_expr)
     };
+
+    if binding_variant_lit.is_some()
+        && (category_lit.is_some()
+            || summary_lit.is_some()
+            || keywords_lit.is_some()
+            || errors_lit.is_some()
+            || related_lit.is_some()
+            || introduced_lit.is_some()
+            || status_lit.is_some()
+            || examples_lit.is_some()
+            || !accel_values.is_empty()
+            || type_resolver_path.is_some()
+            || type_resolver_ctx_path.is_some()
+            || descriptor_path.is_some()
+            || extensions_path.is_some()
+            || integer_capabilities_path.is_some()
+            || integer_audit_path.is_some()
+            || sink_flag
+            || suppress_auto_output_flag)
+    {
+        panic!(
+            "catalog-backed runtime bindings may declare only name, binding_variant, and builtin_path"
+        );
+    }
 
     let doc_expr = quote! {
         runmat_builtins::BuiltinDoc {
@@ -392,19 +478,58 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     let helper_ident = format_ident!("__runmat_wasm_register_builtin_{}", ident);
     let builtin_expr_helper = builtin_expr.clone();
     let doc_expr_helper = doc_expr.clone();
-    let wasm_helper = quote! {
-        #[cfg(target_arch = "wasm32")]
-        #[allow(non_snake_case)]
-        pub(crate) fn #helper_ident() {
-            runmat_builtins::wasm_registry::submit_builtin_function(#builtin_expr_helper);
-            runmat_builtins::wasm_registry::submit_builtin_doc(#doc_expr_helper);
-        }
-    };
-    let register_native = quote! {
-        #[cfg(not(target_arch = "wasm32"))]
-        runmat_builtins::inventory::submit! { #builtin_expr }
-        #[cfg(not(target_arch = "wasm32"))]
-        runmat_builtins::inventory::submit! { #doc_expr }
+    let (wasm_helper, register_native) = if let Some(variant) = binding_variant_lit {
+        let native_symbol = runmat_builtins::native_binding_symbol(&name_str, &variant.value());
+        let native_symbol = syn::LitStr::new(&native_symbol, proc_macro2::Span::call_site());
+        let native_binding_ident = format_ident!(
+            "__RUNMAT_NATIVE_BINDING_{}",
+            ident.to_string().to_ascii_uppercase()
+        );
+        let binding_expr = quote! {
+            crate::builtin::RuntimeBuiltinBinding::new(
+                runmat_builtins::BuiltinBindingIdentity {
+                    builtin: runmat_builtins::BuiltinCatalogIdentity { name: #name_str },
+                    variant: #variant,
+                },
+                #wrapper_ident,
+            )
+        };
+        (
+            quote! {
+                #[cfg(target_arch = "wasm32")]
+                #[allow(non_snake_case)]
+                pub(crate) fn #helper_ident() {
+                    crate::builtin::wasm_registry::submit(#binding_expr);
+                }
+            },
+            quote! {
+                #[cfg(not(target_arch = "wasm32"))]
+                runmat_builtins::inventory::submit! { #binding_expr }
+                // A package's unit-test harness can link both its cfg(test)
+                // copy and a normal dependency copy of the runtime. Only the
+                // latter should publish the process-wide AOT ABI symbols.
+                #[cfg(all(not(target_arch = "wasm32"), not(test)))]
+                #[export_name = #native_symbol]
+                static #native_binding_ident: crate::builtin::RuntimeBuiltinBinding = #binding_expr;
+            },
+        )
+    } else {
+        (
+            quote! {
+                #[cfg(target_arch = "wasm32")]
+                #[allow(non_snake_case)]
+                pub(crate) fn #helper_ident() {
+                    runmat_builtins::wasm_registry::submit_builtin_function(#builtin_expr_helper);
+                    runmat_builtins::wasm_registry::submit_builtin_doc(#doc_expr_helper);
+                }
+            },
+            quote! {
+                #[cfg(not(target_arch = "wasm32"))]
+                runmat_builtins::inventory::submit! { #builtin_expr }
+                #[cfg(not(target_arch = "wasm32"))]
+                runmat_builtins::inventory::submit! { #doc_expr }
+            },
+        )
     };
     append_wasm_block(quote! {
         #builtin_path::#helper_ident();
@@ -425,7 +550,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
 /// Example:
 /// ```rust,ignore
 /// use runmat_macros::runtime_constant;
-/// use runmat_builtins::Value;
+/// use runmat_value::Value;
 ///
 /// #[runtime_constant(name = "pi", value = std::f64::consts::PI)]
 /// const PI_CONSTANT: ();

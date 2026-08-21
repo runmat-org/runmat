@@ -2,13 +2,17 @@
 
 use nalgebra::{linalg::SVD, DMatrix};
 use num_complex::Complex64;
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPinvOptions};
+use runmat_accelerate_api::{GpuTensorHandle, ProviderPinvOptions};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::linalg::{
     matrix_dimensions_for, parse_tolerance_arg, svd_default_tolerance,
@@ -23,6 +27,82 @@ use crate::builtins::math::linalg::type_resolvers::pinv_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "pinv";
+
+pub const PINV_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pinv-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pinv with a typed-integer matrix is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PinvIntegerInputExtension"),
+};
+
+pub const PINV_INTEGER_TOLERANCE_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "pinv-integer-tolerance",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "pinv with a typed-integer tolerance is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:PinvIntegerToleranceExtension"),
+    };
+pub const PINV_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pinv-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pinv with a logical matrix is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PinvLogicalInputExtension"),
+};
+pub const PINV_LOGICAL_TOLERANCE_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "pinv-logical-tolerance",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "pinv with a logical tolerance is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:PinvLogicalToleranceExtension"),
+    };
+
+pub const PINV_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    PINV_INTEGER_INPUT_EXTENSION,
+    PINV_INTEGER_TOLERANCE_EXTENSION,
+    PINV_LOGICAL_INPUT_EXTENSION,
+    PINV_LOGICAL_TOLERANCE_EXTENSION,
+];
+
+const PINV_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The public matrix classes are single and double; RunMat mode admits real integer matrices only when every value is exactly representable as binary64.",
+    }];
+
+const PINV_INTEGER_TOLERANCE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "tol",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public tolerance is a real scalar without an integer class list; RunMat mode admits typed integer tolerance values only when exactly representable as binary64.",
+    }];
+
+pub const PINV_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "X = pinv(integer_A, tol?)",
+        inputs: &PINV_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The gated integer matrix crosses one checked binary64 SVD boundary. Host output is double, and automatic residency may restore the floating result to the owning provider.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "X = pinv(A, integer_tol)",
+        inputs: &PINV_INTEGER_TOLERANCE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed integer tolerance is a gated RunMat extension and crosses into the SVD threshold only after exact binary64 representability and nonnegative finite validation.",
+    },
+];
 
 const PINV_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "X",
@@ -175,10 +255,56 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "pinv",
     type_resolver(pinv_type),
     descriptor(crate::builtins::math::linalg::solve::pinv::PINV_DESCRIPTOR),
+    extensions(crate::builtins::math::linalg::solve::pinv::PINV_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::linalg::solve::pinv::PINV_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::linalg::solve::pinv"
 )]
 async fn pinv_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::value_has_native_integer_class(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &PINV_INTEGER_INPUT_EXTENSION,
+            NAME,
+        )?;
+    }
+    if crate::builtins::common::validation::value_has_logical_class(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &PINV_LOGICAL_INPUT_EXTENSION,
+            NAME,
+        )?;
+    }
+    for tolerance in &rest {
+        if crate::builtins::common::validation::value_has_native_integer_class(tolerance) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &PINV_INTEGER_TOLERANCE_EXTENSION,
+                NAME,
+            )?;
+            if !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(
+                tolerance,
+            )
+            .await?
+            {
+                return Err(argument_error(
+                    "pinv: integer tolerance must be exactly representable as double",
+                ));
+            }
+        }
+        if crate::builtins::common::validation::value_has_logical_class(tolerance) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &PINV_LOGICAL_TOLERANCE_EXTENSION,
+                NAME,
+            )?;
+        }
+    }
     let tol = parse_tolerance_arg(NAME, &rest).map_err(argument_error)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, NAME)?;
+    if crate::builtins::common::validation::value_has_native_integer_class(&value)
+        && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(&value)
+            .await?
+    {
+        return Err(builtin_error(
+            "pinv: integer input must be exactly representable as double",
+        ));
+    }
     match value {
         Value::GpuTensor(handle) => pinv_gpu(handle, tol).await,
         Value::ComplexTensor(t) => pinv_complex_value(t, tol),
@@ -194,22 +320,21 @@ async fn pinv_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 async fn pinv_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        let options = ProviderPinvOptions { tolerance: tol };
-        match provider.pinv(&handle, options).await {
-            Ok(result) => return Ok(Value::GpuTensor(result)),
-            Err(_) => {
-                // Fall through to host implementation and attempt to re-upload
+    if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
+        if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
+            let options = ProviderPinvOptions { tolerance: tol };
+            match provider.pinv(&handle, options).await {
+                Ok(result) => return Ok(Value::GpuTensor(result)),
+                Err(_) => {
+                    // Fall through to host implementation and attempt to re-upload.
+                }
             }
         }
         let gathered = gpu_helpers::gather_tensor_async(&handle)
             .await
             .map_err(map_control_flow)?;
         let pinv = pinv_real_tensor(&gathered, tol)?;
-        if let Ok(uploaded) = provider.upload(&HostTensorView {
-            data: &pinv.data,
-            shape: &pinv.shape,
-        }) {
+        if let Ok(uploaded) = gpu_helpers::upload_tensor(provider, &pinv) {
             return Ok(Value::GpuTensor(uploaded));
         }
         return Ok(tensor::tensor_into_value(pinv));
@@ -246,7 +371,8 @@ fn pinv_real_tensor_impl(matrix: &Tensor, tol: Option<f64>) -> BuiltinResult<Ten
         return Tensor::new(vec![0.0; cols * rows], vec![cols, rows])
             .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
-    let dm = DMatrix::from_column_slice(rows, cols, &matrix.data);
+    let values = tensor::tensor_values_f64_cow(matrix);
+    let dm = DMatrix::from_column_slice(rows, cols, &values);
     let pinv = pseudoinverse_real(&dm, tol)?;
     matrix_to_tensor(NAME, pinv)
 }
@@ -262,7 +388,7 @@ fn pinv_complex_tensor_impl(
             .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
     let data: Vec<Complex64> = matrix
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
@@ -338,7 +464,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, IntValue, ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{CharArray, IntValue, IntegerStorage};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -406,10 +533,54 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                approx_equal(&out.data, &[0.04, 0.08, 0.08, 0.16], 1e-12);
+                approx_equal(&out.materialize_f64(), &[0.04, 0.08, 0.08, 0.16], 1e-12);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn pinv_reads_typed_integer_tensor_storage_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![2, 0, 0, 4]), vec![2, 2]).unwrap();
+
+        let result = pinv_builtin(Value::Tensor(tensor), Vec::new()).expect("pinv");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![2, 2]);
+                approx_equal(&out.materialize_f64(), &[0.5, 0.0, 0.0, 0.25], 1e-12);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pinv_resident_integer_gates_then_uses_checked_owner_fallback() {
+        test_support::with_test_provider(|provider| {
+            let input =
+                Tensor::new_integer(IntegerStorage::U16(vec![2, 0, 0, 4]), vec![2, 2]).unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &input).expect("integer upload");
+            {
+                let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+                let err = pinv_builtin(Value::GpuTensor(handle.clone()), Vec::new())
+                    .expect_err("strict mode must gate resident integer input");
+                assert_eq!(
+                    err.identifier(),
+                    PINV_INTEGER_INPUT_EXTENSION.error_identifier
+                );
+            }
+            let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let Value::GpuTensor(output) =
+                pinv_builtin(Value::GpuTensor(handle), Vec::new()).expect("resident pinv")
+            else {
+                panic!("resident fallback must restore output");
+            };
+            assert_eq!(runmat_accelerate_api::handle_integer_type(&output), None);
+            let gathered = test_support::gather(Value::GpuTensor(output)).expect("gather output");
+            approx_equal(&gathered.materialize_f64(), &[0.5, 0.0, 0.0, 0.25], 1e-12);
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -420,7 +591,11 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 3]);
-                approx_equal(&out.data, &[1.0, 0.0, 0.0, 0.0, 0.0, 1.0], 1e-12);
+                approx_equal(
+                    &out.materialize_f64(),
+                    &[1.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+                    1e-12,
+                );
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -434,7 +609,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                approx_equal(&out.data, &[1.0, 0.0, 0.0, 0.0], 1e-9);
+                approx_equal(&out.materialize_f64(), &[1.0, 0.0, 0.0, 0.0], 1e-9);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -458,7 +633,7 @@ pub(crate) mod tests {
                     (0.0, 0.0),
                     (0.23076923076923078, 0.15384615384615385),
                 ];
-                for (actual, expected) in out.data.iter().zip(expected.iter()) {
+                for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual.0 - expected.0).abs() < 1e-12);
                     assert!((actual.1 - expected.1).abs() < 1e-12);
                 }
@@ -473,14 +648,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 2.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = pinv_builtin(Value::GpuTensor(handle), Vec::new()).expect("gpu pinv");
             let gathered = test_support::gather(result).expect("gather");
             let cpu = pinv_real_tensor(&tensor, None).expect("cpu pinv");
-            approx_equal(&gathered.data, &cpu.data, 1e-12);
+            approx_equal(&gathered.materialize_f64(), &cpu.materialize_f64(), 1e-12);
         });
     }
 
@@ -492,12 +667,14 @@ pub(crate) mod tests {
             register_wgpu_provider, WgpuProviderOptions,
         };
 
-        let _ = register_wgpu_provider(WgpuProviderOptions::default());
+        if register_wgpu_provider(WgpuProviderOptions::default()).is_err() {
+            return;
+        }
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let cpu = pinv_real_tensor(&tensor, None).expect("cpu pinv");
 
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
@@ -509,10 +686,10 @@ pub(crate) mod tests {
 
         match runmat_accelerate_api::provider().unwrap().precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => {
-                approx_equal(&gathered.data, &cpu.data, 1e-10);
+                approx_equal(&gathered.materialize_f64(), &cpu.materialize_f64(), 1e-10);
             }
             runmat_accelerate_api::ProviderPrecision::F32 => {
-                approx_equal(&gathered.data, &cpu.data, 5e-5);
+                approx_equal(&gathered.materialize_f64(), &cpu.materialize_f64(), 5e-5);
             }
         }
     }
@@ -520,6 +697,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pinv_rejects_negative_tolerance() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
         let err = unwrap_error(
             pinv_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(-1))]).unwrap_err(),
@@ -531,6 +709,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pinv_tolerance_accepts_boolean() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let result =
             pinv_builtin(Value::Num(4.0), vec![Value::Bool(true)]).expect("pinv with bool tol");
         match result {

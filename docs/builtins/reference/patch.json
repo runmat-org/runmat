@@ -19,7 +19,7 @@
       "double"
     ],
     "broadcasting": "none",
-    "notes": "`patch` is a plotting sink. The initial implementation gathers GPU-resident coordinate inputs, triangulates polygon faces on the host, then renders through RunMat's shared GPU plotting renderer."
+    "notes": "`patch` is a plotting sink. It retains native X/Y/Z/C/Faces/Vertices storage for graphics properties, then explicitly materializes host floating geometry for triangulation and shared GPU rendering."
   },
   "fusion": {
     "elementwise": false,
@@ -39,6 +39,8 @@
     "Patch edges close automatically, matching MATLAB's open-polygon behavior.",
     "`Faces` values are interpreted as MATLAB-style one-based vertex indices.",
     "2-D vertices are accepted as N-by-2; 3-D vertices are accepted as N-by-3.",
+    "`XData`, `YData`, `ZData`, `CData`, `Faces`, and `Vertices` preserve native `single`, `double`, or integer class, shape, and exact host values even though renderer geometry is floating.",
+    "A typed-integer numeric alias for a leading axes handle is a gated RunMat extension; ordinary axes objects remain the compatibility form.",
     "The returned value is a patch graphics handle that works with `get`, `set`, `ishandle`, and `isgraphics`.",
     "Per-vertex or per-face `CData` colormap interpolation is not yet implemented; non-scalar color data is accepted only as compatibility input and currently falls back to the default face color unless `FaceColor` supplies a concrete RGB/color-name value."
   ],

@@ -1,17 +1,20 @@
 use crate::bytecode::instr::PropertyDefaultLiteral;
-use crate::bytecode::ArgSpec;
 use crate::call::builtins as call_builtins;
 use crate::call::builtins::ImportedBuiltinResolution;
 use crate::call::closures as call_closures;
-use crate::call::descriptor::{execute_callable_descriptor, CallableCallKind, CallableDescriptor};
-use crate::call::shared::{build_expanded_args_from_specs, expand_brace_values};
+use crate::call::shared::build_expanded_args_from_specs;
 use crate::interpreter::debug;
 use crate::interpreter::dispatch::exceptions::{redirect_exception_to_catch, ExceptionHandling};
 use crate::object::class_def as obj_class_def;
-use crate::object::resolve as obj_resolve;
-use runmat_builtins::{Access, MException, Value};
 use runmat_hir::{CallableFallbackPolicy, CallableIdentity};
+use runmat_runtime::call::arguments::ArgumentSpec;
+use runmat_runtime::call::descriptor::{
+    execute_callable_descriptor, CallableCallKind, CallableDescriptor,
+};
+use runmat_runtime::object::resolve as obj_resolve;
 use runmat_runtime::RuntimeError;
+use runmat_types::MemberAccess;
+use runmat_value::{MException, Value};
 
 pub enum BuiltinHandling {
     Completed,
@@ -29,41 +32,6 @@ pub enum UserCallHandling {
     Uncaught(Box<RuntimeError>),
 }
 
-fn current_class_context_from_function_name(current_function_name: &str) -> Option<String> {
-    if current_function_name.is_empty() {
-        return None;
-    }
-    if let Some((class_name, method_name)) = current_function_name.rsplit_once('.') {
-        if !class_name.is_empty()
-            && !method_name.is_empty()
-            && runmat_builtins::get_class(class_name).is_some()
-        {
-            return Some(class_name.to_string());
-        }
-    }
-    runmat_builtins::class_names()
-        .into_iter()
-        .find(|class_name| {
-            runmat_builtins::get_class(class_name).is_some_and(|class_def| {
-                class_def.methods.values().any(|method| {
-                    method.function_name == current_function_name
-                        || method
-                            .function_name
-                            .strip_prefix(class_name)
-                            .is_some_and(|suffix| {
-                                suffix
-                                    .strip_prefix('.')
-                                    .is_some_and(|name| name == current_function_name)
-                            })
-                        || method
-                            .function_name
-                            .rsplit_once('.')
-                            .is_some_and(|(_, name)| name == current_function_name)
-                })
-            })
-        })
-}
-
 pub(crate) fn normalize_requested_outputs(value: Value, requested_outputs: usize) -> Value {
     // Preserve values for non-singleton requests (including zero). Statement-level
     // display/public-result policy is decided later by core/session plumbing.
@@ -77,7 +45,7 @@ pub(crate) fn normalize_requested_outputs(value: Value, requested_outputs: usize
 }
 
 pub struct ExceptionRouteContext<'a> {
-    pub try_stack: &'a mut Vec<(usize, Option<usize>)>,
+    pub try_stack: &'a mut Vec<crate::interpreter::state::ActiveTryHandler>,
     pub vars: &'a mut Vec<Value>,
     pub last_exception: &'a mut Option<MException>,
     pub pc: &'a mut usize,
@@ -134,7 +102,8 @@ fn imported_static_method_owner(
                 continue;
             }
             let class_name = path.join(".");
-            if let Some((method, owner)) = runmat_builtins::lookup_method(&class_name, method_name)
+            if let Some((method, owner)) =
+                runmat_runtime::class_registry::lookup_method(&class_name, method_name)
             {
                 if method.is_static && !owners.iter().any(|existing| existing == &owner) {
                     owners.push(owner);
@@ -146,7 +115,9 @@ fn imported_static_method_owner(
             continue;
         }
         let class_name = path[..path.len() - 1].join(".");
-        if let Some((method, owner)) = runmat_builtins::lookup_method(&class_name, method_name) {
+        if let Some((method, owner)) =
+            runmat_runtime::class_registry::lookup_method(&class_name, method_name)
+        {
             if method.is_static && !owners.iter().any(|existing| existing == &owner) {
                 owners.push(owner);
             }
@@ -167,47 +138,23 @@ fn imported_static_method_owner(
 
 pub async fn build_builtin_expand_multi_args(
     stack: &mut Vec<Value>,
-    specs: &[ArgSpec],
+    specs: &[ArgumentSpec],
 ) -> Result<Vec<Value>, RuntimeError> {
-    build_expanded_args_from_specs(
-        stack,
-        specs,
-        "CallBuiltinExpandMulti requires cell or object for expand_all",
-        "CallBuiltinExpandMulti requires cell or object cell access",
-        |base| async move { expand_brace_values(base, &[], None).await },
-        |base, indices| async move { expand_brace_values(base, &indices, None).await },
-    )
-    .await
+    build_expanded_args_from_specs(stack, specs).await
 }
 
 pub async fn build_feval_expand_multi_args(
     stack: &mut Vec<Value>,
-    specs: &[ArgSpec],
+    specs: &[ArgumentSpec],
 ) -> Result<Vec<Value>, RuntimeError> {
-    build_expanded_args_from_specs(
-        stack,
-        specs,
-        "CallFevalExpandMulti requires cell or object for expand_all",
-        "CallFevalExpandMulti requires cell or object cell access",
-        |base| async move { expand_brace_values(base, &[], None).await },
-        |base, indices| async move { expand_brace_values(base, &indices, None).await },
-    )
-    .await
+    build_expanded_args_from_specs(stack, specs).await
 }
 
 pub async fn build_user_function_expand_multi_args(
     stack: &mut Vec<Value>,
-    specs: &[ArgSpec],
+    specs: &[ArgumentSpec],
 ) -> Result<Vec<Value>, RuntimeError> {
-    build_expanded_args_from_specs(
-        stack,
-        specs,
-        "CallFunctionExpandMultiOutput requires cell or object for expand_all",
-        "CallFunctionExpandMultiOutput requires cell or object cell access",
-        |base| async move { expand_brace_values(base, &[], None).await },
-        |base, indices| async move { expand_brace_values(base, &indices, None).await },
-    )
-    .await
+    build_expanded_args_from_specs(stack, specs).await
 }
 
 pub fn handle_builtin_outcome(
@@ -318,7 +265,8 @@ async fn handle_builtin_call_inner(
 
     let _callsite_guard = runmat_runtime::callsite::push_callsite(source_id, call_arg_spans);
     let _output_guard = runmat_runtime::output_context::push_output_count(requested_outputs);
-    let current_class_context = current_class_context_from_function_name(current_function_name);
+    let current_class_context =
+        runmat_runtime::class_registry::class_context_for_function(current_function_name);
     let _access_guard = current_class_context
         .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
 
@@ -369,7 +317,8 @@ pub async fn handle_prepared_user_function_call(
         imports,
         exception,
     } = ctx;
-    let current_class_context = current_class_context_from_function_name(current_function_name);
+    let current_class_context =
+        runmat_runtime::class_registry::class_context_for_function(current_function_name);
     let _function_input_callsite_guard =
         runmat_runtime::callsite::push_function_input_callsite(source_id, call_arg_spans);
     let ExceptionRouteContext {
@@ -399,19 +348,22 @@ pub async fn handle_prepared_user_function_call(
     };
     if current_class_context.is_some() {
         if let Some((class_name, method_name)) = static_candidate {
-            if runmat_builtins::get_class(&class_name).is_some() {
+            if runmat_runtime::class_registry::get_class(&class_name).is_some() {
                 if let Some((method, owner)) =
-                    runmat_builtins::lookup_method(&class_name, &method_name)
+                    runmat_runtime::class_registry::lookup_method(&class_name, &method_name)
                 {
                     if method.is_static {
                         let allowed = match method.access {
-                            Access::Public => true,
-                            Access::Private => {
+                            MemberAccess::Public => true,
+                            MemberAccess::Private => {
                                 current_class_context.as_deref() == Some(owner.as_str())
                             }
-                            Access::Protected => {
+                            MemberAccess::Protected => {
                                 current_class_context.as_ref().is_some_and(|caller_class| {
-                                    runmat_builtins::is_class_or_subclass(caller_class, &owner)
+                                    runmat_runtime::class_registry::is_class_or_subclass(
+                                        caller_class,
+                                        &owner,
+                                    )
                                 })
                             }
                         };
@@ -469,14 +421,21 @@ pub async fn handle_prepared_user_function_call(
         current_class_context.as_ref(),
         local_method_candidate.as_ref(),
     ) {
-        if let Some((method, owner)) = runmat_builtins::lookup_method(class_name, method_name) {
+        if let Some((method, owner)) =
+            runmat_runtime::class_registry::lookup_method(class_name, method_name)
+        {
             if method.is_static {
                 let allowed = match method.access {
-                    Access::Public => true,
-                    Access::Private => current_class_context.as_deref() == Some(owner.as_str()),
-                    Access::Protected => {
+                    MemberAccess::Public => true,
+                    MemberAccess::Private => {
+                        current_class_context.as_deref() == Some(owner.as_str())
+                    }
+                    MemberAccess::Protected => {
                         current_class_context.as_ref().is_some_and(|caller_class| {
-                            runmat_builtins::is_class_or_subclass(caller_class, &owner)
+                            runmat_runtime::class_registry::is_class_or_subclass(
+                                caller_class,
+                                &owner,
+                            )
                         })
                     }
                 };
@@ -514,15 +473,21 @@ pub async fn handle_prepared_user_function_call(
     }
     if let Some(method_name) = local_method_candidate.as_ref() {
         if let Some(owner_class) = imported_static_method_owner(imports, method_name)? {
-            if let Some((method, owner)) = runmat_builtins::lookup_method(&owner_class, method_name)
+            if let Some((method, owner)) =
+                runmat_runtime::class_registry::lookup_method(&owner_class, method_name)
             {
                 if method.is_static {
                     let allowed = match method.access {
-                        Access::Public => true,
-                        Access::Private => current_class_context.as_deref() == Some(owner.as_str()),
-                        Access::Protected => {
+                        MemberAccess::Public => true,
+                        MemberAccess::Private => {
+                            current_class_context.as_deref() == Some(owner.as_str())
+                        }
+                        MemberAccess::Protected => {
                             current_class_context.as_ref().is_some_and(|caller_class| {
-                                runmat_builtins::is_class_or_subclass(caller_class, &owner)
+                                runmat_runtime::class_registry::is_class_or_subclass(
+                                    caller_class,
+                                    &owner,
+                                )
                             })
                         }
                     };
@@ -744,10 +709,11 @@ async fn handle_method_or_member_index_call_inner(
 ) -> Result<MethodHandling, RuntimeError> {
     let (base, args) = call_closures::collect_method_args(stack, arg_count)?;
     let _output_guard = runmat_runtime::output_context::push_output_count(requested_outputs);
-    let current_class_context = current_class_context_from_function_name(current_function_name);
+    let current_class_context =
+        runmat_runtime::class_registry::class_context_for_function(current_function_name);
     let _access_guard = current_class_context
         .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
-    let value = call_closures::call_method_or_member_index_with_outputs(
+    let value = runmat_runtime::object::dispatch::call_method_or_member_index_with_outputs(
         base,
         identity,
         args,
@@ -764,7 +730,7 @@ pub async fn handle_method_or_member_index_expand_multi_call(
     stack: &mut Vec<Value>,
     identity: CallableIdentity,
     fallback_policy: CallableFallbackPolicy,
-    specs: &[ArgSpec],
+    specs: &[ArgumentSpec],
     requested_outputs: usize,
     current_function_name: &str,
 ) -> Result<MethodHandling, RuntimeError> {
@@ -777,10 +743,11 @@ pub async fn handle_method_or_member_index_expand_multi_call(
     }
     let base = args.remove(0);
     let _output_guard = runmat_runtime::output_context::push_output_count(requested_outputs);
-    let current_class_context = current_class_context_from_function_name(current_function_name);
+    let current_class_context =
+        runmat_runtime::class_registry::class_context_for_function(current_function_name);
     let _access_guard = current_class_context
         .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
-    let value = call_closures::call_method_or_member_index_with_outputs(
+    let value = runmat_runtime::object::dispatch::call_method_or_member_index_with_outputs(
         base,
         identity,
         args,
@@ -799,7 +766,7 @@ pub fn handle_load_method(
     current_function_name: &str,
 ) -> Result<MethodHandling, RuntimeError> {
     let base = crate::interpreter::stack::pop_value(stack)?;
-    let value = call_closures::load_method_closure(
+    let value = runmat_runtime::call::closures::load_method_closure(
         base,
         name,
         (!current_function_name.is_empty()).then_some(current_function_name),
@@ -859,6 +826,7 @@ pub fn handle_register_class(
             |(name, is_static, is_constant, default_literal, get_access, set_access)| {
                 let default_value = default_literal.map(|literal| match literal {
                     PropertyDefaultLiteral::Num(value) => Value::Num(value),
+                    PropertyDefaultLiteral::Int(value) => Value::Int(value),
                     PropertyDefaultLiteral::Bool(value) => Value::Bool(value),
                     PropertyDefaultLiteral::String(value) => Value::String(value),
                 });
@@ -890,7 +858,7 @@ mod tests {
     use super::{handle_builtin_outcome, normalize_requested_outputs, ExceptionRouteContext};
     use crate::call::builtins::ImportedBuiltinResolution;
     use crate::interpreter::errors::mex;
-    use runmat_builtins::Value;
+    use runmat_value::Value;
 
     #[test]
     fn normalize_requested_outputs_collapses_singleton_for_single_request() {
@@ -906,7 +874,7 @@ mod tests {
 
     #[test]
     fn handle_builtin_outcome_preserves_ambiguous_import_identifier() {
-        let mut try_stack: Vec<(usize, Option<usize>)> = Vec::new();
+        let mut try_stack: Vec<crate::interpreter::state::ActiveTryHandler> = Vec::new();
         let mut vars: Vec<Value> = Vec::new();
         let mut last_exception = None;
         let mut pc = 0usize;

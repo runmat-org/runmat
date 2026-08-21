@@ -1,10 +1,3 @@
----
-title: "Diagnostics & Highlighting"
-category: "Language Server Protocol (LSP)"
-section: "10.1"
-last_updated: "May 28, 2026"
----
-
 # Diagnostics & Highlighting
 
 Diagnostics and semantic highlighting come from a static analysis pass over the current document. The server tokenizes, parses, lowers to HIR, runs static analysis, performs a VM compile check, and converts those results into LSP diagnostics and semantic tokens.

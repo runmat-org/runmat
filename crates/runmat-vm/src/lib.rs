@@ -4,20 +4,21 @@ pub mod accel;
 pub(crate) mod bytecode;
 pub(crate) mod call;
 pub(crate) mod compiler;
-pub mod indexing;
 pub(crate) mod instr {
-    pub use crate::bytecode::instr::{ArgSpec, EndExpr, Instr};
+    pub use crate::bytecode::instr::Instr;
 }
 pub(crate) mod interpreter;
 pub(crate) mod layout;
 pub(crate) mod object;
 pub(crate) mod ops;
+mod program_execution;
 pub(crate) mod runtime;
 
 pub use bytecode::{compile, compile_semantic_function_registry};
 pub use bytecode::{
-    ArgSpec, AsyncMetadata, AwaitSite, Bytecode, EmitLabel, EndExpr, FunctionBytecode,
-    FunctionRegistry, Instr, SpawnSite, StackEffect,
+    AsyncMetadata, AwaitSite, Bytecode, BytecodeRegion, BytecodeRegionBoundary, EmitLabel,
+    FunctionBytecode, FunctionRegistry, Instr, SpawnSite, StackEffect, BYTECODE_SCHEMA_VERSION,
+    FUNCTION_REGISTRY_SCHEMA_VERSION,
 };
 #[cfg(feature = "native-accel")]
 pub use bytecode::{
@@ -25,17 +26,18 @@ pub use bytecode::{
 };
 pub use call::builtins::{push_dynamic_eval_options, set_dynamic_eval_options};
 pub use compiler::CompileError;
-pub use interpreter::api::{
-    set_call_stack_limit, set_error_namespace, DEFAULT_CALLSTACK_LIMIT, DEFAULT_ERROR_NAMESPACE,
-};
 pub use interpreter::runner::{
     interpret, interpret_function, interpret_function_with_counts, interpret_with_vars,
-    invoke_semantic_function_value,
+    interpret_with_vars_in_context, invoke_semantic_function_value,
+    invoke_semantic_function_value_in_context,
 };
-pub use interpreter::state::{InterpreterOutcome, InterpreterState};
+pub use interpreter::runner::{interpret_resume_in_context, prepare_native_execution_metadata};
+pub use interpreter::state::{InterpreterOutcome, InterpreterResumeState, InterpreterState};
 pub use layout::{
-    derive_layout, LayoutError, VmAssemblyLayout, VmEntrypointLayout, VmFunctionLayout, VmSlotId,
+    derive_layout, remap_layout_function_ids, LayoutError, VmAssemblyLayout, VmEntrypointLayout,
+    VmFunctionLayout, VmSlotId, VM_LAYOUT_SCHEMA_VERSION,
 };
+pub use program_execution::{execute_program_request, materialize_deferred_call};
 pub use runtime::workspace::{
     push_pending_workspace, take_updated_workspace_assigned_report, take_updated_workspace_state,
     PendingWorkspaceGuard, WorkspaceAssignedReport,
@@ -43,26 +45,8 @@ pub use runtime::workspace::{
 
 #[doc(hidden)]
 pub fn reset_thread_state_for_tests() {
-    runtime::call_stack::reset_thread_state_for_tests();
     runmat_runtime::debug_context::reset_for_tests();
     runmat_runtime::builtins::introspection::debugging::reset_lock_registry_for_tests();
     runtime::globals::reset_thread_state_for_tests();
     runtime::workspace::reset_thread_state_for_tests();
-}
-
-pub async fn call_method_or_member_index_named_with_outputs(
-    base: runmat_builtins::Value,
-    name: String,
-    args: Vec<runmat_builtins::Value>,
-    requested_outputs: usize,
-    _fallback_policy: runmat_hir::CallableFallbackPolicy,
-) -> Result<runmat_builtins::Value, runmat_runtime::RuntimeError> {
-    call::closures::call_method_or_member_index_named_with_outputs(
-        base,
-        name,
-        args,
-        requested_outputs,
-        None,
-    )
-    .await
 }

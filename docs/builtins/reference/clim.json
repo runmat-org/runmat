@@ -1,0 +1,15 @@
+{
+  "title": "clim",
+  "category": "plotting",
+  "keywords": ["clim", "caxis", "color limits", "colormap", "matlab clim"],
+  "summary": "Query or set colormap limits.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "`clim` updates host graphics metadata and exposes no interactive gpuArray input surface."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 0, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::plotting::clim::tests and builtins::plotting::caxis::tests", "integration": "crates/runmat-vm/tests/plotting.rs"},
+  "description": "`clim` queries or configures the color limits used to map scaled chart data through the active colormap. `caxis` is its legacy alias.",
+  "behaviors": ["`clim()` returns the current explicit color limits as a two-element double row vector.", "`clim([cmin cmax])` accepts a two-element single or double vector with finite values and `cmin < cmax`.", "The public color-limit mode tokens are `auto` and `manual`; `tight` belongs to axis-limit selection and is not accepted here.", "All eight typed integer limit classes are a RunMat-only extension. MATLAB-compatible mode rejects them before conversion; RunMat mode validates authoritative storage before one deliberate conversion into host double graphics metadata.", "`caxis` shares this exact integer capability and compatibility gate as an audited alias.", "Resident arguments reject without provider dispatch because color limits are host graphics controls and no interactive gpuArray input is documented.", "Persistent `CLimMode` state, computed automatic-limit queries, set-form output arity, and specific-target or multi-target forms remain general graphics-surface gaps."],
+  "examples": [{"description": "Set and query color limits", "input": "imagesc([1 2; 3 4]);\nclim([1 4]);\nlimits = clim();"}, {"description": "Return to automatic color limits", "input": "clim('auto');"}],
+  "links": [{"label": "caxis", "url": "./caxis"}, {"label": "colormap", "url": "./colormap"}, {"label": "colorbar", "url": "./colorbar"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/plotting/ops/clim.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/clim.rs"}
+}

@@ -1,7 +1,7 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use runmat_builtins::Value;
+use runmat_value::Value;
 use test_helpers::execute_source;
 
 #[test]
@@ -21,10 +21,10 @@ fn tf_constructs_object_through_vm_dispatch() {
         .iter()
         .any(|value| matches!(value, Value::String(class_name) if class_name == "tf")));
     assert!(vars.iter().any(|value| {
-        matches!(value, Value::Tensor(tensor) if tensor.shape == vec![1, 1] && tensor.data == vec![20.0])
+        matches!(value, Value::Tensor(tensor) if tensor.shape == vec![1, 1] && tensor.materialize_f64() == vec![20.0])
     }));
     assert!(vars.iter().any(|value| {
-        matches!(value, Value::Tensor(tensor) if tensor.shape == vec![1, 2] && tensor.data == vec![1.0, 5.0])
+        matches!(value, Value::Tensor(tensor) if tensor.shape == vec![1, 2] && tensor.materialize_f64() == vec![1.0, 5.0])
     }));
 }
 
@@ -215,10 +215,10 @@ fn ss_constructs_object_through_vm_dispatch() {
         .iter()
         .any(|value| matches!(value, Value::String(class_name) if class_name == "ss")));
     assert!(vars.iter().any(|value| {
-        matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 2] && tensor.data == vec![0.0, -2.0, 1.0, -3.0])
+        matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 2] && tensor.materialize_f64() == vec![0.0, -2.0, 1.0, -3.0])
     }));
     assert!(vars.iter().any(|value| {
-        matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 1] && tensor.data == vec![0.0, 1.0])
+        matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 1] && tensor.materialize_f64() == vec![0.0, 1.0])
     }));
     assert!(vars
         .iter()
@@ -236,13 +236,13 @@ fn step_returns_siso_response_through_vm_dispatch() {
     assert!(vars.iter().any(|value| {
         matches!(value, Value::Tensor(tensor)
             if tensor.shape == vec![3, 1]
-                && (tensor.data[0] - 0.0).abs() < 1.0e-8
-                && (tensor.data[1] - (1.0 - (-1.0_f64).exp())).abs() < 1.0e-5
-                && (tensor.data[2] - (1.0 - (-2.0_f64).exp())).abs() < 1.0e-5)
+                && (tensor.materialize_f64()[0] - 0.0).abs() < 1.0e-8
+                && (tensor.materialize_f64()[1] - (1.0 - (-1.0_f64).exp())).abs() < 1.0e-5
+                && (tensor.materialize_f64()[2] - (1.0 - (-2.0_f64).exp())).abs() < 1.0e-5)
     }));
     assert!(vars.iter().any(|value| {
         matches!(value, Value::Tensor(tensor)
-            if tensor.shape == vec![3, 1] && tensor.data == vec![0.0, 1.0, 2.0])
+            if tensor.shape == vec![3, 1] && tensor.materialize_f64() == vec![0.0, 1.0, 2.0])
     }));
 }
 
@@ -257,8 +257,8 @@ fn step_single_output_assignment_returns_response() {
     assert!(vars.iter().any(|value| {
         matches!(value, Value::Tensor(tensor)
             if tensor.shape == vec![3, 1]
-                && (tensor.data[0] - 0.0).abs() < 1.0e-8
-                && (tensor.data[2] - (1.0 - (-1.0_f64).exp())).abs() < 1.0e-5)
+                && (tensor.materialize_f64()[0] - 0.0).abs() < 1.0e-8
+                && (tensor.materialize_f64()[2] - (1.0 - (-1.0_f64).exp())).abs() < 1.0e-5)
     }));
 }
 

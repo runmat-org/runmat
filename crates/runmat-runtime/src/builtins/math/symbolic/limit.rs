@@ -1,11 +1,15 @@
 //! MATLAB-compatible scalar symbolic `limit` builtin.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    SymbolicExpr, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{SymbolicExpr, Value};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -15,6 +19,56 @@ const BUILTIN_NAME: &str = "limit";
 const MAX_LOPITAL_DEPTH: usize = 8;
 const ZERO_EPSILON: f64 = 1.0e-12;
 const SAMPLE_EPSILON: f64 = 1.0e-7;
+
+const LIMIT_NUMERIC_EXPRESSION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "limit-numeric-expression",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "limit with a nonsymbolic numeric expression is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LimitNumericExpressionExtension"),
+};
+
+pub const LIMIT_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [LIMIT_NUMERIC_EXPRESSION_EXTENSION];
+
+const LIMIT_INTEGER_EXPRESSION_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "expr",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The public input is symbolic; RunMat mode also admits a scalar native integer when it is exactly representable by the current binary64 symbolic core.",
+    }];
+
+const LIMIT_INTEGER_POINT_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "point",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "A scalar integer limit point enters the current binary64 symbolic core only after an exact-representability check.",
+    }];
+
+pub const LIMIT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "L = limit(integer_expr, ...)",
+        inputs: &LIMIT_INTEGER_EXPRESSION_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "This independently gated RunMat extension rejects integers that would round before constructing a symbolic constant; the result follows the symbolic result contract.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "L = limit(expr, var, integer_point, direction)",
+        inputs: &LIMIT_INTEGER_POINT_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The point is read from authoritative integer storage and must convert exactly before substitution into RunMat's current binary64 symbolic representation. Wider integer points reject explicitly instead of rounding.",
+    },
+];
 
 const LIMIT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "L",
@@ -121,9 +175,18 @@ enum LimitDirection {
     summary = "Evaluate scalar symbolic limits.",
     keywords = "limit,symbolic,calculus,lhopital",
     descriptor(crate::builtins::math::symbolic::limit::LIMIT_DESCRIPTOR),
+    extensions(crate::builtins::math::symbolic::limit::LIMIT_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::symbolic::limit::LIMIT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::symbolic::limit"
 )]
 async fn limit_builtin(expr: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if !matches!(&expr, Value::Symbolic(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &LIMIT_NUMERIC_EXPRESSION_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    ensure_exact_integer_symbolic_boundary(&expr, &LIMIT_ERRORS[0], "expression")?;
     let expr = value_to_symbolic_scalar(&expr).ok_or_else(|| limit_error(&LIMIT_ERRORS[0]))?;
     let args = parse_limit_args(&expr, &rest)?;
     let result = evaluate_limit(&expr, &args.variable, args.point, args.direction, 0)?;
@@ -191,6 +254,7 @@ fn variable_name_from_value(value: &Value) -> Option<String> {
 }
 
 fn finite_scalar_point(value: &Value) -> BuiltinResult<f64> {
+    ensure_exact_integer_symbolic_boundary(value, &LIMIT_ERRORS[2], "point")?;
     let Some(expr) = value_to_symbolic_scalar(value) else {
         return Err(limit_error(&LIMIT_ERRORS[2]));
     };
@@ -201,6 +265,21 @@ fn finite_scalar_point(value: &Value) -> BuiltinResult<f64> {
         Ok(point)
     } else {
         Err(limit_error(&LIMIT_ERRORS[2]))
+    }
+}
+
+fn ensure_exact_integer_symbolic_boundary(
+    value: &Value,
+    error: &'static BuiltinErrorDescriptor,
+    role: &str,
+) -> BuiltinResult<()> {
+    if crate::builtins::common::validation::native_integer_value_is_exact_f64(value) {
+        Ok(())
+    } else {
+        Err(limit_error_with_message(
+            error,
+            format!("limit: integer {role} must be exactly representable as double"),
+        ))
     }
 }
 
@@ -570,7 +649,14 @@ fn sample_simple_pole(
 }
 
 fn limit_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
-    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    limit_error_with_message(error, error.message)
+}
+
+fn limit_error_with_message(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }
@@ -580,7 +666,9 @@ fn limit_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::symbolic::SymbolicFunction;
+    use futures::executor::block_on;
+    use runmat_value::SymbolicFunction;
+    use runmat_value::{IntegerStorage, Tensor};
 
     #[test]
     fn computes_sinc_limit() {
@@ -699,6 +787,57 @@ mod tests {
         assert_eq!(
             err.identifier.as_deref(),
             Some("RunMat:limit:InvalidVariable")
+        );
+    }
+
+    #[test]
+    fn integer_points_cross_only_an_exact_binary64_boundary() {
+        let x = Value::Symbolic(SymbolicExpr::variable("x"));
+        let exact = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 53]), vec![1, 1])
+                .expect("exact point"),
+        );
+        block_on(limit_builtin(x.clone(), vec![exact])).expect("exact integer point");
+
+        let lossy = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1])
+                .expect("lossy point"),
+        );
+        let error = block_on(limit_builtin(x, vec![lossy])).expect_err("lossy point must reject");
+        assert_eq!(error.identifier(), Some("RunMat:limit:InvalidPoint"));
+        assert!(error.message().contains("exactly representable"));
+    }
+
+    #[test]
+    fn numeric_integer_expression_is_gated_before_symbolic_conversion() {
+        let input = || Value::Int(runmat_value::IntValue::I16(7));
+        {
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(limit_builtin(input(), Vec::new()))
+                .expect_err("numeric expression is a RunMat extension");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:LimitNumericExpressionExtension")
+            );
+        }
+        {
+            let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let output = block_on(limit_builtin(input(), Vec::new()))
+                .expect_err("constant expression has no variable to infer");
+            assert_eq!(output.identifier(), Some("RunMat:limit:InvalidVariable"));
+        }
+    }
+
+    #[test]
+    fn limit_integer_capabilities_distinguish_public_point_and_extension_expression() {
+        assert_eq!(LIMIT_INTEGER_CAPABILITIES.len(), 2);
+        assert_eq!(
+            LIMIT_INTEGER_CAPABILITIES[0].inputs[0].availability,
+            BuiltinIntegerInputAvailability::RunMatOnly
+        );
+        assert_eq!(
+            LIMIT_INTEGER_CAPABILITIES[1].inputs[0].availability,
+            BuiltinIntegerInputAvailability::Documented
         );
     }
 }

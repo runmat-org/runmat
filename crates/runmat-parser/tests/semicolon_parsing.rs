@@ -12,6 +12,7 @@ fn assert_program_eq(actual: Program, expected: Program) {
 
 fn strip_program(program: &Program) -> Program {
     Program {
+        sections: vec![],
         body: program.body.iter().map(strip_stmt).collect(),
     }
 }
@@ -62,6 +63,7 @@ fn test_expression_without_semicolon() {
     assert_program_eq(
         program,
         Program {
+            sections: vec![],
             body: vec![expr_stmt(
                 binary_boxed(
                     Box::new(num("1".to_string())),
@@ -81,6 +83,7 @@ fn test_expression_with_semicolon() {
     assert_program_eq(
         program,
         Program {
+            sections: vec![],
             body: vec![expr_stmt(
                 binary_boxed(
                     Box::new(num("1".to_string())),
@@ -167,6 +170,7 @@ fn test_function_call_semicolon_preservation() {
     assert_program_eq(
         program,
         Program {
+            sections: vec![],
             body: vec![expr_stmt(
                 func_call("sin".to_string(), vec![ident("x".to_string())]),
                 true, // Semicolon-terminated
@@ -182,6 +186,7 @@ fn test_matrix_literal_semicolon_preservation() {
     assert_program_eq(
         program,
         Program {
+            sections: vec![],
             body: vec![expr_stmt(
                 tensor(vec![vec![
                     num("1".to_string()),

@@ -2,9 +2,16 @@
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_builtins::{
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -20,6 +27,100 @@ use crate::{build_runtime_error, dispatcher, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "tf";
 const DEFAULT_VARIABLE: &str = "s";
+
+const INTEGER_COEFFICIENT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tf-integer-coefficients",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "tf with typed-integer coefficients is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TfIntegerCoefficientsExtension"),
+};
+const LOGICAL_COEFFICIENT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tf-logical-coefficients",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "tf with logical coefficients is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TfLogicalCoefficientsExtension"),
+};
+const INTEGER_SAMPLE_TIME_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tf-integer-sample-time",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "tf with a typed-integer sample time is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TfIntegerSampleTimeExtension"),
+};
+const VARIABLE_SHORTHAND_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tf-variable-shorthand-alias",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "tf variable shorthand other than documented s and z forms is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TfVariableShorthandExtension"),
+};
+const DEFAULT_DISCRETE_SAMPLE_TIME_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "tf-default-discrete-sample-time",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "tf discrete-variable shorthand without an explicit sample time is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:TfDefaultDiscreteSampleTimeExtension"),
+    };
+const EXPLICIT_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tf-explicit-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "tf with explicit gpuArray input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TfExplicitGpuInputExtension"),
+};
+pub const TF_EXTENSIONS: [BuiltinExtensionDescriptor; 6] = [
+    INTEGER_COEFFICIENT_EXTENSION,
+    LOGICAL_COEFFICIENT_EXTENSION,
+    INTEGER_SAMPLE_TIME_EXTENSION,
+    VARIABLE_SHORTHAND_EXTENSION,
+    DEFAULT_DISCRETE_SAMPLE_TIME_EXTENSION,
+    EXPLICIT_GPU_INPUT_EXTENSION,
+];
+
+const INTEGER_COEFFICIENT_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "numerator",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public page describes numeric real or complex coefficient arrays without enumerating typed integer classes. RunMat mode admits them only at a checked binary64 model boundary.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "denominator",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed denominator coefficients are independently read from authoritative storage and must be exactly representable in the model's double coefficient domain.",
+    },
+];
+const INTEGER_SAMPLE_TIME_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Ts",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed sample time is gated independently and crosses one exact binary64 metadata boundary; documented double values include positive periods and -1 for unspecified discrete time.",
+    }];
+pub const TF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "sys = tf(integer_numerator, integer_denominator, ...)",
+        inputs: &INTEGER_COEFFICIENT_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Each integer coefficient role is gated before provider access, checked for exact binary64 conversion, and stored as host double or complex-double model metadata.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "sys = tf(..., integer_Ts)",
+        inputs: &INTEGER_SAMPLE_TIME_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "Typed Ts is checked before conversion and does not determine coefficient or object class.",
+    },
+];
 
 const TF_OUTPUT_SYS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "sys",
@@ -285,15 +386,34 @@ fn tf_error_with_message(
     keywords = "tf,transfer function,control system,filter,polynomial",
     type_resolver(tf_type),
     descriptor(crate::builtins::control::tf::TF_DESCRIPTOR),
+    extensions(crate::builtins::control::tf::TF_EXTENSIONS),
+    integer_capabilities(crate::builtins::control::tf::TF_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::control::tf"
 )]
 async fn tf_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args
+        .iter()
+        .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &EXPLICIT_GPU_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     match args.as_slice() {
-        [variable] if is_text_value(variable) => variable_model(variable, None)?.to_value("tf"),
+        [variable] if is_text_value(variable) => {
+            ensure_variable_shorthand(variable, false)?;
+            variable_model(variable, None)?.to_value("tf")
+        }
         [variable, sample_time] if is_text_value(variable) => {
+            ensure_variable_shorthand(variable, true)?;
+            ensure_sample_time_boundary(sample_time).await?;
             variable_model(variable, Some(sample_time))?.to_value("tf")
         }
         [numerator, denominator, rest @ ..] => {
+            ensure_coefficient_boundary(numerator, "numerator").await?;
+            ensure_coefficient_boundary(denominator, "denominator").await?;
+            ensure_constructor_sample_time_boundaries(rest).await?;
             let options = TfConstructorOptions::parse(rest)?;
             let numerator = parse_coefficients("numerator", numerator.clone(), "tf").await?;
             let denominator = parse_coefficients("denominator", denominator.clone(), "tf").await?;
@@ -318,6 +438,71 @@ async fn tf_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     }
 }
 
+async fn ensure_coefficient_boundary(value: &Value, role: &str) -> BuiltinResult<()> {
+    if crate::builtins::common::validation::value_has_logical_class(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &LOGICAL_COEFFICIENT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        value,
+        &INTEGER_COEFFICIENT_EXTENSION,
+        BUILTIN_NAME,
+        role,
+    )
+    .await
+}
+
+async fn ensure_sample_time_boundary(value: &Value) -> BuiltinResult<()> {
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        value,
+        &INTEGER_SAMPLE_TIME_EXTENSION,
+        BUILTIN_NAME,
+        "sample time",
+    )
+    .await
+}
+
+async fn ensure_constructor_sample_time_boundaries(rest: &[Value]) -> BuiltinResult<()> {
+    match rest {
+        [sample_time] => ensure_sample_time_boundary(sample_time).await,
+        pairs if pairs.len().is_multiple_of(2) => {
+            for pair in pairs.chunks_exact(2) {
+                let Ok(name) = scalar_text(&pair[0], "option name", BUILTIN_NAME) else {
+                    continue;
+                };
+                if matches!(
+                    name.trim().to_ascii_lowercase().as_str(),
+                    "ts" | "sampletime"
+                ) {
+                    ensure_sample_time_boundary(&pair[1]).await?;
+                }
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn ensure_variable_shorthand(value: &Value, has_sample_time: bool) -> BuiltinResult<()> {
+    let variable = scalar_text(value, "variable", BUILTIN_NAME)?;
+    let variable = variable.trim();
+    if !matches!(variable, "s" | "z") {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &VARIABLE_SHORTHAND_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if !has_sample_time && is_discrete_variable(variable) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DEFAULT_DISCRETE_SAMPLE_TIME_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
+}
+
 #[derive(Clone)]
 struct TfConstructorOptions {
     variable: String,
@@ -340,7 +525,7 @@ impl TfConstructorOptions {
             [sample_time] => {
                 options.sample_time = parse_sample_time(sample_time)?;
                 options.sample_time_explicit = true;
-                if options.sample_time > 0.0 {
+                if options.sample_time != 0.0 {
                     options.variable = "z".to_string();
                 }
             }
@@ -374,7 +559,7 @@ impl TfConstructorOptions {
                     }
                     idx += 2;
                 }
-                if options.sample_time > 0.0 && !options.variable_explicit {
+                if options.sample_time != 0.0 && !options.variable_explicit {
                     options.variable = "z".to_string();
                 }
             }
@@ -402,7 +587,7 @@ fn parse_sample_time(value: &Value) -> BuiltinResult<f64> {
     let sample_time = scalar_f64(value, "sample time", "tf").map_err(|_| {
         tf_error_with_detail(
             &TF_ERROR_INVALID_SAMPLE_TIME,
-            format!("expected non-negative scalar, got {value:?}"),
+            format!("expected -1 or a non-negative scalar, got {value:?}"),
         )
     })?;
     if let Err(err) = validate_sample_time(sample_time, "tf") {
@@ -437,7 +622,7 @@ fn variable_model(value: &Value, sample_time: Option<&Value>) -> BuiltinResult<T
         "s" | "p" => {
             if let Some(sample_time) = sample_time {
                 let parsed = parse_sample_time(sample_time)?;
-                if parsed > 0.0 {
+                if parsed != 0.0 {
                     return Err(tf_error_with_detail(
                         &TF_ERROR_INVALID_SAMPLE_TIME,
                         "continuous transfer-function variables require Ts = 0",
@@ -451,10 +636,10 @@ fn variable_model(value: &Value, sample_time: Option<&Value>) -> BuiltinResult<T
                 Some(value) => parse_sample_time(value)?,
                 None => 1.0,
             };
-            if sample_time <= 0.0 {
+            if sample_time != -1.0 && sample_time <= 0.0 {
                 return Err(tf_error_with_detail(
                     &TF_ERROR_INVALID_SAMPLE_TIME,
-                    "discrete transfer-function variables require a positive sample time",
+                    "discrete transfer-function variables require a positive sample time or -1",
                 ));
             }
             TfModel::discrete_variable(variable, sample_time)
@@ -473,6 +658,15 @@ async fn tf_binary(
 }
 
 fn parse_integer_exponent(value: &Value) -> BuiltinResult<i64> {
+    if let Some(integer) = crate::builtins::common::tensor::scalar_integer_value(value) {
+        return integer.try_to_i64().ok_or_else(|| {
+            control_error(
+                "tf",
+                "RunMat:tf:InvalidExponent",
+                "tf: exponent exceeds integer range",
+            )
+        });
+    }
     let exponent = scalar_f64(value, "exponent", "tf")?;
     if !exponent.is_finite() || exponent.fract().abs() > 0.0 {
         return Err(control_error(
@@ -482,6 +676,13 @@ fn parse_integer_exponent(value: &Value) -> BuiltinResult<i64> {
         ));
     }
     if exponent < i64::MIN as f64 || exponent > i64::MAX as f64 {
+        return Err(control_error(
+            "tf",
+            "RunMat:tf:InvalidExponent",
+            "tf: exponent exceeds integer range",
+        ));
+    }
+    if exponent == i64::MAX as f64 {
         return Err(control_error(
             "tf",
             "RunMat:tf:InvalidExponent",
@@ -608,7 +809,7 @@ async fn tf_mpower(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, IntValue, Tensor};
+    use runmat_value::{CharArray, IntValue, IntegerStorage, Tensor};
 
     fn run_tf(numerator: Value, denominator: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         let mut args = vec![numerator, denominator];
@@ -632,9 +833,39 @@ mod tests {
 
     fn tensor_property(value: &Value, name: &str) -> Vec<f64> {
         match property(value, name) {
-            Value::Tensor(tensor) => tensor.data.clone(),
+            Value::Tensor(tensor) => tensor.materialize_f64().clone(),
             other => panic!("expected tensor property {name}, got {other:?}"),
         }
+    }
+
+    fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
+    }
+
+    #[test]
+    fn exponent_parser_reads_typed_integer_scalar_storage_exactly() {
+        assert_eq!(
+            parse_integer_exponent(&Value::Int(IntValue::I64(-3))).unwrap(),
+            -3
+        );
+
+        let exponent =
+            Tensor::new_integer(IntegerStorage::I16(vec![-2]), vec![1, 1]).expect("typed exponent");
+        assert_eq!(
+            parse_integer_exponent(&Value::Tensor(exponent)).unwrap(),
+            -2
+        );
+
+        let too_large =
+            Tensor::new_integer(IntegerStorage::U64(vec![i64::MAX as u64 + 1]), vec![1, 1])
+                .expect("wide exponent");
+        assert!(parse_integer_exponent(&Value::Tensor(too_large)).is_err());
+    }
+
+    #[test]
+    fn exponent_parser_rejects_unrepresentable_double_boundary() {
+        assert!(parse_integer_exponent(&Value::Num(i64::MAX as f64)).is_err());
+        assert!(parse_integer_exponent(&Value::Num((i64::MAX as f64) + 1024.0)).is_err());
     }
 
     #[test]
@@ -673,14 +904,14 @@ mod tests {
         match property(&sys, "Numerator") {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 1]);
-                assert_eq!(tensor.data, vec![20.0]);
+                assert_eq!(tensor.materialize_f64(), vec![20.0]);
             }
             other => panic!("expected numerator tensor, got {other:?}"),
         }
         match property(&sys, "Denominator") {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 2]);
-                assert_eq!(tensor.data, vec![1.0, 5.0]);
+                assert_eq!(tensor.materialize_f64(), vec![1.0, 5.0]);
             }
             other => panic!("expected denominator tensor, got {other:?}"),
         }
@@ -748,14 +979,14 @@ mod tests {
         match property(&sys, "Numerator") {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 2]);
-                assert_eq!(tensor.data, vec![1.0, 2.0]);
+                assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0]);
             }
             other => panic!("expected numerator tensor, got {other:?}"),
         }
         match property(&sys, "Denominator") {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 3]);
-                assert_eq!(tensor.data, vec![1.0, 3.0, 2.0]);
+                assert_eq!(tensor.materialize_f64(), vec![1.0, 3.0, 2.0]);
             }
             other => panic!("expected denominator tensor, got {other:?}"),
         }
@@ -764,7 +995,7 @@ mod tests {
     #[test]
     fn tf_accepts_discrete_sample_time() {
         let sys = run_tf(
-            Value::Int(IntValue::I32(1)),
+            Value::Num(1.0),
             Value::Tensor(Tensor::new(vec![1.0, -0.5], vec![1, 2]).unwrap()),
             vec![Value::Num(0.1)],
         )
@@ -778,9 +1009,78 @@ mod tests {
     }
 
     #[test]
+    fn tf_typed_integer_coefficients_and_sample_time_cross_double_boundary_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let sys = run_tf(
+            integer_tensor(IntegerStorage::U64(vec![1, 2]), vec![1, 2]),
+            integer_tensor(IntegerStorage::I16(vec![1, 3, 2]), vec![1, 3]),
+            vec![integer_tensor(IntegerStorage::U8(vec![1]), vec![1, 1])],
+        )
+        .expect("tf");
+
+        assert_eq!(tensor_property(&sys, "Numerator"), vec![1.0, 2.0]);
+        assert_eq!(tensor_property(&sys, "Denominator"), vec![1.0, 3.0, 2.0]);
+        assert_eq!(property(&sys, "Ts"), &Value::Num(1.0));
+        assert_eq!(
+            property(&sys, "Variable"),
+            &Value::CharArray(CharArray::new_row("z"))
+        );
+    }
+
+    #[test]
+    fn tf_integer_roles_and_shorthand_extensions_follow_compatibility_mode() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let coefficients = run_tf(
+            integer_tensor(IntegerStorage::U8(vec![1]), vec![1, 1]),
+            Value::Num(1.0),
+            Vec::new(),
+        )
+        .unwrap_err();
+        assert_eq!(
+            coefficients.identifier(),
+            INTEGER_COEFFICIENT_EXTENSION.error_identifier
+        );
+        let sample_time = run_tf(
+            Value::Num(1.0),
+            Value::Num(1.0),
+            vec![Value::Int(IntValue::I8(1))],
+        )
+        .unwrap_err();
+        assert_eq!(
+            sample_time.identifier(),
+            INTEGER_SAMPLE_TIME_EXTENSION.error_identifier
+        );
+        let shorthand = run_tf_args(vec![Value::from("p")]).unwrap_err();
+        assert_eq!(
+            shorthand.identifier(),
+            VARIABLE_SHORTHAND_EXTENSION.error_identifier
+        );
+        let implicit_discrete = run_tf_args(vec![Value::from("z")]).unwrap_err();
+        assert_eq!(
+            implicit_discrete.identifier(),
+            DEFAULT_DISCRETE_SAMPLE_TIME_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn tf_accepts_unspecified_discrete_sample_time_and_rejects_inexact_integer_coefficients() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let discrete = run_tf_args(vec![Value::from("z"), Value::Num(-1.0)]).expect("tf('z', -1)");
+        assert_eq!(property(&discrete, "Ts"), &Value::Num(-1.0));
+
+        let inexact = run_tf(
+            integer_tensor(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1]),
+            Value::Num(1.0),
+            Vec::new(),
+        )
+        .unwrap_err();
+        assert!(inexact.message().contains("exactly representable"));
+    }
+
+    #[test]
     fn tf_positional_zero_sample_time_remains_continuous() {
         let sys = run_tf(
-            Value::Int(IntValue::I32(1)),
+            Value::Num(1.0),
             Value::Tensor(Tensor::new(vec![1.0, 5.0], vec![1, 2]).unwrap()),
             vec![Value::Num(0.0)],
         )

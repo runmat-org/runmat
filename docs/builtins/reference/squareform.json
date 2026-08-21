@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": ["f64"],
     "broadcasting": "none",
-    "notes": "GPU inputs are gathered to host before conversion."
+    "notes": "Automatically resident inputs may gather transparently for the host structural conversion. An explicit gpuArray call is a RunMat-only extension."
   },
   "fusion": {
     "elementwise": false,
@@ -34,7 +34,8 @@
     "Matrix inputs must be square, symmetric, and have a zero diagonal.",
     "`squareform(Z,\"tomatrix\")` forces vector-to-matrix conversion.",
     "`squareform(Z,\"tovector\")` forces matrix-to-vector conversion.",
-    "Condensed vectors use the same pair ordering as `pdist`."
+    "Condensed vectors use the same pair ordering as `pdist`.",
+    "The conversion preserves native single, double, and RunMat-extension integer storage exactly; it does not route structural values through double."
   ],
   "examples": [
     {

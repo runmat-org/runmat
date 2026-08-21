@@ -18,7 +18,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Uses the provider unary_gammaln hook after proving real GPU inputs are nonnegative; falls back to host evaluation when the hook is unavailable."
+    "notes": "Uses unary_gammaln for documented real single or double input after proving the domain. RunMat-only integer and logical extensions gather authoritatively, validate before provider access, and restore floating output to the owning provider."
   },
   "fusion": {
     "elementwise": false,
@@ -36,9 +36,10 @@
     "`gammaln(A)` applies the log-gamma function element-by-element while preserving the input tensor shape.",
     "Double inputs return double results; single tensors preserve single dtype metadata with single-rounded output values.",
     "`gammaln(0)` returns `Inf`; `gammaln(Inf)` returns `Inf`; `gammaln(NaN)` returns `NaN`.",
-    "Scalar integer, logical, and character inputs are promoted through RunMat's ordinary numeric coercion path for compatibility with existing elementwise builtins.",
+    "Typed integer, logical, and character inputs are separate RunMat-only extensions and are rejected in strict compatibility mode.",
+    "The integer extension admits all eight classes only when every value is exactly representable as binary64; output is double.",
     "Negative, complex, string, and sparse inputs produce stable typed errors.",
-    "Real GPU tensors stay on device when the provider implements `unary_gammaln`; otherwise RunMat gathers the tensor, evaluates on the host, and returns a host value with the computed results."
+    "Real GPU tensors stay with their owning provider. Native output is validated for shape, precision, real storage, and ownership; all fallback results are restored to that owner."
   ],
   "examples": [
     {
@@ -78,7 +79,7 @@
     },
     {
       "question": "Can `gammaln` run on GPU arrays?",
-      "answer": "Yes for real nonnegative tensors. The WGPU backend evaluates `gammaln` on device; other providers may fall back to host evaluation if they do not expose `unary_gammaln`."
+      "answer": "Yes for real nonnegative single or double tensors. A valid native result stays resident; otherwise RunMat gathers, computes, and uploads the precision-preserving result back to the input's owning provider."
     }
   ],
   "related": [
@@ -109,10 +110,11 @@
       "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/gammaln.rs"
     }
   ],
-  "gpu_residency": "Yes when the active provider implements `unary_gammaln` for real-valued gpuArray inputs. Providers without that hook trigger a host fallback, so the computed result is returned as a host tensor rather than a resident gpuArray.",
+  "gpu_residency": "Yes for admitted gpuArray inputs. Documented floating inputs use validated native output when possible; host fallback and RunMat-only integer or logical extension paths upload the result back to the original owning provider.",
   "implementation_notes": [
     "CPU evaluation uses a log-Lanczos approximation and the reflection identity for positive inputs below 0.5.",
     "The WGPU backend uses the same log-Lanczos form for f32 and f64 precision.",
-    "RunMat validates the real nonnegative domain before executing provider kernels so negative inputs produce stable domain errors."
+    "RunMat validates the real nonnegative domain before executing provider kernels so negative inputs produce stable domain errors.",
+    "Integer, logical, and character support consists of independently gated RunMat-only extensions. Integer admission uses the shared exact-binary64 predicate before conversion, including for resident storage."
   ]
 }

@@ -27,9 +27,9 @@
     "unit": "builtins::strings::text_analytics::details::tests",
     "integration": null
   },
-  "description": "`tokenDetails(documents)` returns a table describing the tokens stored in a RunMat `tokenizedDocument` compatibility object.",
+  "description": "`tokenDetails(documents)` returns a table describing the tokens stored in a `tokenizedDocument` object.",
   "behaviors": [
-    "`documents` must be a RunMat `tokenizedDocument` object created by `tokenizedDocument`.",
+    "`documents` must be a `tokenizedDocument` object created by `tokenizedDocument`.",
     "Normally tokenized documents return table variables `Token`, `DocumentNumber`, `LineNumber`, `Type`, and `Language`.",
     "After `addSentenceDetails`, documents also return a `SentenceNumber` variable after `DocumentNumber`.",
     "After `addPartOfSpeechDetails`, documents also return a `PartOfSpeech` variable after `Language`.",
@@ -40,7 +40,8 @@
     "After `addTypeDetails`, pre-tokenized documents also return a `Type` variable.",
     "`Type` values are derived from RunMat's lightweight tokenizer and include `letters`, `digits`, `punctuation`, `email-address`, `web-address`, `hashtag`, `at-mention`, `emoticon`, `emoji`, and `other`.",
     "`LineNumber` is currently `1` for each token because RunMat's tokenizer stores document-level tokens and does not yet preserve per-line token provenance.",
-    "Exact MathWorks dependency-parser and full language-model parity remain broader Text Analytics work."
+    "Dependency, entity, and language annotations use the models available in the current Text Analytics implementation; their results can differ from other language-model implementations.",
+    "`DocumentNumber`, `SentenceNumber`, `LineNumber`, and `Head` are generated double table columns. `tokenDetails` has no caller-provided native integer input."
   ],
   "examples": [
     {
@@ -82,7 +83,7 @@
   "faqs": [
     {
       "question": "Does `tokenDetails` return sentence or part-of-speech details?",
-      "answer": "RunMat returns `SentenceNumber` after `addSentenceDetails`, `PartOfSpeech` after `addPartOfSpeechDetails`, `Entity` after `addEntityDetails`, `Lemma` after `addLemmaDetails`, and `Head`/`Dependency` after `addDependencyDetails`. Exact model parity remains tracked by the Text Analytics umbrella issue."
+      "answer": "It returns `SentenceNumber` after `addSentenceDetails`, `PartOfSpeech` after `addPartOfSpeechDetails`, `Entity` after `addEntityDetails`, `Lemma` after `addLemmaDetails`, and `Head`/`Dependency` after `addDependencyDetails`."
     },
     {
       "question": "Does `tokenDetails` execute on the GPU?",

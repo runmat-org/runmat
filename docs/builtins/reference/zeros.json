@@ -34,11 +34,11 @@
   "behaviors": [
     "`zeros()` returns the scalar `0`.",
     "`zeros(n)` returns an `n × n` double array.",
-    "`zeros(m, n, ...)` returns a dense double array with the requested dimensions.",
-    "`zeros(sz)` accepts a size vector (row or column) and returns an array with `prod(sz)` elements arranged using MATLAB column-major ordering.",
-    "`zeros(A)` returns an array of zeros with the same size (and device residency) as `A`.",
-    "`zeros(___, 'logical')` returns a logical array instead of double precision.",
-    "`zeros(___, 'like', prototype)` matches the device residency and numeric/logical flavour of `prototype`."
+    "`zeros(m, n, ...)` returns a dense double array with the requested dimensions. Size controls accept single, double, and all eight native integer classes.",
+    "`zeros(sz)` accepts a row size vector. RunMat mode also accepts a column size vector.",
+    "A class name selects double, single, logical, or any native integer output class.",
+    "`zeros(___, 'like', prototype)` preserves the prototype's class, sparsity, complexity, and supported device residency. Integer prototypes produce exact native integer zero storage.",
+    "RunMat mode additionally accepts a prototype array without the `like` keyword."
   ],
   "examples": [
     {
@@ -84,7 +84,7 @@
     },
     {
       "question": "How does `zeros(A)` behave?",
-      "answer": "If you call `zeros(A)`, where `A` is an array, the result is a new array of zeros with the same shape as `A`."
+      "answer": "In RunMat mode, `zeros(A)` creates zeros with the same shape and class as `A`. For portable code, use `zeros('like', A)` or provide dimensions followed by `'like', A`."
     },
     {
       "question": "Is the output always dense?",

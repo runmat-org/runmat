@@ -7,9 +7,12 @@ use crate::builtins::common::spec::{
 use crate::builtins::introspection::type_resolvers::isobject_type;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
+use runmat_value::{IntValue, IntegerStorage};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::isobject")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -24,7 +27,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Metadata predicate; gpuArray inputs stay resident and return logical true.",
+    notes: "Metadata predicate; explicit gpuArray inputs stay resident and return logical true, while internal automatic residency remains an invisible numeric implementation detail.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::introspection::isobject")]
@@ -68,6 +71,12 @@ pub const ISOBJECT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ISOBJECT_ERRORS,
 };
+pub const ISOBJECT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "isobject is a universal object-type predicate; host integers and internally auto-resident integers return scalar false, while an explicitly constructed integer gpuArray returns true without payload access.",
+    };
 
 #[runtime_builtin(
     name = "isobject",
@@ -77,6 +86,7 @@ pub const ISOBJECT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "metadata",
     type_resolver(isobject_type),
     descriptor(crate::builtins::introspection::isobject::ISOBJECT_DESCRIPTOR),
+    integer_audit(crate::builtins::introspection::isobject::ISOBJECT_INTEGER_AUDIT),
     builtin_path = "crate::builtins::introspection::isobject"
 )]
 fn isobject_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -86,13 +96,17 @@ fn isobject_builtin(value: Value) -> crate::BuiltinResult<Value> {
 pub(crate) fn isobject_value(value: &Value) -> bool {
     matches!(
         value,
-        Value::Object(_)
+        Value::ObjectArray(_)
+            | Value::Object(_)
             | Value::HandleObject(_)
             | Value::Listener(_)
             | Value::ClassRef(_)
             | Value::MException(_)
-            | Value::GpuTensor(_)
-    )
+            | Value::Future(_)
+            | Value::Task(_)
+            | Value::Pool(_)
+            | Value::Job(_)
+    ) || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
 }
 
 #[cfg(test)]
@@ -100,7 +114,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{
+    use runmat_value::{
         CellArray, CharArray, Closure, HandleRef, Listener, MException, ObjectInstance,
         StructValue, Tensor,
     };
@@ -169,16 +183,39 @@ mod tests {
     }
 
     #[test]
-    fn gpu_tensor_reports_true_without_gathering() {
-        test_support::with_test_provider(|provider| {
-            let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+    fn all_integer_classes_report_false() {
+        for value in [
+            IntValue::I8(-1),
+            IntValue::I16(-2),
+            IntValue::I32(-3),
+            IntValue::I64(i64::MIN),
+            IntValue::U8(1),
+            IntValue::U16(2),
+            IntValue::U32(3),
+            IntValue::U64(u64::MAX),
+        ] {
             assert_eq!(
-                isobject_builtin(Value::GpuTensor(handle)).expect("isobject"),
+                isobject_builtin(Value::Int(value)).expect("isobject"),
+                Value::Bool(false)
+            );
+        }
+    }
+
+    #[test]
+    fn only_explicit_resident_integer_reports_as_gpuarray_object() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+                .expect("integer tensor");
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+                .expect("upload integer");
+            assert_eq!(
+                isobject_builtin(Value::GpuTensor(handle.clone())).unwrap(),
+                Value::Bool(false)
+            );
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            assert_eq!(
+                isobject_builtin(Value::GpuTensor(handle)).unwrap(),
                 Value::Bool(true)
             );
         });

@@ -1,14 +1,19 @@
 //! MATLAB-compatible `unwrap` builtin for phase-continuity correction.
 
+use runmat_value::NumericDType;
 use std::f64::consts::PI;
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -21,6 +26,86 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "unwrap";
 const TWO_PI: f64 = 2.0 * PI;
+
+const INTEGER_PHASE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "unwrap-integer-phase-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "unwrap with typed-integer phase data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:UnwrapIntegerPhaseDataExtension"),
+};
+const LOGICAL_PHASE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "unwrap-logical-phase-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "unwrap with logical phase data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:UnwrapLogicalPhaseDataExtension"),
+};
+const INTEGER_TOLERANCE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "unwrap-integer-tolerance",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "unwrap with a typed-integer tolerance is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:UnwrapIntegerToleranceExtension"),
+};
+pub const UNWRAP_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    INTEGER_PHASE_EXTENSION,
+    LOGICAL_PHASE_EXTENSION,
+    INTEGER_TOLERANCE_EXTENSION,
+];
+const INTEGER_PHASE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "P",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double phase data; RunMat mode admits typed integers only through a checked binary64 phase boundary.",
+    }];
+const INTEGER_TOLERANCE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "tol",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target documents single and double tolerance; RunMat mode admits a typed integer scalar only when it is exactly representable as binary64.",
+    }];
+const INTEGER_DIMENSION_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "dim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented dimension accepts every integer class and is decoded exactly as a positive structural index.",
+    }];
+pub const UNWRAP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Q = unwrap(integer_P, tol?, dim?)",
+        inputs: &INTEGER_PHASE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Typed phase values are independently gated and must be exactly representable before unwrapping; the extension returns double so phase corrections are not coerced back into integer storage.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Q = unwrap(P, integer_tol, dim?)",
+        inputs: &INTEGER_TOLERANCE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The tolerance is independently gated and crosses a checked binary64 comparison boundary without changing the documented output class selected by P.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Q = unwrap(P, tol, integer_dim)",
+        inputs: &INTEGER_DIMENSION_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The dimension remains exact through validation and selects a traversal axis without entering phase arithmetic.",
+    },
+];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::unwrap")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -218,9 +303,33 @@ fn unwrap_error_with_message(
     keywords = "unwrap,phase,angle,signal processing,radians",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::signal::unwrap::UNWRAP_DESCRIPTOR),
+    extensions(crate::builtins::math::signal::unwrap::UNWRAP_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::signal::unwrap::UNWRAP_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::signal::unwrap"
 )]
 async fn unwrap_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &value,
+        &INTEGER_PHASE_EXTENSION,
+        BUILTIN_NAME,
+        "phase",
+    )
+    .await?;
+    if crate::builtins::common::validation::value_has_logical_class(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &LOGICAL_PHASE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if let Some(tolerance) = rest.first() {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            tolerance,
+            &INTEGER_TOLERANCE_EXTENSION,
+            BUILTIN_NAME,
+            "tolerance",
+        )
+        .await?;
+    }
     let options = parse_arguments(&rest).await?;
     match value {
         Value::GpuTensor(handle) => unwrap_gpu(handle, options).await,
@@ -286,9 +395,9 @@ async fn parse_dimension(value: &Value) -> BuiltinResult<Option<usize>> {
 
 fn is_empty_value(value: &Value) -> bool {
     match value {
-        Value::Tensor(t) => t.data.is_empty(),
+        Value::Tensor(t) => tensor::tensor_element_len(t) == 0,
         Value::LogicalArray(l) => l.data.is_empty(),
-        Value::ComplexTensor(t) => t.data.is_empty(),
+        Value::ComplexTensor(t) => t.materialize_f64().is_empty(),
         _ => false,
     }
 }
@@ -309,12 +418,16 @@ fn unwrap_host(value: Value, options: UnwrapOptions) -> BuiltinResult<Value> {
 }
 
 fn unwrap_tensor(tensor: Tensor, options: UnwrapOptions) -> BuiltinResult<Tensor> {
-    let Tensor {
-        data,
-        mut shape,
-        dtype,
-        ..
-    } = tensor;
+    let input_dtype = tensor.numeric_dtype();
+    let output_dtype = match input_dtype {
+        NumericDType::F32 => NumericDType::F32,
+        _ => NumericDType::F64,
+    };
+    let mut shape = tensor.shape.clone();
+    let data = tensor
+        .into_numeric_storage()
+        .map_err(|err| unwrap_error_with_detail(&UNWRAP_ERROR_INTERNAL, err))?
+        .materialize_f64();
     if crate::builtins::common::shape::is_scalar_shape(&shape) {
         shape = crate::builtins::common::shape::normalize_scalar_shape(&shape);
     }
@@ -331,7 +444,7 @@ fn unwrap_tensor(tensor: Tensor, options: UnwrapOptions) -> BuiltinResult<Tensor
 
     let len = logical_shape[dim_index];
     if len <= 1 || data.is_empty() {
-        return Tensor::new_with_dtype(data, shape, dtype)
+        return Tensor::new_with_dtype(data, shape, output_dtype)
             .map_err(|err| unwrap_error_with_detail(&UNWRAP_ERROR_INTERNAL, err));
     }
 
@@ -372,7 +485,7 @@ fn unwrap_tensor(tensor: Tensor, options: UnwrapOptions) -> BuiltinResult<Tensor
         }
     }
 
-    Tensor::new_with_dtype(output, shape, dtype)
+    Tensor::new_with_dtype(output, shape, output_dtype)
         .map_err(|err| unwrap_error_with_detail(&UNWRAP_ERROR_INTERNAL, err))
 }
 
@@ -396,7 +509,8 @@ fn principal_phase_delta(delta: f64) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{ComplexTensor, LogicalArray, ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{ComplexTensor, IntegerStorage, LogicalArray};
 
     const TOL: f64 = 1.0e-12;
 
@@ -441,7 +555,7 @@ pub(crate) mod tests {
             Tensor::new(vec![0.0, 1.0, 2.0, 2.0 - TWO_PI, 3.0 - TWO_PI], vec![1, 5]).unwrap();
         let out = as_tensor(unwrap_call(Value::Tensor(input), Vec::new()).unwrap());
         assert_eq!(out.shape, vec![1, 5]);
-        assert_close(&out.data, &[0.0, 1.0, 2.0, 2.0, 3.0]);
+        assert_close(&out.materialize_f64(), &[0.0, 1.0, 2.0, 2.0, 3.0]);
     }
 
     #[test]
@@ -453,7 +567,7 @@ pub(crate) mod tests {
         .unwrap();
         let out = as_tensor(unwrap_call(Value::Tensor(input), Vec::new()).unwrap());
         assert_eq!(out.shape, vec![3, 2]);
-        assert_close(&out.data, &[0.0, 1.0, 1.0, 0.0, -1.0, -1.0]);
+        assert_close(&out.materialize_f64(), &[0.0, 1.0, 1.0, 0.0, -1.0, -1.0]);
     }
 
     #[test]
@@ -474,7 +588,7 @@ pub(crate) mod tests {
             .unwrap(),
         );
         assert_eq!(out.shape, vec![2, 3]);
-        assert_close(&out.data, &[0.0, 0.0, 1.0, -1.0, 1.0, -1.0]);
+        assert_close(&out.materialize_f64(), &[0.0, 0.0, 1.0, -1.0, 1.0, -1.0]);
     }
 
     #[test]
@@ -482,7 +596,7 @@ pub(crate) mod tests {
         let input = Tensor::new(vec![0.0, 1.0, 1.0 - TWO_PI], vec![1, 3]).unwrap();
         let out = as_tensor(unwrap_call(Value::Tensor(input), vec![Value::Num(10.0)]).unwrap());
         assert_eq!(out.shape, vec![1, 3]);
-        assert_close(&out.data, &[0.0, 1.0, 1.0 - TWO_PI]);
+        assert_close(&out.materialize_f64(), &[0.0, 1.0, 1.0 - TWO_PI]);
     }
 
     #[test]
@@ -491,17 +605,72 @@ pub(crate) mod tests {
             Tensor::new(vec![0.0, f64::NAN, 1.0 - TWO_PI, 2.0 - TWO_PI], vec![1, 4]).unwrap();
         let out = as_tensor(unwrap_call(Value::Tensor(input), Vec::new()).unwrap());
         assert_eq!(out.shape, vec![1, 4]);
-        assert_eq!(out.data[0], 0.0);
-        assert!(out.data[1].is_nan());
-        assert_close(&out.data[2..], &[1.0 - TWO_PI, 2.0 - TWO_PI]);
+        assert_eq!(out.materialize_f64()[0], 0.0);
+        assert!(out.materialize_f64()[1].is_nan());
+        assert_close(&out.materialize_f64()[2..], &[1.0 - TWO_PI, 2.0 - TWO_PI]);
     }
 
     #[test]
     fn unwrap_accepts_logical_input() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let input = LogicalArray::new(vec![0, 1, 0], vec![1, 3]).unwrap();
         let out = as_tensor(unwrap_call(Value::LogicalArray(input), Vec::new()).unwrap());
         assert_eq!(out.shape, vec![1, 3]);
-        assert_close(&out.data, &[0.0, 1.0, 0.0]);
+        assert_close(&out.materialize_f64(), &[0.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn unwrap_integer_phase_extension_returns_double_phase_data() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let input = Tensor::new_integer(IntegerStorage::I16(vec![7, 7]), vec![1, 2])
+            .expect("integer input");
+        let out = as_tensor(unwrap_call(Value::Tensor(input), Vec::new()).unwrap());
+        assert_eq!(out.numeric_dtype(), NumericDType::F64);
+        assert_eq!(out.materialize_f64(), vec![7.0, 7.0]);
+    }
+
+    #[test]
+    fn unwrap_integer_phase_and_tolerance_are_gated_but_integer_dimension_is_documented() {
+        let compatibility = crate::compatibility::push_runmat_extensions_enabled(false);
+        let phase_error = unwrap_call(Value::Int(runmat_value::IntValue::I16(1)), Vec::new())
+            .expect_err("typed phase data must be gated");
+        assert_eq!(
+            phase_error.identifier(),
+            INTEGER_PHASE_EXTENSION.error_identifier
+        );
+        let tolerance_error = unwrap_call(
+            Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
+            vec![Value::Int(runmat_value::IntValue::U8(4))],
+        )
+        .expect_err("typed tolerance must be gated");
+        assert_eq!(
+            tolerance_error.identifier(),
+            INTEGER_TOLERANCE_EXTENSION.error_identifier
+        );
+        let output = as_tensor(
+            unwrap_call(
+                Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
+                vec![
+                    Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+                    Value::Int(runmat_value::IntValue::U8(2)),
+                ],
+            )
+            .expect("typed dimension is documented"),
+        );
+        assert_eq!(output.shape, vec![1, 2]);
+        drop(compatibility);
+    }
+
+    #[test]
+    fn unwrap_rejects_lossy_wide_integer_phase_data() {
+        let extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let error = unwrap_call(
+            Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_993)),
+            Vec::new(),
+        )
+        .expect_err("lossy phase input must reject");
+        assert!(error.message().contains("exactly representable"));
+        drop(extensions);
     }
 
     #[test]
@@ -523,13 +692,13 @@ pub(crate) mod tests {
         crate::builtins::common::test_support::with_test_provider(|provider| {
             let input = Tensor::new(vec![0.0, 1.0, 1.0 - TWO_PI], vec![1, 3]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &input.data,
+                data: &input.materialize_f64(),
                 shape: &input.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let out = as_tensor(unwrap_call(Value::GpuTensor(handle), Vec::new()).unwrap());
             assert_eq!(out.shape, vec![1, 3]);
-            assert_close(&out.data, &[0.0, 1.0, 1.0]);
+            assert_close(&out.materialize_f64(), &[0.0, 1.0, 1.0]);
         });
     }
 }

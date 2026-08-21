@@ -1,4 +1,7 @@
 use runmat_hir::{CallableFallbackPolicy, CallableIdentity, FunctionId};
+use runmat_runtime::call::arguments::ArgumentSpec;
+use runmat_runtime::indexing::EndExpr;
+use runmat_value::IntValue;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -14,32 +17,9 @@ pub enum EmitLabel {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum EndExpr {
-    End,
-    Const(f64),
-    Var(usize),
-    ResolvedCall {
-        identity: CallableIdentity,
-        fallback_policy: CallableFallbackPolicy,
-        args: Vec<EndExpr>,
-    },
-    Add(Box<EndExpr>, Box<EndExpr>),
-    Sub(Box<EndExpr>, Box<EndExpr>),
-    Mul(Box<EndExpr>, Box<EndExpr>),
-    Div(Box<EndExpr>, Box<EndExpr>),
-    LeftDiv(Box<EndExpr>, Box<EndExpr>),
-    Pow(Box<EndExpr>, Box<EndExpr>),
-    Neg(Box<EndExpr>),
-    Pos(Box<EndExpr>),
-    Floor(Box<EndExpr>),
-    Ceil(Box<EndExpr>),
-    Round(Box<EndExpr>),
-    Fix(Box<EndExpr>),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PropertyDefaultLiteral {
     Num(f64),
+    Int(IntValue),
     Bool(bool),
     String(String),
 }
@@ -48,6 +28,7 @@ pub enum PropertyDefaultLiteral {
 pub enum Instr {
     // Constant and variable loads.
     LoadConst(f64),
+    LoadInt(IntValue),
     LoadComplex(f64, f64),
     LoadBool(bool),
     LoadString(String),
@@ -210,7 +191,7 @@ pub enum Instr {
     CallMethodOrMemberIndexExpandMultiOutput {
         identity: CallableIdentity,
         fallback_policy: CallableFallbackPolicy,
-        specs: Vec<ArgSpec>,
+        specs: Vec<ArgumentSpec>,
         out_count: usize,
     },
 
@@ -250,11 +231,11 @@ pub enum Instr {
     // `feval` keeps the callable value on the stack instead of naming the target statically.
     CallFevalMulti(usize, usize),
     CallFevalMultiUsingOutputSlot(usize, usize),
-    CallFevalExpandMultiOutput(Vec<ArgSpec>, usize),
-    CallFevalExpandMultiOutputUsingOutputSlot(Vec<ArgSpec>, usize),
+    CallFevalExpandMultiOutput(Vec<ArgumentSpec>, usize),
+    CallFevalExpandMultiOutputUsingOutputSlot(Vec<ArgumentSpec>, usize),
     // Create a lazy semantic-future descriptor from call arguments.
     CreateSemanticFuture(FunctionId, usize, usize),
-    CreateSemanticFutureExpandMultiOutput(FunctionId, Vec<ArgSpec>, usize),
+    CreateSemanticFutureExpandMultiOutput(FunctionId, Vec<ArgumentSpec>, usize),
     // Explicit async spawn boundary.
     Spawn,
     // Explicit await boundary.
@@ -262,8 +243,12 @@ pub enum Instr {
 
     // Stack and exception-control operations.
     Swap,
-    EnterTry(usize, Option<usize>),
-    PopTry,
+    EnterTry {
+        scope: usize,
+        catch_pc: usize,
+        catch_var: Option<usize>,
+    },
+    LeaveTry(usize),
     Return,
     ReturnValue,
 
@@ -331,7 +316,7 @@ pub enum Instr {
     CallFunctionExpandMultiOutput {
         identity: CallableIdentity,
         fallback_policy: CallableFallbackPolicy,
-        specs: Vec<ArgSpec>,
+        specs: Vec<ArgumentSpec>,
         out_count: usize,
     },
     CallWorkspaceFirstExpandMultiOutput {
@@ -339,7 +324,7 @@ pub enum Instr {
         identity: CallableIdentity,
         fallback_policy: CallableFallbackPolicy,
         bare_identifier: bool,
-        specs: Vec<ArgSpec>,
+        specs: Vec<ArgumentSpec>,
         out_count: usize,
     },
     CallWorkspaceFirstExpandMultiOutputUsingOutputSlot {
@@ -347,28 +332,28 @@ pub enum Instr {
         identity: CallableIdentity,
         fallback_policy: CallableFallbackPolicy,
         bare_identifier: bool,
-        specs: Vec<ArgSpec>,
+        specs: Vec<ArgumentSpec>,
         out_count_slot: usize,
     },
-    CallSemanticFunctionExpandMultiOutput(FunctionId, Vec<ArgSpec>, usize),
+    CallSemanticFunctionExpandMultiOutput(FunctionId, Vec<ArgumentSpec>, usize),
     CallSemanticNestedFunctionExpandMultiOutput {
         function: FunctionId,
         capture_slots: Vec<usize>,
-        specs: Vec<ArgSpec>,
+        specs: Vec<ArgumentSpec>,
         out_count: usize,
     },
-    CallBuiltinExpandMultiOutput(String, Vec<ArgSpec>, usize),
+    CallBuiltinExpandMultiOutput(String, Vec<ArgumentSpec>, usize),
     CallSuperConstructorExpandMultiOutput {
         current_class: String,
         super_class: String,
-        specs: Vec<ArgSpec>,
+        specs: Vec<ArgumentSpec>,
         out_count: usize,
     },
     CallSuperMethodExpandMultiOutput {
         current_class: String,
         super_class: String,
         method: String,
-        specs: Vec<ArgSpec>,
+        specs: Vec<ArgumentSpec>,
         out_count: usize,
     },
 
@@ -404,13 +389,6 @@ pub enum Instr {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ArgSpec {
-    pub is_expand: bool,
-    pub num_indices: usize,
-    pub expand_all: bool,
-}
-
 impl Instr {
     pub fn stack_effect(&self) -> Option<StackEffect> {
         fn effect(pops: usize, pushes: usize) -> Option<StackEffect> {
@@ -419,6 +397,7 @@ impl Instr {
 
         match self {
             Instr::LoadConst(_)
+            | Instr::LoadInt(_)
             | Instr::LoadComplex(_, _)
             | Instr::LoadBool(_)
             | Instr::LoadString(_)
@@ -583,10 +562,10 @@ impl Instr {
                 effect(handle + fixed + expanded, 1)
             }
             Instr::PackToRow(n) | Instr::PackToCol(n) => effect(*n, 1),
-            Instr::EnterScope(_) | Instr::ExitScope(_) | Instr::Jump(_) | Instr::PopTry => {
+            Instr::EnterScope(_) | Instr::ExitScope(_) | Instr::Jump(_) | Instr::LeaveTry(_) => {
                 effect(0, 0)
             }
-            Instr::EnterTry(_, _) => effect(0, 0),
+            Instr::EnterTry { .. } => effect(0, 0),
             Instr::Return => effect(0, 0),
             Instr::ReturnValue => effect(1, 0),
             Instr::RegisterImport { .. }

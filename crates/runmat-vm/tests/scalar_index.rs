@@ -1,7 +1,7 @@
-use runmat_builtins::Value;
-use runmat_vm::indexing::selectors::{
+use runmat_runtime::indexing::selectors::{
     indices_from_value_linear, selector_from_value_dim, SliceSelector,
 };
+use runmat_value::Value;
 
 #[test]
 fn linear_false_bool_index_is_empty() {

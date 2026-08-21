@@ -7,7 +7,7 @@ use runmat_config::runtime::{
 };
 
 use crate::app::dispatch;
-use crate::cli::{Cli, CliOverrideSources, GcPreset, LogLevel, OptLevel};
+use crate::cli::{Cli, CliOverrideSources, Commands, GcPreset, LogLevel, OptLevel};
 use crate::logging::format_log_record;
 use crate::telemetry;
 
@@ -49,16 +49,21 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
 
     configure_gc_from_config(&config)?;
 
-    let accel_options: AccelerateInitOptions = (&config.accelerate).into();
-    runmat_accelerate::initialize_acceleration_provider_with(&accel_options);
+    let compilation_only = matches!(cli.command, Some(Commands::Compile { .. }));
+    if !compilation_only {
+        let accel_options: AccelerateInitOptions = (&config.accelerate).into();
+        runmat_accelerate::initialize_acceleration_provider_with(&accel_options);
 
-    configure_plotting_from_config(&config);
-    configure_analysis_from_config(&config)?;
-    report_plot_context_status(&config);
+        configure_plotting_from_config(&config);
+        configure_analysis_from_config(&config)?;
+        report_plot_context_status(&config);
+    }
 
     let wants_gui = match config.plotting.mode {
-        PlotMode::Gui => true,
-        PlotMode::Auto => !config.plotting.force_headless && is_gui_available(),
+        PlotMode::Gui => !compilation_only,
+        PlotMode::Auto => {
+            !compilation_only && !config.plotting.force_headless && is_gui_available()
+        }
         PlotMode::Headless => false,
     };
 

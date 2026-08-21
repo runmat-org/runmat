@@ -1,6 +1,6 @@
 [package]
 name = "runmat-builtins"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../LICENSE.md"
@@ -11,15 +11,11 @@ repository = "https://github.com/runmat-org/runmat"
 [dependencies]
 inventory = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
-runmat-accelerate-api = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
 runmat-async = { workspace = true }
-runmat-gc-api = { workspace = true }
-runmat-thread-local = { workspace = true }
-indexmap = { version = "1.9", features = ["std"] }
-once_cell = { workspace = true }
-num-bigint = "0.4"
-num-integer = "0.1"
-num-traits = "0.2"
+runmat-value = { workspace = true }
+runmat-types = { workspace = true }
 
 [dev-dependencies]
 runmat-macros = { workspace = true }

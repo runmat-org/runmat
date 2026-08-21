@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "`stackedplot` is a composite chart/rendering sink. RunMat materializes matrix and table columns on the host to split them across stacked axes; grouped table variables can place multiple child lines on one stacked axes."
+    "notes": "`stackedplot` is a composite host chart rather than a numeric GPU kernel. Automatically resident data is gathered through its owning provider before columns are split across stacked axes. An explicitly supplied `gpuArray` is a separately gated RunMat extension because the public chart surface does not document direct interactive GPU input."
   },
   "fusion": {
     "elementwise": false,
@@ -28,7 +28,7 @@
     "unit": "builtins::plotting::stackedplot::tests",
     "vm": "crates/runmat-vm/tests/plotting.rs"
   },
-  "description": "`stackedplot(Y)` plots vector or matrix data with matrix columns in separate stacked axes and row/column vectors as one series. `stackedplot(X,Y)` uses a common x vector. `stackedplot(tbl)`, `stackedplot(tbl,vars)`, `stackedplot(tbl1,...,tblN)`, and `stackedplot({tbl1,...,tblN})` plot selected numeric, logical, datetime, duration, or categorical table/timetable variables and use timetable row times as x data when available.",
+  "description": "`stackedplot` creates a chart with vertically aligned axes that share one x-axis. Pass a vector for one series, a matrix to place each column on a separate axes, or paired `X,Y` data to choose the common x coordinates. Table and timetable forms select plottable variables by name, numeric index, logical mask, or supported selector object. Numeric source data remains in its native `single`, `double`, logical, or integer storage for chart-property queries; floating values used by the renderer are derived from that source rather than becoming the chart's authoritative data.",
   "behaviors": [
     "`Y` can be a vector or matrix. Row and column vectors become one stacked axes; matrix columns become separate stacked axes.",
     "`X` must be a vector whose length matches the vector length or matrix row count of `Y`.",
@@ -39,8 +39,10 @@
     "LineSpec and line style name-value properties apply to every child line.",
     "The returned handle is a `stackedplot` chart object. `get` supports `Type`, `Parent`, `DisplayVariables`, `SourceTable`, `XVariable`, `CombineMatchingNames`, `XData`, `YData`, `XLabel`, `Title`, `Visible`, `GridVisible`, `XLimits`, `LineWidth`, `LineStyle`, and `Color`. `YData` is a numeric matrix when child lines have matching lengths and a cell array of vectors when multiple source tables have unequal lengths.",
     "`SourceTable` returns a lightweight provenance snapshot with source table classes and variable names rather than embedding the original table objects in plotting registry state.",
+    "All eight integer classes are accepted for numeric X/Y data and for numeric table-variable selectors. Integer selectors are decoded as exact positive indices, so adjacent `uint64` values are never collapsed through binary64 conversion.",
+    "`XData` and `YData` preserve native numeric storage and exact integer values. When all Y columns share a class and length, `YData` is rebuilt as one same-class matrix; heterogeneous classes or unequal lengths are returned as a cell array of typed vectors.",
     "`set` supports `Title`, `XLabel`, `DisplayLabels`, `YLabels`, `Visible`, `GridVisible`, `XLimits`, `Color`, `LineStyle`, `LineWidth`, `Marker`, and `MarkerSize`. `XLimits` accepts finite or infinite numeric bounds as long as the range is increasing.",
-    "Figure handles are accepted as parents. Axes handles, nested grouped `DisplayVariables` cells, event-table rendering, interactive chart controls, and provider-resident column splitting are not implemented yet and raise explicit errors or documented compatibility fallbacks."
+    "Figure handles are accepted as parents. Axes handles, nested grouped `DisplayVariables` cells, event-table rendering, interactive chart controls, and native provider-side column splitting are not implemented yet. Automatically resident inputs can use an exact owner-aware host fallback, while explicit GPU input requires RunMat mode."
   ],
   "examples": [
     {

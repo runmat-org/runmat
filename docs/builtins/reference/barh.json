@@ -20,7 +20,7 @@
       "double"
     ],
     "broadcasting": "none",
-    "notes": "`barh` uses the shared bar rendering path. Supported gpuArray inputs are packed into horizontal bar vertices directly on the plotting GPU context."
+    "notes": "`barh` keeps floating gpuArray Y data on the shared WGPU geometry path where supported. Integer gpuArray Y data gathers exactly on the client before the deliberate floating graphics conversion."
   },
   "fusion": {
     "elementwise": false,
@@ -31,14 +31,16 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::plotting::bar::tests",
-    "vm": "runmat-vm plotting::barh_dispatches_and_sets_horizontal_bars",
+    "vm": "runmat-vm plotting::barh_accepts_all_integer_classes_through_compiled_execution",
     "integration": "runmat-plot/tests/renderer_tests.rs"
   },
-  "description": "`barh` creates horizontal bar charts from vector or matrix-style inputs. It returns a bar handle and supports grouped and stacked forms through the shared MATLAB/RunMat plotting handle-property system.",
+  "description": "`barh` creates horizontal bar charts from scalar, vector, or matrix Y data, optionally at explicit X positions. It returns one bar handle per plotted series and supports grouped and stacked forms through the shared plotting handle-property system.",
   "behaviors": [
     "Vector inputs create a single horizontal bar series with implicit category positions on the y-axis.",
     "Matrix inputs support grouped and stacked horizontal bar rendering workflows.",
-    "The returned value is a bar handle that can be queried and updated through `get` and `set`.",
+    "Matrix Y returns a row vector containing one opaque bar handle per series; scalar and vector Y return one handle.",
+    "X and Y accept all eight integer classes. Exact integer X labels and uniqueness are preserved before conversion into client graphics coordinates.",
+    "The positional bar thickness defaults to 0.8 and, like the `LineWidth` property, accepts real numeric scalars including every integer class.",
     "Display names, bar width, and face color participate in the shared plotting object/property model.",
     "RunMat preserves the same fast GPU-backed rendering path as `bar` when inputs and style options can be handled by the shared bar vertex packer."
   ],
@@ -112,9 +114,10 @@
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/bar.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/bar.rs"
   },
-  "gpu_residency": "`barh` preserves GPU residency where the shared bar geometry pipeline can consume exported buffers directly. Stacked gpuArray charts read values for stacked extent calculation, matching the existing `bar` stacked-bounds behavior, then render through the same GPU plotting path.",
+  "gpu_residency": "`barh` preserves floating GPU residency where the shared bar geometry pipeline can consume exported buffers directly. Integer GPU data gathers once through its owning provider so native integer buffers are never reinterpreted by the floating vertex shader.",
   "gpu_behavior": [
-    "Horizontal bar rendering shares the same plotting architecture and shader vertex-packing path as vertical `bar`.",
+    "Floating single and double Y data can use the shared horizontal WGPU vertex-packing path.",
+    "All eight resident integer classes use exact client gather before the explicit floating graphics boundary.",
     "The builtin is a plotting sink and fusion barrier."
   ]
 }

@@ -1,0 +1,26 @@
+{
+  "title": "fea.domain",
+  "category": "fea",
+  "keywords": ["fea", "domain", "thermal", "electromagnetic", "cfd"],
+  "summary": "Create a typed RunMat FEA physics domain.",
+  "requires_feature": "fea",
+  "tested": { "unit": "builtins::fea::tests", "integration": null },
+  "description": "`fea.domain(kind, Name, Value, ...)` creates thermo-mechanical, electro-thermal, electromagnetic, or CFD domain data for a RunMat FEA model.",
+  "behaviors": [
+    "The domain kind selects the supported field set; unknown fields are rejected before object construction.",
+    "Finite real numeric physical fields accept all eight built-in integer classes. Exact integer values are retained until one host-only binary64 model-storage conversion, so sufficiently wide integers can round.",
+    "A nested thermo-field-source `revision` is a structural nonnegative integer and remains exact rather than crossing the physical-value binary64 boundary.",
+    "Resident numeric fields are rejected because domain construction does not perform provider execution."
+  ],
+  "integer_forms": [
+    "Thermo-mechanical physical fields, including reference temperature, applied temperature delta, region temperature deltas, and time-profile coordinates/scales.",
+    "Electro-thermal physical fields, including reference temperature, applied voltage, conductivity scales, and time-profile coordinates/scales.",
+    "Electromagnetic reference frequency and applied current.",
+    "CFD density, viscosity, inlet velocity, turbulence intensity, and time-profile coordinates/scales.",
+    "Thermo field-source revision is structural and exact."
+  ],
+  "examples": [{ "description": "Create a CFD domain", "input": "domain = fea.domain(\"cfd\", \"ReferenceDensityKgPerM3\", uint16(1), \"InletVelocityMPerS\", int16(12));" }],
+  "faqs": [{ "question": "Does `revision` become binary64?", "answer": "No. Revision is structural model identity and is validated and stored as an exact nonnegative integer." }],
+  "links": [{ "label": "Using FEA", "url": "../../fea/using-fea" }],
+  "source": { "label": "`crates/runmat-runtime/src/builtins/fea/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/mod.rs" }
+}

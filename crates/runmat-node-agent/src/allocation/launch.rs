@@ -1,0 +1,322 @@
+use std::collections::BTreeMap;
+use std::path::Path;
+
+use runmat_execution_transport_native::control::DriverBootstrapCredential;
+use runmat_execution_transport_native::control::NodeAllocation;
+use runmat_execution_transport_native::control::WorkerBootstrapCredential;
+use runmat_process_host::{
+    environment::{EnvironmentAllowlist, EnvironmentPolicy},
+    ChildLifetime, ChildProcess, HiddenMode, HostCommand, ResourceLimits, StdioPolicy,
+};
+
+use super::Sandbox;
+use crate::{AgentError, AgentResult};
+
+#[derive(Default)]
+pub struct AllocationProcesses {
+    children: BTreeMap<String, ManagedProcess>,
+}
+
+struct ManagedProcess {
+    child: ChildProcess,
+    process_id: u32,
+    fencing_token: u64,
+    expires_at_millis: i64,
+    maximum_memory_bytes: u64,
+    maximum_wall_millis: u64,
+    started_at_millis: i64,
+}
+
+impl AllocationProcesses {
+    pub async fn launch_worker(
+        &mut self,
+        runmat_executable: &Path,
+        allocation: &NodeAllocation,
+        sandbox: &Sandbox,
+        server_url: &str,
+        bootstrap: &WorkerBootstrapCredential,
+    ) -> AgentResult<u32> {
+        use base64::Engine as _;
+
+        if self.children.contains_key(&allocation.id) {
+            return Err(AgentError::AllocationRejected(
+                "allocation already has a worker".to_string(),
+            ));
+        }
+        let mut command = HostCommand::new(runmat_executable);
+        command.environment_policy =
+            EnvironmentPolicy::Allow(EnvironmentAllowlist::platform_runtime());
+        command.arguments = vec![HiddenMode::ExecutionWorker.marker().to_string()];
+        command.environment.insert(
+            "RUNMAT_EXECUTION_WORKER_REMOTE".to_string(),
+            "1".to_string(),
+        );
+        for (name, value) in [
+            ("RUNMAT_EXECUTION_SERVER_URL", server_url.to_string()),
+            ("RUNMAT_EXECUTION_RUN_ID", bootstrap.run_id.clone()),
+            ("RUNMAT_EXECUTION_ORG_ID", bootstrap.org_id.clone()),
+            ("RUNMAT_EXECUTION_PROJECT_ID", bootstrap.project_id.clone()),
+            (
+                "RUNMAT_EXECUTION_ALLOCATION_ID",
+                bootstrap.allocation_lease_id.clone(),
+            ),
+            (
+                "RUNMAT_EXECUTION_ALLOCATION_FENCING_TOKEN",
+                bootstrap.allocation_fencing_token.to_string(),
+            ),
+            (
+                "RUNMAT_EXECUTION_DRIVER_FENCING_TOKEN",
+                bootstrap.driver_fencing_token.to_string(),
+            ),
+            (
+                "RUNMAT_EXECUTION_ENDPOINT_FINGERPRINT",
+                bootstrap.endpoint_fingerprint.clone(),
+            ),
+            (
+                "RUNMAT_EXECUTION_RUN_KEY_ENVELOPE",
+                base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .encode(&bootstrap.run_key_envelope),
+            ),
+            (
+                "RUNMAT_EXECUTION_WORKER_RELAY_PATH",
+                bootstrap.relay_path.clone(),
+            ),
+            (
+                "RUNMAT_EXECUTION_WORKER_RELAY_PROTOCOL",
+                bootstrap.relay_protocol.clone(),
+            ),
+            (
+                "RUNMAT_EXECUTION_WORKER_RELAY_TICKET",
+                bootstrap.relay_ticket.clone(),
+            ),
+            (
+                "RUNMAT_EXECUTION_WORKER_RESOURCES",
+                serde_json::to_string(&allocation.resources)?,
+            ),
+            (
+                "RUNMAT_EXECUTION_ENDPOINT_IDENTITY_FILE",
+                sandbox
+                    .root
+                    .join("endpoint-identity.json")
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+            (
+                "RUNMAT_EXECUTION_NODE_BUNDLE_CACHE",
+                sandbox
+                    .root
+                    .parent()
+                    .ok_or_else(|| {
+                        AgentError::AllocationRejected(
+                            "allocation sandbox has no node cache parent".into(),
+                        )
+                    })?
+                    .join("bundle-cache")
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+        ] {
+            command.environment.insert(name.to_string(), value);
+        }
+        command.working_directory = Some(sandbox.root.clone());
+        command.lifetime = ChildLifetime::Owned;
+        command.stdio = StdioPolicy::Files {
+            stdout: sandbox.stdout.clone(),
+            stderr: sandbox.stderr.clone(),
+        };
+        command.resource_limits = allocation_limits(allocation);
+        self.spawn(allocation, command, "worker").await
+    }
+
+    pub async fn launch_driver(
+        &mut self,
+        runmat_executable: &Path,
+        allocation: &NodeAllocation,
+        sandbox: &Sandbox,
+        server_url: &str,
+        bootstrap: &DriverBootstrapCredential,
+    ) -> AgentResult<u32> {
+        if self.children.contains_key(&allocation.id) {
+            return Err(AgentError::AllocationRejected(
+                "allocation already has a driver".to_string(),
+            ));
+        }
+        let mut command = HostCommand::new(runmat_executable);
+        command.environment_policy =
+            EnvironmentPolicy::Allow(EnvironmentAllowlist::platform_runtime());
+        // This exact private mode remains the sole process argument. Lease
+        // authority crosses in a sanitized environment; the Server cannot
+        // choose an executable or arbitrary argument vector.
+        command.arguments = vec![HiddenMode::ExecutionDriver.marker().to_string()];
+        command.environment.insert(
+            "RUNMAT_EXECUTION_ALLOCATION_ID".to_string(),
+            allocation.id.clone(),
+        );
+        command.environment.insert(
+            "RUNMAT_EXECUTION_SERVER_URL".to_string(),
+            server_url.to_string(),
+        );
+        command.environment.insert(
+            "RUNMAT_EXECUTION_RUN_ID".to_string(),
+            bootstrap.run_id.clone(),
+        );
+        command.environment.insert(
+            "RUNMAT_EXECUTION_ORG_ID".to_string(),
+            bootstrap.org_id.clone(),
+        );
+        command.environment.insert(
+            "RUNMAT_EXECUTION_PROJECT_ID".to_string(),
+            bootstrap.project_id.clone(),
+        );
+        command.environment.insert(
+            "RUNMAT_EXECUTION_DRIVER_LEASE_ID".to_string(),
+            bootstrap.driver_lease_id.clone(),
+        );
+        command.environment.insert(
+            "RUNMAT_EXECUTION_DRIVER_FENCING_TOKEN".to_string(),
+            bootstrap.fencing_token.to_string(),
+        );
+        command.environment.insert(
+            "RUNMAT_EXECUTION_DRIVER_CREDENTIAL".to_string(),
+            bootstrap.credential.clone(),
+        );
+        command.environment.insert(
+            "RUNMAT_EXECUTION_ENDPOINT_IDENTITY_FILE".to_string(),
+            sandbox
+                .root
+                .join("endpoint-identity.json")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        command.working_directory = Some(sandbox.root.clone());
+        command.lifetime = ChildLifetime::Owned;
+        command.stdio = StdioPolicy::Files {
+            stdout: sandbox.stdout.clone(),
+            stderr: sandbox.stderr.clone(),
+        };
+        command.resource_limits = allocation_limits(allocation);
+        self.spawn(allocation, command, "driver").await
+    }
+
+    async fn spawn(
+        &mut self,
+        allocation: &NodeAllocation,
+        command: HostCommand,
+        process_kind: &str,
+    ) -> AgentResult<u32> {
+        let child = command.spawn().await?;
+        let process_id = child.id().ok_or_else(|| {
+            AgentError::AllocationRejected(format!("{process_kind} process has no id"))
+        })?;
+        self.children.insert(
+            allocation.id.clone(),
+            ManagedProcess {
+                child,
+                process_id,
+                fencing_token: allocation.fencing_token,
+                expires_at_millis: allocation.expires_at_millis,
+                maximum_memory_bytes: allocation.resources.memory_bytes,
+                maximum_wall_millis: allocation.resources.maximum_wall_millis,
+                started_at_millis: chrono::Utc::now().timestamp_millis(),
+            },
+        );
+        Ok(process_id)
+    }
+
+    pub async fn terminate(&mut self, allocation_id: &str) -> AgentResult<()> {
+        if let Some(mut process) = self.children.remove(allocation_id) {
+            process.child.terminate_tree().await?;
+        }
+        Ok(())
+    }
+
+    pub async fn terminate_all(&mut self) -> AgentResult<()> {
+        let ids = self.children.keys().cloned().collect::<Vec<_>>();
+        for id in ids {
+            self.terminate(&id).await?;
+        }
+        Ok(())
+    }
+
+    pub fn reap_finished(&mut self) -> AgentResult<Vec<String>> {
+        let mut completed = Vec::new();
+        for (allocation_id, process) in &mut self.children {
+            if process.child.try_wait()?.is_some() {
+                completed.push(allocation_id.clone());
+            }
+        }
+        for allocation_id in &completed {
+            self.children.remove(allocation_id);
+        }
+        Ok(completed)
+    }
+
+    pub async fn fence_stale(
+        &mut self,
+        leases: &[NodeAllocation],
+        now_millis: i64,
+    ) -> AgentResult<Vec<String>> {
+        let stale = self
+            .children
+            .iter()
+            .filter_map(|(allocation_id, process)| {
+                let authorized = leases.iter().any(|lease| {
+                    lease.id == *allocation_id
+                        && lease.fencing_token == process.fencing_token
+                        && lease.expires_at_millis == process.expires_at_millis
+                        && lease.expires_at_millis > now_millis
+                        && matches!(lease.state.as_str(), "offered" | "active")
+                });
+                (!authorized).then(|| allocation_id.clone())
+            })
+            .collect::<Vec<_>>();
+        for allocation_id in &stale {
+            self.terminate(allocation_id).await?;
+        }
+        Ok(stale)
+    }
+
+    pub async fn enforce_local_limits(&mut self, now_millis: i64) -> AgentResult<Vec<String>> {
+        let mut system = sysinfo::System::new();
+        system.refresh_processes();
+        let exceeded = self
+            .children
+            .iter()
+            .filter_map(|(allocation_id, process)| {
+                let wall_deadline = process
+                    .started_at_millis
+                    .saturating_add(i64::try_from(process.maximum_wall_millis).unwrap_or(i64::MAX));
+                let memory_exceeded = system
+                    .process(sysinfo::Pid::from_u32(process.process_id))
+                    .is_some_and(|value| value.memory() > process.maximum_memory_bytes);
+                (now_millis >= wall_deadline || memory_exceeded).then(|| allocation_id.clone())
+            })
+            .collect::<Vec<_>>();
+        for allocation_id in &exceeded {
+            self.terminate(allocation_id).await?;
+        }
+        Ok(exceeded)
+    }
+
+    pub fn active_count(&self) -> usize {
+        self.children.len()
+    }
+
+    pub fn contains(&self, allocation_id: &str) -> bool {
+        self.children.contains_key(allocation_id)
+    }
+}
+
+fn allocation_limits(allocation: &NodeAllocation) -> ResourceLimits {
+    ResourceLimits {
+        memory_bytes: Some(allocation.resources.memory_bytes),
+        cpu_seconds: Some(
+            allocation
+                .resources
+                .maximum_wall_millis
+                .div_ceil(1_000)
+                .max(1),
+        ),
+        process_count: Some(64),
+    }
+}

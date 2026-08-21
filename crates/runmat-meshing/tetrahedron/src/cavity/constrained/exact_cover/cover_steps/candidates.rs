@@ -1,16 +1,6 @@
 use super::*;
 
 impl<'a> BoundaryExactCoverSearch<'a> {
-    #[cfg(test)]
-    pub(in super::super::super) fn candidates_exhausted_reason(
-        &self,
-        face_counts: &BTreeMap<[u32; 3], usize>,
-        selected: &[usize],
-    ) -> &'static str {
-        self.candidates_exhausted_reason_and_face(face_counts, selected)
-            .0
-    }
-
     pub(in super::super::super) fn candidates_exhausted_reason_and_face(
         &self,
         face_counts: &BTreeMap<[u32; 3], usize>,

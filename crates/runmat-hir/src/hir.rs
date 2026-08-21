@@ -1,6 +1,20 @@
 use crate::{
     BindingId, ClassId, EntrypointId, ExprId, FunctionId, ModuleId, SourceId, Span, StmtId,
 };
+pub use runmat_types::{
+    AssignmentCreationPolicy, AssignmentShapePolicy, BindingName, BuiltinId,
+    CallableFallbackPolicy, CallableIdentity, ClassDeclaration, DefPath, DefPathSegment,
+    EntrypointName, FunctionName, IndexKind, IndexResultContext, MemberName, MethodId, MethodName,
+    OperatorKind, PackageName, PlaceMutationKind, QualifiedName, RequestedOutputCount,
+    SemanticAttribute, SymbolName, ASSIGNIN_BUILTIN_NAME, AWAIT_EXTENSION_NAME,
+    DISCARD_OUTPUT_NAME, EVALC_BUILTIN_NAME, EVALIN_BUILTIN_NAME, EVAL_BUILTIN_NAME,
+    FEVAL_BUILTIN_NAME, NARGINCHK_BUILTIN_NAME, NARGIN_BUILTIN_NAME, NARGOUTCHK_BUILTIN_NAME,
+    NARGOUT_BUILTIN_NAME, RUNTESTS_BUILTIN_NAME, RUN_BUILTIN_NAME, SPAWN_EXTENSION_NAME,
+    TEST_CLASS_REGISTRATION_BUILTIN_NAME,
+};
+use runmat_types::{
+    FunctionArgDefaultValue, FunctionArgSizeSpec, FunctionArgValidator, IntegerLiteral,
+};
 use serde::{Deserialize, Serialize};
 
 /// Canonical semantic HIR product for one compiled source set.
@@ -33,6 +47,15 @@ pub struct HirModule {
     pub top_level_functions: Vec<FunctionId>,
     pub classes: Vec<ClassId>,
     pub synthetic_entry_function: Option<FunctionId>,
+    pub script_sections: Vec<HirScriptSection>,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct HirScriptSection {
+    pub ordinal: u32,
+    pub title: String,
+    pub marker_span: Span,
+    pub body_span: Span,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -127,104 +150,12 @@ pub struct FunctionAbi {
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum FunctionArgDim {
-    Any,
-    Exact(usize),
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct FunctionArgSizeSpec {
-    pub rows: FunctionArgDim,
-    pub cols: FunctionArgDim,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct FunctionArgumentValidation {
     pub binding: BindingId,
     pub size: Option<FunctionArgSizeSpec>,
     pub class_name: Option<String>,
     pub validators: Vec<FunctionArgValidator>,
     pub default_value: Option<FunctionArgDefaultValue>,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum FunctionArgValidator {
-    A(Vec<String>),
-    Column,
-    Finite,
-    Float,
-    Folder,
-    File,
-    NumericOrLogical,
-    Numeric,
-    Text,
-    TextScalar,
-    NonzeroLengthText,
-    Nonempty,
-    ScalarOrEmpty,
-    Real,
-    Integer,
-    Vector,
-    Positive,
-    Negative,
-    Nonnegative,
-    Nonmissing,
-    NonNan,
-    Nonzero,
-    Nonpositive,
-    Nonsparse,
-    Sparse,
-    ValidVariableName,
-    UnderlyingType(Vec<String>),
-    Member(Vec<FunctionArgValidationLiteral>),
-    InRange(f64, f64, FunctionArgRangeInclusivity),
-    GreaterThanOrEqual(f64),
-    LessThanOrEqual(f64),
-    GreaterThan(f64),
-    LessThan(f64),
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
-pub struct FunctionArgRangeInclusivity {
-    pub lower: bool,
-    pub upper: bool,
-}
-
-impl FunctionArgRangeInclusivity {
-    pub const CLOSED: Self = Self {
-        lower: true,
-        upper: true,
-    };
-
-    pub const OPEN: Self = Self {
-        lower: false,
-        upper: false,
-    };
-
-    pub const OPEN_LEFT: Self = Self {
-        lower: false,
-        upper: true,
-    };
-
-    pub const OPEN_RIGHT: Self = Self {
-        lower: true,
-        upper: false,
-    };
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum FunctionArgValidationLiteral {
-    Number(f64),
-    Text(String),
-    Bool(bool),
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum FunctionArgDefaultValue {
-    Number(f64),
-    Bool(bool),
-    String(String),
-    EmptyArray,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -317,6 +248,18 @@ pub enum HirStmtKind {
         range: HirExpr,
         body: HirBlock,
     },
+    ParFor {
+        region: runmat_types::ParallelRegionId,
+        binding: BindingId,
+        range: HirExpr,
+        maximum_workers: Option<HirExpr>,
+        body: HirBlock,
+    },
+    Spmd {
+        region: runmat_types::ParallelRegionId,
+        header: crate::parallel::SpmdHeader<HirExpr>,
+        body: HirBlock,
+    },
     Switch {
         expr: HirExpr,
         cases: Vec<(HirExpr, HirBlock)>,
@@ -351,6 +294,7 @@ impl HirExpr {
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum HirExprKind {
     Number(String),
+    IntegerLiteral(IntegerLiteral),
     String(StringLiteral),
     Constant(SymbolName),
     Binding(BindingId),
@@ -466,198 +410,6 @@ impl HirCallableRef {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
-pub enum CallableIdentity {
-    BoundFunction(FunctionId),
-    ExternalFunction {
-        function: FunctionId,
-        display_name: String,
-    },
-    Builtin(BuiltinId),
-    Imported(DefPath),
-    Method(MethodId),
-    AnonymousFunction(FunctionId),
-    DynamicName(SymbolName),
-    ExternalName(QualifiedName),
-}
-
-impl CallableIdentity {
-    pub fn display_name(&self) -> Option<String> {
-        match self {
-            CallableIdentity::BoundFunction(_) | CallableIdentity::AnonymousFunction(_) => None,
-            CallableIdentity::ExternalFunction { display_name, .. } => {
-                (!display_name.is_empty()).then_some(display_name.clone())
-            }
-            CallableIdentity::Builtin(id) => (!id.0.is_empty()).then_some(id.0.clone()),
-            CallableIdentity::Imported(path) => path.module.display_name(),
-            CallableIdentity::Method(id) => (!id.0.is_empty()).then_some(id.0.clone()),
-            CallableIdentity::DynamicName(name) => (!name.0.is_empty()).then_some(name.0.clone()),
-            CallableIdentity::ExternalName(name) => name.display_name(),
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, Serialize, Deserialize)]
-pub enum CallableFallbackPolicy {
-    None,
-    RuntimeNameResolution,
-    ObjectDispatch,
-    ExternalBoundary,
-}
-
-impl CallableFallbackPolicy {
-    fn is_well_formed_external_name(name: &QualifiedName) -> bool {
-        name.0.len() > 1 && name.0.iter().all(|segment| !segment.0.trim().is_empty())
-    }
-
-    fn is_well_formed_imported_path(path: &DefPath) -> bool {
-        let Some(module_name) = path.module.display_name() else {
-            return false;
-        };
-        let Some(last_item) = path.item.last() else {
-            return false;
-        };
-        let item_name = last_item.display_name();
-        if item_name.trim().is_empty() {
-            return false;
-        }
-        let Some(last_module_segment) = path.module.0.last() else {
-            return false;
-        };
-        if last_module_segment.0.trim().is_empty() {
-            return false;
-        }
-        // Imported callable identities must keep module leaf and item leaf aligned.
-        // This prevents silently routing a mismatched DefPath through name-shaped fallback.
-        let _ = module_name;
-        last_module_segment.0 == item_name
-    }
-
-    pub fn allows_runtime_name_resolution(self) -> bool {
-        matches!(self, CallableFallbackPolicy::RuntimeNameResolution)
-    }
-
-    pub fn allows_semantic_name_resolution_for(self, identity: &CallableIdentity) -> bool {
-        match identity {
-            CallableIdentity::DynamicName(SymbolName(name))
-            | CallableIdentity::Method(MethodId(name)) => {
-                self.allows_runtime_name_resolution() && !name.trim().is_empty()
-            }
-            CallableIdentity::Imported(path) => {
-                self.allows_runtime_name_resolution() && Self::is_well_formed_imported_path(path)
-            }
-            CallableIdentity::ExternalName(name) => {
-                matches!(self, CallableFallbackPolicy::ExternalBoundary)
-                    && Self::is_well_formed_external_name(name)
-            }
-            _ => false,
-        }
-    }
-
-    pub fn allows_vm_name_fallback_for(self, identity: &CallableIdentity) -> bool {
-        match identity {
-            CallableIdentity::DynamicName(SymbolName(name)) => {
-                self.allows_runtime_name_resolution() && !name.trim().is_empty()
-            }
-            CallableIdentity::Imported(path) => {
-                self.allows_runtime_name_resolution() && Self::is_well_formed_imported_path(path)
-            }
-            CallableIdentity::ExternalName(name) => {
-                matches!(self, CallableFallbackPolicy::ExternalBoundary)
-                    && Self::is_well_formed_external_name(name)
-            }
-            _ => false,
-        }
-    }
-
-    pub fn resolution_name_for(self, identity: &CallableIdentity) -> Option<String> {
-        if !self.allows_semantic_name_resolution_for(identity) {
-            return None;
-        }
-
-        match identity {
-            CallableIdentity::DynamicName(SymbolName(name))
-            | CallableIdentity::Method(MethodId(name)) => {
-                let trimmed = name.trim();
-                (!trimmed.is_empty()).then_some(trimmed.to_string())
-            }
-            CallableIdentity::Imported(path) => path.module.display_name(),
-            CallableIdentity::ExternalName(name) if Self::is_well_formed_external_name(name) => {
-                Some(
-                    name.0
-                        .iter()
-                        .map(|segment| segment.0.as_str())
-                        .collect::<Vec<_>>()
-                        .join("."),
-                )
-            }
-            _ => None,
-        }
-    }
-
-    pub fn vm_fallback_name_for(self, identity: &CallableIdentity) -> Option<String> {
-        if !self.allows_vm_name_fallback_for(identity) {
-            return None;
-        }
-
-        match identity {
-            CallableIdentity::DynamicName(SymbolName(name)) => {
-                let trimmed = name.trim();
-                (!trimmed.is_empty()).then_some(trimmed.to_string())
-            }
-            CallableIdentity::Imported(path) => path.module.display_name(),
-            CallableIdentity::ExternalName(name) if Self::is_well_formed_external_name(name) => {
-                Some(
-                    name.0
-                        .iter()
-                        .map(|segment| segment.0.as_str())
-                        .collect::<Vec<_>>()
-                        .join("."),
-                )
-            }
-            _ => None,
-        }
-    }
-
-    pub fn supports_vm_static_call(self) -> bool {
-        matches!(
-            self,
-            CallableFallbackPolicy::RuntimeNameResolution
-                | CallableFallbackPolicy::ExternalBoundary
-        )
-    }
-
-    pub fn supports_vm_method_or_member_call(self) -> bool {
-        matches!(
-            self,
-            CallableFallbackPolicy::RuntimeNameResolution | CallableFallbackPolicy::ObjectDispatch
-        )
-    }
-
-    pub fn post_object_dispatch(self) -> Self {
-        match self {
-            CallableFallbackPolicy::ObjectDispatch => CallableFallbackPolicy::RuntimeNameResolution,
-            other => other,
-        }
-    }
-}
-
-pub const FEVAL_BUILTIN_NAME: &str = "feval";
-pub const EVAL_BUILTIN_NAME: &str = "eval";
-pub const EVALC_BUILTIN_NAME: &str = "evalc";
-pub const EVALIN_BUILTIN_NAME: &str = "evalin";
-pub const ASSIGNIN_BUILTIN_NAME: &str = "assignin";
-pub const RUN_BUILTIN_NAME: &str = "run";
-pub const RUNTESTS_BUILTIN_NAME: &str = "runtests";
-pub const NARGIN_BUILTIN_NAME: &str = "nargin";
-pub const NARGOUT_BUILTIN_NAME: &str = "nargout";
-pub const NARGINCHK_BUILTIN_NAME: &str = "narginchk";
-pub const NARGOUTCHK_BUILTIN_NAME: &str = "nargoutchk";
-pub const AWAIT_EXTENSION_NAME: &str = "await";
-pub const SPAWN_EXTENSION_NAME: &str = "spawn";
-pub const TEST_CLASS_REGISTRATION_BUILTIN_NAME: &str = "__register_test_classes";
-pub const DISCARD_OUTPUT_NAME: &str = "~";
-
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum CallSyntax {
     Plain,
@@ -691,88 +443,31 @@ pub struct HirImport {
 /// not durable statement variants in the semantic model.
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct HirClass {
-    pub id: ClassId,
     pub module: ModuleId,
-    pub name: QualifiedName,
-    pub super_class: Option<ClassId>,
-    pub builtin_super_class: Option<String>,
-    pub kind: ClassKind,
-    pub is_sealed: bool,
-    pub is_abstract: bool,
-    pub properties: Vec<ClassProperty>,
-    pub methods: Vec<ClassMethod>,
-    pub events: Vec<ClassEvent>,
-    pub enumerations: Vec<ClassEnumeration>,
+    pub declaration: ClassDeclaration,
+    pub property_defaults: Vec<ClassPropertyDefault>,
     pub arguments: Vec<ClassArgumentBlock>,
-    pub span: Span,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum ClassKind {
-    Value,
-    Handle,
+pub struct ClassPropertyDefault {
+    pub property: MemberName,
+    pub value: HirExpr,
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct ClassProperty {
-    pub name: MemberName,
-    pub attributes: PropertyAttributes,
-    pub default: Option<HirExpr>,
-    pub span: Span,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct ClassMethod {
-    pub function: FunctionId,
-    pub name: MethodName,
-    pub is_static: bool,
-    pub attributes: MethodAttributes,
-    pub span: Span,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct ClassEvent {
-    pub name: SymbolName,
-    pub span: Span,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct ClassEnumeration {
-    pub name: SymbolName,
-    pub span: Span,
+impl HirClass {
+    pub fn property_default(&self, property: &MemberName) -> Option<&HirExpr> {
+        self.property_defaults
+            .iter()
+            .find(|default| default.property == *property)
+            .map(|default| &default.value)
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct ClassArgumentBlock {
+    pub declared_attributes: Vec<SemanticAttribute>,
     pub span: Span,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default)]
-pub struct PropertyAttributes {
-    pub is_static: bool,
-    pub is_constant: bool,
-    pub is_dependent: bool,
-    pub is_transient: bool,
-    pub is_hidden: bool,
-    pub access: MemberAccess,
-    pub get_access: MemberAccess,
-    pub set_access: MemberAccess,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default)]
-pub struct MethodAttributes {
-    pub access: MemberAccess,
-    pub is_hidden: bool,
-    pub is_abstract: bool,
-    pub is_sealed: bool,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default)]
-pub enum MemberAccess {
-    #[default]
-    Public,
-    Private,
-    Protected,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -788,31 +483,6 @@ pub enum OutputTarget {
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum RequestedOutputCount {
-    Zero,
-    One,
-    Exactly(usize),
-    CurrentFunctionNargout,
-}
-
-impl RequestedOutputCount {
-    pub fn fixed_count(&self) -> usize {
-        match self {
-            RequestedOutputCount::Zero => 0,
-            RequestedOutputCount::One => 1,
-            RequestedOutputCount::Exactly(count) => *count,
-            RequestedOutputCount::CurrentFunctionNargout => 1,
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum IndexKind {
-    Paren,
-    Brace,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum IndexComponent {
     Colon,
     End { dim: Option<usize>, offset: isize },
@@ -825,15 +495,6 @@ pub struct IndexingSemantics {
     pub kind: IndexKind,
     pub components: Vec<IndexComponent>,
     pub result_context: IndexResultContext,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum IndexResultContext {
-    ReadSingle,
-    ReadCommaList,
-    AssignmentTarget,
-    DeletionTarget,
-    FunctionArgumentExpansion,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -906,88 +567,11 @@ pub enum ExpansionSemantics {
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum OperatorKind {
-    UnaryPlus,
-    UnaryMinus,
-    Not,
-    Add,
-    Subtract,
-    MatrixMultiply,
-    ElementwiseMultiply,
-    MatrixPower,
-    ElementwisePower,
-    Mldivide,
-    Mrdivide,
-    ElementwiseDivide,
-    ElementwiseLeftDivide,
-    Equal,
-    NotEqual,
-    Less,
-    LessEqual,
-    Greater,
-    GreaterEqual,
-    ShortCircuitAnd,
-    ShortCircuitOr,
-    ElementwiseAnd,
-    ElementwiseOr,
-    Transpose,
-    ConjugateTranspose,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum NumericClass {
-    Double,
-    Single,
-    Int8,
-    UInt8,
-    Int16,
-    UInt16,
-    Int32,
-    UInt32,
-    Int64,
-    UInt64,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum ValueFlowFact {
-    NoValue,
-    Single(TypeFact),
-    CommaList(Vec<TypeFact>),
-    UnknownList,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum PlaceMutationKind {
-    BindOrAssign,
-    IndexedAssign,
-    CellAssign,
-    MemberAssign,
-    Delete,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct PlaceMutation {
     pub place: HirPlace,
     pub kind: PlaceMutationKind,
     pub creation_policy: AssignmentCreationPolicy,
     pub shape_policy: AssignmentShapePolicy,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum AssignmentCreationPolicy {
-    ExistingOnly,
-    CreateBinding,
-    CreateArrayByIndex,
-    CreateStructFieldPath,
-    Overloaded,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum AssignmentShapePolicy {
-    Exact,
-    ScalarExpansion,
-    MatlabCompatible,
-    Overloaded,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -1087,187 +671,25 @@ pub struct FunctionHandleResolution {
     pub span: Span,
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum SpawnSafetyFact {
-    SpawnSafe,
-    RequiresIsolation,
-    NotSpawnSafe { reason: SpawnSafetyReason },
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum SpawnSafetyReason {
-    MutableLexicalCapture,
-    NonSendableRuntimeHandle,
-    UnsynchronizedSharedMutation,
-    UnknownDynamicCapture,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum AsyncValueFact {
-    Future(FutureFact),
-    TaskHandle(TaskHandleFact),
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct FutureFact {
-    pub output: Box<TypeFact>,
-    pub state: FutureStateFact,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum FutureStateFact {
-    Lazy,
-    Awaited,
-    Unknown,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct TaskHandleFact {
-    pub output: Box<TypeFact>,
-    pub spawn_safety: SpawnSafetyFact,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum TypeFact {
-    Never,
-    Unknown,
-    Logical,
-    Numeric {
-        class: NumericClass,
-        domain: NumericDomain,
-    },
-    Tensor(TensorTypeFact),
-    String,
-    CharArray,
-    Cell,
-    Struct,
-    ClassInstance(ClassId),
-    ClassRef(ClassId),
-    Function(FunctionId),
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct TensorTypeFact {
-    pub element: TensorElementDomainFact,
-    pub shape: ShapeFact,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum TensorElementDomainFact {
-    Unknown,
-    Logical,
-    Numeric {
-        class: NumericClass,
-        domain: NumericDomain,
-    },
-    Char,
-    Object(ClassId),
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum NumericDomain {
-    Real,
-    Complex,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum ShapeFact {
-    Unreachable,
-    Unknown,
-    Scalar,
-    Ranked { rank: usize },
-    Shaped { dims: Vec<DimFact> },
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum DimFact {
-    Known(usize),
-    Symbolic(DimSymbol),
-    Unknown,
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
-pub struct DimSymbol(pub String);
-
-/// Stable qualified semantic identity for a package/module/item path.
-///
-/// Unlike local `ModuleId`/`FunctionId`/`ClassId`/`BindingId` values, a `DefPath`
-/// is intended to describe the same semantic item across compiler products when
-/// the source/project identity is unchanged.
-#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
-pub struct DefPath {
-    pub package: PackageName,
-    pub module: QualifiedName,
-    pub item: Vec<DefPathSegment>,
-}
-
-impl DefPath {
-    pub fn display_name(&self) -> Option<String> {
-        self.item.last().map(DefPathSegment::display_name)
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
-pub enum DefPathSegment {
-    Function(SymbolName),
-}
-
-impl DefPathSegment {
-    pub fn display_name(&self) -> String {
-        match self {
-            DefPathSegment::Function(name) => name.0.clone(),
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
-pub struct QualifiedName(pub Vec<SymbolName>);
-
-impl QualifiedName {
-    pub fn display_name(&self) -> Option<String> {
-        if self.0.is_empty() || self.0.iter().any(|segment| segment.0.is_empty()) {
-            None
-        } else {
-            Some(
-                self.0
-                    .iter()
-                    .map(|segment| segment.0.as_str())
-                    .collect::<Vec<_>>()
-                    .join("."),
-            )
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
-pub struct SymbolName(pub String);
-
-#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
-pub struct BindingName(pub String);
-
-#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
-pub struct FunctionName(pub String);
-
-#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
-pub struct EntrypointName(pub String);
-
-#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
-pub struct MemberName(pub String);
-
-#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
-pub struct MethodName(pub String);
-
-#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
-pub struct PackageName(pub String);
-
-#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
-pub struct BuiltinId(pub String);
-
-#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
-pub struct MethodId(pub String);
-
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 pub struct StringLiteral(pub String);
+
+impl StringLiteral {
+    /// Decode the source spelling into the text observed by MATLAB execution.
+    pub fn runtime_text(&self) -> String {
+        if self.0.starts_with('"') && self.0.ends_with('"') && self.0.len() >= 2 {
+            self.0[1..self.0.len() - 1].replace("\"\"", "\"")
+        } else if self.0.starts_with('\'') && self.0.ends_with('\'') && self.0.len() >= 2 {
+            self.0[1..self.0.len() - 1].replace("''", "'")
+        } else {
+            self.0.clone()
+        }
+    }
+
+    pub fn is_character_row(&self) -> bool {
+        self.0.starts_with('\'') && self.0.ends_with('\'') && self.0.len() >= 2
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct LoweringResult {
@@ -1300,6 +722,7 @@ mod tests {
                 top_level_functions: vec![],
                 classes: vec![],
                 synthetic_entry_function: Some(function),
+                script_sections: vec![],
             }],
             functions: vec![HirFunction {
                 id: function,
@@ -1415,7 +838,7 @@ mod tests {
     }
 
     #[test]
-    fn facts_capture_value_flow_and_mutation_context() {
+    fn mutation_captures_creation_and_shape_context() {
         let binding = BindingId(0);
         let mutation = PlaceMutation {
             place: HirPlace::Binding(binding),
@@ -1423,23 +846,14 @@ mod tests {
             creation_policy: AssignmentCreationPolicy::CreateBinding,
             shape_policy: AssignmentShapePolicy::MatlabCompatible,
         };
-        let value = ValueFlowFact::Single(TypeFact::Tensor(TensorTypeFact {
-            element: TensorElementDomainFact::Numeric {
-                class: NumericClass::Double,
-                domain: NumericDomain::Real,
-            },
-            shape: ShapeFact::Shaped {
-                dims: vec![DimFact::Known(1), DimFact::Symbolic(DimSymbol("n".into()))],
-            },
-        }));
-
         assert!(matches!(mutation.place, HirPlace::Binding(id) if id == binding));
         assert!(matches!(
-            value,
-            ValueFlowFact::Single(TypeFact::Tensor(TensorTypeFact {
-                shape: ShapeFact::Shaped { .. },
-                ..
-            }))
+            mutation.creation_policy,
+            AssignmentCreationPolicy::CreateBinding
+        ));
+        assert!(matches!(
+            mutation.shape_policy,
+            AssignmentShapePolicy::MatlabCompatible
         ));
     }
 
@@ -1504,33 +918,6 @@ mod tests {
             CallableIdentity::DynamicName(SymbolName(String::new())).display_name(),
             None
         );
-    }
-
-    #[test]
-    fn async_facts_distinguish_lazy_futures_from_spawned_tasks() {
-        let future = AsyncValueFact::Future(FutureFact {
-            output: Box::new(TypeFact::Unknown),
-            state: FutureStateFact::Lazy,
-        });
-        let task = AsyncValueFact::TaskHandle(TaskHandleFact {
-            output: Box::new(TypeFact::Unknown),
-            spawn_safety: SpawnSafetyFact::SpawnSafe,
-        });
-
-        assert!(matches!(
-            future,
-            AsyncValueFact::Future(FutureFact {
-                state: FutureStateFact::Lazy,
-                ..
-            })
-        ));
-        assert!(matches!(
-            task,
-            AsyncValueFact::TaskHandle(TaskHandleFact {
-                spawn_safety: SpawnSafetyFact::SpawnSafe,
-                ..
-            })
-        ));
     }
 
     #[test]

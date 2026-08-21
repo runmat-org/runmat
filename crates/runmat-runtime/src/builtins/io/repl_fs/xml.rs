@@ -1,14 +1,15 @@
 //! XML file compatibility helpers.
 
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use std::collections::BTreeMap;
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CellArray,
-    ObjectInstance, StructValue, Value,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, ObjectInstance, StructValue, Value};
 
 use crate::builtins::common::fs::path_to_string;
 use crate::builtins::common::identifiers::is_valid_varname;
@@ -94,6 +95,11 @@ xml_descriptor!(
     &INPUTS_THREE,
     &OUTPUT_VALUE
 );
+pub const XMLREAD_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "xmlread accepts a text filename only; integer and resident numeric inputs reject before file or provider access.",
+};
 xml_descriptor!(
     XMLREAD_SIGNATURES,
     XMLREAD_DESCRIPTOR,
@@ -150,9 +156,16 @@ async fn readstruct_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::struct_type),
     descriptor(crate::builtins::io::repl_fs::xml::XMLREAD_DESCRIPTOR),
+    integer_audit(crate::builtins::io::repl_fs::xml::XMLREAD_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::repl_fs::xml"
 )]
 async fn xmlread_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args
+        .iter()
+        .any(crate::builtins::common::validation::value_has_native_integer_class)
+    {
+        return Err(compat_error("xmlread", "xmlread: filename must be text"));
+    }
     let args = gather_args("xmlread", &args).await?;
     if args.len() != 1 {
         return Err(compat_error(
@@ -653,7 +666,7 @@ fn scalar_xml_text(value: &Value) -> BuiltinResult<String> {
         Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
         Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
         Value::Num(number) => Ok(number.to_string()),
-        Value::Int(number) => Ok(number.to_i64().to_string()),
+        Value::Int(number) => Ok(number.decimal_string()),
         Value::Bool(flag) => Ok(flag.to_string()),
         _ => Err(compat_error(
             "xmlwrite",
@@ -697,6 +710,14 @@ mod tests {
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         (provider_guard, repl_guard)
+    }
+
+    #[test]
+    fn xml_scalar_text_preserves_exact_uint64() {
+        assert_eq!(
+            scalar_xml_text(&Value::Int(runmat_value::IntValue::U64(u64::MAX))).expect("xml text"),
+            "18446744073709551615"
+        );
     }
 
     fn run(value: impl std::future::Future<Output = BuiltinResult<Value>>) -> BuiltinResult<Value> {

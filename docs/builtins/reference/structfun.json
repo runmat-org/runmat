@@ -25,7 +25,7 @@
   "behaviors": [
     "The second input must be a scalar struct. Struct arrays are rejected rather than flattened implicitly.",
     "Callback execution uses RunMat's `feval` path, so function handles, semantic closures, requested output count, `UniformOutput`, `ErrorHandler`, and GPU gather behavior follow ordinary callback invocation semantics.",
-    "With `\"UniformOutput\", true` (default), every callback result must be scalar numeric, logical, or complex; results are packed into an N-by-1 array where N is the number of fields.",
+    "With `\"UniformOutput\", true` (default), every callback result must be scalar numeric, logical, or complex; results are packed into an N-by-1 array where N is the number of fields. Uniform integer results retain their exact class, while mixed integer classes or integer/double mixtures are rejected.",
     "With `\"UniformOutput\", false`, callback outputs may have mixed types or sizes and are returned as a scalar struct preserving the input field names.",
     "When multiple outputs are requested, each callback must return that many outputs; `structfun` collects each output independently.",
     "`\"ErrorHandler\", handler` receives an error struct followed by the field value that triggered the failure."

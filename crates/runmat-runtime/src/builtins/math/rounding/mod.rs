@@ -8,11 +8,15 @@ pub(crate) mod round;
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::spec::{
@@ -21,6 +25,9 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::elementwise::integer_arithmetic::{
+    reject_integer_logical_operands, try_integer_remainder, IntegerRemainderOp,
+};
 use crate::builtins::math::type_resolvers::numeric_binary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -52,7 +59,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     workgroup_size: None,
     accepts_nan_mode: false,
     notes:
-        "Providers can keep mod on-device by composing elem_div → unary_floor → elem_mul → elem_sub for matching shapes. Future backends may expose a dedicated elem_mod hook.",
+        "Native integer providers may execute exact mod directly; floating fallback gathers and reuploads when a dedicated semantically complete provider hook is unavailable.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::rounding")]
@@ -68,12 +75,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
                 .first()
                 .ok_or(FusionError::MissingInput(0))?;
             let b = ctx.inputs.get(1).ok_or(FusionError::MissingInput(1))?;
-            Ok(format!("{a} - {b} * floor({a} / {b})"))
+            Ok(format!(
+                "select({a} - {b} * floor({a} / {b}), {a}, {b} == 0.0)"
+            ))
         },
     }),
     reduction: None,
     emits_nan: true,
-    notes: "Fusion generates floor(a / b) followed by a - b * q; providers may substitute specialised kernels when available.",
+    notes: "Fusion applies a - b * floor(a / b), including the documented mod(a, 0) = a convention; providers may substitute specialised kernels when available.",
 };
 
 const BUILTIN_NAME: &str = "mod";
@@ -91,14 +100,14 @@ const MOD_INPUTS: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Dividend input (numeric/logical/char/complex).",
+        description: "Real dividend input (numeric/logical/char).",
     },
     BuiltinParamDescriptor {
         name: "B",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Divisor input (numeric/logical/char/complex).",
+        description: "Real divisor input (numeric/logical/char).",
     },
 ];
 const MOD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
@@ -109,7 +118,7 @@ const MOD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescrip
 const MOD_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.MOD.INVALID_INPUT",
     identifier: Some("RunMat:mod:InvalidInput"),
-    when: "Inputs cannot be interpreted as numeric, logical, char, or complex operands.",
+    when: "Inputs are complex or cannot be interpreted as real numeric, logical, or char operands.",
     message: "mod: invalid input",
 };
 const MOD_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -136,6 +145,35 @@ pub const MOD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &MOD_ERRORS,
 };
 
+const MOD_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::AllowedExceptWith64BitInteger,
+        notes: "A is an integer array or a compatible real scalar double.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "B",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::AllowedExceptWith64BitInteger,
+        notes: "B is an integer array or a compatible real scalar double.",
+    },
+];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "R = mod(A, B)",
+        inputs: &MOD_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::BroadcastCompatible,
+        notes: "Native integer storage uses exact floor-remainder semantics; providers may execute exact integer mod directly or gather for a semantically complete fallback.",
+    }];
+
 fn mod_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl AsRef<str>,
@@ -157,14 +195,27 @@ fn mod_error_with_message(
 #[runtime_builtin(
     name = "mod",
     category = "math/rounding",
-    summary = "MATLAB-compatible modulus a - b .* floor(a./b) with support for complex values and broadcasting.",
+    summary = "MATLAB-compatible real modulus a - b .* floor(a./b) with broadcasting.",
     keywords = "mod,modulus,remainder,gpu",
     accel = "binary",
     type_resolver(numeric_binary_type),
     descriptor(crate::builtins::math::rounding::MOD_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::rounding::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::rounding"
 )]
 async fn mod_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    if matches!(&lhs, Value::Complex(_, _) | Value::ComplexTensor(_))
+        || matches!(&rhs, Value::Complex(_, _) | Value::ComplexTensor(_))
+    {
+        return Err(mod_error_with_detail(
+            &MOD_ERROR_INVALID_INPUT,
+            "inputs must be real",
+        ));
+    }
+    crate::builtins::common::validation::reject_typed_complex_integer(&lhs, BUILTIN_NAME)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&rhs, BUILTIN_NAME)?;
+    reject_integer_logical_operands(&lhs, &rhs, BUILTIN_NAME)
+        .map_err(|error| mod_error_with_detail(&MOD_ERROR_INVALID_INPUT, error))?;
     match (lhs, rhs) {
         (Value::GpuTensor(a), Value::GpuTensor(b)) => mod_gpu_pair(a, b).await,
         (Value::GpuTensor(a), other) => {
@@ -180,44 +231,48 @@ async fn mod_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 }
 
 async fn mod_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<Value> {
-    if a.device_id == b.device_id {
+    if runmat_accelerate_api::handle_integer_type(&a).is_some()
+        && runmat_accelerate_api::handle_integer_type(&b).is_some()
+        && a.device_id == b.device_id
+    {
         if let Some(provider) = runmat_accelerate_api::provider_for_handle(&a) {
-            if a.shape == b.shape {
-                if let Ok(div) = provider.elem_div(&a, &b).await {
-                    match provider.unary_floor(&div).await {
-                        Ok(floored) => match provider.elem_mul(&b, &floored).await {
-                            Ok(mul) => match provider.elem_sub(&a, &mul).await {
-                                Ok(out) => {
-                                    let _ = provider.free(&div);
-                                    let _ = provider.free(&floored);
-                                    let _ = provider.free(&mul);
-                                    return Ok(gpu_helpers::resident_gpu_value(out));
-                                }
-                                Err(_) => {
-                                    let _ = provider.free(&mul);
-                                    let _ = provider.free(&floored);
-                                    let _ = provider.free(&div);
-                                }
-                            },
-                            Err(_) => {
-                                let _ = provider.free(&floored);
-                                let _ = provider.free(&div);
-                            }
-                        },
-                        Err(_) => {
-                            let _ = provider.free(&div);
-                        }
-                    }
-                }
+            if let Ok(out) = provider.elem_mod(&a, &b).await {
+                return Ok(gpu_helpers::resident_gpu_value(out));
             }
         }
     }
     let left = gpu_helpers::gather_tensor_async(&a).await?;
     let right = gpu_helpers::gather_tensor_async(&b).await?;
-    mod_host(Value::Tensor(left), Value::Tensor(right))
+    let result = mod_host(Value::Tensor(left), Value::Tensor(right))?;
+    if a.device_id == b.device_id {
+        if let Some(provider) = runmat_accelerate_api::provider_for_handle(&a) {
+            return upload_mod_result(provider, result);
+        }
+    }
+    Ok(result)
+}
+
+fn upload_mod_result(
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    value: Value,
+) -> BuiltinResult<Value> {
+    let tensor = match value {
+        Value::Tensor(tensor) => tensor,
+        Value::Num(value) => Tensor::new(vec![value], vec![1, 1])
+            .map_err(|err| mod_error_with_detail(&MOD_ERROR_INTERNAL, err))?,
+        other => return Ok(other),
+    };
+    let handle = gpu_helpers::upload_tensor(provider, &tensor)
+        .map_err(|err| mod_error_with_detail(&MOD_ERROR_INTERNAL, err))?;
+    Ok(gpu_helpers::resident_gpu_value(handle))
 }
 
 fn mod_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    if let Some(result) = try_integer_remainder(&lhs, &rhs, IntegerRemainderOp::Mod, BUILTIN_NAME)
+        .map_err(|error| mod_error_with_detail(&MOD_ERROR_INVALID_INPUT, error))?
+    {
+        return Ok(result);
+    }
     if let Some(result) = scalar_mod_value(&lhs, &rhs) {
         return Ok(result);
     }
@@ -232,18 +287,24 @@ fn mod_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 fn compute_mod_real(a: &Tensor, b: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&a.shape, &b.shape)
         .map_err(|err| mod_error_with_detail(&MOD_ERROR_SIZE_MISMATCH, err))?;
+    let dtype = if a.numeric_dtype() == NumericDType::F32 && b.numeric_dtype() == NumericDType::F32
+    {
+        NumericDType::F32
+    } else {
+        NumericDType::F64
+    };
     if plan.is_empty() {
-        let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
+        let tensor = Tensor::new_with_dtype(Vec::new(), plan.output_shape().to_vec(), dtype)
             .map_err(|e| mod_error_with_detail(&MOD_ERROR_INTERNAL, e))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
     let mut result = vec![0.0f64; plan.len()];
     for (out_idx, idx_a, idx_b) in plan.iter() {
-        let aval = a.data[idx_a];
-        let bval = b.data[idx_b];
+        let aval = tensor::tensor_value_f64(a, idx_a);
+        let bval = tensor::tensor_value_f64(b, idx_b);
         result[out_idx] = mod_real_scalar(aval, bval);
     }
-    let tensor = Tensor::new(result, plan.output_shape().to_vec())
+    let tensor = Tensor::new_with_dtype(result, plan.output_shape().to_vec(), dtype)
         .map_err(|e| mod_error_with_detail(&MOD_ERROR_INTERNAL, e))?;
     Ok(tensor::tensor_into_value(tensor))
 }
@@ -258,8 +319,8 @@ fn compute_mod_complex(a: &ComplexTensor, b: &ComplexTensor) -> BuiltinResult<Va
     }
     let mut result = vec![(0.0f64, 0.0f64); plan.len()];
     for (out_idx, idx_a, idx_b) in plan.iter() {
-        let (ar, ai) = a.data[idx_a];
-        let (br, bi) = b.data[idx_b];
+        let (ar, ai) = a.materialize_f64()[idx_a];
+        let (br, bi) = b.materialize_f64()[idx_b];
         result[out_idx] = mod_complex_scalar(ar, ai, br, bi);
     }
     let tensor = ComplexTensor::new(result, plan.output_shape().to_vec())
@@ -272,7 +333,7 @@ fn mod_real_scalar(a: f64, b: f64) -> f64 {
         return f64::NAN;
     }
     if b == 0.0 {
-        return f64::NAN;
+        return a;
     }
     if !a.is_finite() && b.is_finite() {
         return f64::NAN;
@@ -327,7 +388,7 @@ fn scalar_real_value(value: &Value) -> Option<f64> {
         Value::Num(n) => Some(*n),
         Value::Int(i) => Some(i.to_f64()),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => t.data.first().copied(),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Some(tensor::tensor_value_f64(t, 0)),
         Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
         Value::CharArray(ca) if ca.rows * ca.cols == 1 => {
             Some(ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
@@ -339,7 +400,10 @@ fn scalar_real_value(value: &Value) -> Option<f64> {
 fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
     match value {
         Value::Complex(re, im) => Some((*re, *im)),
-        Value::ComplexTensor(ct) if ct.data.len() == 1 => ct.data.first().copied(),
+        Value::ComplexTensor(ct) if tensor::complex_tensor_element_len(ct) == 1 => {
+            let value = tensor::complex_tensor_value_complex64(ct, 0);
+            Some((value.re, value.im))
+        }
         _ => None,
     }
 }
@@ -377,9 +441,9 @@ fn complex_div(ar: f64, ai: f64, br: f64, bi: f64) -> (f64, f64) {
 }
 
 fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
-    if tensor.data.len() == 1 {
-        let (re, im) = tensor.data[0];
-        Value::Complex(re, im)
+    if tensor::complex_tensor_element_len(&tensor) == 1 {
+        let value = tensor::complex_tensor_value_complex64(&tensor, 0);
+        Value::Complex(value.re, value.im)
     } else {
         Value::ComplexTensor(tensor)
     }
@@ -439,8 +503,14 @@ fn align_numeric_arrays(lhs: NumericArray, rhs: NumericArray) -> BuiltinResult<N
 fn into_complex(input: NumericArray) -> BuiltinResult<ComplexTensor> {
     match input {
         NumericArray::Real(t) => {
-            let Tensor { data, shape, .. } = t;
-            let complex: Vec<(f64, f64)> = data.into_iter().map(|re| (re, 0.0)).collect();
+            let shape = t.shape.clone();
+            let complex = t
+                .into_numeric_storage()
+                .map_err(|e| mod_error_with_detail(&MOD_ERROR_INTERNAL, e))?
+                .materialize_f64()
+                .into_iter()
+                .map(|real| (real, 0.0))
+                .collect();
             ComplexTensor::new(complex, shape)
                 .map_err(|e| mod_error_with_detail(&MOD_ERROR_INTERNAL, e))
         }
@@ -454,12 +524,35 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use crate::RuntimeError;
     use futures::executor::block_on;
-    use runmat_builtins::{
-        CharArray, ComplexTensor, IntValue, LogicalArray, ResolveContext, Tensor, Type,
-    };
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, Tensor};
 
     fn mod_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
         block_on(super::mod_builtin(lhs, rhs))
+    }
+
+    #[test]
+    fn mod_real_arrays_preserve_native_single_storage_including_empty() {
+        let lhs = Tensor::from_f32(vec![5.5, -5.5], vec![1, 2]).unwrap();
+        let rhs = Tensor::from_f32(vec![2.0, 2.0], vec![1, 2]).unwrap();
+        let output = compute_mod_real(&lhs, &rhs).unwrap();
+        let Value::Tensor(output) = output else {
+            panic!("expected native-single tensor")
+        };
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            runmat_value::NumericStorage::F32(vec![1.5, 0.5])
+        );
+
+        let lhs = Tensor::from_f32(Vec::new(), vec![0, 2]).unwrap();
+        let rhs = Tensor::from_f32(Vec::new(), vec![0, 2]).unwrap();
+        let Value::Tensor(output) = compute_mod_real(&lhs, &rhs).unwrap() else {
+            panic!("expected empty native-single tensor")
+        };
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            runmat_value::NumericStorage::F32(Vec::new())
+        );
     }
 
     fn assert_error_contains(error: RuntimeError, needle: &str) {
@@ -545,7 +638,7 @@ pub(crate) mod tests {
             mod_builtin(Value::Tensor(tensor), Value::Tensor(divisor)).expect("mod broadcast");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.data, vec![-3.0, -3.0, 0.0, -3.0]);
+                assert_eq!(out.materialize_f64(), vec![-3.0, -3.0, 0.0, -3.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -563,11 +656,11 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn mod_zero_divisor_returns_nan() {
+    fn mod_zero_divisor_returns_dividend() {
         let result = mod_builtin(Value::Num(3.0), Value::Num(0.0)).expect("mod");
         match result {
-            Value::Num(v) => assert!(v.is_nan()),
-            other => panic!("expected NaN, got {other:?}"),
+            Value::Num(v) => assert_eq!(v, 3.0),
+            other => panic!("expected dividend, got {other:?}"),
         }
     }
 
@@ -580,7 +673,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
                 let expected = [0.5, 1.1, 1.7, 0.4];
-                for (a, b) in t.data.iter().zip(expected.iter()) {
+                for (a, b) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((a - b).abs() < 1e-12);
                 }
             }
@@ -590,23 +683,34 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn mod_complex_operands() {
+    fn mod_rejects_complex_operands() {
         let complex =
             ComplexTensor::new(vec![(3.0, 4.0), (-2.0, 5.0)], vec![1, 2]).expect("complex tensor");
         let divisor = ComplexTensor::new(vec![(2.0, 1.0)], vec![1, 1]).expect("divisor");
-        let result = mod_builtin(Value::ComplexTensor(complex), Value::ComplexTensor(divisor))
-            .expect("complex mod");
-        match result {
-            Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
-                let expected = [(0.0, 0.0), (0.0, 1.0)];
-                for ((re, im), (er, ei)) in out.data.iter().zip(expected.iter()) {
-                    assert!((re - er).abs() < 1e-12);
-                    assert!((im - ei).abs() < 1e-12);
-                }
-            }
-            other => panic!("expected complex tensor result, got {other:?}"),
-        }
+        assert!(mod_builtin(Value::ComplexTensor(complex), Value::ComplexTensor(divisor)).is_err());
+        assert!(mod_builtin(Value::Complex(2.0, 0.0), Value::Num(1.0)).is_err());
+    }
+
+    #[test]
+    fn mod_complex_scalar_helpers_read_typed_integer_complex_storage_without_mirror() {
+        let complex = ComplexTensor::new_integer(
+            runmat_value::IntegerComplexStorage::new(
+                IntegerStorage::I16(vec![9]),
+                IntegerStorage::I16(vec![-2]),
+            )
+            .expect("integer complex storage"),
+            vec![1, 1],
+        )
+        .expect("integer complex tensor");
+
+        assert_eq!(
+            scalar_complex_value(&Value::ComplexTensor(complex.clone())),
+            Some((9.0, -2.0))
+        );
+        assert_eq!(
+            complex_tensor_into_value(complex),
+            Value::Complex(9.0, -2.0)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -615,7 +719,7 @@ pub(crate) mod tests {
         let chars = CharArray::new("ABC".chars().collect(), 1, 3).unwrap();
         let result = mod_builtin(Value::CharArray(chars), Value::Num(5.0)).expect("mod");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data, vec![0.0, 1.0, 2.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![0.0, 1.0, 2.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -637,7 +741,7 @@ pub(crate) mod tests {
         let value =
             mod_builtin(Value::LogicalArray(logical), Value::Num(2.0)).expect("logical mod");
         match value {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 0.0, 1.0, 0.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 0.0, 1.0, 0.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -651,7 +755,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
-                assert_eq!(t.data, vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -674,11 +778,11 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![-5.0, -3.0, 0.0, 1.0, 6.0, 9.0], vec![3, 2]).unwrap();
             let divisor = Tensor::new(vec![4.0, 4.0, 4.0, 4.0, 4.0, 4.0], vec![3, 2]).unwrap();
             let a_view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let b_view = runmat_accelerate_api::HostTensorView {
-                data: &divisor.data,
+                data: &divisor.materialize_f64(),
                 shape: &divisor.shape,
             };
             let a_handle = provider.upload(&a_view).expect("upload a");
@@ -687,19 +791,61 @@ pub(crate) mod tests {
                 mod_builtin(Value::GpuTensor(a_handle), Value::GpuTensor(b_handle)).expect("mod");
             let gathered = test_support::gather(result).expect("gather result");
             assert_eq!(gathered.shape, vec![3, 2]);
-            assert_eq!(gathered.data, vec![3.0, 1.0, 0.0, 1.0, 2.0, 1.0]);
+            assert_eq!(
+                gathered.materialize_f64(),
+                vec![3.0, 1.0, 0.0, 1.0, 2.0, 1.0]
+            );
         });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn mod_int_scalar_promotes() {
+    fn mod_int_scalar_preserves_exact_class() {
         let result =
             mod_builtin(Value::Int(IntValue::I32(-7)), Value::Int(IntValue::I32(4))).expect("mod");
         match result {
-            Value::Num(v) => assert!((v - 1.0).abs() < 1e-12),
-            other => panic!("expected scalar result, got {other:?}"),
+            Value::Int(IntValue::I32(v)) => assert_eq!(v, 1),
+            other => panic!("expected int32 scalar result, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn mod_scalar_fast_path_reads_typed_integer_storage_exactly() {
+        let lhs =
+            Tensor::new_integer(IntegerStorage::I16(vec![7]), vec![1, 1]).expect("lhs tensor");
+
+        assert_eq!(scalar_real_value(&Value::Tensor(lhs.clone())), Some(7.0));
+
+        let result = mod_builtin(Value::Tensor(lhs), Value::Num(4.0)).expect("mod");
+        match result {
+            Value::Int(IntValue::I16(v)) => assert_eq!(v, 3),
+            other => panic!("expected int16 scalar result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mod_dense_integer_arrays_preserve_exact_storage_without_mirror() {
+        let lhs = Tensor::new_integer(IntegerStorage::I64(vec![-7, 7]), vec![2, 1]).expect("lhs");
+        let rhs =
+            Tensor::new_integer(IntegerStorage::I64(vec![4, -4, 0]), vec![1, 3]).expect("rhs");
+
+        let result = mod_builtin(Value::Tensor(lhs), Value::Tensor(rhs)).expect("mod");
+        let Value::Tensor(result) = result else {
+            panic!("expected integer tensor");
+        };
+        assert_eq!(result.shape, vec![2, 3]);
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::I64(vec![1, 3, -3, -1, -7, 7]))
+        );
+
+        let lhs =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("lhs");
+        assert_eq!(
+            mod_builtin(Value::Tensor(lhs), Value::Num(3.0)).expect("mod"),
+            Value::Int(IntValue::U64(0))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -717,13 +863,13 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider registered");
         let numer_handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
-                data: &numer.data,
+                data: &numer.materialize_f64(),
                 shape: &numer.shape,
             })
             .expect("upload numer");
         let denom_handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
-                data: &denom.data,
+                data: &denom.materialize_f64(),
                 shape: &denom.shape,
             })
             .expect("upload denom");
@@ -742,7 +888,11 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        for (gpu, cpu) in gpu_tensor.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gpu_tensor
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!(
                 (gpu - cpu).abs() <= tol,
                 "|{gpu} - {cpu}| exceeded tolerance {tol}"

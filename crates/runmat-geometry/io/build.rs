@@ -29,14 +29,48 @@ fn build_occt_backend() {
     if link_mode != "static" && link_mode != "dylib" {
         panic!("RUNMAT_OCCT_LINK_MODE must be either 'static' or 'dylib'");
     }
-    let (occt_include, occt_lib) = occt_paths(&link_mode);
+    let (occt_include, occt_lib, uses_bundled_occt) = occt_paths(&link_mode);
 
     let occt_link_libs = occt_link_libs(&occt_lib);
+    let mut build = cxx_build::bridge("src/occt/ffi.rs");
+    build
+        .file("src/occt/occt_bridge.cc")
+        .file("src/occt/exact_assembly.cc")
+        .file("src/occt/exact_identity.cc")
+        .file("src/occt/exact_healing.cc")
+        .file("src/occt/exact_small_topology.cc")
+        .file("src/occt/exact_xcaf_healing.cc")
+        .file("src/occt/exact_xcaf_subshape_remap.cc")
+        .file("src/occt/exact_nesting.cc")
+        .file("src/occt/exact_topology.cc")
+        .file("src/occt/exact_evaluator.cc")
+        .file("src/occt/exact_surface_evaluator.cc")
+        .include(&occt_include)
+        .std("c++17")
+        .flag_if_supported("-Wno-deprecated-declarations")
+        .define("_USE_MATH_DEFINES", None);
+    if uses_bundled_occt {
+        // OCCT 7.8's process-lifetime RTTI registry can be destroyed before STEP/IGES type
+        // descriptors when statically linked. This source overrides that one TKernel object with
+        // the upstream lifetime-safe ownership model used by later OCCT releases.
+        build.file("src/occt/occt_type_lifetime.cc");
+    }
+
+    if is_windows_gnu {
+        build.define("OCC_CONVERT_SIGNALS", "TRUE");
+    }
+    if target_env == "msvc" {
+        build.flag("/utf-8");
+    }
+
+    build.compile("runmat_geometry_io_occt");
+
+    // Keep the bridge archive before OCCT's archives so its bundled-7.8 Standard_Type lifetime
+    // override satisfies TKernel's symbols before the defective object can be selected.
     println!("cargo:rustc-link-search=native={}", occt_lib.display());
     for lib in &occt_link_libs {
         println!("cargo:rustc-link-lib={link_mode}={lib}");
     }
-
     if is_windows {
         println!("cargo:rustc-link-lib=dylib=user32");
     }
@@ -51,26 +85,27 @@ fn build_occt_backend() {
         }
     }
 
-    let mut build = cxx_build::bridge("src/occt/ffi.rs");
-    build
-        .file("src/occt/occt_bridge.cc")
-        .include(&occt_include)
-        .std("c++17")
-        .flag_if_supported("-Wno-deprecated-declarations")
-        .define("_USE_MATH_DEFINES", None);
-
-    if is_windows_gnu {
-        build.define("OCC_CONVERT_SIGNALS", "TRUE");
-    }
-    if target_env == "msvc" {
-        build.flag("/utf-8");
-    }
-
-    build.compile("runmat_geometry_io_occt");
-
     println!("cargo:rerun-if-changed=src/occt/ffi.rs");
     println!("cargo:rerun-if-changed=src/occt/occt_bridge.hxx");
     println!("cargo:rerun-if-changed=src/occt/occt_bridge.cc");
+    println!("cargo:rerun-if-changed=src/occt/exact_assembly.hxx");
+    println!("cargo:rerun-if-changed=src/occt/exact_assembly.cc");
+    println!("cargo:rerun-if-changed=src/occt/exact_identity.hxx");
+    println!("cargo:rerun-if-changed=src/occt/exact_identity.cc");
+    println!("cargo:rerun-if-changed=src/occt/exact_healing.hxx");
+    println!("cargo:rerun-if-changed=src/occt/exact_healing.cc");
+    println!("cargo:rerun-if-changed=src/occt/exact_small_topology.cc");
+    println!("cargo:rerun-if-changed=src/occt/exact_xcaf_healing.hxx");
+    println!("cargo:rerun-if-changed=src/occt/exact_xcaf_healing.cc");
+    println!("cargo:rerun-if-changed=src/occt/exact_xcaf_subshape_remap.hxx");
+    println!("cargo:rerun-if-changed=src/occt/exact_xcaf_subshape_remap.cc");
+    println!("cargo:rerun-if-changed=src/occt/exact_nesting.hxx");
+    println!("cargo:rerun-if-changed=src/occt/exact_nesting.cc");
+    println!("cargo:rerun-if-changed=src/occt/exact_topology.hxx");
+    println!("cargo:rerun-if-changed=src/occt/exact_topology.cc");
+    println!("cargo:rerun-if-changed=src/occt/exact_evaluator.cc");
+    println!("cargo:rerun-if-changed=src/occt/exact_evaluator_internal.hxx");
+    println!("cargo:rerun-if-changed=src/occt/exact_surface_evaluator.cc");
 }
 
 #[cfg(not(feature = "occt-native"))]
@@ -91,11 +126,11 @@ fn configure_macos_deployment_target(target: &str) {
 }
 
 #[cfg(feature = "occt-native")]
-fn occt_paths(link_mode: &str) -> (PathBuf, PathBuf) {
+fn occt_paths(link_mode: &str) -> (PathBuf, PathBuf, bool) {
     let include_dir = env::var_os("RUNMAT_OCCT_INCLUDE_DIR").map(PathBuf::from);
     let lib_dir = env::var_os("RUNMAT_OCCT_LIB_DIR").map(PathBuf::from);
     match (include_dir, lib_dir) {
-        (Some(include), Some(lib)) => return (include, lib),
+        (Some(include), Some(lib)) => return (include, lib, false),
         (Some(_), None) | (None, Some(_)) => {
             panic!("RUNMAT_OCCT_INCLUDE_DIR and RUNMAT_OCCT_LIB_DIR must be set together")
         }
@@ -103,7 +138,7 @@ fn occt_paths(link_mode: &str) -> (PathBuf, PathBuf) {
     }
 
     if let Some(root) = env::var_os("RUNMAT_OCCT_ROOT").map(PathBuf::from) {
-        return (occt_root_include_dir(&root), root.join("lib"));
+        return (occt_root_include_dir(&root), root.join("lib"), false);
     }
 
     if link_mode == "dylib" {
@@ -119,7 +154,7 @@ fn occt_paths(link_mode: &str) -> (PathBuf, PathBuf) {
     require_cmake_for_bundled_occt();
     occt_sys::build_occt();
     let occt_path = occt_sys::occt_path();
-    (occt_path.join("include"), occt_path.join("lib"))
+    (occt_path.join("include"), occt_path.join("lib"), true)
 }
 
 #[cfg(feature = "occt-native")]

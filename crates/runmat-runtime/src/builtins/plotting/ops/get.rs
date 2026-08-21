@@ -1,14 +1,47 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use super::properties::{get_properties, resolve_plot_handle};
 use crate::builtins::plotting::type_resolvers::get_type;
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "get";
+
+const GET_INTEGER_HANDLE_ALIAS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "get-integer-handle-alias",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "typed-integer numeric graphics aliases for get are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:GetIntegerHandleAliasExtension"),
+};
+pub const GET_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [GET_INTEGER_HANDLE_ALIAS_EXTENSION];
+
+const GET_INTEGER_HANDLE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "h",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target documents graphics objects, not typed numeric aliases; RunMat resolves exact aliases only under extension policy.",
+    }];
+pub const GET_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "value = get(integer_graphics_alias, property?)",
+        inputs: &GET_INTEGER_HANDLE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "Only handle resolution is integer-sensitive. Property payload Values are returned unchanged, including authoritative integer storage.",
+    }];
 
 const GET_OUTPUT_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "value",
@@ -23,7 +56,7 @@ const GET_INPUTS_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Graphics handle (figure, axes, plot object, text, legend, etc.).",
+    description: "Graphics object (figure, axes, plot object, text, legend, etc.); RunMat currently also resolves its numeric handle representation.",
 }];
 
 const GET_INPUTS_HANDLE_PROPERTY: [BuiltinParamDescriptor; 2] = [
@@ -32,7 +65,7 @@ const GET_INPUTS_HANDLE_PROPERTY: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Graphics handle (figure, axes, plot object, text, legend, etc.).",
+        description: "Graphics object (figure, axes, plot object, text, legend, etc.); RunMat currently also resolves its numeric handle representation.",
     },
     BuiltinParamDescriptor {
         name: "property",
@@ -106,6 +139,8 @@ fn map_get_error(err: RuntimeError) -> RuntimeError {
     keywords = "get,plotting,handle,property",
     type_resolver(get_type),
     descriptor(crate::builtins::plotting::get::GET_DESCRIPTOR),
+    extensions(crate::builtins::plotting::get::GET_EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::get::GET_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::get"
 )]
 pub fn get_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -115,28 +150,52 @@ pub fn get_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             "expected a plotting handle",
         ));
     }
+    let typed_integer_alias = is_typed_integer_handle_alias(&args[0]);
+    if typed_integer_alias {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &GET_INTEGER_HANDLE_ALIAS_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    let handle_arg = if typed_integer_alias {
+        Value::Num(
+            super::op_common::handles::numeric_handle_scalar(&args[0]).ok_or_else(|| {
+                get_error_with_detail(
+                    &GET_ERROR_INVALID_ARGUMENT,
+                    "typed-integer graphics alias must be exactly representable",
+                )
+            })?,
+        )
+    } else {
+        args[0].clone()
+    };
     let property = args
         .get(1)
         .and_then(|v| crate::builtins::plotting::style::value_as_string(v));
     if let Some(value) =
-        super::zoom::get_zoom_object_property(&args[0], property.as_deref(), BUILTIN_NAME)?
+        super::zoom::get_zoom_object_property(&handle_arg, property.as_deref(), BUILTIN_NAME)?
     {
         return Ok(value);
     }
     if let Some(value) =
-        super::pan::get_pan_object_property(&args[0], property.as_deref(), BUILTIN_NAME)?
+        super::pan::get_pan_object_property(&handle_arg, property.as_deref(), BUILTIN_NAME)?
     {
         return Ok(value);
     }
     if let Some(value) = super::datacursormode::get_data_cursor_object_property(
-        &args[0],
+        &handle_arg,
         property.as_deref(),
         BUILTIN_NAME,
     )? {
         return Ok(value);
     }
-    let handle = resolve_plot_handle(&args[0], BUILTIN_NAME).map_err(map_get_error)?;
+    let handle = resolve_plot_handle(&handle_arg, BUILTIN_NAME).map_err(map_get_error)?;
     get_properties(handle, property.as_deref(), BUILTIN_NAME).map_err(map_get_error)
+}
+
+fn is_typed_integer_handle_alias(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
 }
 
 #[cfg(test)]
@@ -148,8 +207,8 @@ mod tests {
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::title::title_builtin;
     use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
-    use runmat_builtins::Value;
     use runmat_plot::plots::{Figure, LinePlot};
+    use runmat_value::Value;
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -175,6 +234,57 @@ mod tests {
         let _guard = setup();
         let err = get_builtin(vec![]).expect_err("expected missing handle to fail");
         assert_eq!(err.identifier(), GET_ERROR_INVALID_ARGUMENT.identifier);
+    }
+
+    #[test]
+    fn get_typed_integer_graphics_aliases_are_gated_before_lookup() {
+        assert_eq!(GET_INTEGER_CAPABILITIES[0].inputs[0].classes.len(), 8);
+        let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+        for integer in [
+            runmat_value::IntValue::I8(1),
+            runmat_value::IntValue::I16(1),
+            runmat_value::IntValue::I32(1),
+            runmat_value::IntValue::I64(1),
+            runmat_value::IntValue::U8(1),
+            runmat_value::IntValue::U16(1),
+            runmat_value::IntValue::U32(1),
+            runmat_value::IntValue::U64(1),
+        ] {
+            let error = get_builtin(vec![Value::Int(integer)]).unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:GetIntegerHandleAliasExtension")
+            );
+        }
+        let tensor = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U32(vec![1]),
+            vec![1, 1],
+        )
+        .expect("alias");
+        let error = get_builtin(vec![Value::Tensor(tensor)]).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:GetIntegerHandleAliasExtension")
+        );
+    }
+
+    #[test]
+    fn get_rejects_inexact_wide_integer_aliases_before_lookup() {
+        let _matlab = crate::compatibility::push_runmat_extensions_enabled(true);
+        let error = get_builtin(vec![Value::Int(runmat_value::IntValue::U64(
+            (1_u64 << 53) + 1,
+        ))])
+        .expect_err("wide scalar alias must not round");
+        assert_eq!(error.identifier(), GET_ERROR_INVALID_ARGUMENT.identifier);
+
+        let tensor = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![(1_u64 << 53) + 1]),
+            vec![1, 1],
+        )
+        .unwrap();
+        let error =
+            get_builtin(vec![Value::Tensor(tensor)]).expect_err("wide tensor alias must not round");
+        assert_eq!(error.identifier(), GET_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[test]
@@ -213,7 +323,7 @@ mod tests {
         let _ = crate::builtins::plotting::set::set_builtin(vec![
             Value::Num(h),
             Value::String("String".into()),
-            Value::StringArray(runmat_builtins::StringArray {
+            Value::StringArray(runmat_value::StringArray {
                 data: vec!["Top".into(), "Bottom".into()],
                 shape: vec![1, 2],
                 rows: 1,
@@ -290,14 +400,7 @@ mod tests {
         crate::builtins::plotting::set::set_builtin(vec![
             Value::Num(ax),
             Value::String("XLim".into()),
-            Value::Tensor(runmat_builtins::Tensor {
-                rows: 1,
-                cols: 2,
-                shape: vec![1, 2],
-                data: vec![1.0, 5.0],
-                integer_data: None,
-                dtype: runmat_builtins::NumericDType::F64,
-            }),
+            Value::Tensor(runmat_value::Tensor::new(vec![1.0, 5.0], vec![1, 2]).expect("x limits")),
             Value::String("XScale".into()),
             Value::String("log".into()),
             Value::String("Grid".into()),
@@ -308,7 +411,9 @@ mod tests {
         let scale = get_builtin(vec![Value::Num(ax), Value::String("XScale".into())]).unwrap();
         let grid = get_builtin(vec![Value::Num(ax), Value::String("Grid".into())]).unwrap();
         assert_eq!(
-            runmat_builtins::Tensor::try_from(&xlim).unwrap().data,
+            runmat_value::Tensor::try_from(&xlim)
+                .unwrap()
+                .materialize_f64(),
             vec![1.0, 5.0]
         );
         assert_eq!(scale, Value::String("log".into()));
@@ -416,14 +521,7 @@ mod tests {
     fn stem_handle_exposes_runtime_properties() {
         let _guard = setup();
         let handle = crate::builtins::plotting::stem::stem_builtin(vec![
-            Value::Tensor(runmat_builtins::Tensor {
-                rows: 2,
-                cols: 1,
-                shape: vec![2],
-                data: vec![1.0, 2.0],
-                integer_data: None,
-                dtype: runmat_builtins::NumericDType::F64,
-            }),
+            Value::Tensor(runmat_value::Tensor::new(vec![1.0, 2.0], vec![2]).expect("stem values")),
             Value::String("DisplayName".into()),
             Value::String("Impulse".into()),
             Value::String("BaseValue".into()),

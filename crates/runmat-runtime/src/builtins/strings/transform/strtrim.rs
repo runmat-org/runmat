@@ -3,16 +3,19 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, StringArray, Value,
 };
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, StringArray, Value};
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
+use crate::builtins::strings::common::{
+    char_row_to_string_slice, contains_numeric_or_resident_text_input, is_missing_string,
+};
 use crate::builtins::strings::type_resolvers::text_preserve_type;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
@@ -105,6 +108,12 @@ pub const STRTRIM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &STRTRIM_ERRORS,
 };
 
+pub const STRTRIM_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "strtrim removes whitespace from text containers. Numeric, integer, and provider-resident values reject before provider access and are not interpreted as character codes.",
+};
+
 fn map_flow(err: RuntimeError) -> RuntimeError {
     map_control_flow_with_builtin(err, BUILTIN_NAME)
 }
@@ -132,9 +141,13 @@ fn strtrim_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     accel = "sink",
     type_resolver(text_preserve_type),
     descriptor(crate::builtins::strings::transform::strtrim::STRTRIM_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::transform::strtrim::STRTRIM_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::transform::strtrim"
 )]
 async fn strtrim_builtin(value: Value) -> BuiltinResult<Value> {
+    if contains_numeric_or_resident_text_input(&value) {
+        return Err(strtrim_error(&STRTRIM_ERROR_INVALID_INPUT));
+    }
     let gathered = gather_if_needed_async(&value).await.map_err(map_flow)?;
     match gathered {
         Value::String(text) => Ok(Value::String(trim_string(text))),
@@ -155,9 +168,19 @@ fn strtrim_string_array(array: StringArray) -> BuiltinResult<Value> {
 }
 
 fn strtrim_char_array(array: CharArray) -> BuiltinResult<Value> {
-    let CharArray { data, rows, cols } = array;
+    let CharArray {
+        data,
+        shape,
+        rows,
+        cols,
+    } = array;
     if rows == 0 {
-        return Ok(Value::CharArray(CharArray { data, rows, cols }));
+        return Ok(Value::CharArray(CharArray {
+            data,
+            shape,
+            rows,
+            cols,
+        }));
     }
 
     let mut trimmed_rows: Vec<Vec<char>> = Vec::with_capacity(rows);

@@ -89,7 +89,7 @@ fn append_document_symbols(
 #[cfg(not(target_arch = "wasm32"))]
 fn project_symbols_sync(project: &ProjectContext, compat: CompatMode) -> Vec<SymbolInformation> {
     let mut out = Vec::new();
-    for source in project.all_source_files() {
+    for source in project.visible_source_files() {
         let Some(uri) = file_path_to_url(source) else {
             continue;
         };
@@ -115,7 +115,7 @@ async fn project_symbols_async(
     compat: CompatMode,
 ) -> Vec<SymbolInformation> {
     let mut out = Vec::new();
-    for source in project.all_source_files() {
+    for source in project.visible_source_files() {
         let Some(uri) = file_path_to_url(source) else {
             continue;
         };

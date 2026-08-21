@@ -10,10 +10,11 @@
   "summary": "Draw horizontal reference lines on current or specified axes with MATLAB-compatible styling forms.",
   "description": "`yline` adds one or more horizontal reference lines with optional labels, line specs, and name-value styling, following MATLAB-compatible plotting behavior.",
   "behaviors": [
-    "`yline(y)` adds a horizontal reference line at each coordinate in `y`.",
+    "`yline(y)` adds a horizontal reference line at each coordinate in `y`. Coordinates may use any native integer class and cross to the graphics coordinate domain after validation.",
     "Reference lines append to the current axes without replacing existing plot content.",
     "Line spans follow the active axes limits, including later `xlim` and `ylim` changes.",
-    "The returned handle supports `get` and `set` for `Value`, `Color`, `LineWidth`, `LineStyle`, `Label`, `LabelOrientation`, `DisplayName`, and `Visible`."
+    "The returned handle supports `get` and `set` for `Value`, `Color`, `LineWidth`, `LineStyle`, `Label`, `LabelOrientation`, `DisplayName`, and `Visible`.",
+    "Integer RGB components must be zero or one, integer line widths must be positive, and numeric `Visible` values must be exactly zero or one."
   ],
   "examples": [
     {

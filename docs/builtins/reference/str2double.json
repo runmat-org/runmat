@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Runs on the CPU. When inputs reference GPU data, RunMat gathers them before parsing so results match MATLAB exactly."
+    "notes": "Text parsing runs on the CPU. Numeric GPU values are not text and reject before RunMat accesses an acceleration provider."
   },
   "fusion": {
     "elementwise": false,
@@ -34,7 +34,8 @@
     "Scientific notation with `e`, `E`, `d`, or `D` exponents is supported (`\"1.2e3\"`, `\"4.5D-6\"`, etc.).",
     "`\"Inf\"`, `\"Infinity\"`, and `\"NaN\"` (any letter case, with optional sign on `Inf`) map to IEEE special values.",
     "Missing string scalars (displayed as `<missing>`) convert to `NaN`, matching MATLAB behaviour.",
-    "Character arrays return a column vector whose length equals the number of rows; cell arrays preserve their shape."
+    "Character arrays return a column vector whose length equals the number of rows; cell arrays preserve their shape.",
+    "Integer and other numeric inputs are not converted to text first. They reject before provider access, and successful results are always double."
   ],
   "examples": [
     {
@@ -109,7 +110,7 @@
     },
     {
       "question": "Will the result stay on the GPU when I pass gpuArray inputs?",
-      "answer": "No. The builtin gathers GPU-backed inputs to the host, parses them, and keeps the numeric result in host memory. Wrap the result with `gpuArray(...)` if you need to move it back to the device."
+      "answer": "The parser accepts host text and returns host doubles. Numeric GPU values are not text and reject before provider access; move only the resulting numeric array explicitly if later GPU computation needs it."
     }
   ],
   "links": [
@@ -167,6 +168,6 @@
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/str2double.rs"
   },
   "gpu_behavior": [
-    "`str2double` executes entirely on the CPU. If any argument is backed by a GPU buffer (for example, a cell array that still wraps GPU-resident character data), RunMat gathers the values first, parses the text on the host, and returns CPU-resident doubles. Providers do not need custom kernels for this builtin."
+    "`str2double` executes entirely on host text and returns host double values. Numeric resident handles are not text and reject before provider access, so providers do not need a parsing kernel."
   ]
 }

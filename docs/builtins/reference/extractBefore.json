@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "No GPU kernel is registered for this compatibility builtin; GPU-resident inputs are gathered to host memory before evaluation."
+    "notes": "No GPU kernel is registered. Documented text and numeric position inputs are host values; gathering a resident numeric position is an independently gated RunMat extension."
   },
   "fusion": {
     "elementwise": false,
@@ -28,7 +28,7 @@
     "unit": "builtins::strings::transform::compat::tests",
     "integration": null
   },
-  "description": "s = extractBefore(text, boundary) - Extract text before a position or boundary.",
+  "description": "`extractBefore(text, boundary)` returns the text before the first matching text/pattern boundary or before a one-based numeric position. The output preserves the text input datatype and shape.",
   "signatures": [
     {
       "label": "s = extractBefore(text, boundary)",
@@ -41,11 +41,11 @@
           "description": "Input text."
         },
         {
-          "name": "arg",
+          "name": "boundary",
           "ty": "Any",
-          "arity": "Variadic",
+          "arity": "Required",
           "default": null,
-          "description": "Additional arguments."
+          "description": "Text/pattern boundary or positive numeric position, supplied as a scalar or an array the same size as the text input."
         }
       ],
       "outputs": [
@@ -60,8 +60,11 @@
     }
   ],
   "behaviors": [
-    "Extract text before a position or boundary.",
-    "Missing text or pattern boundaries are reported as errors."
+    "Numeric positions are one-based structural controls. Scalar positions expand to every text element; nonscalar positions must have exactly the same shape as the text input.",
+    "All eight built-in integer classes are read from native storage without floating-point conversion. Single and double positions must be finite positive integer values.",
+    "String arrays, character vectors, and cell arrays of character vectors preserve their input datatype and shape. Row-wise character matrices and broader cell containers are explicit RunMat extensions.",
+    "Missing text propagates. A text or pattern boundary that cannot be found is reported as an error by the current RunMat implementation.",
+    "Integer, logical, complex, and resident numeric values are not accepted as text. Resident numeric positions require the RunMat extension mode and are gathered before host evaluation."
   ],
   "examples": [
     "extractBefore(\"alpha.beta\", \".\") returns \"alpha\"."

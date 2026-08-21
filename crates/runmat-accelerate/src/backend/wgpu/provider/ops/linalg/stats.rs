@@ -28,10 +28,10 @@ impl WgpuProvider {
             let left_entry = self.get_entry(matrix)?;
             let right_entry = self.get_entry(rhs)?;
 
-            let rows_left = match left_entry.shape.len() {
-                0 => 1usize,
-                1 => left_entry.shape[0],
-                2 => left_entry.shape[0],
+            let left_is_vector = match left_entry.shape.len() {
+                0 => true,
+                1 => true,
+                2 => left_entry.shape[0] == 1 || left_entry.shape[1] == 1,
                 _ => {
                     return Err(anyhow!(
                         "covariance: inputs must be 2-D matrices or vectors (got shape {:?})",
@@ -39,10 +39,10 @@ impl WgpuProvider {
                     ))
                 }
             };
-            let rows_right = match right_entry.shape.len() {
-                0 => 1usize,
-                1 => right_entry.shape[0],
-                2 => right_entry.shape[0],
+            let right_is_vector = match right_entry.shape.len() {
+                0 => true,
+                1 => true,
+                2 => right_entry.shape[0] == 1 || right_entry.shape[1] == 1,
                 _ => {
                     return Err(anyhow!(
                         "covariance: inputs must be 2-D matrices or vectors (got shape {:?})",
@@ -51,25 +51,48 @@ impl WgpuProvider {
                 }
             };
 
+            let compatible = if left_is_vector && right_is_vector {
+                left_entry.len == right_entry.len
+            } else {
+                left_entry.shape == right_entry.shape
+            };
             ensure!(
-                rows_left == rows_right,
-                "covariance: inputs must have the same number of rows (got {} and {})",
-                rows_left,
-                rows_right
+                compatible,
+                "covariance: paired inputs must have the same size"
             );
 
-            let cat_inputs = vec![matrix.clone(), rhs.clone()];
-            Some(self.cat_exec(2, &cat_inputs)?)
+            let left_column = self.reshape(matrix, &[left_entry.len, 1])?;
+            let right_column = self.reshape(rhs, &[right_entry.len, 1])?;
+            let cat_inputs = vec![left_column.clone(), right_column.clone()];
+            let result = self.cat_exec(2, &cat_inputs);
+            let _ = self.free_exec(&left_column);
+            let _ = self.free_exec(&right_column);
+            Some(result?)
         } else {
             None
         };
 
+        let normalized_single = if combined.is_none() {
+            let entry = self.get_entry(matrix)?;
+            match entry.shape.as_slice() {
+                [1, _] => Some(self.reshape(matrix, &[entry.len, 1])?),
+                _ => None,
+            }
+        } else {
+            None
+        };
         let result = {
-            let source = combined.as_ref().unwrap_or(matrix);
+            let source = combined
+                .as_ref()
+                .or(normalized_single.as_ref())
+                .unwrap_or(matrix);
             self.covariance_exec(source, weights, options).await
         };
 
         if let Some(handle) = combined {
+            let _ = self.free_exec(&handle);
+        }
+        if let Some(handle) = normalized_single {
             let _ = self.free_exec(&handle);
         }
 
@@ -753,6 +776,10 @@ impl WgpuProvider {
             }
         };
 
+        if entry.len == 0 && cols == 0 {
+            return self.fill_exec(&[1, 1], f64::NAN);
+        }
+
         if cols == 0 {
             let out_buffer = self.create_storage_buffer(0, "runmat-cov-empty");
             return Ok(self.register_existing_buffer(out_buffer, vec![0, 0], 0));
@@ -769,7 +796,7 @@ impl WgpuProvider {
         }
 
         let denom = match options.normalization {
-            CovNormalization::Unbiased => (rows as f64) - 1.0,
+            CovNormalization::Unbiased => ((rows as f64) - 1.0).max(1.0),
             CovNormalization::Biased => rows as f64,
         };
 
@@ -789,6 +816,29 @@ impl WgpuProvider {
         result
     }
     pub(crate) async fn corrcoef_exec(
+        &self,
+        matrix: &GpuTensorHandle,
+        options: &CorrcoefOptions,
+    ) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(matrix)?;
+        let normalized = match entry.shape.as_slice() {
+            [1, _] => Some(self.register_existing_buffer_with_storage(
+                entry.buffer.clone(),
+                vec![entry.len, 1],
+                entry.len,
+                entry.storage,
+            )),
+            _ => None,
+        };
+        let source = normalized.as_ref().unwrap_or(matrix);
+        let result = self.corrcoef_matrix_exec(source, options).await;
+        if let Some(handle) = normalized {
+            let _ = self.free_exec(&handle);
+        }
+        result
+    }
+
+    async fn corrcoef_matrix_exec(
         &self,
         matrix: &GpuTensorHandle,
         options: &CorrcoefOptions,
@@ -964,6 +1014,8 @@ impl WgpuProvider {
         let sigma_buffer = self.create_storage_buffer_checked(rows, "runmat-cov2corr-sigma-out")?;
 
         if total > 0 {
+            let validation_buffer =
+                self.create_storage_buffer_checked(total, "runmat-cov2corr-validation")?;
             let error_buffer =
                 self.device_ref()
                     .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -1043,6 +1095,10 @@ impl WgpuProvider {
                                 binding: 4,
                                 resource: params_buffer.as_entire_binding(),
                             },
+                            wgpu::BindGroupEntry {
+                                binding: 5,
+                                resource: validation_buffer.as_ref().as_entire_binding(),
+                            },
                         ],
                     });
                 let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
@@ -1087,7 +1143,7 @@ impl WgpuProvider {
                 0 => {}
                 1 => {
                     return Err(anyhow!(
-                        "covariance_to_correlation: covariance matrix must contain finite values or NaN"
+                        "covariance_to_correlation: covariance matrix must contain finite values"
                     ))
                 }
                 2 => {
@@ -1105,6 +1161,11 @@ impl WgpuProvider {
                         "covariance_to_correlation: covariance magnitude exceeds variance bounds"
                     ))
                 }
+                5 => {
+                    return Err(anyhow!(
+                        "covariance_to_correlation: covariance matrix must be positive semidefinite"
+                    ))
+                }
                 other => {
                     return Err(anyhow!(
                         "covariance_to_correlation: validation failed with code {other}"
@@ -1120,7 +1181,7 @@ impl WgpuProvider {
     }
 }
 
-fn covariance_to_correlation_bind_layout_entries() -> [wgpu::BindGroupLayoutEntry; 5] {
+fn covariance_to_correlation_bind_layout_entries() -> [wgpu::BindGroupLayoutEntry; 6] {
     std::array::from_fn(|binding| {
         let read_only = binding == 0;
         wgpu::BindGroupLayoutEntry {
@@ -1179,6 +1240,7 @@ struct Params {{
 @group(0) @binding(2) var<storage, read_write> sigma: Tensor;
 @group(0) @binding(3) var<storage, read_write> errors: ErrorState;
 @group(0) @binding(4) var<uniform> params: Params;
+@group(0) @binding(5) var<storage, read_write> validation: Tensor;
 
 fn is_nan_cov2corr(x: {ty}) -> bool {{
   return x != x;
@@ -1214,7 +1276,76 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
   let diag_row = covariance.data[row + row * n];
   let diag_col = covariance.data[col + col * n];
 
-  if (!is_nan_cov2corr(value) && !is_finite_cov2corr(value)) {{
+  if (idx == 0u) {{
+    var finite_matrix = true;
+    var scan = 0u;
+    loop {{
+      if (scan >= params.total) {{
+        break;
+      }}
+      if (!is_finite_cov2corr(covariance.data[scan])) {{
+        finite_matrix = false;
+      }}
+      validation.data[scan] = {ty}(0.0);
+      scan = scan + 1u;
+    }}
+    if (finite_matrix) {{
+      var scale = {ty}(1.0);
+      var diagonal = 0u;
+      loop {{
+        if (diagonal >= n) {{
+          break;
+        }}
+        scale = max(scale, abs(covariance.data[diagonal + diagonal * n]));
+        diagonal = diagonal + 1u;
+      }}
+      let psd_tol = {ty}({tol}) * scale;
+      let pivot_tol = sqrt(psd_tol);
+      var factor_row = 0u;
+      var psd = true;
+      loop {{
+        if (factor_row >= n || !psd) {{
+          break;
+        }}
+        var factor_col = 0u;
+        loop {{
+          if (factor_col > factor_row || !psd) {{
+            break;
+          }}
+          var residual = covariance.data[factor_row + factor_col * n];
+          var k = 0u;
+          loop {{
+            if (k >= factor_col) {{
+              break;
+            }}
+            residual = residual - validation.data[factor_row * n + k] * validation.data[factor_col * n + k];
+            k = k + 1u;
+          }}
+          if (factor_row == factor_col) {{
+            if (residual < -psd_tol) {{
+              psd = false;
+            }} else {{
+              validation.data[factor_row * n + factor_col] = sqrt(max(residual, {ty}(0.0)));
+            }}
+          }} else {{
+            let pivot = validation.data[factor_col * n + factor_col];
+            if (pivot > pivot_tol) {{
+              validation.data[factor_row * n + factor_col] = residual / pivot;
+            }} else if (abs(residual) > psd_tol) {{
+              psd = false;
+            }}
+          }}
+          factor_col = factor_col + 1u;
+        }}
+        factor_row = factor_row + 1u;
+      }}
+      if (!psd) {{
+        flag_error(5u);
+      }}
+    }}
+  }}
+
+  if (!is_finite_cov2corr(value)) {{
     flag_error(1u);
   }}
   if (row == col && value < {ty}(0.0)) {{
@@ -1315,5 +1446,21 @@ mod covariance_conversion_tests {
 
         assert!(err.to_string().contains("symmetric"));
         provider.free(&covariance).ok();
+
+        let indefinite = provider
+            .upload(&HostTensorView {
+                data: &[
+                    1.0, 0.9, 0.9, //
+                    0.9, 1.0, -0.9, //
+                    0.9, -0.9, 1.0,
+                ],
+                shape: &[3, 3],
+            })
+            .expect("upload indefinite covariance");
+        let err = provider
+            .covariance_to_correlation(&indefinite)
+            .expect_err("indefinite covariance");
+        assert!(err.to_string().contains("positive semidefinite"));
+        provider.free(&indefinite).ok();
     }
 }

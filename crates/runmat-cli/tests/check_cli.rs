@@ -51,6 +51,11 @@ fn unresolved_function_is_a_warning_by_default_and_an_error_when_denied() {
 fn json_output_is_stable_and_contains_source_coordinates() {
     let temp = TempDir::new().unwrap();
     fs::write(
+        temp.path().join("runmat.toml"),
+        "[package]\nname = \"check-json\"\n\n[sources]\nroots = [\".\"]\n",
+    )
+    .unwrap();
+    fs::write(
         temp.path().join("main.m"),
         "value = definitely_missing(1);\n",
     )
@@ -67,6 +72,12 @@ fn json_output_is_stable_and_contains_source_coordinates() {
     assert_eq!(payload["diagnostics"][0]["primary"]["line"], 1);
     assert_eq!(payload["diagnostics"][0]["primary"]["column"], 9);
     assert_eq!(payload["analysis"]["name_resolution"], "complete");
+    assert!(payload["project_revision"]["graph_digest"]
+        .as_str()
+        .is_some_and(|digest| digest.starts_with("sha256:")));
+    assert!(payload["project_revision"]["source_revision"]
+        .as_str()
+        .is_some_and(|digest| digest.starts_with("sha256:")));
 }
 
 #[test]

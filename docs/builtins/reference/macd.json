@@ -15,9 +15,10 @@
   "tested": { "unit": "builtins::finance::macd::tests", "integration": null },
   "description": "`macd(Data)` computes the 12-period minus 26-period exponential moving-average line and the 9-period exponential signal line.",
   "behaviors": [
-    "Matrix input must be M-by-4 with High, Low, Open, and Close prices in columns 1 through 4.",
+    "MATLAB-compatible matrix input must be a double M-by-4 array with High, Low, Open, and Close prices in columns 1 through 4.",
+    "In `runmat` compatibility mode, raw native-single and integer M-by-4 matrices are accepted as a RunMat extension and computed in the double MACD domain; integer prices that are not exactly representable in binary64 reject before computation.",
     "Table and timetable inputs must contain High, Low, Open, and Close variables, matched case-insensitively.",
-    "Table and timetable High, Low, Open, and Close variables must be numeric M-by-1 vectors.",
+    "Table and timetable High, Low, Open, and Close variables must be numeric M-by-1 vectors. Integer variables use authoritative native storage until a checked binary64 EMA boundary and produce double Close output data.",
     "The returned MACDLine and SignalLine preserve the input row count and container type.",
     "For table and timetable inputs, outputs contain a Close variable with the computed series.",
     "Empty M-by-4 inputs return empty M-by-1 outputs; NaNs propagate through the exponential moving-average recurrence."

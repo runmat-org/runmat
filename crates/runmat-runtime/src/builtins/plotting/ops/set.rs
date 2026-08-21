@@ -1,8 +1,14 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use super::properties::{resolve_plot_handle, set_properties};
 use crate::builtins::plotting::type_resolvers::set_type;
@@ -40,6 +46,26 @@ const SET_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescrip
     inputs: &SET_INPUTS_HANDLE_PAIRS,
     outputs: &SET_OUTPUT_STATUS,
 }];
+
+const SET_INTEGER_PROPERTY_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "property value",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Integer availability and conversion are property-specific; accepted graphics properties read the authoritative scalar or array value before their named renderer or structural boundary.",
+    }];
+pub const SET_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "set(h, property, integer_value, ...)",
+        inputs: &SET_INTEGER_PROPERTY_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The generic setter delegates class, range, and storage behavior to each property contract; graphics mutation is client-side and does not reinterpret integer values through a universal floating accessor.",
+    }];
 
 const SET_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.SET.INVALID_ARGUMENT",
@@ -91,6 +117,7 @@ fn map_set_error(err: RuntimeError) -> RuntimeError {
     suppress_auto_output = true,
     type_resolver(set_type),
     descriptor(crate::builtins::plotting::set::SET_DESCRIPTOR),
+    integer_capabilities(crate::builtins::plotting::set::SET_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::set"
 )]
 pub fn set_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
@@ -126,8 +153,8 @@ mod tests {
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::title::title_builtin;
     use crate::builtins::plotting::{clear_figure, clone_figure, reset_hold_state_for_run};
-    use runmat_builtins::Value;
     use runmat_plot::plots::{Figure, LinePlot};
+    use runmat_value::Value;
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -290,14 +317,7 @@ mod tests {
         set_builtin(vec![
             Value::Num(ax),
             Value::String("YLim".into()),
-            Value::Tensor(runmat_builtins::Tensor {
-                rows: 1,
-                cols: 2,
-                shape: vec![1, 2],
-                data: vec![2.0, 8.0],
-                integer_data: None,
-                dtype: runmat_builtins::NumericDType::F64,
-            }),
+            Value::Tensor(runmat_value::Tensor::new(vec![2.0, 8.0], vec![1, 2]).expect("y limits")),
             Value::String("Colorbar".into()),
             Value::Bool(true),
             Value::String("Colormap".into()),
@@ -467,14 +487,7 @@ mod tests {
     fn set_updates_stem_properties() {
         let _guard = setup();
         let handle = crate::builtins::plotting::stem::stem_builtin(vec![Value::Tensor(
-            runmat_builtins::Tensor {
-                rows: 2,
-                cols: 1,
-                shape: vec![2],
-                data: vec![1.0, 2.0],
-                integer_data: None,
-                dtype: runmat_builtins::NumericDType::F64,
-            },
+            runmat_value::Tensor::new(vec![1.0, 2.0], vec![2]).expect("stem values"),
         )])
         .unwrap();
         set_builtin(vec![

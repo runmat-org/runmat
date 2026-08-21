@@ -1,7 +1,10 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::gpu::errorbar::ErrorBarGpuInputs;
@@ -10,15 +13,16 @@ use runmat_plot::gpu::line::{
 };
 use runmat_plot::gpu::ScalarType;
 use runmat_plot::plots::{ErrorBar, LineMarkerAppearance};
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, RuntimeError};
 
-use super::common::numeric_pair;
 use super::gpu_helpers::gpu_errorbar_bounds;
 use super::op_common::line_inputs::NumericInput;
 use super::plotting_error;
@@ -117,7 +121,7 @@ const ERRORBAR_INPUTS_X_Y_YNEG_YPOS: [BuiltinParamDescriptor; 4] = [
     },
 ];
 
-const ERRORBAR_INPUTS_X_Y_XNEG_XPOS_YNEG_YPOS: [BuiltinParamDescriptor; 6] = [
+const ERRORBAR_INPUTS_X_Y_YNEG_YPOS_XNEG_XPOS: [BuiltinParamDescriptor; 6] = [
     BuiltinParamDescriptor {
         name: "X",
         ty: BuiltinParamType::NumericArray,
@@ -133,20 +137,6 @@ const ERRORBAR_INPUTS_X_Y_XNEG_XPOS_YNEG_YPOS: [BuiltinParamDescriptor; 6] = [
         description: "Y coordinates.",
     },
     BuiltinParamDescriptor {
-        name: "XNeg",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Negative X error magnitudes.",
-    },
-    BuiltinParamDescriptor {
-        name: "XPos",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Positive X error magnitudes.",
-    },
-    BuiltinParamDescriptor {
         name: "YNeg",
         ty: BuiltinParamType::NumericArray,
         arity: BuiltinParamArity::Required,
@@ -159,6 +149,20 @@ const ERRORBAR_INPUTS_X_Y_XNEG_XPOS_YNEG_YPOS: [BuiltinParamDescriptor; 6] = [
         arity: BuiltinParamArity::Required,
         default: None,
         description: "Positive Y error magnitudes.",
+    },
+    BuiltinParamDescriptor {
+        name: "XNeg",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Negative X error magnitudes.",
+    },
+    BuiltinParamDescriptor {
+        name: "XPos",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Positive X error magnitudes.",
     },
 ];
 
@@ -203,8 +207,8 @@ const ERRORBAR_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
         outputs: &ERRORBAR_OUTPUT_HANDLE,
     },
     BuiltinSignatureDescriptor {
-        label: "h = errorbar(X, Y, XNeg, XPos, YNeg, YPos)",
-        inputs: &ERRORBAR_INPUTS_X_Y_XNEG_XPOS_YNEG_YPOS,
+        label: "h = errorbar(X, Y, YNeg, YPos, XNeg, XPos)",
+        inputs: &ERRORBAR_INPUTS_X_Y_YNEG_YPOS_XNEG_XPOS,
         outputs: &ERRORBAR_OUTPUT_HANDLE,
     },
     BuiltinSignatureDescriptor {
@@ -237,6 +241,130 @@ pub const ERRORBAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORBAR_ERRORS,
 };
+
+macro_rules! documented_integer_input {
+    ($name:literal, $notes:literal) => {
+        BuiltinIntegerInputCapability {
+            name: $name,
+            classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+            availability: BuiltinIntegerInputAvailability::Documented,
+            scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+            notes: $notes,
+        }
+    };
+}
+
+const ERRORBAR_Y_ERR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    documented_integer_input!(
+        "Y",
+        "Y accepts every built-in integer class as coordinate data."
+    ),
+    documented_integer_input!(
+        "E",
+        "E accepts every built-in integer class as symmetric error lengths."
+    ),
+];
+const ERRORBAR_X_Y_ERR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 3] = [
+    documented_integer_input!(
+        "X",
+        "X accepts every built-in integer class as coordinate data."
+    ),
+    documented_integer_input!(
+        "Y",
+        "Y accepts every built-in integer class as coordinate data."
+    ),
+    documented_integer_input!(
+        "E",
+        "E accepts every built-in integer class as symmetric error lengths."
+    ),
+];
+const ERRORBAR_ASYMMETRIC_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 4] = [
+    documented_integer_input!(
+        "X",
+        "X accepts every built-in integer class as coordinate data."
+    ),
+    documented_integer_input!(
+        "Y",
+        "Y accepts every built-in integer class as coordinate data."
+    ),
+    documented_integer_input!(
+        "YNeg",
+        "Negative error lengths accept every built-in integer class."
+    ),
+    documented_integer_input!(
+        "YPos",
+        "Positive error lengths accept every built-in integer class."
+    ),
+];
+const ERRORBAR_BOTH_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 6] = [
+    documented_integer_input!(
+        "X",
+        "X accepts every built-in integer class as coordinate data."
+    ),
+    documented_integer_input!(
+        "Y",
+        "Y accepts every built-in integer class as coordinate data."
+    ),
+    documented_integer_input!(
+        "YNeg",
+        "Negative vertical lengths accept every built-in integer class."
+    ),
+    documented_integer_input!(
+        "YPos",
+        "Positive vertical lengths accept every built-in integer class."
+    ),
+    documented_integer_input!(
+        "XNeg",
+        "Negative horizontal lengths accept every built-in integer class."
+    ),
+    documented_integer_input!(
+        "XPos",
+        "Positive horizontal lengths accept every built-in integer class."
+    ),
+];
+
+pub const ERRORBAR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = errorbar(integer_Y, integer_E)",
+        inputs: &ERRORBAR_Y_ERR_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Authoritative integer storage crosses one explicit client graphics conversion boundary and returns opaque graphics handles.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = errorbar(integer_X, integer_Y, integer_E)",
+        inputs: &ERRORBAR_X_Y_ERR_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Coordinate and error inputs remain exact until the client graphics conversion boundary.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = errorbar(integer_X, integer_Y, integer_YNeg, integer_YPos)",
+        inputs: &ERRORBAR_ASYMMETRIC_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Asymmetric lengths remain exact until the client graphics conversion boundary.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = errorbar(integer_X, integer_Y, integer_YNeg, integer_YPos, integer_XNeg, integer_XPos)",
+        inputs: &ERRORBAR_BOTH_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Both-direction integer lengths gather authoritatively before client graphics conversion.",
+    },
+];
 
 fn errorbar_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -297,34 +425,36 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::errorbar::ERRORBAR_DESCRIPTOR),
+    integer_capabilities(crate::builtins::plotting::errorbar::ERRORBAR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::errorbar"
 )]
 pub fn errorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+    if matches!(crate::output_count::current_output_count(), Some(count) if count > 1) {
+        return Err(errorbar_invalid("too many output arguments"));
+    }
     let (target_axes, x, y, x_neg, x_pos, y_neg, y_pos, rest) =
         parse_errorbar_args(args).map_err(map_errorbar_invalid)?;
     let parsed = parse_errorbar_style_args(&rest).map_err(map_errorbar_invalid)?;
-    let mut x_in = Some(NumericInput::from_value(x, BUILTIN_NAME).map_err(map_errorbar_invalid)?);
-    let mut y_in = Some(NumericInput::from_value(y, BUILTIN_NAME).map_err(map_errorbar_invalid)?);
+    let mut x_in = Some(errorbar_numeric_input(x).map_err(map_errorbar_invalid)?);
+    let mut y_in = Some(errorbar_numeric_input(y).map_err(map_errorbar_invalid)?);
     let mut xn_in = x_neg
-        .map(|v| NumericInput::from_value(v, BUILTIN_NAME))
+        .map(errorbar_numeric_input)
         .transpose()
         .map_err(map_errorbar_invalid)?;
     let mut xp_in = x_pos
-        .map(|v| NumericInput::from_value(v, BUILTIN_NAME))
+        .map(errorbar_numeric_input)
         .transpose()
         .map_err(map_errorbar_invalid)?;
-    let mut n_in =
-        Some(NumericInput::from_value(y_neg, BUILTIN_NAME).map_err(map_errorbar_invalid)?);
-    let mut p_in =
-        Some(NumericInput::from_value(y_pos, BUILTIN_NAME).map_err(map_errorbar_invalid)?);
+    let mut n_in = Some(errorbar_numeric_input(y_neg).map_err(map_errorbar_invalid)?);
+    let mut p_in = Some(errorbar_numeric_input(y_pos).map_err(map_errorbar_invalid)?);
     let opts = PlotRenderOptions {
         title: "Error Bars",
         x_label: "X",
         y_label: "Y",
         ..Default::default()
     };
-    let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
-    let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
+    let plot_indices_out = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let plot_indices_slot = std::rc::Rc::clone(&plot_indices_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
     let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let axes = target_axes.unwrap_or(axes);
@@ -333,29 +463,40 @@ pub fn errorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         let yn_arg = n_in.take().expect("yn consumed");
         let yp_arg = p_in.take().expect("yp consumed");
         let label = parsed.label.clone().unwrap_or_else(|| "Data".into());
-        if let (Some(x_gpu), Some(y_gpu), Some(yn_gpu), Some(yp_gpu)) = (
-            x_arg.gpu_handle(),
-            y_arg.gpu_handle(),
-            yn_arg.gpu_handle(),
-            yp_arg.gpu_handle(),
-        ) {
-            match build_errorbar_gpu_plot(
-                BUILTIN_NAME,
-                x_gpu,
-                y_gpu,
-                xn_in.as_ref().and_then(|v| v.gpu_handle()),
-                xp_in.as_ref().and_then(|v| v.gpu_handle()),
-                yn_gpu,
-                yp_gpu,
-                &parsed,
-                &label,
+        if parsed.orientation == runmat_plot::plots::errorbar::ErrorBarOrientation::Vertical
+            && errorbar_gpu_inputs_eligible(
+                &x_arg,
+                &y_arg,
+                xn_in.as_ref(),
+                xp_in.as_ref(),
+                &yn_arg,
+                &yp_arg,
+            )
+        {
+            if let (Some(x_gpu), Some(y_gpu), Some(yn_gpu), Some(yp_gpu)) = (
+                x_arg.gpu_handle(),
+                y_arg.gpu_handle(),
+                yn_arg.gpu_handle(),
+                yp_arg.gpu_handle(),
             ) {
-                Ok(plot) => {
-                    let plot_index = figure.add_errorbar_on_axes(plot, axes);
-                    *plot_index_slot.borrow_mut() = Some((axes, plot_index));
-                    return Ok(());
+                match build_errorbar_gpu_plot(
+                    BUILTIN_NAME,
+                    x_gpu,
+                    y_gpu,
+                    xn_in.as_ref().and_then(|v| v.gpu_handle()),
+                    xp_in.as_ref().and_then(|v| v.gpu_handle()),
+                    yn_gpu,
+                    yp_gpu,
+                    &parsed,
+                    &label,
+                ) {
+                    Ok(plot) => {
+                        let plot_index = figure.add_errorbar_on_axes(plot, axes);
+                        plot_indices_slot.borrow_mut().push((axes, plot_index));
+                        return Ok(());
+                    }
+                    Err(err) => log::warn!("errorbar GPU path unavailable: {err}"),
                 }
-                Err(err) => log::warn!("errorbar GPU path unavailable: {err}"),
             }
         }
         let x = x_arg
@@ -380,42 +521,260 @@ pub fn errorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         let yp = yp_arg
             .into_tensor(BUILTIN_NAME)
             .map_err(map_errorbar_invalid)?;
-        let (x, y) = numeric_pair(x, y, BUILTIN_NAME).map_err(map_errorbar_invalid)?;
-        let (yn, yp) = numeric_pair(yn, yp, BUILTIN_NAME).map_err(map_errorbar_invalid)?;
-        let mut plot = if let (Some(xn), Some(xp)) = (xn, xp) {
-            let (xn, xp) = numeric_pair(xn, xp, BUILTIN_NAME).map_err(map_errorbar_invalid)?;
-            ErrorBar::new_both(x, y, xn, xp, yn, yp)
-        } else {
-            ErrorBar::new_vertical(x, y, yn, yp)
+        let plots = build_errorbar_host_plots(x, y, xn, xp, yn, yp, &parsed, &label)
+            .map_err(map_errorbar_invalid)?;
+        for plot in plots {
+            let plot_index = figure.add_errorbar_on_axes(plot, axes);
+            plot_indices_slot.borrow_mut().push((axes, plot_index));
         }
-        .map_err(|e| errorbar_invalid(&e))?
-        .with_style(
-            parsed.color,
-            parsed.line_width,
-            parsed.line_style,
-            parsed.cap_size,
-        )
-        .with_label(label);
-        if let Some(marker) = parsed.marker.clone() {
-            plot.set_marker(Some(marker));
-        }
-        let plot_index = figure.add_errorbar_on_axes(plot, axes);
-        *plot_index_slot.borrow_mut() = Some((axes, plot_index));
         Ok(())
     });
-    let Some((axes, plot_index)) = *plot_index_out.borrow() else {
+    if plot_indices_out.borrow().is_empty() {
         return render_result.map(|_| f64::NAN);
-    };
-    let handle =
-        crate::builtins::plotting::state::register_errorbar_handle(figure_handle, axes, plot_index);
+    }
+    let handles: Vec<f64> = plot_indices_out
+        .borrow()
+        .iter()
+        .map(|(axes, plot_index)| {
+            crate::builtins::plotting::state::register_errorbar_handle(
+                figure_handle,
+                *axes,
+                *plot_index,
+            )
+        })
+        .collect();
     if let Err(err) = render_result {
         let lower = err.to_string().to_lowercase();
         if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
-            return Ok(handle);
+            return Ok(handles[0]);
         }
         return Err(map_errorbar_invalid(err));
     }
-    Ok(handle)
+    // The runtime builtin ABI is scalar today. Matrix calls register every
+    // series handle and return the first; the descriptor/type ABI must be
+    // widened before the complete handle vector can cross this boundary.
+    Ok(handles[0])
+}
+
+fn errorbar_numeric_input(value: Value) -> crate::BuiltinResult<NumericInput> {
+    match value {
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(errorbar_invalid(
+            "complex coordinate and error data are not supported",
+        )),
+        Value::LogicalArray(array) => {
+            let data = array
+                .data
+                .iter()
+                .map(|value| if *value == 0 { 0.0 } else { 1.0 })
+                .collect();
+            let tensor = Tensor::new(data, array.shape)
+                .map_err(|err| errorbar_invalid(format!("logical input: {err}")))?;
+            Ok(NumericInput::Host(tensor))
+        }
+        other => NumericInput::from_value(other, BUILTIN_NAME),
+    }
+}
+
+fn errorbar_gpu_inputs_eligible(
+    x: &NumericInput,
+    y: &NumericInput,
+    x_neg: Option<&NumericInput>,
+    x_pos: Option<&NumericInput>,
+    y_neg: &NumericInput,
+    y_pos: &NumericInput,
+) -> bool {
+    let eligible = |input: &NumericInput| match input.gpu_handle() {
+        Some(handle) => {
+            runmat_accelerate_api::handle_integer_type(handle).is_none()
+                && !runmat_accelerate_api::handle_is_logical(handle)
+                && runmat_accelerate_api::handle_storage(handle)
+                    == runmat_accelerate_api::GpuTensorStorage::Real
+                && handle.shape.iter().filter(|extent| **extent > 1).count() <= 1
+        }
+        None => false,
+    };
+    eligible(x)
+        && eligible(y)
+        && eligible(y_neg)
+        && eligible(y_pos)
+        && x_neg.is_none_or(eligible)
+        && x_pos.is_none_or(eligible)
+}
+
+#[derive(Clone, Copy)]
+enum ErrorBarSeriesLayout {
+    Vector,
+    MatrixColumns { rows: usize, cols: usize },
+    MatrixRows { rows: usize, cols: usize },
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_errorbar_host_plots(
+    x: Tensor,
+    y: Tensor,
+    x_neg: Option<Tensor>,
+    x_pos: Option<Tensor>,
+    y_neg: Tensor,
+    y_pos: Tensor,
+    parsed: &ParsedErrorBarStyle,
+    label: &str,
+) -> crate::BuiltinResult<Vec<ErrorBar>> {
+    let tensors = [
+        Some(&x),
+        Some(&y),
+        x_neg.as_ref(),
+        x_pos.as_ref(),
+        Some(&y_neg),
+        Some(&y_pos),
+    ];
+    for tensor in tensors.into_iter().flatten() {
+        if tensor.shape.len() > 2 && tensor.shape.iter().skip(2).any(|extent| *extent != 1) {
+            return Err(errorbar_invalid(
+                "inputs must be vectors or two-dimensional matrices",
+            ));
+        }
+    }
+    let matrix_shape = tensors
+        .into_iter()
+        .flatten()
+        .find(|tensor| tensor.rows() > 1 && tensor.cols() > 1)
+        .map(|tensor| (tensor.rows(), tensor.cols()));
+    let layout = if let Some((rows, cols)) = matrix_shape {
+        for tensor in tensors.into_iter().flatten() {
+            if tensor.rows() > 1
+                && tensor.cols() > 1
+                && (tensor.rows(), tensor.cols()) != (rows, cols)
+            {
+                return Err(errorbar_invalid(
+                    "all matrix inputs must have the same size and orientation",
+                ));
+            }
+        }
+        let vectors_match = |points: usize| {
+            tensors.into_iter().flatten().all(|tensor| {
+                (tensor.rows() > 1 && tensor.cols() > 1)
+                    || tensor.len() == points
+                    || tensor.is_empty()
+            })
+        };
+        if vectors_match(rows) {
+            ErrorBarSeriesLayout::MatrixColumns { rows, cols }
+        } else if vectors_match(cols) {
+            ErrorBarSeriesLayout::MatrixRows { rows, cols }
+        } else {
+            return Err(errorbar_invalid(
+                "vector lengths must match one dimension of the matrix inputs",
+            ));
+        }
+    } else {
+        ErrorBarSeriesLayout::Vector
+    };
+    let series_count = match layout {
+        ErrorBarSeriesLayout::Vector => 1,
+        ErrorBarSeriesLayout::MatrixColumns { cols, .. } => cols,
+        ErrorBarSeriesLayout::MatrixRows { rows, .. } => rows,
+    };
+    let mut plots = Vec::with_capacity(series_count);
+    for series in 0..series_count {
+        let x_values = errorbar_series_values(&x, layout, series)?;
+        let y_values = errorbar_series_values(&y, layout, series)?;
+        let xn_values = x_neg
+            .as_ref()
+            .map(|tensor| errorbar_series_values(tensor, layout, series))
+            .transpose()?;
+        let xp_values = x_pos
+            .as_ref()
+            .map(|tensor| errorbar_series_values(tensor, layout, series))
+            .transpose()?;
+        let yn_values = errorbar_series_values(&y_neg, layout, series)?;
+        let yp_values = errorbar_series_values(&y_pos, layout, series)?;
+        let series_label = if series_count == 1 {
+            label.to_string()
+        } else {
+            format!("{label} {}", series + 1)
+        };
+        plots.push(build_errorbar_series(
+            x_values,
+            y_values,
+            xn_values,
+            xp_values,
+            yn_values,
+            yp_values,
+            parsed,
+            series_label,
+        )?);
+    }
+    Ok(plots)
+}
+
+fn errorbar_series_values(
+    tensor: &Tensor,
+    layout: ErrorBarSeriesLayout,
+    series: usize,
+) -> crate::BuiltinResult<Vec<f64>> {
+    let values = tensor.materialize_f64();
+    if values.is_empty() {
+        return Ok(Vec::new());
+    }
+    let is_matrix = tensor.rows() > 1 && tensor.cols() > 1;
+    match layout {
+        ErrorBarSeriesLayout::Vector => Ok(values),
+        ErrorBarSeriesLayout::MatrixColumns { rows, .. } if is_matrix => {
+            let start = series * rows;
+            Ok(values[start..start + rows].to_vec())
+        }
+        ErrorBarSeriesLayout::MatrixRows { rows, cols } if is_matrix => {
+            Ok((0..cols).map(|col| values[series + rows * col]).collect())
+        }
+        _ => Ok(values),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_errorbar_series(
+    x: Vec<f64>,
+    y: Vec<f64>,
+    x_neg: Option<Vec<f64>>,
+    x_pos: Option<Vec<f64>>,
+    y_neg: Vec<f64>,
+    y_pos: Vec<f64>,
+    parsed: &ParsedErrorBarStyle,
+    label: String,
+) -> crate::BuiltinResult<ErrorBar> {
+    let mut plot = if let (Some(x_neg), Some(x_pos)) = (x_neg, x_pos) {
+        ErrorBar::new_both(x, y, x_neg, x_pos, y_neg, y_pos)
+    } else {
+        match parsed.orientation {
+            runmat_plot::plots::errorbar::ErrorBarOrientation::Vertical => {
+                ErrorBar::new_vertical(x, y, y_neg, y_pos)
+            }
+            runmat_plot::plots::errorbar::ErrorBarOrientation::Horizontal => {
+                let len = x.len();
+                ErrorBar::new_both(x, y, y_neg, y_pos, vec![0.0; len], vec![0.0; len]).map(
+                    |mut plot| {
+                        plot.orientation =
+                            runmat_plot::plots::errorbar::ErrorBarOrientation::Horizontal;
+                        plot
+                    },
+                )
+            }
+            runmat_plot::plots::errorbar::ErrorBarOrientation::Both => {
+                ErrorBar::new_both(x, y, y_neg.clone(), y_pos.clone(), y_neg, y_pos)
+            }
+        }
+    }
+    .map_err(|err| errorbar_invalid(&err))?
+    .with_style(
+        parsed.color,
+        parsed.line_width,
+        parsed.line_style,
+        parsed.cap_size,
+    )
+    .with_label(label);
+    if let Some(marker) = parsed.marker.clone() {
+        plot.set_marker(Some(marker));
+    }
+    Ok(plot)
 }
 
 fn build_errorbar_gpu_plot(
@@ -556,14 +915,34 @@ struct ParsedErrorBarStyle {
     marker: Option<LineMarkerAppearance>,
     label: Option<String>,
     cap_size: f32,
+    orientation: runmat_plot::plots::errorbar::ErrorBarOrientation,
 }
 
 fn parse_errorbar_style_args(args: &[Value]) -> crate::BuiltinResult<ParsedErrorBarStyle> {
     let mut filtered = Vec::new();
     let mut cap_size = 6.0;
+    let mut orientation = runmat_plot::plots::errorbar::ErrorBarOrientation::Vertical;
     let mut idx = 0usize;
     while idx < args.len() {
         if let Some(key) = super::style::value_as_string(&args[idx]) {
+            match (idx, key.trim().to_ascii_lowercase().as_str()) {
+                (0, "vertical") => {
+                    orientation = runmat_plot::plots::errorbar::ErrorBarOrientation::Vertical;
+                    idx += 1;
+                    continue;
+                }
+                (0, "horizontal") => {
+                    orientation = runmat_plot::plots::errorbar::ErrorBarOrientation::Horizontal;
+                    idx += 1;
+                    continue;
+                }
+                (0, "both") => {
+                    orientation = runmat_plot::plots::errorbar::ErrorBarOrientation::Both;
+                    idx += 1;
+                    continue;
+                }
+                _ => {}
+            }
             if key.trim().eq_ignore_ascii_case("CapSize") && idx + 1 < args.len() {
                 cap_size = super::style::value_as_f64(&args[idx + 1]).ok_or_else(|| {
                     plotting_error(BUILTIN_NAME, "errorbar: CapSize must be numeric")
@@ -584,6 +963,7 @@ fn parse_errorbar_style_args(args: &[Value]) -> crate::BuiltinResult<ParsedError
         marker,
         label: parsed.label,
         cap_size,
+        orientation,
     })
 }
 
@@ -694,23 +1074,62 @@ fn is_styleish(value: &Value) -> bool {
 fn is_numericish(value: &Value) -> bool {
     matches!(
         value,
-        Value::Tensor(_) | Value::GpuTensor(_) | Value::Num(_) | Value::Int(_) | Value::Bool(_)
+        Value::Tensor(_)
+            | Value::GpuTensor(_)
+            | Value::Num(_)
+            | Value::Int(_)
+            | Value::Bool(_)
+            | Value::LogicalArray(_)
+            | Value::Complex(_, _)
+            | Value::ComplexTensor(_)
     )
 }
 
 fn infer_errorbar_x_from_y(y: &Value) -> crate::BuiltinResult<Value> {
-    let len = Tensor::try_from(y)
-        .map_err(|e| plotting_error(BUILTIN_NAME, format!("errorbar: {e}")))?
-        .data
-        .len();
-    Ok(Value::Tensor(Tensor {
-        data: (1..=len).map(|i| i as f64).collect(),
-        integer_data: None,
-        shape: vec![len],
-        rows: len,
-        cols: 1,
-        dtype: runmat_builtins::NumericDType::F64,
-    }))
+    let len = match y {
+        Value::Tensor(tensor) => {
+            if tensor.rows() > 1 && tensor.cols() > 1 {
+                tensor.rows()
+            } else {
+                tensor_utils::tensor_element_len(tensor)
+            }
+        }
+        Value::LogicalArray(array) => {
+            if array.shape.first().copied().unwrap_or(1) > 1
+                && array.shape.get(1).copied().unwrap_or(1) > 1
+            {
+                array.shape[0]
+            } else {
+                array.data.len()
+            }
+        }
+        Value::GpuTensor(handle) => {
+            if handle.shape.first().copied().unwrap_or(1) > 1
+                && handle.shape.get(1).copied().unwrap_or(1) > 1
+            {
+                handle.shape[0]
+            } else {
+                handle.shape.iter().product()
+            }
+        }
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) => 1,
+        Value::Complex(_, _) | Value::ComplexTensor(_) => {
+            return Err(plotting_error(
+                BUILTIN_NAME,
+                "errorbar: complex coordinate data are not supported",
+            ))
+        }
+        other => {
+            return Err(plotting_error(
+                BUILTIN_NAME,
+                format!("errorbar: unsupported Y input {other:?}"),
+            ))
+        }
+    };
+    Ok(Value::Tensor(
+        Tensor::new((1..=len).map(|i| i as f64).collect(), vec![len])
+            .expect("implicit errorbar axis"),
+    ))
 }
 
 #[cfg(test)]
@@ -724,16 +1143,23 @@ mod tests {
         subplot::subplot_builtin,
     };
     use runmat_plot::plots::PlotElement;
+    use runmat_value::IntegerStorage;
 
     fn vec_tensor(data: &[f64]) -> Tensor {
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![data.len()],
-            rows: data.len(),
-            cols: 1,
-            dtype: runmat_builtins::NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), vec![data.len()]).expect("errorbar test vector")
+    }
+
+    #[test]
+    fn implicit_errorbar_axis_uses_exact_integer_storage_length() {
+        let y = Tensor::new_integer(IntegerStorage::U64(vec![7, 8, 9]), vec![1, 3])
+            .expect("integer y values");
+
+        let x = infer_errorbar_x_from_y(&Value::Tensor(y)).expect("implicit x");
+        let Value::Tensor(x) = x else {
+            panic!("expected tensor axis");
+        };
+        assert_eq!(x.materialize_f64(), vec![1.0, 2.0, 3.0]);
+        assert_eq!(x.shape, vec![3]);
     }
 
     #[test]
@@ -1025,7 +1451,7 @@ mod tests {
             .collect();
         assert!(labels.contains(&"h = errorbar(Y, E)"));
         assert!(labels.contains(&"h = errorbar(X, Y, E)"));
-        assert!(labels.contains(&"h = errorbar(X, Y, XNeg, XPos, YNeg, YPos)"));
+        assert!(labels.contains(&"h = errorbar(X, Y, YNeg, YPos, XNeg, XPos)"));
     }
 
     #[test]
@@ -1033,5 +1459,170 @@ mod tests {
         let err = errorbar_builtin(vec![Value::Num(1.0)])
             .expect_err("expected errorbar argument validation error");
         assert_eq!(err.identifier(), ERRORBAR_ERROR_INVALID_ARGUMENT.identifier);
+    }
+
+    #[test]
+    fn errorbar_supports_documented_orientation_tokens() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        errorbar_builtin(vec![
+            Value::Tensor(vec_tensor(&[1.0, 2.0])),
+            Value::Tensor(vec_tensor(&[3.0, 4.0])),
+            Value::Tensor(vec_tensor(&[0.2, 0.3])),
+            Value::String("horizontal".into()),
+        ])
+        .unwrap();
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        let PlotElement::ErrorBar(error) = fig.plots().next().unwrap() else {
+            panic!("expected errorbar");
+        };
+        assert_eq!(
+            error.orientation,
+            runmat_plot::plots::errorbar::ErrorBarOrientation::Horizontal
+        );
+        assert_eq!(error.x_neg, vec![0.2, 0.3]);
+        assert_eq!(error.y_neg, vec![0.0, 0.0]);
+    }
+
+    #[test]
+    fn errorbar_matrix_inputs_create_one_series_per_column() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        let y = Tensor::new(vec![1.0, 2.0, 10.0, 20.0, 100.0, 200.0], vec![2, 3]).unwrap();
+        let err = Tensor::new(vec![0.1; 6], vec![2, 3]).unwrap();
+        errorbar_builtin(vec![Value::Tensor(y), Value::Tensor(err)]).unwrap();
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        let plots: Vec<_> = fig.plots().collect();
+        assert_eq!(plots.len(), 3);
+        let PlotElement::ErrorBar(first) = plots[0] else {
+            panic!("expected errorbar");
+        };
+        assert_eq!(first.x, vec![1.0, 2.0]);
+        assert_eq!(first.y, vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn errorbar_accepts_logical_arrays_and_defaults_to_no_marker() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        let y = runmat_value::LogicalArray::new(vec![0, 1], vec![1, 2]).unwrap();
+        let err = runmat_value::LogicalArray::new(vec![1, 1], vec![1, 2]).unwrap();
+        errorbar_builtin(vec![Value::LogicalArray(y), Value::LogicalArray(err)]).unwrap();
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        let PlotElement::ErrorBar(error) = fig.plots().next().unwrap() else {
+            panic!("expected errorbar");
+        };
+        assert_eq!(error.y, vec![0.0, 1.0]);
+        assert!(error.marker.is_none());
+    }
+
+    #[test]
+    fn errorbar_rejects_complex_and_excess_outputs_before_mutation() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        let error = errorbar_builtin(vec![Value::Complex(1.0, 1.0), Value::Num(0.2)])
+            .expect_err("complex data");
+        assert_eq!(
+            error.identifier(),
+            ERRORBAR_ERROR_INVALID_ARGUMENT.identifier
+        );
+        assert_eq!(
+            clone_figure(current_figure_handle())
+                .unwrap()
+                .plots()
+                .count(),
+            0
+        );
+
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        let error =
+            errorbar_builtin(vec![Value::Num(1.0), Value::Num(0.2)]).expect_err("excess outputs");
+        assert_eq!(
+            error.identifier(),
+            ERRORBAR_ERROR_INVALID_ARGUMENT.identifier
+        );
+        assert_eq!(
+            clone_figure(current_figure_handle())
+                .unwrap()
+                .plots()
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn errorbar_integer_capabilities_cover_every_documented_role() {
+        assert_eq!(ERRORBAR_INTEGER_CAPABILITIES.len(), 4);
+        for capability in ERRORBAR_INTEGER_CAPABILITIES {
+            for input in capability.inputs {
+                assert_eq!(
+                    input.classes,
+                    crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES
+                );
+                assert_eq!(
+                    input.availability,
+                    BuiltinIntegerInputAvailability::Documented
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn errorbar_host_boundary_accepts_all_integer_classes() {
+        let storages = vec![
+            IntegerStorage::I8(vec![1, 2]),
+            IntegerStorage::I16(vec![1, 2]),
+            IntegerStorage::I32(vec![1, 2]),
+            IntegerStorage::I64(vec![1, 2]),
+            IntegerStorage::U8(vec![1, 2]),
+            IntegerStorage::U16(vec![1, 2]),
+            IntegerStorage::U32(vec![1, 2]),
+            IntegerStorage::U64(vec![1, 2]),
+        ];
+        let parsed = parse_errorbar_style_args(&[]).unwrap();
+        for storage in storages {
+            let y = Tensor::new_integer(storage, vec![1, 2]).unwrap();
+            let plots = build_errorbar_host_plots(
+                vec_tensor(&[1.0, 2.0]),
+                y,
+                None,
+                None,
+                vec_tensor(&[1.0, 1.0]),
+                vec_tensor(&[1.0, 1.0]),
+                &parsed,
+                "Data",
+            )
+            .unwrap();
+            assert_eq!(plots[0].y, vec![1.0, 2.0]);
+        }
+    }
+
+    #[test]
+    fn errorbar_resident_integer_never_enters_floating_gpu_geometry() {
+        let make = |buffer_id| {
+            NumericInput::Gpu(runmat_accelerate_api::GpuTensorHandle {
+                shape: vec![1, 2],
+                device_id: 0,
+                buffer_id,
+                descriptor: Default::default(),
+            })
+        };
+        let x = make(9_401_001);
+        let mut y = make(9_401_002);
+        let yn = make(9_401_003);
+        let yp = make(9_401_004);
+        let NumericInput::Gpu(handle) = &mut y else {
+            unreachable!()
+        };
+        handle.descriptor.element_type = Some(runmat_accelerate_api::NumericElementType::U64);
+        assert!(!errorbar_gpu_inputs_eligible(&x, &y, None, None, &yn, &yp));
     }
 }

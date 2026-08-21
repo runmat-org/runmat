@@ -1,4 +1,4 @@
-use runmat_builtins::Value;
+use runmat_value::{IntValue, Value};
 
 use crate::builtins::common::arg_tokens::ArgToken;
 use crate::builtins::common::gpu_helpers;
@@ -23,7 +23,9 @@ pub(crate) async fn materialize_value(
 pub(crate) async fn parse_dims(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
     match value {
         Value::Num(_) | Value::Int(_) => parse_scalar_dims(value, builtin).await,
-        Value::Tensor(tensor) if tensor.data.len() == 1 => parse_scalar_dims(value, builtin).await,
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            parse_scalar_dims(value, builtin).await
+        }
         Value::GpuTensor(handle) if tensor::element_count(&handle.shape) == 1 => {
             parse_scalar_dims(value, builtin).await
         }
@@ -39,7 +41,7 @@ pub(crate) async fn parse_dims(value: &Value, builtin: &str) -> BuiltinResult<Ve
             for cell in &ca.data {
                 let coerced = match cell {
                     Value::Num(n) => coerce_positive_int(*n, builtin)?,
-                    Value::Int(i) => coerce_positive_int(i.to_f64(), builtin)?,
+                    Value::Int(i) => coerce_positive_integer(i, builtin)?,
                     _ => {
                         return Err(indexing_error(
                             builtin,
@@ -112,13 +114,29 @@ pub(crate) fn coerce_positive_int(value: f64, builtin: &str) -> BuiltinResult<us
             "Size arguments must be positive integers.",
         ));
     }
+    if !fits_positive_platform_index(rounded) {
+        return Err(indexing_error(
+            builtin,
+            "Size arguments exceed the maximum supported size.",
+        ));
+    }
     Ok(rounded as usize)
+}
+
+fn coerce_positive_integer(value: &IntValue, builtin: &str) -> BuiltinResult<usize> {
+    value.try_to_usize().filter(|&dim| dim >= 1).ok_or_else(|| {
+        indexing_error(
+            builtin,
+            "Size arguments must be positive integers within the supported range.",
+        )
+    })
 }
 
 pub(crate) fn dims_from_tokens(tokens: &[ArgToken]) -> Option<Vec<usize>> {
     let value = tokens.first()?;
     match value {
         ArgToken::Number(num) => coerce_positive_literal(*num).map(|dim| vec![dim]),
+        ArgToken::Integer(value) => coerce_positive_integer_literal(value).map(|dim| vec![dim]),
         ArgToken::Vector(values) => {
             if values.is_empty() {
                 return None;
@@ -127,6 +145,7 @@ pub(crate) fn dims_from_tokens(tokens: &[ArgToken]) -> Option<Vec<usize>> {
             for value in values {
                 let dim = match value {
                     ArgToken::Number(num) => coerce_positive_literal(*num)?,
+                    ArgToken::Integer(value) => coerce_positive_integer_literal(value)?,
                     _ => return None,
                 };
                 dims.push(dim);
@@ -135,6 +154,10 @@ pub(crate) fn dims_from_tokens(tokens: &[ArgToken]) -> Option<Vec<usize>> {
         }
         _ => None,
     }
+}
+
+fn coerce_positive_integer_literal(value: &IntValue) -> Option<usize> {
+    value.try_to_usize().filter(|&dim| dim >= 1)
 }
 
 fn coerce_positive_literal(value: f64) -> Option<usize> {
@@ -148,7 +171,18 @@ fn coerce_positive_literal(value: f64) -> Option<usize> {
     if rounded < 1.0 {
         return None;
     }
+    if !fits_positive_platform_index(rounded) {
+        return None;
+    }
     Some(rounded as usize)
+}
+
+pub(crate) fn fits_positive_platform_index(value: f64) -> bool {
+    if value > usize::MAX.saturating_sub(1) as f64 {
+        return false;
+    }
+    let parsed = value as usize;
+    parsed as f64 == value && parsed != usize::MAX
 }
 
 /// Build column-major strides for the supplied dimensions, checking overflow.
@@ -186,6 +220,8 @@ fn indexing_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::executor::block_on;
+    use runmat_value::{CellArray, IntegerStorage, Tensor};
 
     #[test]
     fn dims_from_tokens_accepts_scalar() {
@@ -206,5 +242,80 @@ mod tests {
     fn dims_from_tokens_rejects_non_numeric() {
         let dims = dims_from_tokens(&[ArgToken::Vector(vec![ArgToken::String("bad".to_string())])]);
         assert_eq!(dims, None);
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn parse_dims_preserves_typed_cell_dimensions_exactly() {
+        let dims = block_on(parse_dims(
+            &Value::Cell(
+                CellArray::new(
+                    vec![
+                        Value::Int(IntValue::U8(2)),
+                        Value::Int(IntValue::U64(9_007_199_254_740_993)),
+                    ],
+                    1,
+                    2,
+                )
+                .expect("cell"),
+            ),
+            "zeros",
+        ))
+        .expect("dimensions");
+
+        assert_eq!(dims, vec![2, 9_007_199_254_740_993]);
+        assert!(block_on(parse_dims(
+            &Value::Cell(CellArray::new(vec![Value::Int(IntValue::I8(-1))], 1, 1).expect("cell"),),
+            "zeros",
+        ))
+        .is_err());
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "32")]
+    fn parse_dims_rejects_typed_cell_dimensions_outside_platform_range() {
+        let value = Value::Cell(
+            CellArray::new(
+                vec![
+                    Value::Int(IntValue::U8(2)),
+                    Value::Int(IntValue::U64(9_007_199_254_740_993)),
+                ],
+                1,
+                2,
+            )
+            .expect("cell"),
+        );
+
+        let err = block_on(parse_dims(&value, "zeros")).expect_err("dimension must fit usize");
+        assert!(err.to_string().contains("supported range"));
+    }
+
+    #[test]
+    fn parse_dims_reads_typed_integer_tensor_storage_exactly() {
+        let scalar =
+            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("scalar dim");
+        let dims = block_on(parse_dims(&Value::Tensor(scalar), "zeros")).expect("scalar dims");
+        assert_eq!(dims, vec![7]);
+
+        let vector =
+            Tensor::new_integer(IntegerStorage::U16(vec![2, 3]), vec![1, 2]).expect("vector dims");
+        let dims = block_on(parse_dims(&Value::Tensor(vector), "zeros")).expect("vector dims");
+        assert_eq!(dims, vec![2, 3]);
+    }
+
+    #[test]
+    fn numeric_dimension_coercion_rejects_out_of_range_float_values() {
+        assert!(coerce_positive_int(usize::MAX as f64, "zeros").is_err());
+        assert!(dims_from_tokens(&[ArgToken::Number(usize::MAX as f64)]).is_none());
+        assert!(dims_from_tokens(&[ArgToken::Integer(IntValue::I64(-1))]).is_none());
+        #[cfg(target_pointer_width = "32")]
+        assert!(dims_from_tokens(&[ArgToken::Integer(IntValue::U64(u64::MAX))]).is_none());
+        assert_eq!(
+            dims_from_tokens(&[ArgToken::Vector(vec![
+                ArgToken::Integer(IntValue::U16(2)),
+                ArgToken::Integer(IntValue::U32(4)),
+            ])]),
+            Some(vec![2, 4])
+        );
     }
 }
