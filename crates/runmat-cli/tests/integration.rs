@@ -80,14 +80,15 @@ result = z + 5
 }
 
 #[test]
-fn spawned_async_functions_execute_concurrently_in_isolated_workers() {
+fn spawned_async_functions_respect_local_worker_capacity() {
+    let available_workers = std::thread::available_parallelism().map_or(1, |count| count.get());
     let temp_dir = TempDir::new().unwrap();
     let script_path = temp_dir.path().join("local_execution.m");
     fs::write(
         &script_path,
         r#"
 async function y = delayed_square(x)
-    pause(0.2);
+    pause(0.4);
     y = x * x;
 end
 tic;
@@ -118,10 +119,17 @@ disp(elapsed);
     assert!(numbers.len() >= 3, "unexpected output: {stdout}");
     assert_eq!(numbers[0], 9.0);
     assert_eq!(numbers[1], 16.0);
-    assert!(
-        numbers[2] < 0.38,
-        "tasks were not observably concurrent: {stdout}"
-    );
+    if available_workers >= 2 {
+        assert!(
+            numbers[2] < 0.7,
+            "tasks were not observably concurrent with {available_workers} available workers: {stdout}"
+        );
+    } else {
+        assert!(
+            numbers[2] < 1.5,
+            "tasks did not complete within the bounded single-worker allowance: {stdout}"
+        );
+    }
 }
 
 #[test]
