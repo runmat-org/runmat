@@ -10,9 +10,11 @@ fn ensure_auto_init() {
     INIT.call_once(|| {
         std::env::set_var("RUNMAT_ACCEL_AUTO_OFFLOAD", "1");
         std::env::set_var("RUNMAT_ACCEL_CALIBRATE", "0");
+        std::env::set_var("RUNMAT_ACCEL_CALIBRATE_REFRESH", "1");
         std::env::set_var("RUNMAT_ACCEL_THRESHOLD_UNARY", "1");
         std::env::set_var("RUNMAT_ACCEL_THRESHOLD_ELEMWISE", "1");
         std::env::set_var("RUNMAT_ACCEL_THRESHOLD_REDUCTION", "1");
+        std::env::set_var("RUNMAT_ACCEL_SMALL_BATCH_MAX_DIM", "0");
         register_inprocess_provider();
     });
 }
