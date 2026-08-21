@@ -938,22 +938,36 @@ jobs:
             os: windows-latest-l
             target: x86_64-pc-windows-msvc
             command: build
+            bin: runmat.exe
           - release_for: macos-x86_64
             os: macOS-latest
             target: x86_64-apple-darwin
             command: build
+            bin: runmat
           - release_for: macos-aarch64
             os: macOS-latest
             target: aarch64-apple-darwin
             command: build
+            bin: runmat
           - release_for: linux-x86_64
             os: warp-ubuntu-latest-x64-16x
             target: x86_64-unknown-linux-gnu
             command: build
+            bin: runmat
     runs-on: ${{ matrix.platform.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Resolve branch artifact identity
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')
+        id: artifact-identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n '/^\[package\]/,/^\[/s/^version = "\([^"]*\)"/\1/p' crates/runmat-cli/Cargo.toml | head -n 1)"
+          [[ -n "${VERSION}" ]] || { echo "Unable to read Runtime version." >&2; exit 1; }
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
 
       - name: Install native dependencies (Linux x86_64)
         if: runner.os == 'Linux' && matrix.platform.os != 'ubuntu-latest-arm-l'
@@ -1134,3 +1148,113 @@ jobs:
           # Build all targets with full BLAS+LAPACK
           args: "--locked --release --bin runmat --features blas-lapack,vendored-openssl,occt-native"
           strip: false
+
+      - name: Package branch artifact (Windows)
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outDir = Join-Path "target" (Join-Path "${{ matrix.platform.target }}" "release")
+          $artifactName = "runmat-${{ steps.artifact-identity.outputs.version }}-${{ matrix.platform.release_for }}"
+          Push-Location $outDir
+          $vcpkgBin = Join-Path $env:VCPKG_ROOT ("installed\" + $env:VCPKG_DEFAULT_TRIPLET + "\bin")
+          if (Test-Path $vcpkgBin) {
+            Copy-Item -Path (Join-Path $vcpkgBin "*.dll") -Destination . -Force -ErrorAction SilentlyContinue
+          }
+          $zmqBin = Join-Path $env:ZMQ_PATH "bin"
+          if (Test-Path $zmqBin) {
+            Copy-Item -Path (Join-Path $zmqBin "*.dll") -Destination . -Force -ErrorAction SilentlyContinue
+          } else {
+            $zmqLib = Join-Path $env:ZMQ_PATH "lib"
+            if (Test-Path $zmqLib) {
+              Copy-Item -Path (Join-Path $zmqLib "*.dll") -Destination . -Force -ErrorAction SilentlyContinue
+            }
+          }
+          7z a (Join-Path "..\..\.." ("${artifactName}.zip")) "${{ matrix.platform.bin }}" *.dll
+          Pop-Location
+
+      - name: Package branch artifact (Unix)
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') && runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARTIFACT_NAME="runmat-${{ steps.artifact-identity.outputs.version }}-${{ matrix.platform.release_for }}"
+          tar -C "target/${{ matrix.platform.target }}/release" -czf "${ARTIFACT_NAME}.tar.gz" "${{ matrix.platform.bin }}"
+
+      - name: Record branch artifact provenance (Windows)
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $archive = "runmat-${{ steps.artifact-identity.outputs.version }}-${{ matrix.platform.release_for }}.zip"
+          $provenance = @{
+            schema_version = 1
+            source_branch = "${{ github.ref_name }}"
+            source_sha = "${{ github.sha }}"
+            version = "${{ steps.artifact-identity.outputs.version }}"
+            platform = "${{ matrix.platform.release_for }}"
+            archive = $archive
+            sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
+            workflow_run_id = "${{ github.run_id }}"
+          }
+          [IO.File]::WriteAllText("runtime-artifact-provenance.json", ($provenance | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
+
+      - name: Record branch artifact provenance (Unix)
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') && runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARCHIVE="runmat-${{ steps.artifact-identity.outputs.version }}-${{ matrix.platform.release_for }}.tar.gz"
+          if command -v sha256sum >/dev/null 2>&1; then
+            DIGEST="$(sha256sum "${ARCHIVE}" | awk '{print $1}')"
+          else
+            DIGEST="$(shasum -a 256 "${ARCHIVE}" | awk '{print $1}')"
+          fi
+          cat > runtime-artifact-provenance.json <<JSON
+          {
+            "schema_version": 1,
+            "source_branch": "${{ github.ref_name }}",
+            "source_sha": "${{ github.sha }}",
+            "version": "${{ steps.artifact-identity.outputs.version }}",
+            "platform": "${{ matrix.platform.release_for }}",
+            "archive": "${ARCHIVE}",
+            "sha256": "${DIGEST}",
+            "workflow_run_id": "${{ github.run_id }}"
+          }
+          JSON
+
+      - name: Upload branch artifact
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')
+        uses: actions/upload-artifact@v4
+        with:
+          name: runmat-${{ steps.artifact-identity.outputs.version }}-${{ matrix.platform.release_for }}
+          path: |
+            runmat-*.tar.gz
+            runmat-*.zip
+            runtime-artifact-provenance.json
+          if-no-files-found: error
+          retention-days: 30
+
+  runtime-artifacts-ready:
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')
+    needs: cross-build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Record complete Runtime artifact matrix
+        shell: bash
+        run: |
+          cat > runtime-artifacts-ready.json <<JSON
+          {
+            "schema_version": 1,
+            "source_branch": "${{ github.ref_name }}",
+            "source_sha": "${{ github.sha }}",
+            "workflow_run_id": "${{ github.run_id }}",
+            "platforms": ["linux-x86_64", "macos-aarch64", "macos-x86_64", "windows-x86_64"]
+          }
+          JSON
+      - name: Publish Runtime artifact readiness marker
+        uses: actions/upload-artifact@v4
+        with:
+          name: runmat-runtime-artifacts-ready
+          path: runtime-artifacts-ready.json
+          if-no-files-found: error
+          retention-days: 30
