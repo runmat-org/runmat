@@ -27,16 +27,6 @@ pub fn format_variable_hover(
         "```runmat\n{kind} {name}: {}\n```",
         format_fact(fact)
     );
-    if let Some(fact) = fact {
-        let _ = writeln!(
-            output,
-            "Storage: `{:?}` · Layout: `{:?}` · Residency: `{:?}` · Certainty: `{:?}`",
-            fact.storage, fact.layout, fact.residency, fact.certainty
-        );
-        if !fact.invalidation.0.is_empty() {
-            let _ = writeln!(output, "Invalidated by: `{:?}`", fact.invalidation.0);
-        }
-    }
     if global {
         let _ = writeln!(output, "Global variable available across the workspace.");
     }
@@ -129,6 +119,28 @@ mod tests {
             runmat_types::StorageFact::Dense,
         );
         assert_eq!(format_fact(Some(&fact)), "double [2 x 3]");
+    }
+
+    #[test]
+    fn variable_hover_does_not_expose_internal_execution_facts() {
+        let fact = ValueFact::proven(
+            ValueKindFact::Numeric(runmat_types::NumericFact {
+                class: runmat_types::NumericClass::Double,
+                domain: runmat_types::NumericDomain::Real,
+            }),
+            ShapeFact::from(vec![Some(2), Some(3)]),
+            runmat_types::StorageFact::Dense,
+        );
+
+        let hover = format_variable_hover("x", "workspace", Some(&fact), false);
+
+        assert!(hover.contains("workspace x: double [2 x 3]"));
+        assert!(!hover.contains("Storage"));
+        assert!(!hover.contains("Layout"));
+        assert!(!hover.contains("Residency"));
+        assert!(!hover.contains("Certainty"));
+        assert!(!hover.contains("Proven"));
+        assert!(!hover.contains("Invalidated by"));
     }
 
     #[test]

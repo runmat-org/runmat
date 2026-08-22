@@ -10,7 +10,7 @@ This page is the documentation source of truth for the current pin.
 
 For supported functionality, RunMat follows the documented behavior of the compatibility version pin. It also preserves older documented call forms when they remain accepted by the target or can coexist without changing target-compatible programs. There is no blanket earliest-supported release: historical behavior is retained per feature when it is documented, useful, and nonconflicting.
 
-A compatibility target does not imply that every toolbox, object type, or function from that release is implemented. Missing functionality is documented as a coverage limitation; it is not treated as an alternative compatibility rule or a RunMat extension.
+A compatibility target does not imply that every toolbox, object type, or function from that release is implemented.
 
 ## Compatibility Modes
 
