@@ -3,11 +3,11 @@ use std::future::Future;
 use std::task::{Context, Poll, Waker};
 
 use crate::{
-    build_task_submission, import_exact_geometry_input, prepare_exact_geometry_input,
-    prepare_exact_geometry_objects, prepare_faceted_geometry_input,
-    prepare_faceted_geometry_objects, prepare_result_publication, prepare_stage_objects,
-    MeshingArtifactAccess, MeshingExecutionContext, MeshingHostResponse, MeshingHostWorkload,
-    MeshingTaskEffectPolicy,
+    build_task_submission, import_exact_geometry_input, prepare_domain_model_input,
+    prepare_domain_model_objects, prepare_exact_geometry_input, prepare_exact_geometry_objects,
+    prepare_faceted_geometry_input, prepare_faceted_geometry_objects, prepare_result_publication,
+    prepare_stage_objects, MeshingArtifactAccess, MeshingExecutionContext, MeshingHostResponse,
+    MeshingHostWorkload, MeshingTaskEffectPolicy,
 };
 use runmat_execution::identity::{ArtifactId, AttemptId, WorkerId};
 use runmat_execution::value::{ValuePayload, ValueRef};
@@ -28,8 +28,9 @@ use runmat_meshing_core::{
     MeshingManifestDisposition, MeshingPartitionDescriptor, MeshingPartitionKind,
     MeshingQualityTargets, MeshingRequest, MeshingResourceBudget, MeshingStageIdentity,
     MeshingStageKind, MeshingStageResultKind, MeshingWorkloadRequest, MeshingWorkloadResult,
-    MetricCombinationRule, MetricFieldRequest, MetricTensor3, NeverCancelled, StableDigest,
-    SurfaceQualityTargets, VolumeQualityTargets, MESHING_IDENTITY_SCHEMA_VERSION,
+    MetricCombinationRule, MetricFieldRequest, MetricTensor3, NeverCancelled,
+    RegionMaterialAssignment, StableDigest, SurfaceQualityTargets, VolumeQualityTargets,
+    MESHING_DOMAIN_MODEL_SCHEMA_VERSION, MESHING_IDENTITY_SCHEMA_VERSION,
     MESHING_REQUEST_SCHEMA_VERSION, MESHING_WORKLOAD_SCHEMA_VERSION,
 };
 
@@ -977,11 +978,16 @@ impl Fixture {
     }
 
     fn with_exact_tetrahedron_curve_partition() -> Self {
-        Self::with_exact_geometry_fixture(
+        Self::with_exact_tetrahedron_curve_partition_order(ElementOrder::Tet4)
+    }
+
+    fn with_exact_tetrahedron_curve_partition_order(element_order: ElementOrder) -> Self {
+        Self::with_exact_geometry_fixture_order(
             MeshingStageKind::CurveMesh,
             runmat_geometry_fixtures::exact_tetrahedron(),
             false,
             true,
+            element_order,
         )
     }
 
@@ -996,6 +1002,25 @@ impl Fixture {
 
     fn with_exact_geometry_fixture(
         stage: MeshingStageKind,
+        fixture: (
+            runmat_geometry_core::GeometryDocument,
+            runmat_geometry_core::ExactBRepTopology,
+            runmat_geometry_core::ExactEvaluatorRegistry,
+        ),
+        curve_as_sheet: bool,
+        relaxed_volume: bool,
+    ) -> Self {
+        Self::with_exact_geometry_fixture_order(
+            stage,
+            fixture,
+            curve_as_sheet,
+            relaxed_volume,
+            ElementOrder::Tet4,
+        )
+    }
+
+    fn with_exact_geometry_fixture_order(
+        stage: MeshingStageKind,
         (mut document, mut topology, mut evaluators): (
             runmat_geometry_core::GeometryDocument,
             runmat_geometry_core::ExactBRepTopology,
@@ -1003,6 +1028,7 @@ impl Fixture {
         ),
         curve_as_sheet: bool,
         relaxed_volume: bool,
+        element_order: ElementOrder,
     ) -> Self {
         let access = MeshingArtifactAccess {
             authorization_scope: "serial-exact-geometry-run".into(),
@@ -1061,6 +1087,7 @@ impl Fixture {
             store.write_verified(object).unwrap();
         }
         let mut request = request();
+        request.element_order = element_order;
         request.tolerance = document.tolerance;
         if relaxed_volume {
             request.metric.global_metric = MetricTensor3::isotropic_length_m(10.0).unwrap();
@@ -1084,7 +1111,7 @@ impl Fixture {
             request.resources.maximum_memory_bytes = 64_000_000;
             request.resources.maximum_artifact_bytes = 16_000_000;
             request.resources.maximum_search_work = 1_000_000;
-            request.resources.maximum_iterations = 100_000;
+            request.resources.maximum_iterations = if relaxed_volume { 2_000_000 } else { 100_000 };
         }
         let root_digest = StableDigest::from_bytes(*input.root_input().logical_digest.bytes());
         let exact_input = MeshingInputRef {
@@ -1131,7 +1158,7 @@ impl Fixture {
                     },
                 },
                 MeshingCapabilityRequirement::ElementOrder {
-                    order: ElementOrder::Tet4,
+                    order: element_order,
                 },
                 MeshingCapabilityRequirement::DeterministicPlatformCohort {
                     cohort: "native-cohort-v1".into(),

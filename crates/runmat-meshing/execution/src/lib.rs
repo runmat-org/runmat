@@ -22,6 +22,7 @@ mod objects;
 mod publication;
 mod response;
 mod serial;
+mod solver_projection_kernel;
 mod surface_join_kernel;
 mod surface_kernel;
 mod task;
@@ -91,6 +92,9 @@ pub use response::{MeshingHostResponse, MESHING_HOST_RESPONSE_SCHEMA_VERSION};
 pub use serial::{
     execute_serial_stage, CompletedMeshingStage, MeshingSerialExecutionError,
     MeshingStageInvocation, MeshingStageKernel, PreparedMeshingInput, ValidatedMeshingStageOutput,
+};
+pub use solver_projection_kernel::{
+    ExactSolverEvaluatorProvider, ExactSolverProjectionKernel, PortableSolverEvaluatorProvider,
 };
 pub use surface_join_kernel::ExactSurfaceJoinKernel;
 pub use surface_kernel::ExactSurfacePartitionKernel;
