@@ -1242,8 +1242,8 @@ pub fn analysis_run_study_op(
     let run_operation = run_operation_for_kind(spec.run_kind).to_string();
     let run_op_version = run_operation_version_for_kind(spec.run_kind).to_string();
     let operation_sequence = study_operation_sequence(spec, &run_op_version);
-    let analysis_mesh_artifact_path = spec.analysis_mesh_artifact_path.clone();
-    if let Some(path) = analysis_mesh_artifact_path.as_deref() {
+    let solver_mesh_artifact_path = spec.solver_mesh_artifact_path.clone();
+    if let Some(path) = solver_mesh_artifact_path.as_deref() {
         resolve_solver_mesh_artifact(
             Some(path),
             ANALYSIS_RUN_STUDY_OPERATION,
@@ -1251,7 +1251,7 @@ pub fn analysis_run_study_op(
             &context,
         )?;
     }
-    let analysis_mesh_evidence_artifact_path = spec.analysis_mesh_evidence_artifact_path.clone();
+    let meshing_evidence_artifact_path = spec.meshing_evidence_artifact_path.clone();
 
     let study_prep = crate::geometry::geometry_prep_for_analysis_op(
         &spec.geometry,
@@ -1286,9 +1286,9 @@ pub fn analysis_run_study_op(
         AnalysisRunKind::LinearStatic => {
             let mut options = spec.linear_static_run_options.clone().unwrap_or_default();
             attach_prep_artifact_to_run_options(&mut options, &study_prep_artifact_id);
-            attach_analysis_mesh_artifact_to_run_options(
+            attach_solver_mesh_artifact_to_run_options(
                 &mut options,
-                analysis_mesh_artifact_path.as_deref(),
+                solver_mesh_artifact_path.as_deref(),
             );
             let initial_run = analysis_run_linear_static_with_options(
                 &model,
@@ -1398,9 +1398,6 @@ pub fn analysis_run_study_op(
             Ok((run, run_options_to_json(&options), Some(options)))
         }
     }?;
-    let refined_analysis_mesh_artifact_path = None;
-    let refined_analysis_mesh_evidence_artifact_path = None;
-
     let evidence_artifact_path = persist_study_evidence(
         &study_fingerprint,
         "run",
@@ -1412,10 +1409,8 @@ pub fn analysis_run_study_op(
             "run_kind": spec.run_kind,
             "backend": spec.backend,
             "prep_artifact_id": study_prep_artifact_id.clone(),
-            "analysis_mesh_artifact_path": analysis_mesh_artifact_path.clone(),
-            "analysis_mesh_evidence_artifact_path": analysis_mesh_evidence_artifact_path.clone(),
-            "refined_analysis_mesh_artifact_path": refined_analysis_mesh_artifact_path.clone(),
-            "refined_analysis_mesh_evidence_artifact_path": refined_analysis_mesh_evidence_artifact_path.clone(),
+            "solver_mesh_artifact_path": solver_mesh_artifact_path.clone(),
+            "meshing_evidence_artifact_path": meshing_evidence_artifact_path.clone(),
             "run_options": resolved_run_options.clone(),
             "resolved_electromagnetic_run_options": resolved_electromagnetic_run_options.clone(),
             "study_fingerprint": study_fingerprint.clone(),
@@ -1462,10 +1457,8 @@ pub fn analysis_run_study_op(
             backend: spec.backend,
             electromagnetic_run_options: resolved_electromagnetic_run_options,
             prep_artifact_id: Some(study_prep_artifact_id),
-            analysis_mesh_artifact_path,
-            analysis_mesh_evidence_artifact_path,
-            refined_analysis_mesh_artifact_path,
-            refined_analysis_mesh_evidence_artifact_path,
+            solver_mesh_artifact_path,
+            meshing_evidence_artifact_path,
             run_options: resolved_run_options,
             study_fingerprint,
             operation_sequence,
@@ -9331,7 +9324,7 @@ pub fn analysis_run_linear_static_with_options(
         &context,
     )?;
     let solver_mesh = resolve_solver_mesh_artifact(
-        options.analysis_mesh_artifact_path.as_deref(),
+        options.solver_mesh_artifact_path.as_deref(),
         ANALYSIS_RUN_OPERATION,
         ANALYSIS_RUN_OP_VERSION,
         &context,
@@ -9346,7 +9339,7 @@ pub fn analysis_run_linear_static_with_options(
                 prep_context.as_ref(),
                 options.prep_calibration_profile,
             ),
-            solver_mesh_artifact_path: options.analysis_mesh_artifact_path.clone(),
+            solver_mesh_artifact_path: options.solver_mesh_artifact_path.clone(),
             solver_mesh: solver_mesh.clone(),
             require_solver_mesh_for_solid: true,
             thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
@@ -13357,12 +13350,12 @@ fn attach_prep_artifact_to_run_options(options: &mut AnalysisRunOptions, prep_ar
     }
 }
 
-fn attach_analysis_mesh_artifact_to_run_options(
+fn attach_solver_mesh_artifact_to_run_options(
     options: &mut AnalysisRunOptions,
-    analysis_mesh_artifact_path: Option<&str>,
+    solver_mesh_artifact_path: Option<&str>,
 ) {
-    if options.analysis_mesh_artifact_path.is_none() {
-        options.analysis_mesh_artifact_path = analysis_mesh_artifact_path.map(str::to_string);
+    if options.solver_mesh_artifact_path.is_none() {
+        options.solver_mesh_artifact_path = solver_mesh_artifact_path.map(str::to_string);
     }
 }
 

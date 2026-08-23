@@ -194,8 +194,8 @@ pub fn analysis_author_study_op(
         backend: intent.backend,
         mesh_options: Some(VolumeMeshingOptions::default()),
         outputs: Vec::new(),
-        analysis_mesh_artifact_path: intent.analysis_mesh_artifact_path.clone(),
-        analysis_mesh_evidence_artifact_path: intent.analysis_mesh_evidence_artifact_path.clone(),
+        solver_mesh_artifact_path: intent.solver_mesh_artifact_path.clone(),
+        meshing_evidence_artifact_path: intent.meshing_evidence_artifact_path.clone(),
         linear_static_run_options: None,
         modal_run_options: None,
         acoustic_run_options: None,
@@ -259,8 +259,8 @@ pub fn analysis_author_study_op(
             .diagram_observation
             .as_ref()
             .and_then(|observation| observation.confidence),
-        analysis_mesh_artifact_path: intent.analysis_mesh_artifact_path,
-        analysis_mesh_evidence_artifact_path: intent.analysis_mesh_evidence_artifact_path,
+        solver_mesh_artifact_path: intent.solver_mesh_artifact_path,
+        meshing_evidence_artifact_path: intent.meshing_evidence_artifact_path,
         material_region_source,
         boundary_condition_region_source,
         driving_condition_region_source,
