@@ -16,6 +16,7 @@ mod lineage;
 mod manifest;
 mod metric;
 mod request;
+mod settings;
 mod solver_projection;
 mod transfer;
 mod workload;
@@ -80,6 +81,7 @@ pub use request::{
     MESHING_REQUEST_SCHEMA_VERSION,
 };
 pub use runmat_geometry_core::{GeometryTolerancePolicy, PersistentEntityId, PersistentEntityKind};
+pub use settings::{resolve_meshing_request, MeshingRequestSettings};
 pub use solver_projection::{
     SolverMeshProjection, SolverMeshValidation, SOLVER_MESH_PROJECTION_SCHEMA_VERSION,
     SOLVER_MESH_VALIDATION_SCHEMA_VERSION,
