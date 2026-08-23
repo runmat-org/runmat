@@ -1,9 +1,10 @@
 use runmat_geometry_core::{
     ExactBRepTopology, ExactCurveEvaluator, ExactPcurveEvaluator, ExactSurfaceEvaluator,
-    ExactTrimClassifier, GeometryEvaluationControl, PersistentEntityId,
+    ExactTrimClassifier, GeometryEvaluationControl,
 };
 use runmat_meshing_core::{
-    validate_solver_mesh_topology, MeshingCancellationSignal, MeshingRequest, SolverMeshTopology,
+    validate_solver_mesh_topology, MeshingCancellationSignal, MeshingDomainModel, MeshingRequest,
+    SolverMeshTopology,
 };
 use runmat_meshing_surface::ExactSurfaceMesh;
 
@@ -22,19 +23,13 @@ mod parameters;
 
 pub use error::{DelaunaySolverTopologyError, DelaunaySolverTopologyErrorKind};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DelaunayRegionMaterial {
-    pub region_id: PersistentEntityId,
-    pub material_id: String,
-}
-
 pub struct DelaunaySolverTopologyInput<'a> {
     pub exact_topology: &'a ExactBRepTopology,
     pub exact_surface: &'a ExactSurfaceMesh,
     pub volume_mesh: &'a DelaunayVolumeMesh,
     pub volume_options: DelaunayVolumeMeshOptions,
     pub request: &'a MeshingRequest,
-    pub region_materials: &'a [DelaunayRegionMaterial],
+    pub domain_model: &'a MeshingDomainModel,
     pub exact_evaluation: Option<DelaunayExactEvaluation<'a>>,
 }
 

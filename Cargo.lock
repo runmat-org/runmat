@@ -6802,6 +6802,7 @@ dependencies = [
  "robust",
  "runmat-canonical-codec",
  "runmat-geometry-core",
+ "runmat-geometry-fixtures",
  "runmat-meshing-size",
  "serde",
  "serde_json",

@@ -1,6 +1,7 @@
 [package]
 name = "runmat-geometry-fixtures"
 version = "0.6.2"
+license-file = "../../../LICENSE.md"
 edition = "2021"
 publish = false
 

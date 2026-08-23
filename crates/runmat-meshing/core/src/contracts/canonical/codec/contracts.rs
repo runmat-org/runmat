@@ -2,12 +2,12 @@ use sha2::{Digest as _, Sha256};
 
 use super::{encode_contract, CanonicalMeshingContract, MeshingCanonicalLimits};
 use crate::contracts::canonical::{
-    AlgorithmVersionSet, GeometryTolerancePolicy, MeshingContractError, MeshingEvidence,
-    MeshingFailure, MeshingJoinIdentity, MeshingPartitionDescriptor, MeshingPartitionIdentity,
-    MeshingProgress, MeshingRequest, MeshingStageIdentity, MeshingStageManifest,
-    MeshingStageResultIdentity, MeshingValidationIdentity, MeshingWorkloadRequest,
-    MeshingWorkloadResult, MetricFieldRequest, SolverMeshAdaptationLineage, SolverMeshArtifact,
-    SolverMeshTransferMap, StableDigest,
+    AlgorithmVersionSet, GeometryTolerancePolicy, MeshingContractError, MeshingDomainModel,
+    MeshingEvidence, MeshingFailure, MeshingJoinIdentity, MeshingPartitionDescriptor,
+    MeshingPartitionIdentity, MeshingProgress, MeshingRequest, MeshingStageIdentity,
+    MeshingStageManifest, MeshingStageResultIdentity, MeshingValidationIdentity,
+    MeshingWorkloadRequest, MeshingWorkloadResult, MetricFieldRequest, SolverMeshAdaptationLineage,
+    SolverMeshArtifact, SolverMeshTransferMap, StableDigest,
 };
 
 macro_rules! canonical_contract {
@@ -52,6 +52,12 @@ canonical_contract!(
     "analysis.mesh.algorithm-versions/v2",
     MeshingCanonicalLimits::IDENTITY,
     AlgorithmVersionSet::validate
+);
+canonical_contract!(
+    MeshingDomainModel,
+    "analysis.mesh.domain-model/v1",
+    MeshingCanonicalLimits::REQUEST,
+    MeshingDomainModel::validate
 );
 canonical_contract!(
     MeshingRequest,

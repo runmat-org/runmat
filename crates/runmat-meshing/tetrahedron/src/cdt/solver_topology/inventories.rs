@@ -20,7 +20,7 @@ pub(super) fn build_regions(
         .map(|region| {
             let material = materials
                 .get(&region.region_id)
-                .ok_or_else(|| invalid_materials("mesh region has no material assignment"))?;
+                .ok_or_else(|| invalid_domain_model("mesh region has no material assignment"))?;
             Ok(MeshRegion {
                 region_id: region.region_id.clone(),
                 material_id: (*material).to_owned(),
@@ -126,6 +126,6 @@ fn invalid_mesh(reason: impl Into<String>) -> DelaunaySolverTopologyError {
     error::failure(DelaunaySolverTopologyErrorKind::InvalidMesh, reason)
 }
 
-fn invalid_materials(reason: impl Into<String>) -> DelaunaySolverTopologyError {
-    error::failure(DelaunaySolverTopologyErrorKind::InvalidMaterials, reason)
+fn invalid_domain_model(reason: impl Into<String>) -> DelaunaySolverTopologyError {
+    error::failure(DelaunaySolverTopologyErrorKind::InvalidDomainModel, reason)
 }
