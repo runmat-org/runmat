@@ -281,6 +281,62 @@ fn artifact_and_evidence_round_trip_with_complete_canonical_topology() {
 }
 
 #[test]
+fn solver_projection_validation_forms_an_acyclic_final_artifact_chain() {
+    let expected = artifact();
+    let projection = SolverMeshProjection {
+        schema_version: SOLVER_MESH_PROJECTION_SCHEMA_VERSION,
+        geometry: expected.geometry.clone(),
+        resolved_request: expected.resolved_request.clone(),
+        topology: expected.topology.clone(),
+    };
+    let encoded = projection.canonical_encode().unwrap();
+    let decoded = SolverMeshProjection::canonical_decode(&encoded).unwrap();
+    assert_eq!(decoded, projection);
+
+    let validation = SolverMeshValidation::from_validated_projection(&projection).unwrap();
+    validation.validate_against(&projection).unwrap();
+    assert_eq!(
+        SolverMeshValidation::canonical_decode(&validation.canonical_encode().unwrap()).unwrap(),
+        validation
+    );
+
+    let validation_manifest_digest = digest(71);
+    let artifact = projection
+        .clone()
+        .into_artifact(validation_manifest_digest)
+        .unwrap();
+    artifact.validate().unwrap();
+    assert_eq!(
+        artifact.root_stage_manifest_digest,
+        validation_manifest_digest
+    );
+    assert_eq!(artifact.topology, projection.topology);
+
+    let mut tampered = validation;
+    tampered.boundary_face_count += 1;
+    assert!(tampered.validate_against(&projection).is_err());
+}
+
+#[test]
+fn solver_projection_and_validation_reject_incompatible_contracts() {
+    let source = artifact();
+    let mut projection = SolverMeshProjection {
+        schema_version: SOLVER_MESH_PROJECTION_SCHEMA_VERSION,
+        geometry: source.geometry,
+        resolved_request: source.resolved_request,
+        topology: source.topology,
+    };
+    let validation = SolverMeshValidation::from_validated_projection(&projection).unwrap();
+
+    projection.schema_version += 1;
+    assert!(projection.validate().is_err());
+
+    let mut invalid = validation;
+    invalid.projection_digest = StableDigest::ZERO;
+    assert!(invalid.validate().is_err());
+}
+
+#[test]
 fn artifact_rejects_noncanonical_or_dangling_connectivity() {
     let mut invalid = artifact();
     invalid.topology.nodes[0].stable_identity = StableDigest::ZERO;
