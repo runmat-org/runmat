@@ -17,7 +17,7 @@ runmat-execution-artifact = { workspace = true }
 runmat-execution-runner = { workspace = true }
 runmat-execution-transport-native = { workspace = true }
 runmat-geometry-core = { workspace = true }
-runmat-geometry-io = { workspace = true, optional = true }
+runmat-geometry-io = { workspace = true }
 runmat-meshing-core = { workspace = true }
 runmat-meshing-execution = { workspace = true }
 runmat-process-host = { workspace = true }
@@ -55,4 +55,4 @@ harness = false
 
 [features]
 default = []
-occt-native = ["dep:runmat-geometry-io", "runmat-geometry-io/occt-native"]
+occt-native = ["runmat-geometry-io/occt-native"]

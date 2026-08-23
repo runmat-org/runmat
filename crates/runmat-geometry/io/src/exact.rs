@@ -65,9 +65,9 @@ impl ImportedExactCad {
         Ok(self)
     }
 
-    pub fn build_closure(
+    pub fn geometry_document(
         &self,
-    ) -> Result<EncodedExactGeometryClosure, runmat_geometry_core::GeometryContractError> {
+    ) -> Result<GeometryDocument, runmat_geometry_core::GeometryContractError> {
         let tolerance = GeometryTolerancePolicy {
             source_tolerance_m: self
                 .topology
@@ -98,8 +98,15 @@ impl ImportedExactCad {
             },
             display_tessellations: Vec::new(),
         };
+        document.validate()?;
+        Ok(document)
+    }
+
+    pub fn build_closure(
+        &self,
+    ) -> Result<EncodedExactGeometryClosure, runmat_geometry_core::GeometryContractError> {
         build_exact_geometry_closure(
-            document,
+            self.geometry_document()?,
             &self.topology,
             &self.evaluators,
             Some(&self.representation),
