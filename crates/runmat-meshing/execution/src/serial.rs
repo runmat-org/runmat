@@ -311,7 +311,8 @@ fn validate_stage_streams(
         ),
         MeshingStageKind::OrderElevation => matches!(
             media,
-            MeshingChunkMediaType::MeshNodes
+            MeshingChunkMediaType::SolverMeshProjection
+                | MeshingChunkMediaType::MeshNodes
                 | MeshingChunkMediaType::MeshElements
                 | MeshingChunkMediaType::MeshClassification
         ),

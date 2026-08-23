@@ -7,7 +7,8 @@ use crate::contracts::canonical::{
     MeshingPartitionIdentity, MeshingProgress, MeshingRequest, MeshingStageIdentity,
     MeshingStageManifest, MeshingStageResultIdentity, MeshingValidationIdentity,
     MeshingWorkloadRequest, MeshingWorkloadResult, MetricFieldRequest, SolverMeshAdaptationLineage,
-    SolverMeshArtifact, SolverMeshTransferMap, StableDigest,
+    SolverMeshArtifact, SolverMeshProjection, SolverMeshTransferMap, SolverMeshValidation,
+    StableDigest,
 };
 
 macro_rules! canonical_contract {
@@ -58,6 +59,18 @@ canonical_contract!(
     "analysis.mesh.domain-model/v1",
     MeshingCanonicalLimits::REQUEST,
     MeshingDomainModel::validate
+);
+canonical_contract!(
+    SolverMeshProjection,
+    "analysis.mesh.solver-projection/v1",
+    MeshingCanonicalLimits::ARTIFACT,
+    SolverMeshProjection::validate
+);
+canonical_contract!(
+    SolverMeshValidation,
+    "analysis.mesh.solver-validation/v1",
+    MeshingCanonicalLimits::MANIFEST,
+    SolverMeshValidation::validate
 );
 canonical_contract!(
     MeshingRequest,
