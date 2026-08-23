@@ -257,8 +257,8 @@ mod tests {
 
     #[test]
     fn solid_topology_rejects_unsupported_volume_elements() {
-        let err = solid_topology_from_analysis_mesh(&mesh(VolumeElementKind::Hex8), 3)
-            .expect_err("hex solid assembly is not supported yet");
+        let err = solid_topology_from_analysis_mesh(&mesh(VolumeElementKind::Tetrahedron10), 3)
+            .expect_err("quadratic solid assembly is not supported by this legacy path");
         assert_eq!(
             err,
             SolidAssemblyError::UnsupportedVolumeElementKind {
