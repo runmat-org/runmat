@@ -1,30 +1,30 @@
 use runmat_analysis_core::{AnalysisModel, BoundaryConditionKind, LoadKind};
-use runmat_meshing_core::AnalysisMeshArtifact;
+use runmat_meshing_core::SolverMeshArtifact;
 
 use super::{
     dofs::{StructuralDofKind, StructuralDofLayout},
-    AnalysisMeshRegionMappingError, WrenchLoweringSummary,
+    SolverMeshRegionMappingError, WrenchLoweringSummary,
 };
 
-pub(super) fn apply_analysis_mesh_structural_regions(
+pub(super) fn apply_solver_mesh_structural_regions(
     model: &AnalysisModel,
-    mesh: &AnalysisMeshArtifact,
+    mesh: &SolverMeshArtifact,
     layout: &StructuralDofLayout,
     constrained: &mut [bool],
     rhs: &mut [f64],
     strict_region_mapping: bool,
-) -> Result<Vec<WrenchLoweringSummary>, AnalysisMeshRegionMappingError> {
+) -> Result<Vec<WrenchLoweringSummary>, SolverMeshRegionMappingError> {
     rhs.fill(0.0);
     constrained.fill(false);
 
     let mut wrench_lowering = Vec::new();
     for load in &model.loads {
-        let target_nodes = analysis_mesh_region_node_indices(mesh, &load.region_id);
+        let target_nodes = solver_mesh_region_node_indices(mesh, &load.region_id);
         match load.kind {
             LoadKind::Force { fx, fy, fz } => {
                 if target_nodes.is_empty() {
                     if strict_region_mapping {
-                        return Err(AnalysisMeshRegionMappingError::UnmappedLoadRegion {
+                        return Err(SolverMeshRegionMappingError::UnmappedLoadRegion {
                             load_id: load.load_id.clone(),
                             region_id: load.region_id.clone(),
                             load_kind: "force",
@@ -52,7 +52,7 @@ pub(super) fn apply_analysis_mesh_structural_regions(
             } => {
                 if target_nodes.is_empty() {
                     if strict_region_mapping {
-                        return Err(AnalysisMeshRegionMappingError::UnmappedLoadRegion {
+                        return Err(SolverMeshRegionMappingError::UnmappedLoadRegion {
                             load_id: load.load_id.clone(),
                             region_id: load.region_id.clone(),
                             load_kind: "wrench",
@@ -60,7 +60,7 @@ pub(super) fn apply_analysis_mesh_structural_regions(
                     }
                     continue;
                 }
-                let summary = add_analysis_mesh_wrench_rhs(
+                let summary = add_solver_mesh_wrench_rhs(
                     mesh,
                     layout,
                     rhs,
@@ -77,23 +77,21 @@ pub(super) fn apply_analysis_mesh_structural_regions(
             }
             LoadKind::Pressure { magnitude_pa } => {
                 if strict_region_mapping
-                    && !mesh.boundary_faces.iter().any(|face| {
-                        face.region_ids
-                            .iter()
-                            .any(|region| region == &load.region_id)
-                            && face.node_ids.len() == 3
+                    && !mesh.topology.boundary_faces.iter().any(|face| {
+                        boundary_face_matches_region(face, &load.region_id)
+                            && matches!(face.node_ids.len(), 3 | 6)
                     })
                 {
-                    return Err(AnalysisMeshRegionMappingError::UnmappedLoadRegion {
+                    return Err(SolverMeshRegionMappingError::UnmappedLoadRegion {
                         load_id: load.load_id.clone(),
                         region_id: load.region_id.clone(),
                         load_kind: "pressure",
                     });
                 }
-                apply_analysis_mesh_pressure(mesh, layout, rhs, &load.region_id, magnitude_pa);
+                apply_solver_mesh_pressure(mesh, layout, rhs, &load.region_id, magnitude_pa);
             }
             LoadKind::BodyForce { gx, gy, gz } => {
-                let all_nodes = (0..mesh.nodes.len()).collect::<Vec<_>>();
+                let all_nodes = (0..mesh.topology.nodes.len()).collect::<Vec<_>>();
                 let scale = 1.0 / all_nodes.len().max(1) as f64;
                 for node_index in all_nodes {
                     add_rhs(layout, rhs, node_index, StructuralDofKind::Ux, gx * scale);
@@ -106,7 +104,7 @@ pub(super) fn apply_analysis_mesh_structural_regions(
     }
 
     for bc in &model.boundary_conditions {
-        let target_nodes = analysis_mesh_region_node_indices(mesh, &bc.region_id);
+        let target_nodes = solver_mesh_region_node_indices(mesh, &bc.region_id);
         if strict_region_mapping
             && target_nodes.is_empty()
             && matches!(
@@ -115,7 +113,7 @@ pub(super) fn apply_analysis_mesh_structural_regions(
             )
         {
             return Err(
-                AnalysisMeshRegionMappingError::UnmappedBoundaryConditionRegion {
+                SolverMeshRegionMappingError::UnmappedBoundaryConditionRegion {
                     bc_id: bc.bc_id.clone(),
                     region_id: bc.region_id.clone(),
                     boundary_condition_kind: match bc.kind {
@@ -144,10 +142,10 @@ pub(super) fn apply_analysis_mesh_structural_regions(
     Ok(wrench_lowering)
 }
 
-fn analysis_mesh_region_node_indices(mesh: &AnalysisMeshArtifact, region_id: &str) -> Vec<usize> {
-    let mut node_ids = Vec::<u32>::new();
-    for face in &mesh.boundary_faces {
-        if !face.region_ids.iter().any(|region| region == region_id) {
+fn solver_mesh_region_node_indices(mesh: &SolverMeshArtifact, region_id: &str) -> Vec<usize> {
+    let mut node_ids = Vec::<u64>::new();
+    for face in &mesh.topology.boundary_faces {
+        if !boundary_face_matches_region(face, region_id) {
             continue;
         }
         for node_id in &face.node_ids {
@@ -158,28 +156,42 @@ fn analysis_mesh_region_node_indices(mesh: &AnalysisMeshArtifact, region_id: &st
     }
     node_ids
         .into_iter()
-        .filter_map(|node_id| mesh.nodes.iter().position(|node| node.node_id == node_id))
+        .filter_map(|node_id| {
+            mesh.topology
+                .nodes
+                .iter()
+                .position(|node| node.node_id == node_id)
+        })
         .collect()
 }
 
-fn apply_analysis_mesh_pressure(
-    mesh: &AnalysisMeshArtifact,
+fn boundary_face_matches_region(
+    face: &runmat_meshing_core::SolverBoundaryFace,
+    region_id: &str,
+) -> bool {
+    face.provenance
+        .iter()
+        .any(|entity| entity.source_topology_id == region_id)
+}
+
+fn apply_solver_mesh_pressure(
+    mesh: &SolverMeshArtifact,
     layout: &StructuralDofLayout,
     rhs: &mut [f64],
     region_id: &str,
     magnitude_pa: f64,
 ) {
-    for face in &mesh.boundary_faces {
-        if !face.region_ids.iter().any(|region| region == region_id) || face.node_ids.len() != 3 {
+    for face in &mesh.topology.boundary_faces {
+        if !boundary_face_matches_region(face, region_id) || !matches!(face.node_ids.len(), 3 | 6) {
             continue;
         }
-        let Some(indices) = analysis_mesh_face_node_indices(mesh, &face.node_ids) else {
+        let Some(indices) = solver_mesh_face_node_indices(mesh, &face.node_ids) else {
             continue;
         };
         let coordinates = [
-            mesh.nodes[indices[0]].coordinates_m,
-            mesh.nodes[indices[1]].coordinates_m,
-            mesh.nodes[indices[2]].coordinates_m,
+            mesh.topology.nodes[indices[0]].coordinates_m,
+            mesh.topology.nodes[indices[1]].coordinates_m,
+            mesh.topology.nodes[indices[2]].coordinates_m,
         ];
         let force = scale_vec(triangle_area_normal(coordinates), magnitude_pa);
         let nodal_force = scale_vec(force, 1.0 / 3.0);
@@ -189,8 +201,8 @@ fn apply_analysis_mesh_pressure(
     }
 }
 
-fn add_analysis_mesh_wrench_rhs(
-    mesh: &AnalysisMeshArtifact,
+fn add_solver_mesh_wrench_rhs(
+    mesh: &SolverMeshArtifact,
     layout: &StructuralDofLayout,
     rhs: &mut [f64],
     target_nodes: &[usize],
@@ -211,7 +223,7 @@ fn add_analysis_mesh_wrench_rhs(
         };
     }
 
-    let centroid = analysis_mesh_target_centroid(mesh, target_nodes);
+    let centroid = solver_mesh_target_centroid(mesh, target_nodes);
     let scale = 1.0 / target_nodes.len() as f64;
     let mut nodal_forces = Vec::with_capacity(target_nodes.len());
     for &node_index in target_nodes {
@@ -241,7 +253,7 @@ fn add_analysis_mesh_wrench_rhs(
         let offsets = target_nodes
             .iter()
             .map(|&node_index| {
-                let node = mesh.nodes[node_index].coordinates_m;
+                let node = mesh.topology.nodes[node_index].coordinates_m;
                 [
                     node[0] - centroid[0],
                     node[1] - centroid[1],
@@ -277,7 +289,7 @@ fn add_analysis_mesh_wrench_rhs(
     }
 
     let (applied_force, applied_moment_at_point) =
-        analysis_mesh_wrench_resultants(mesh, target_nodes, &nodal_forces, point_m);
+        solver_mesh_wrench_resultants(mesh, target_nodes, &nodal_forces, point_m);
     WrenchLoweringSummary {
         load_id: String::new(),
         region_id: String::new(),
@@ -298,30 +310,33 @@ fn add_analysis_mesh_wrench_rhs(
     }
 }
 
-fn analysis_mesh_face_node_indices(
-    mesh: &AnalysisMeshArtifact,
-    node_ids: &[u32],
+fn solver_mesh_face_node_indices(
+    mesh: &SolverMeshArtifact,
+    node_ids: &[u64],
 ) -> Option<[usize; 3]> {
-    if node_ids.len() != 3 {
+    if !matches!(node_ids.len(), 3 | 6) {
         return None;
     }
     Some([
-        mesh.nodes
+        mesh.topology
+            .nodes
             .iter()
             .position(|node| node.node_id == node_ids[0])?,
-        mesh.nodes
+        mesh.topology
+            .nodes
             .iter()
             .position(|node| node.node_id == node_ids[1])?,
-        mesh.nodes
+        mesh.topology
+            .nodes
             .iter()
             .position(|node| node.node_id == node_ids[2])?,
     ])
 }
 
-fn analysis_mesh_target_centroid(mesh: &AnalysisMeshArtifact, target_nodes: &[usize]) -> [f64; 3] {
+fn solver_mesh_target_centroid(mesh: &SolverMeshArtifact, target_nodes: &[usize]) -> [f64; 3] {
     let mut centroid = [0.0_f64; 3];
     for &node_index in target_nodes {
-        let node = mesh.nodes[node_index].coordinates_m;
+        let node = mesh.topology.nodes[node_index].coordinates_m;
         centroid[0] += node[0];
         centroid[1] += node[1];
         centroid[2] += node[2];
@@ -329,8 +344,8 @@ fn analysis_mesh_target_centroid(mesh: &AnalysisMeshArtifact, target_nodes: &[us
     scale_vec(centroid, 1.0 / target_nodes.len() as f64)
 }
 
-fn analysis_mesh_wrench_resultants(
-    mesh: &AnalysisMeshArtifact,
+fn solver_mesh_wrench_resultants(
+    mesh: &SolverMeshArtifact,
     target_nodes: &[usize],
     nodal_forces: &[[f64; 3]],
     point_m: [f64; 3],
@@ -341,7 +356,7 @@ fn analysis_mesh_wrench_resultants(
         applied_force[0] += force[0];
         applied_force[1] += force[1];
         applied_force[2] += force[2];
-        let node = mesh.nodes[node_index].coordinates_m;
+        let node = mesh.topology.nodes[node_index].coordinates_m;
         let arm = [
             node[0] - point_m[0],
             node[1] - point_m[1],

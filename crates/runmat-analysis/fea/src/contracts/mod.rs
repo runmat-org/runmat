@@ -1,5 +1,5 @@
 use runmat_analysis_core::AnalysisField;
-use runmat_meshing_core::AnalysisMeshArtifact;
+use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -542,9 +542,9 @@ pub struct LinearStaticSolveOptions {
     pub preconditioner_kind: SpdPreconditionerKind,
     pub algebra_backend_kind: LinearAlgebraBackendKind,
     pub prep_context: Option<FeaPrepContext>,
-    pub analysis_mesh_artifact_path: Option<String>,
-    pub analysis_mesh: Option<AnalysisMeshArtifact>,
-    pub require_analysis_mesh_for_solid: bool,
+    pub solver_mesh_artifact_path: Option<String>,
+    pub solver_mesh: Option<SolverMeshArtifact>,
+    pub require_solver_mesh_for_solid: bool,
     pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
     pub electro_thermal_context: Option<FeaElectroThermalContext>,
 }
@@ -555,9 +555,9 @@ impl Default for LinearStaticSolveOptions {
             preconditioner_kind: SpdPreconditionerKind::Jacobi,
             algebra_backend_kind: LinearAlgebraBackendKind::CpuReference,
             prep_context: None,
-            analysis_mesh_artifact_path: None,
-            analysis_mesh: None,
-            require_analysis_mesh_for_solid: true,
+            solver_mesh_artifact_path: None,
+            solver_mesh: None,
+            require_solver_mesh_for_solid: true,
             thermo_mechanical_context: None,
             electro_thermal_context: None,
         }

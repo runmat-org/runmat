@@ -1517,11 +1517,7 @@ mod tests {
         assembly::assemble_linear_system,
         fixtures::{fixture_model, FixtureId},
     };
-    use runmat_meshing_core::{
-        contracts::artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisMeshArtifact, AnalysisMeshNode,
-        AnalysisMeshProvenance, AnalysisMeshQualityReport, AnalysisVolumeElement, MeshSizingField,
-        VolumeElementKind,
-    };
+    use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
 
     #[test]
     fn solid_tetrahedron4_recovery_uses_solver_mesh_field_shapes() {
@@ -1616,46 +1612,7 @@ mod tests {
             .expect("field should be present")
     }
 
-    fn tetrahedron4_mesh() -> AnalysisMeshArtifact {
-        let mut mesh = AnalysisMeshArtifact {
-            schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
-            mesh_id: "unit_tetrahedron".to_string(),
-            nodes: vec![
-                node(1, [0.0, 0.0, 0.0]),
-                node(2, [1.0, 0.0, 0.0]),
-                node(3, [0.0, 1.0, 0.0]),
-                node(4, [0.0, 0.0, 1.0]),
-            ],
-            volume_elements: vec![AnalysisVolumeElement {
-                element_id: "tetrahedron_1".to_string(),
-                kind: VolumeElementKind::Tetrahedron4,
-                node_ids: vec![1, 2, 3, 4],
-                material_region_id: "solid".to_string(),
-                provenance: Vec::new(),
-            }],
-            boundary_faces: Vec::new(),
-            boundary_edges: Vec::new(),
-            quality: AnalysisMeshQualityReport::default(),
-            sizing: MeshSizingField::default(),
-            field_topology: Vec::new(),
-            backend: Default::default(),
-            adaptive_iterations: Vec::new(),
-            provenance: AnalysisMeshProvenance {
-                algorithm: "test".to_string(),
-                source_geometry_id: "geo:test".to_string(),
-                source_geometry_revision: 1,
-                source_geometry_sha256: None,
-            },
-        };
-        mesh.refresh_field_topology();
-        mesh
-    }
-
-    fn node(node_id: u32, coordinates_m: [f64; 3]) -> AnalysisMeshNode {
-        AnalysisMeshNode {
-            node_id,
-            coordinates_m,
-            provenance: Vec::new(),
-        }
+    fn tetrahedron4_mesh() -> SolverMeshArtifact {
+        crate::assembly::solver_solid::tests::artifact(ElementOrder::Tet4)
     }
 }

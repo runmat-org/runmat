@@ -37,9 +37,7 @@ use crate::{
     FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_meshing_core::{
-    contracts::artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryFace, AnalysisMeshArtifact,
-    AnalysisMeshNode, AnalysisMeshProvenance, AnalysisMeshQualityReport, AnalysisVolumeElement,
-    BoundaryElementKind, MeshSizingField, VolumeElementKind,
+    ElementOrder, PersistentEntityId, PersistentEntityKind, SolverMeshArtifact,
 };
 
 fn field<'a>(result: &'a FeaRunResult, field_id: &str) -> &'a runmat_analysis_core::AnalysisField {
@@ -60,8 +58,8 @@ fn run_linear_static_with_single_tetrahedron_mesh(
         model,
         backend,
         LinearStaticSolveOptions {
-            analysis_mesh: Some(single_tetrahedron_analysis_mesh_for_model(model)),
-            analysis_mesh_artifact_path: Some("analysis_mesh.json".to_string()),
+            solver_mesh: Some(single_tetrahedron_solver_mesh_for_model(model)),
+            solver_mesh_artifact_path: Some("solver_mesh.cbor".to_string()),
             ..LinearStaticSolveOptions::default()
         },
     )
@@ -506,8 +504,8 @@ fn thermo_mechanical_linear_static_emits_coupled_fields() {
         &model,
         ComputeBackend::Cpu,
         LinearStaticSolveOptions {
-            analysis_mesh: Some(single_tetrahedron_analysis_mesh_for_model(&model)),
-            analysis_mesh_artifact_path: Some("analysis_mesh.json".to_string()),
+            solver_mesh: Some(single_tetrahedron_solver_mesh_for_model(&model)),
+            solver_mesh_artifact_path: Some("solver_mesh.cbor".to_string()),
             thermo_mechanical_context: Some(FeaThermoMechanicalContext {
                 enabled: true,
                 reference_temperature_k: 293.15,
@@ -590,34 +588,34 @@ fn convergence_diagnostics_are_emitted() {
 }
 
 #[test]
-fn solid_continuum_requires_analysis_mesh_when_requested() {
+fn solid_continuum_requires_solver_mesh_when_requested() {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
     let err = crate::run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
         LinearStaticSolveOptions {
-            require_analysis_mesh_for_solid: true,
+            require_solver_mesh_for_solid: true,
             ..LinearStaticSolveOptions::default()
         },
     )
-    .expect_err("solid continuum solve should require an analysis mesh");
+    .expect_err("solid continuum solve should require a solver mesh");
 
     assert!(matches!(err, crate::FeaRunError::InvalidModel(_)));
-    assert!(err.to_string().contains("require an analysis mesh"));
+    assert!(err.to_string().contains("require a canonical solver mesh"));
 }
 
 #[test]
-fn explicit_beam_topology_does_not_require_analysis_mesh() {
+fn explicit_beam_topology_does_not_require_solver_mesh() {
     let model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
     let result = crate::run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
         LinearStaticSolveOptions {
-            require_analysis_mesh_for_solid: true,
+            require_solver_mesh_for_solid: true,
             ..LinearStaticSolveOptions::default()
         },
     )
-    .expect("explicit beam topology should not require a solid analysis mesh");
+    .expect("explicit beam topology should not require a solid solver mesh");
 
     assert!(result.diagnostics.iter().any(|diag| {
         diag.code == "FEA_STRUCTURAL_ROTATIONAL_DOF"
@@ -626,14 +624,14 @@ fn explicit_beam_topology_does_not_require_analysis_mesh() {
 }
 
 #[test]
-fn analysis_mesh_linear_static_reports_solid_assembly_basis() {
+fn solver_mesh_linear_static_reports_solid_assembly_basis() {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
     let result = crate::run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
         LinearStaticSolveOptions {
-            analysis_mesh: Some(single_tetrahedron_analysis_mesh()),
-            analysis_mesh_artifact_path: Some("analysis_mesh.json".to_string()),
+            solver_mesh: Some(single_tetrahedron_solver_mesh()),
+            solver_mesh_artifact_path: Some("solver_mesh.cbor".to_string()),
             ..LinearStaticSolveOptions::default()
         },
     )
@@ -658,7 +656,7 @@ fn analysis_mesh_linear_static_reports_solid_assembly_basis() {
 }
 
 #[test]
-fn prep_context_without_analysis_mesh_fails_for_solid_continuum() {
+fn prep_context_without_solver_mesh_fails_for_solid_continuum() {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
     let err = crate::run_linear_static_with_options(
         &model,
@@ -753,51 +751,21 @@ fn prep_context_without_analysis_mesh_fails_for_solid_continuum() {
     .expect_err("prep-only solid continuum solve should fail closed");
 
     assert!(matches!(err, crate::FeaRunError::InvalidModel(_)));
-    assert!(err.to_string().contains("require an analysis mesh"));
+    assert!(err.to_string().contains("require a canonical solver mesh"));
 }
 
-fn single_tetrahedron_analysis_mesh() -> AnalysisMeshArtifact {
-    let mut mesh = AnalysisMeshArtifact {
-        schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
-        mesh_id: "single_tetrahedron".to_string(),
-        nodes: vec![
-            analysis_mesh_node(1, [0.0, 0.0, 0.0]),
-            analysis_mesh_node(2, [1.0, 0.0, 0.0]),
-            analysis_mesh_node(3, [0.0, 1.0, 0.0]),
-            analysis_mesh_node(4, [0.0, 0.0, 1.0]),
-        ],
-        volume_elements: vec![AnalysisVolumeElement {
-            element_id: "tetrahedron_1".to_string(),
-            kind: VolumeElementKind::Tetrahedron4,
-            node_ids: vec![1, 2, 3, 4],
-            material_region_id: "tip".to_string(),
-            provenance: Vec::new(),
-        }],
-        boundary_faces: vec![
-            analysis_boundary_face("root_face", vec![1, 2, 3], &["root"]),
-            analysis_boundary_face("tip_face", vec![1, 2, 4], &["tip"]),
-        ],
-        boundary_edges: Vec::new(),
-        quality: AnalysisMeshQualityReport::default(),
-        sizing: MeshSizingField::default(),
-        field_topology: Vec::new(),
-        backend: Default::default(),
-        adaptive_iterations: Vec::new(),
-        provenance: AnalysisMeshProvenance {
-            algorithm: "test".to_string(),
-            source_geometry_id: "geo:test".to_string(),
-            source_geometry_revision: 1,
-            source_geometry_sha256: None,
-        },
-    };
-    mesh.refresh_field_topology();
+fn single_tetrahedron_solver_mesh() -> SolverMeshArtifact {
+    let mut mesh = crate::assembly::solver_solid::tests::artifact(ElementOrder::Tet4);
+    add_face_region(&mut mesh, 0, "root");
+    add_face_region(&mut mesh, 1, "tip");
+    reseal_solver_mesh(&mut mesh);
     mesh
 }
 
-fn single_tetrahedron_analysis_mesh_for_model(
+fn single_tetrahedron_solver_mesh_for_model(
     model: &runmat_analysis_core::AnalysisModel,
-) -> AnalysisMeshArtifact {
-    let mut mesh = single_tetrahedron_analysis_mesh();
+) -> SolverMeshArtifact {
+    let mut mesh = single_tetrahedron_solver_mesh();
     let mut root_regions = std::collections::BTreeSet::from(["root".to_string()]);
     root_regions.extend(
         model
@@ -819,37 +787,41 @@ fn single_tetrahedron_analysis_mesh_for_model(
             .iter()
             .map(|assignment| assignment.assigned_material_id.clone()),
     );
-    if let Some(root_face) = mesh.boundary_faces.get_mut(0) {
-        root_face.region_ids = root_regions.into_iter().collect();
+    for region in root_regions {
+        add_face_region(&mut mesh, 0, &region);
     }
-    if let Some(loaded_face) = mesh.boundary_faces.get_mut(1) {
-        loaded_face.region_ids = loaded_regions.into_iter().collect();
+    for region in loaded_regions {
+        add_face_region(&mut mesh, 1, &region);
     }
-    mesh.refresh_field_topology();
+    if let Some(material_id) = model
+        .materials
+        .first()
+        .map(|material| material.material_id.clone())
+    {
+        mesh.topology.volume_elements[0].material_id = material_id.clone();
+        mesh.topology.regions[0].material_id = material_id;
+    }
+    reseal_solver_mesh(&mut mesh);
     mesh
 }
 
-fn analysis_mesh_node(node_id: u32, coordinates_m: [f64; 3]) -> AnalysisMeshNode {
-    AnalysisMeshNode {
-        node_id,
-        coordinates_m,
-        provenance: Vec::new(),
+fn add_face_region(mesh: &mut SolverMeshArtifact, face_index: usize, region_id: &str) {
+    let provenance = &mut mesh.topology.boundary_faces[face_index].provenance;
+    let entity = PersistentEntityId {
+        kind: PersistentEntityKind::Face,
+        source_topology_id: region_id.to_owned(),
+        assembly_path: vec!["root".to_owned()],
+    };
+    if !provenance.contains(&entity) {
+        provenance.push(entity);
+        provenance.sort();
     }
 }
 
-fn analysis_boundary_face(
-    face_id: &str,
-    node_ids: Vec<u32>,
-    region_ids: &[&str],
-) -> AnalysisBoundaryFace {
-    AnalysisBoundaryFace {
-        face_id: face_id.to_string(),
-        kind: BoundaryElementKind::Tri3,
-        node_ids,
-        adjacent_volume_element_ids: Vec::new(),
-        region_ids: region_ids.iter().map(|region| region.to_string()).collect(),
-        provenance: Vec::new(),
-    }
+fn reseal_solver_mesh(mesh: &mut SolverMeshArtifact) {
+    mesh.canonical_digest = runmat_meshing_core::StableDigest::ZERO;
+    mesh.seal_canonical_digest()
+        .expect("test solver mesh should remain canonical");
 }
 
 #[test]
@@ -2063,13 +2035,16 @@ fn nonlinear_harder_fixtures_emit_difficulty_profile_signals() {
 }
 
 #[test]
-fn load_sweep_fixture_uses_analysis_mesh_gate() {
+fn load_sweep_fixture_uses_solver_mesh_gate() {
     let baseline = run_linear_static_with_single_tetrahedron_mesh(
         &fixture_model(FixtureId::CantileverLinearStatic),
         ComputeBackend::Cpu,
     )
     .expect("baseline solve should succeed");
-    let model = fixture_model(FixtureId::CantileverLoadSweep);
+    let mut model = fixture_model(FixtureId::CantileverLoadSweep);
+    for load in &mut model.loads {
+        load.region_id = "tip".to_owned();
+    }
     let result = run_linear_static_with_single_tetrahedron_mesh(&model, ComputeBackend::Cpu)
         .expect("solve should succeed");
 
@@ -2106,7 +2081,10 @@ fn load_sweep_fixture_uses_analysis_mesh_gate() {
 
 #[test]
 fn large_load_sweep_fixture_scales_dof_count() {
-    let model = fixture_model(FixtureId::CantileverLargeLoadSweep);
+    let mut model = fixture_model(FixtureId::CantileverLargeLoadSweep);
+    for load in &mut model.loads {
+        load.region_id = "tip".to_owned();
+    }
     let result = run_linear_static_with_single_tetrahedron_mesh(&model, ComputeBackend::Cpu)
         .expect("solve should succeed");
 
