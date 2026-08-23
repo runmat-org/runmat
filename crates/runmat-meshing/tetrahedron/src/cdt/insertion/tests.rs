@@ -108,6 +108,44 @@ fn insertion_retriangulates_an_exact_shared_face_without_zero_volume_cells() {
 }
 
 #[test]
+fn insertion_retriangulates_an_exact_hull_face_without_zero_volume_cells() {
+    let topology = insert_delaunay_volume_node(
+        enclosing_tetrahedron(),
+        node(25, [0.0, -2.0 / 3.0, -2.0]),
+        DelaunayInsertionOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+
+    assert_eq!(topology.tetrahedra.len(), 3);
+    validate_delaunay_volume_topology(
+        &topology,
+        DelaunayInsertionOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+}
+
+#[test]
+fn insertion_retriangulates_an_exact_hull_edge_without_zero_volume_cells() {
+    let topology = insert_delaunay_volume_node(
+        enclosing_tetrahedron(),
+        node(25, [0.0, -2.0, -2.0]),
+        DelaunayInsertionOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+
+    assert_eq!(topology.tetrahedra.len(), 2);
+    validate_delaunay_volume_topology(
+        &topology,
+        DelaunayInsertionOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+}
+
+#[test]
 fn insertion_rejects_outside_repeated_and_tampered_inputs() {
     let topology = enclosing_tetrahedron();
     assert_eq!(

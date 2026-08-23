@@ -198,6 +198,41 @@ fn shell_orientation_places_outer_region_on_the_positive_side_when_reversed() {
 }
 
 #[test]
+fn face_use_is_classified_relative_to_the_oriented_surface_triangle() {
+    let (mut topology, surface) = tetrahedron();
+    topology.faces[0].orientation = TopologicalOrientation::Reversed;
+    topology.shells[0].face_uses[0].orientation = TopologicalOrientation::Reversed;
+    let reversed_face = topology.faces[0].id.clone();
+    for coedge in topology
+        .coedges
+        .iter_mut()
+        .filter(|coedge| coedge.face_id == reversed_face)
+    {
+        coedge.orientation = match coedge.orientation {
+            TopologicalOrientation::Forward => TopologicalOrientation::Reversed,
+            TopologicalOrientation::Reversed => TopologicalOrientation::Forward,
+        };
+    }
+    let constraints = build_delaunay_constraints(
+        &topology,
+        &surface,
+        DelaunayConstraintOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    let region = entity(PersistentEntityKind::Region, "region");
+
+    assert!(constraints
+        .facets
+        .iter()
+        .filter(|facet| facet.source_face_id == reversed_face)
+        .all(|facet| {
+            facet.positive_side == DelaunayConstraintFacetSide::Exterior
+                && facet.negative_side == DelaunayConstraintFacetSide::Region(region.clone())
+        }));
+}
+
+#[test]
 fn interface_and_contact_metadata_remain_typed_and_persistent() {
     let (mut topology, surface) = tetrahedron();
     let second_solid = entity(PersistentEntityKind::Solid, "solid:b");

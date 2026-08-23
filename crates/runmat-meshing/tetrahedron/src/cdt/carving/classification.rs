@@ -40,6 +40,7 @@ pub(super) fn classify_and_build(
         &blocked,
         exterior,
         Classification::Exterior,
+        None,
         &mut classifications,
         work,
     )?;
@@ -281,7 +282,6 @@ fn blocked_faces(
         .map(|triangle| {
             let indices = triangle.node_identities.map(|identity| {
                 recovery
-                    .segment_recovery
                     .topology
                     .nodes
                     .binary_search_by_key(&identity, |node| node.identity)
@@ -307,6 +307,7 @@ fn flood(
     blocked: &BTreeSet<[u32; 3]>,
     starts: BTreeSet<u32>,
     classification: Classification,
+    constraint_index: Option<u32>,
     classifications: &mut [Option<Classification>],
     work: &mut CarvingWork<'_>,
 ) -> Result<(), DelaunayCarvingError> {
@@ -319,8 +320,8 @@ fn flood(
             Some(_) => {
                 return Err(error(
                     DelaunayCarvingErrorKind::AmbiguousClassification,
-                    None,
-                    "carving floods overlap without a recovered facet between them",
+                    constraint_index,
+                    "carving facet-side flood conflicts with an existing component classification",
                 ));
             }
             None => *slot = Some(classification.clone()),

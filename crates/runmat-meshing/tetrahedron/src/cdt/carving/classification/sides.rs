@@ -102,6 +102,7 @@ pub(super) fn classify_facet_sides(
                     blocked,
                     BTreeSet::from([tetrahedron]),
                     classification(side),
+                    Some(recovered.constraint_index),
                     classifications,
                     work,
                 )?;

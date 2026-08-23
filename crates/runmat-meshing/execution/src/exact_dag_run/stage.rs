@@ -12,15 +12,22 @@ use crate::{
 use super::ExactMeshingDagRunError;
 
 #[derive(Debug, thiserror::Error)]
-#[error("{message}")]
-pub struct MeshingStageExecutionError {
-    message: String,
+pub enum MeshingStageExecutionError {
+    #[error("{0}")]
+    Message(String),
+    #[error("{0}")]
+    Failure(Box<runmat_meshing_core::MeshingFailure>),
 }
 
 impl MeshingStageExecutionError {
     pub fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
+        Self::Message(message.into())
+    }
+
+    pub const fn failure(&self) -> Option<&runmat_meshing_core::MeshingFailure> {
+        match self {
+            Self::Message(_) => None,
+            Self::Failure(failure) => Some(failure),
         }
     }
 }
@@ -92,7 +99,20 @@ impl<S: CacheImport + CacheExport> ExactMeshingDagExecutor for SerialExactMeshin
             self.inventory_limits,
         )
         .map(|completed| completed.attempt_success())
-        .map_err(|error| MeshingStageExecutionError::new(error.to_string()))
+        .map_err(map_serial_execution_error)
+    }
+}
+
+fn map_serial_execution_error(
+    error: crate::MeshingSerialExecutionError,
+) -> MeshingStageExecutionError {
+    match error {
+        crate::MeshingSerialExecutionError::Stage(failure) => {
+            MeshingStageExecutionError::Failure(failure)
+        }
+        crate::MeshingSerialExecutionError::Bridge(error) => {
+            MeshingStageExecutionError::new(error.to_string())
+        }
     }
 }
 
@@ -149,4 +169,30 @@ pub(super) fn admit_stage_success<E: ExactMeshingDagExecutor>(
         result_objects: success.result_objects,
         evidence,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serial_executor_preserves_typed_stage_failures() {
+        let failure = runmat_meshing_core::MeshingFailure {
+            schema_version: runmat_meshing_core::MESHING_FAILURE_SCHEMA_VERSION,
+            category: runmat_meshing_core::MeshingFailureCategory::InvalidGeometry,
+            stage: runmat_meshing_core::MeshingStageKind::SurfaceMesh,
+            operation: runmat_meshing_core::MeshingOperation::TriangulateSurface,
+            entity_ids: Vec::new(),
+            witnesses: Vec::new(),
+            request_values: Vec::new(),
+            achieved_values: Vec::new(),
+            remediation: "repair the exact boundary".into(),
+        };
+
+        let error = map_serial_execution_error(crate::MeshingSerialExecutionError::Stage(
+            Box::new(failure.clone()),
+        ));
+
+        assert_eq!(error.failure(), Some(&failure));
+    }
 }

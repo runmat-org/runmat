@@ -14,7 +14,7 @@ mod cavity;
 mod validation;
 mod work;
 
-use cavity::connected_cavity;
+use cavity::{connected_cavity, node_coplanar_with_face};
 pub(super) use validation::validate_constrained_delaunay_volume_topology;
 pub use validation::validate_delaunay_volume_topology;
 use work::InsertionWork;
@@ -145,7 +145,7 @@ fn insert_delaunay_volume_node_internal(
         protect_region_boundaries,
         &mut work,
     )?;
-    let boundary = cavity_boundary(&topology, &cavity, options)?;
+    let boundary = cavity_boundary(&topology, &cavity, node, &mut work)?;
     let cavity_regions = cavity
         .iter()
         .map(|index| topology.tetrahedra[*index].region_id.clone())
@@ -188,7 +188,8 @@ fn insert_delaunay_volume_node_internal(
 fn cavity_boundary(
     topology: &DelaunayVolumeTopology,
     cavity: &BTreeSet<usize>,
-    options: DelaunayInsertionOptions,
+    node: DelaunayVolumeNode,
+    work: &mut InsertionWork<'_>,
 ) -> Result<Vec<[u32; 3]>, DelaunayInsertionError> {
     let mut boundary = BTreeSet::new();
     for index in cavity {
@@ -196,6 +197,14 @@ fn cavity_boundary(
         for opposite in 0..4 {
             if tetrahedron.neighbors[opposite]
                 .is_some_and(|neighbor| cavity.contains(&(neighbor as usize)))
+            {
+                continue;
+            }
+            // A point admitted on the convex hull replaces a coplanar boundary
+            // face with the triangles induced by the adjacent non-coplanar
+            // cavity faces. Coning the old face to the point would create an
+            // exactly zero-volume tetrahedron.
+            if node_coplanar_with_face(topology, tetrahedron.vertex_indices, opposite, node, work)?
             {
                 continue;
             }
@@ -209,7 +218,7 @@ fn cavity_boundary(
             }
             face.sort_unstable();
             boundary.insert(face);
-            if boundary.len() as u64 > options.maximum_cavity_boundary_faces {
+            if boundary.len() as u64 > work.options.maximum_cavity_boundary_faces {
                 return Err(resource("cavity boundary-face limit exceeded"));
             }
         }

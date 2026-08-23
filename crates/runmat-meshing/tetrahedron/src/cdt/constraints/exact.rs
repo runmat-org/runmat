@@ -221,6 +221,11 @@ fn face_sides(
     BTreeMap<PersistentEntityId, (DelaunayConstraintFacetSide, DelaunayConstraintFacetSide)>,
     DelaunayConstraintError,
 > {
+    let face_orientation = topology
+        .faces
+        .iter()
+        .map(|face| (&face.id, face.orientation))
+        .collect::<BTreeMap<_, _>>();
     let mut region_by_solid = BTreeMap::new();
     let mut region_ids = BTreeSet::new();
     for region in &topology.regions {
@@ -284,11 +289,15 @@ fn face_sides(
             if interfaces.contains(&face_use.entity_id) {
                 continue;
             }
-            // Exact surface triangles already carry `ExactFace::orientation` (the surface join
-            // reverses their winding when necessary). Shell and face-use orientation therefore
-            // classify that oriented triangle directly; composing the face orientation again
-            // would invert every reversed face twice.
-            let orientation = compose(shell.orientation, face_use.orientation);
+            // Surface join has already applied `ExactFace::orientation` to the triangle winding.
+            // Express the shell use relative to that final oriented triangle, rather than the
+            // evaluator's canonical surface orientation.
+            let orientation = compose(
+                compose(shell.orientation, face_use.orientation),
+                *face_orientation.get(&face_use.entity_id).ok_or_else(|| {
+                    invalid_geometry("solid shell use references an absent exact face")
+                })?,
+            );
             let sides = region_and_absent(region.clone(), absent.clone(), orientation);
             if result.insert(face_use.entity_id.clone(), sides).is_some() {
                 return Err(invalid_geometry(
@@ -298,13 +307,16 @@ fn face_sides(
         }
     }
     for interface in &topology.interfaces {
+        let face_orientation = *face_orientation
+            .get(&interface.face_id)
+            .ok_or_else(|| invalid_geometry("exact interface references an absent exact face"))?;
         let first = region_side(
             interface.side_a_region_id.clone(),
-            interface.side_a_orientation,
+            compose(interface.side_a_orientation, face_orientation),
         );
         let second = region_side(
             interface.side_b_region_id.clone(),
-            interface.side_b_orientation,
+            compose(interface.side_b_orientation, face_orientation),
         );
         let sides = merge_region_sides(first, second)?;
         if result.insert(interface.face_id.clone(), sides).is_some() {

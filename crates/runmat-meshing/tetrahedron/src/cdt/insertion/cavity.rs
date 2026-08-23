@@ -84,7 +84,7 @@ pub(super) fn stable_face(
     face
 }
 
-fn node_coplanar_with_face(
+pub(super) fn node_coplanar_with_face(
     topology: &DelaunayVolumeTopology,
     vertices: [u32; 4],
     opposite: usize,
