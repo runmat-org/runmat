@@ -664,6 +664,7 @@ fn host_response_rejects_missing_roots_and_wrong_authority() {
     let MeshingHostResponse::Validated {
         schema_version,
         stage_manifest_digest,
+        stage_evidence,
         mut root,
         mut result_objects,
     } = response
@@ -674,15 +675,28 @@ fn host_response_rejects_missing_roots_and_wrong_authority() {
     let missing = MeshingHostResponse::Validated {
         schema_version,
         stage_manifest_digest,
+        stage_evidence: stage_evidence.clone(),
         root: root.clone(),
         result_objects,
     };
     assert!(missing.validate_against(&fixture.host).is_err());
 
+    let mut mismatched_evidence = (*stage_evidence).clone();
+    mismatched_evidence.stage_result_digest = StableDigest::from_bytes([77; 32]);
+    let mismatched = MeshingHostResponse::Validated {
+        schema_version,
+        stage_manifest_digest,
+        stage_evidence: Box::new(mismatched_evidence),
+        root: root.clone(),
+        result_objects: completed.publication().result_objects().to_vec(),
+    };
+    assert!(mismatched.validate_against(&fixture.host).is_err());
+
     root.authorization_scope = "another-run".into();
     let wrong_authority = MeshingHostResponse::Validated {
         schema_version,
         stage_manifest_digest,
+        stage_evidence,
         root,
         result_objects: completed.publication().result_objects().to_vec(),
     };

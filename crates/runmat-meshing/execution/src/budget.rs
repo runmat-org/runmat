@@ -3,8 +3,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use runmat_meshing_core::{
-    MeshingCancellationSignal, MeshingDiagnosticEntry, MeshingDiagnosticValue, MeshingFailure,
-    MeshingFailureCategory, MeshingProgress, MeshingRequest, MeshingStageKind,
+    InvariantEvidence, MeshingCancellationSignal, MeshingDiagnosticEntry, MeshingDiagnosticValue,
+    MeshingFailure, MeshingFailureCategory, MeshingPartitionDescriptor, MeshingProgress,
+    MeshingRequest, MeshingStageEvidence, MeshingStageKind, StableDigest,
     MESHING_FAILURE_SCHEMA_VERSION, MESHING_PROGRESS_SCHEMA_VERSION,
 };
 
@@ -135,6 +136,36 @@ impl<'a> MeshingStageControl<'a> {
             ));
         }
         Ok(())
+    }
+
+    pub(crate) fn stage_evidence(
+        &self,
+        partition: MeshingPartitionDescriptor,
+        stage_result_digest: StableDigest,
+    ) -> MeshingStageEvidence {
+        MeshingStageEvidence {
+            stage: self.stage,
+            partition,
+            stage_result_digest,
+            entity_counts: self.last.entity_counts.clone(),
+            invariants: vec![InvariantEvidence {
+                invariant_id: "canonical_stage_validation".into(),
+                passed: true,
+                measured: None,
+                required: None,
+                unit: None,
+            }],
+            achieved_error_distributions: BTreeMap::new(),
+            completed_work: self.last.completed_work,
+            estimated_work: self.last.estimated_work,
+            peak_memory_bytes: self.last.peak_memory_bytes,
+            peak_scratch_bytes: self.last.peak_scratch_bytes,
+            search_work: self.last.search_work,
+            maximum_recursion_depth: self.last.recursion_depth,
+            iterations: self.last.iterations,
+            elapsed_time_ms: elapsed_millis(self.started, Instant::now()),
+            cancellation_checkpoints: self.sequence,
+        }
     }
 
     pub fn checkpoint(

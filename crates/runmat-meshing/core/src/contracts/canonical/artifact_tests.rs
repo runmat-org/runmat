@@ -218,9 +218,16 @@ pub(super) fn evidence(artifact: &SolverMeshArtifact) -> MeshingEvidence {
         },
         stages: MeshingStageKind::ALL
             .into_iter()
+            .take(MeshingStageKind::ALL.len() - 1)
             .enumerate()
             .map(|(index, stage)| MeshingStageEvidence {
                 stage,
+                partition: MeshingPartitionDescriptor {
+                    kind: MeshingPartitionKind::WholeStage,
+                    partition_index: 0,
+                    partition_count: 1,
+                    entity_range: None,
+                },
                 stage_result_digest: digest(index as u8 + 10),
                 entity_counts: BTreeMap::from([("accepted".into(), 1)]),
                 invariants: vec![InvariantEvidence {
@@ -234,6 +241,10 @@ pub(super) fn evidence(artifact: &SolverMeshArtifact) -> MeshingEvidence {
                 completed_work: 1,
                 estimated_work: 1,
                 peak_memory_bytes: 100,
+                peak_scratch_bytes: 10,
+                search_work: 1,
+                maximum_recursion_depth: 1,
+                iterations: 1,
                 elapsed_time_ms: 1,
                 cancellation_checkpoints: 1,
             })
@@ -601,7 +612,7 @@ fn quadratic_solver_topology_requires_shared_exact_midside_connectivity() {
 }
 
 #[test]
-fn successful_evidence_requires_every_stage_and_respects_hard_budgets() {
+fn successful_evidence_requires_terminal_order_and_respects_hard_budgets() {
     let artifact = artifact();
     let mut invalid = evidence(&artifact);
     invalid.stages.pop();
@@ -621,6 +632,30 @@ fn successful_evidence_requires_every_stage_and_respects_hard_budgets() {
     invalid.artifact_digest = digest(99);
     assert_eq!(
         invalid.validate(&artifact).unwrap_err().field,
+        "meshing evidence"
+    );
+}
+
+#[test]
+fn successful_evidence_admits_canonically_ordered_partition_observations() {
+    let artifact = artifact();
+    let mut evidence = evidence(&artifact);
+    evidence.stages[0].partition.kind = MeshingPartitionKind::CanonicalEntityBatch;
+    evidence.stages[0].partition.partition_count = 2;
+    evidence.stages[0].partition.entity_range = Some(CanonicalEntityRange {
+        first: entity(PersistentEntityKind::Edge, "edge:1"),
+        last: entity(PersistentEntityKind::Edge, "edge:1"),
+        entity_count: 1,
+    });
+    let mut second_partition = evidence.stages[0].clone();
+    second_partition.partition.partition_index = 1;
+    second_partition.stage_result_digest = digest(98);
+    evidence.stages.insert(1, second_partition);
+    evidence.validate(&artifact).unwrap();
+
+    evidence.stages.swap(0, 1);
+    assert_eq!(
+        evidence.validate(&artifact).unwrap_err().field,
         "meshing evidence"
     );
 }
