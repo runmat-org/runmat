@@ -80,7 +80,7 @@ pub async fn execute_program_batch(submission: ProgramBatchSubmission) -> Worker
     crate::execute_meshing_program_request(
         &request,
         &mut store,
-        &runmat_meshing_execution::MeshingKernelDispatcher::default(),
+        &crate::native_meshing_kernel_dispatcher(),
         &runmat_meshing_core::NeverCancelled,
         &mut runmat_meshing_execution::NoopMeshingProgress,
         limits,

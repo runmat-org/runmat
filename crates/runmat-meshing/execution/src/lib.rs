@@ -64,7 +64,9 @@ pub use domain_model_objects::{
     PreparedDomainModelObjects,
 };
 pub use error::{MeshingExecutionError, MeshingExecutionResult};
-pub use evaluator_provider::{ExactMeshingEvaluatorProvider, PortableMeshingEvaluatorProvider};
+pub use evaluator_provider::{
+    ExactMeshingEvaluatorProvider, ExactMeshingGeometryEvaluation, PortableMeshingEvaluatorProvider,
+};
 pub use evidence::{assemble_meshing_evidence, MeshingEvidenceContext};
 pub use evidence_objects::{
     import_evidence_input, import_evidence_objects, prepare_evidence_input,

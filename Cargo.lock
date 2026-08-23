@@ -6509,6 +6509,7 @@ dependencies = [
  "runmat-execution-transport-native",
  "runmat-geometry-core",
  "runmat-geometry-fixtures",
+ "runmat-geometry-io",
  "runmat-meshing-core",
  "runmat-meshing-curve",
  "runmat-meshing-execution",
