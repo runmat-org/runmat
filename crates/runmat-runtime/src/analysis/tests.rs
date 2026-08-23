@@ -6931,8 +6931,8 @@ fn field_topology_quality_reasons_use_analysis_mesh_descriptors() {
 #[test]
 fn solid_mesh_quality_reasons_report_volume_kind_and_quality_failures() {
     let mut mesh = minimal_analysis_mesh();
-    mesh.volume_elements[0].kind = VolumeElementKind::Hex8;
-    mesh.volume_elements[0].node_ids = vec![1, 2, 3, 4, 1, 2, 3, 4];
+    mesh.volume_elements[0].kind = VolumeElementKind::Tetrahedron10;
+    mesh.volume_elements[0].node_ids = vec![1, 2, 3, 4, 1, 2, 3, 4, 1, 2];
     mesh.quality.min_scaled_jacobian = 0.01;
     mesh.quality.max_aspect_ratio = 30.0;
 

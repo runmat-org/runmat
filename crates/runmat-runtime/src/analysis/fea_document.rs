@@ -2454,19 +2454,13 @@ kind: display_only
     }
 
     #[test]
-    fn fea_document_mesh_options_reject_unsupported_solid_element() {
-        let mesh: FeaMeshDocument = serde_yaml::from_str(
+    fn fea_document_mesh_options_reject_removed_element_family() {
+        assert!(serde_yaml::from_str::<FeaMeshDocument>(
             r#"
-element: hex8
+element: removed
 "#,
         )
-        .expect("mesh document should parse");
-
-        let err = resolve_linear_static_mesh_options(Some(&mesh))
-            .expect_err("hex8 solid element is not supported yet");
-
-        assert!(err.contains("mesh.element"));
-        assert!(err.contains("tetrahedron4"));
+        .is_err());
     }
 
     #[test]

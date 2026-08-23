@@ -82,8 +82,8 @@ fn rejects_unintended_isolated_volume_components() {
 #[test]
 fn rejects_unsupported_element_kind_until_assembly_exists() {
     let mut mesh = valid_tetrahedron_mesh();
-    mesh.volume_elements[0].kind = VolumeElementKind::Hex8;
-    mesh.volume_elements[0].node_ids = vec![1, 2, 3, 4, 1, 2, 3, 4];
+    mesh.volume_elements[0].kind = VolumeElementKind::Tetrahedron10;
+    mesh.volume_elements[0].node_ids = vec![1, 2, 3, 4, 1, 2, 3, 4, 1, 2];
     let err = validate_analysis_mesh(&mesh, QualityThresholds::default())
         .expect_err("unsupported element kind should fail");
     assert_eq!(

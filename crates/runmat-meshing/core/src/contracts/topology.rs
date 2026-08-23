@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 pub enum VolumeElementKind {
     Tetrahedron4,
     Tetrahedron10,
-    Hex8,
 }
 
 impl VolumeElementKind {
@@ -13,7 +12,6 @@ impl VolumeElementKind {
         match self {
             Self::Tetrahedron4 => 4,
             Self::Tetrahedron10 => 10,
-            Self::Hex8 => 8,
         }
     }
 
@@ -27,7 +25,6 @@ impl VolumeElementKind {
 pub enum BoundaryElementKind {
     Tri3,
     Tri6,
-    Quad4,
 }
 
 impl BoundaryElementKind {
@@ -35,7 +32,6 @@ impl BoundaryElementKind {
         match self {
             Self::Tri3 => 3,
             Self::Tri6 => 6,
-            Self::Quad4 => 4,
         }
     }
 
