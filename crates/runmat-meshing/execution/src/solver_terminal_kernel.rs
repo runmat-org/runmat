@@ -5,8 +5,8 @@ use runmat_meshing_core::{
     MeshingDiagnosticValue, MeshingFailure, MeshingFailureCategory, MeshingPartitionKind,
     MeshingStageKind, MeshingStageResultKind, SolverMeshArtifact, SolverMeshProjection,
     SolverMeshValidation, StableDigest, ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
-    MESHING_FAILURE_SCHEMA_VERSION, SOLVER_MESH_PROJECTION_SCHEMA_VERSION,
-    SOLVER_MESH_VALIDATION_SCHEMA_VERSION,
+    MESHING_EVIDENCE_SCHEMA_VERSION, MESHING_FAILURE_SCHEMA_VERSION,
+    SOLVER_MESH_PROJECTION_SCHEMA_VERSION, SOLVER_MESH_VALIDATION_SCHEMA_VERSION,
 };
 
 use crate::{
@@ -111,6 +111,80 @@ impl MeshingStageKernel for SolverSerializationKernel {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SolverPublicationKernel;
+
+impl MeshingStageKernel for SolverPublicationKernel {
+    fn execute(
+        &self,
+        invocation: MeshingStageInvocation<'_, '_>,
+    ) -> Result<ValidatedMeshingStageOutput, Box<MeshingFailure>> {
+        require_stage(&invocation, MeshingStageKind::Publication)?;
+        let (serialization, evidence_input) = publication_inputs(invocation.inputs)?;
+        invocation
+            .control
+            .checkpoint(MeshingStageCheckpoint::default())?;
+        let artifact = decode_artifact(serialization)?;
+        let evidence = &evidence_input.evidence_objects().evidence;
+        evidence
+            .validate(&artifact)
+            .map_err(|error| terminal_failure(MeshingStageKind::Publication, &error.to_string()))?;
+        let serialization_digest =
+            StableDigest::from_bytes(*serialization.stage_objects().root.digest.bytes());
+        if evidence
+            .stages
+            .last()
+            .map(|stage| stage.stage_result_digest)
+            != Some(serialization_digest)
+        {
+            return Err(invalid_inputs(MeshingStageKind::Publication));
+        }
+        let artifact_bytes = artifact
+            .canonical_encode()
+            .map_err(|error| terminal_failure(MeshingStageKind::Publication, &error.to_string()))?;
+        let evidence_bytes = evidence
+            .canonical_encode()
+            .map_err(|error| terminal_failure(MeshingStageKind::Publication, &error.to_string()))?;
+        let encoded_length = u64::try_from(artifact_bytes.len())
+            .ok()
+            .and_then(|artifact_length| {
+                u64::try_from(evidence_bytes.len())
+                    .ok()
+                    .and_then(|evidence_length| artifact_length.checked_add(evidence_length))
+            })
+            .ok_or_else(|| {
+                terminal_failure(
+                    MeshingStageKind::Publication,
+                    "terminal publication byte inventory overflowed",
+                )
+            })?;
+        let checkpoint = artifact_checkpoint_for_stage(
+            &artifact,
+            encoded_length,
+            MeshingStageKind::Publication,
+        )?;
+        invocation.control.checkpoint(checkpoint.clone())?;
+        Ok(ValidatedMeshingStageOutput {
+            invariant_summary_digest: evidence.canonical_digest().map_err(|error| {
+                terminal_failure(MeshingStageKind::Publication, &error.to_string())
+            })?,
+            streams: vec![
+                MeshingChunkStream {
+                    media_type: MeshingChunkMediaType::AnalysisMeshArtifact,
+                    schema_version: ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
+                    records: vec![artifact_bytes],
+                },
+                MeshingChunkStream {
+                    media_type: MeshingChunkMediaType::MeshingEvidence,
+                    schema_version: MESHING_EVIDENCE_SCHEMA_VERSION,
+                    records: vec![evidence_bytes],
+                },
+            ],
+            final_checkpoint: checkpoint,
+        })
+    }
+}
+
 fn require_stage(
     invocation: &MeshingStageInvocation<'_, '_>,
     stage: MeshingStageKind,
@@ -157,6 +231,38 @@ fn terminal_inputs(
     ))
 }
 
+fn publication_inputs(
+    inputs: &[PreparedMeshingInput],
+) -> Result<
+    (
+        &PreparedMeshingResultPublication,
+        &crate::PreparedEvidenceInput,
+    ),
+    Box<MeshingFailure>,
+> {
+    let mut serialization = None;
+    let mut evidence = None;
+    for input in inputs {
+        match input {
+            PreparedMeshingInput::StageArtifact(publication)
+                if publication.stage_objects().result_identity.stage
+                    == MeshingStageKind::Serialization
+                    && serialization.is_none() =>
+            {
+                serialization = Some(publication.as_ref());
+            }
+            PreparedMeshingInput::Evidence(input) if evidence.is_none() => {
+                evidence = Some(input.as_ref());
+            }
+            _ => return Err(invalid_inputs(MeshingStageKind::Publication)),
+        }
+    }
+    Ok((
+        serialization.ok_or_else(|| invalid_inputs(MeshingStageKind::Publication))?,
+        evidence.ok_or_else(|| invalid_inputs(MeshingStageKind::Publication))?,
+    ))
+}
+
 fn decode_projection(
     publication: &PreparedMeshingResultPublication,
     host: &MeshingHostWorkload,
@@ -190,6 +296,20 @@ fn decode_validation(
     )?;
     SolverMeshValidation::canonical_decode(&bytes)
         .map_err(|error| terminal_failure(MeshingStageKind::Serialization, &error.to_string()))
+}
+
+fn decode_artifact(
+    publication: &PreparedMeshingResultPublication,
+) -> Result<SolverMeshArtifact, Box<MeshingFailure>> {
+    let bytes = one_record(
+        publication,
+        MeshingStageKind::Serialization,
+        MeshingChunkMediaType::AnalysisMeshArtifact,
+        ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
+        MeshingStageKind::Publication,
+    )?;
+    SolverMeshArtifact::canonical_decode(&bytes)
+        .map_err(|error| terminal_failure(MeshingStageKind::Publication, &error.to_string()))
 }
 
 fn one_record(
@@ -238,13 +358,21 @@ fn artifact_checkpoint(
     artifact: &SolverMeshArtifact,
     encoded_length: u64,
 ) -> Result<MeshingStageCheckpoint, Box<MeshingFailure>> {
+    artifact_checkpoint_for_stage(artifact, encoded_length, MeshingStageKind::Serialization)
+}
+
+fn artifact_checkpoint_for_stage(
+    artifact: &SolverMeshArtifact,
+    encoded_length: u64,
+    stage: MeshingStageKind,
+) -> Result<MeshingStageCheckpoint, Box<MeshingFailure>> {
     checkpoint(
         artifact.topology.nodes.len() as u64,
         artifact.topology.volume_elements.len() as u64,
         artifact.topology.boundary_faces.len() as u64,
         artifact.topology.boundary_edges.len() as u64,
         encoded_length,
-        MeshingStageKind::Serialization,
+        stage,
     )
 }
 

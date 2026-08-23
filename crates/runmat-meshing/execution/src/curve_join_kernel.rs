@@ -171,7 +171,8 @@ fn inputs(
             PreparedMeshingInput::StageArtifact(input) => partitions.push(input.as_ref()),
             PreparedMeshingInput::ExactGeometry(_)
             | PreparedMeshingInput::FacetedGeometry(_)
-            | PreparedMeshingInput::DomainModel(_) => {
+            | PreparedMeshingInput::DomainModel(_)
+            | PreparedMeshingInput::Evidence(_) => {
                 return Err(invalid_partition("curve join input kinds are invalid"));
             }
         }

@@ -56,7 +56,7 @@ impl MeshingChunkMediaType {
             Self::ValidationEvidence => "application/vnd.runmat.mesh-validation.v2",
             Self::DiagnosticEvidence => "application/vnd.runmat.mesh-diagnostics.v2",
             Self::AnalysisMeshArtifact => "application/vnd.runmat.analysis-mesh.v2",
-            Self::MeshingEvidence => "application/vnd.runmat.meshing-evidence.v2",
+            Self::MeshingEvidence => "application/vnd.runmat.meshing-evidence.v3",
         }
     }
 
