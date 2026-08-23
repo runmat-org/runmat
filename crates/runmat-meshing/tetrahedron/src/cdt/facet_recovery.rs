@@ -72,6 +72,15 @@ pub struct DelaunayRecoveredFacet {
     pub triangles: Vec<DelaunayRecoveredFacetTriangle>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DelaunayFacetSteinerInsertion {
+    pub constraint_index: u32,
+    pub support_node_identities: [StableDigest; 3],
+    pub insertion_round: u64,
+    pub candidate_rank: u64,
+    pub node_identity: StableDigest,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct DelaunayFacetRecovery {
     /// Immutable prerequisite used to replay this stage independently.
@@ -79,6 +88,7 @@ pub struct DelaunayFacetRecovery {
     /// Canonical topology after every recovered facet has been inserted.
     pub topology: DelaunayVolumeTopology,
     pub facets: Vec<DelaunayRecoveredFacet>,
+    pub steiner_insertions: Vec<DelaunayFacetSteinerInsertion>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -141,6 +151,7 @@ pub(super) fn construct_delaunay_facet_recovery(
     let mut work = FacetRecoveryWork::new(options, cancellation);
     let mut facets = Vec::with_capacity(constraints.facets.len());
     let mut protected_triangles = Vec::new();
+    let mut steiner_insertions = Vec::new();
     for constraint_index in 0..constraints.facets.len() {
         let support = facet_support(&working, constraints, constraint_index as u32, &mut work)?;
         for triangle in &support {
@@ -165,7 +176,8 @@ pub(super) fn construct_delaunay_facet_recovery(
                     constraint_index as u32,
                     &mut work,
                 )? {
-                    updated
+                    steiner_insertions.extend_from_slice(&updated.steiner_insertions);
+                    updated.topology
                 } else {
                     return Err(error(
                         DelaunayFacetRecoveryErrorKind::UnsatisfiableConstraint,
@@ -182,10 +194,20 @@ pub(super) fn construct_delaunay_facet_recovery(
             triangles: support,
         });
     }
+    steiner_insertions.sort_by_key(|insertion| {
+        (
+            insertion.constraint_index,
+            insertion.support_node_identities,
+            insertion.insertion_round,
+            insertion.candidate_rank,
+            insertion.node_identity,
+        )
+    });
     let recovery = DelaunayFacetRecovery {
         segment_recovery,
         topology: working.topology,
         facets,
+        steiner_insertions,
     };
     Ok(recovery)
 }

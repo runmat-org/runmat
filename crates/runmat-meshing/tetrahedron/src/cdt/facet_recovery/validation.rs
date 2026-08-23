@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use runmat_meshing_core::{MeshingCancellationSignal, StableDigest};
 
 use super::{
@@ -44,6 +46,7 @@ pub fn validate_delaunay_facet_recovery(
         options,
         cancellation,
     )?;
+    validate_steiner_insertions(recovery, constraints, options)?;
     let mut protected_faces = recovery
         .facets
         .iter()
@@ -76,6 +79,91 @@ pub fn validate_delaunay_facet_recovery(
             DelaunayFacetRecoveryErrorKind::InvalidTopology,
             None,
             "facet recovery differs from deterministic replay of its segment-recovery prerequisite",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_steiner_insertions(
+    recovery: &DelaunayFacetRecovery,
+    constraints: &DelaunayConstraints,
+    options: DelaunayFacetRecoveryOptions,
+) -> Result<(), DelaunayFacetRecoveryError> {
+    if recovery.steiner_insertions.len() as u64 > options.maximum_cavity_steiner_nodes
+        || !recovery.steiner_insertions.windows(2).all(|pair| {
+            (
+                pair[0].constraint_index,
+                pair[0].support_node_identities,
+                pair[0].insertion_round,
+                pair[0].candidate_rank,
+                pair[0].node_identity,
+            ) < (
+                pair[1].constraint_index,
+                pair[1].support_node_identities,
+                pair[1].insertion_round,
+                pair[1].candidate_rank,
+                pair[1].node_identity,
+            )
+        })
+    {
+        return Err(error(
+            DelaunayFacetRecoveryErrorKind::InvalidTopology,
+            None,
+            "facet Steiner insertion lineage is over budget or noncanonical",
+        ));
+    }
+    let prerequisite_nodes = recovery
+        .segment_recovery
+        .topology
+        .nodes
+        .iter()
+        .map(|node| node.identity)
+        .collect::<BTreeSet<_>>();
+    let introduced_nodes = recovery
+        .topology
+        .nodes
+        .iter()
+        .map(|node| node.identity)
+        .filter(|identity| !prerequisite_nodes.contains(identity))
+        .collect::<BTreeSet<_>>();
+    let mut evidenced_nodes = BTreeSet::new();
+    for insertion in &recovery.steiner_insertions {
+        if constraints
+            .facets
+            .get(insertion.constraint_index as usize)
+            .is_none()
+        {
+            return Err(error(
+                DelaunayFacetRecoveryErrorKind::InvalidConstraints,
+                Some(insertion.constraint_index),
+                "facet Steiner insertion names an unknown constraint",
+            ));
+        }
+        let mut support = insertion.support_node_identities;
+        support.sort_unstable();
+        if support != insertion.support_node_identities
+            || !support
+                .iter()
+                .all(|identity| prerequisite_nodes.contains(identity))
+            || super::cavity::steiner_identity(
+                support,
+                insertion.insertion_round,
+                insertion.candidate_rank,
+            ) != insertion.node_identity
+            || !evidenced_nodes.insert(insertion.node_identity)
+        {
+            return Err(error(
+                DelaunayFacetRecoveryErrorKind::InvalidTopology,
+                Some(insertion.constraint_index),
+                "facet Steiner insertion lineage is inconsistent with its canonical support",
+            ));
+        }
+    }
+    if evidenced_nodes != introduced_nodes {
+        return Err(error(
+            DelaunayFacetRecoveryErrorKind::InvalidTopology,
+            None,
+            "facet Steiner insertion lineage does not exactly cover introduced nodes",
         ));
     }
     Ok(())
