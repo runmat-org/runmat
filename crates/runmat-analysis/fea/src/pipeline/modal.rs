@@ -58,7 +58,7 @@ pub fn run_modal_with_options(
     );
     let summary = assemble_linear_system(
         model,
-        None,
+        options.solver_mesh,
         options.thermo_mechanical_context,
         options.electro_thermal_context,
     );

@@ -541,6 +541,8 @@ pub struct AnalysisElectromagneticRunOptions {
     pub harmonic_tolerance: f64,
     pub harmonic_max_iterations: usize,
     #[serde(default)]
+    pub solver_mesh_artifact_path: Option<String>,
+    #[serde(default)]
     pub sweep_enabled: bool,
     #[serde(default)]
     pub sweep_frequency_hz: Vec<f64>,
@@ -555,6 +557,7 @@ impl Default for AnalysisElectromagneticRunOptions {
             residual_target: 1.0e-6,
             harmonic_tolerance: 1.0e-7,
             harmonic_max_iterations: 96,
+            solver_mesh_artifact_path: None,
             sweep_enabled: false,
             sweep_frequency_hz: Vec::new(),
         }
@@ -593,6 +596,8 @@ pub struct AnalysisTransientRunOptions {
     pub adapt_retry_growth_cap: f64,
     pub adapt_nonconverged_shrink: f64,
     pub dt_bucket_rel_tolerance: f64,
+    #[serde(default)]
+    pub solver_mesh_artifact_path: Option<String>,
 }
 
 impl Default for AnalysisTransientRunOptions {
@@ -616,6 +621,7 @@ impl Default for AnalysisTransientRunOptions {
             adapt_retry_growth_cap: 1.05,
             adapt_nonconverged_shrink: 0.75,
             dt_bucket_rel_tolerance: 0.0,
+            solver_mesh_artifact_path: None,
         }
     }
 }
@@ -651,6 +657,8 @@ pub struct AnalysisCfdRunOptions {
     pub max_linear_iters: usize,
     pub tolerance: f64,
     pub residual_warn_threshold: f64,
+    #[serde(default)]
+    pub solver_mesh_artifact_path: Option<String>,
 }
 
 impl Default for AnalysisCfdRunOptions {
@@ -664,6 +672,7 @@ impl Default for AnalysisCfdRunOptions {
             max_linear_iters: 128,
             tolerance: 1.0e-8,
             residual_warn_threshold: 1.0e-5,
+            solver_mesh_artifact_path: None,
         }
     }
 }
@@ -678,6 +687,8 @@ pub struct AnalysisChtRunOptions {
     pub max_linear_iters: usize,
     pub tolerance: f64,
     pub residual_warn_threshold: f64,
+    #[serde(default)]
+    pub solver_mesh_artifact_path: Option<String>,
 }
 
 impl Default for AnalysisChtRunOptions {
@@ -691,6 +702,7 @@ impl Default for AnalysisChtRunOptions {
             max_linear_iters: 128,
             tolerance: 1.0e-8,
             residual_warn_threshold: 1.0e-4,
+            solver_mesh_artifact_path: None,
         }
     }
 }
@@ -705,6 +717,8 @@ pub struct AnalysisFsiRunOptions {
     pub max_linear_iters: usize,
     pub tolerance: f64,
     pub residual_warn_threshold: f64,
+    #[serde(default)]
+    pub solver_mesh_artifact_path: Option<String>,
 }
 
 impl Default for AnalysisFsiRunOptions {
@@ -718,6 +732,7 @@ impl Default for AnalysisFsiRunOptions {
             max_linear_iters: 128,
             tolerance: 1.0e-8,
             residual_warn_threshold: 1.0e-4,
+            solver_mesh_artifact_path: None,
         }
     }
 }
@@ -730,6 +745,8 @@ pub struct AnalysisThermalRunOptions {
     pub step_count: usize,
     pub time_step_s: f64,
     pub residual_warn_threshold: f64,
+    #[serde(default)]
+    pub solver_mesh_artifact_path: Option<String>,
 }
 
 impl Default for AnalysisThermalRunOptions {
@@ -741,6 +758,7 @@ impl Default for AnalysisThermalRunOptions {
             step_count: 10,
             time_step_s: 1.0e-2,
             residual_warn_threshold: 1.0e-4,
+            solver_mesh_artifact_path: None,
         }
     }
 }
@@ -766,6 +784,7 @@ impl AnalysisTransientRunOptions {
             adapt_retry_growth_cap: 1.02,
             adapt_nonconverged_shrink: 0.7,
             dt_bucket_rel_tolerance: 0.02,
+            solver_mesh_artifact_path: None,
         }
     }
 
@@ -803,6 +822,7 @@ impl AnalysisTransientRunOptions {
             adapt_retry_growth_cap: 1.03,
             adapt_nonconverged_shrink: 0.8,
             dt_bucket_rel_tolerance: 0.005,
+            solver_mesh_artifact_path: None,
         }
     }
 }
@@ -814,6 +834,8 @@ pub struct AnalysisModalRunOptions {
     pub quality_policy: QualityPolicy,
     pub mode_count: usize,
     pub residual_warn_threshold: f64,
+    #[serde(default)]
+    pub solver_mesh_artifact_path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -830,6 +852,8 @@ pub struct AnalysisNonlinearRunOptions {
     pub max_line_search_backtracks: usize,
     pub line_search_reduction: f64,
     pub tangent_refresh_interval: usize,
+    #[serde(default)]
+    pub solver_mesh_artifact_path: Option<String>,
 }
 
 impl Default for AnalysisNonlinearRunOptions {
@@ -847,6 +871,7 @@ impl Default for AnalysisNonlinearRunOptions {
             max_line_search_backtracks: 6,
             line_search_reduction: 0.5,
             tangent_refresh_interval: 2,
+            solver_mesh_artifact_path: None,
         }
     }
 }
@@ -866,6 +891,7 @@ impl AnalysisNonlinearRunOptions {
             max_line_search_backtracks: 0,
             line_search_reduction: 0.6,
             tangent_refresh_interval: 4,
+            solver_mesh_artifact_path: None,
         }
     }
 
@@ -887,6 +913,7 @@ impl AnalysisNonlinearRunOptions {
             max_line_search_backtracks: 10,
             line_search_reduction: 0.5,
             tangent_refresh_interval: 1,
+            solver_mesh_artifact_path: None,
         }
     }
 
@@ -904,6 +931,7 @@ impl AnalysisNonlinearRunOptions {
             max_line_search_backtracks: 8,
             line_search_reduction: 0.5,
             tangent_refresh_interval: 2,
+            solver_mesh_artifact_path: None,
         }
     }
 }
@@ -916,6 +944,7 @@ impl Default for AnalysisModalRunOptions {
             quality_policy: QualityPolicy::Balanced,
             mode_count: 3,
             residual_warn_threshold: 1.0e-3,
+            solver_mesh_artifact_path: None,
         }
     }
 }
@@ -928,6 +957,7 @@ impl AnalysisModalRunOptions {
             quality_policy: QualityPolicy::Exploratory,
             mode_count: 2,
             residual_warn_threshold: 5.0e-3,
+            solver_mesh_artifact_path: None,
         }
     }
 
@@ -942,6 +972,7 @@ impl AnalysisModalRunOptions {
             quality_policy: QualityPolicy::Strict,
             mode_count: 8,
             residual_warn_threshold: 5.0e-4,
+            solver_mesh_artifact_path: None,
         }
     }
 }

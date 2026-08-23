@@ -78,7 +78,12 @@ pub fn run_thermal_with_options(
         Some(1),
         Some(5),
     );
-    let summary = assemble_linear_system(model, None, Some(thermo_context.clone()), None);
+    let summary = assemble_linear_system(
+        model,
+        options.solver_mesh.clone(),
+        Some(thermo_context.clone()),
+        None,
+    );
     super::validate_rotational_dof_targets(model, &summary)?;
     emit_phase(
         "fea.run_thermal",

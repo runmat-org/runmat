@@ -1096,6 +1096,7 @@ fn analysis_run_modal_with_options_contract_controls_mode_budget() {
             quality_policy: QualityPolicy::Balanced,
             mode_count: 2,
             residual_warn_threshold: 1.0e-2,
+            solver_mesh_artifact_path: None,
         },
         OperationContext::new(Some("trace-contract-modal-opts-3".to_string()), None),
     )
@@ -1121,6 +1122,7 @@ fn analysis_run_modal_with_options_contract_controls_mode_budget() {
             quality_policy: QualityPolicy::Balanced,
             mode_count: 0,
             residual_warn_threshold: 1.0e-3,
+            solver_mesh_artifact_path: None,
         },
         OperationContext::new(Some("trace-contract-modal-opts-4".to_string()), None),
     )
@@ -2147,6 +2149,7 @@ fn analysis_run_transient_with_options_contract_controls_execution_window() {
             adapt_retry_growth_cap: 1.05,
             adapt_nonconverged_shrink: 0.75,
             dt_bucket_rel_tolerance: 0.0,
+            solver_mesh_artifact_path: None,
         },
         OperationContext::new(Some("trace-contract-transient-opts-1".to_string()), None),
     )

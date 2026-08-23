@@ -4885,6 +4885,53 @@ fn requested_preconditioner_fallback_is_recorded() {
 }
 
 #[test]
+fn solver_mesh_geometry_revision_must_match_the_analysis_model() {
+    let _guard = analysis_test_guard();
+    let (mesh_root, mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("geometry-revision-mismatch");
+    let model = sample_solid_model();
+    let mut mesh = SolverMeshArtifact::canonical_decode(
+        &fs::read(&mesh_path).expect("read solver mesh fixture"),
+    )
+    .expect("decode solver mesh fixture");
+    mesh.geometry.geometry_revision = u64::from(model.geometry_revision) + 1;
+    mesh.canonical_digest = StableDigest::ZERO;
+    mesh.seal_canonical_digest()
+        .expect("reseal mismatched solver mesh");
+    fs::write(
+        &mesh_path,
+        mesh.canonical_encode()
+            .expect("encode mismatched solver mesh"),
+    )
+    .expect("write mismatched solver mesh");
+
+    let error = analysis_run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisRunOptions {
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
+            ..AnalysisRunOptions::default()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect_err("stale solver mesh should be rejected");
+
+    assert_eq!(
+        error.error_code,
+        "RM.FEA.RUN_LINEAR_STATIC.SOLVER_MESH_INVALID"
+    );
+    assert_eq!(
+        error.context.get("model_geometry_revision"),
+        Some(&model.geometry_revision.to_string())
+    );
+    assert_eq!(
+        error.context.get("solver_mesh_geometry_revision"),
+        Some(&(u64::from(model.geometry_revision) + 1).to_string())
+    );
+    let _ = fs::remove_dir_all(mesh_root);
+}
+
+#[test]
 fn ilu_preconditioner_fallback_is_recorded_when_solver_uses_jacobi() {
     let _guard = analysis_test_guard();
     let (mesh_root, mesh_path) = write_ready_minimal_analysis_mesh_artifact("preconditioner-ilu");
@@ -5646,6 +5693,7 @@ fn analysis_run_cht_uses_authored_conjugate_heat_transfer_interface() {
             max_linear_iters: 64,
             tolerance: 1.0e-8,
             residual_warn_threshold: 1.0e-4,
+            solver_mesh_artifact_path: None,
         },
         OperationContext::new(None, None),
     )
@@ -5778,6 +5826,7 @@ fn analysis_run_fsi_uses_authored_fluid_structure_interface() {
             max_linear_iters: 64,
             tolerance: 1.0e-8,
             residual_warn_threshold: 1.0e-4,
+            solver_mesh_artifact_path: None,
         },
         OperationContext::new(None, None),
     )
@@ -7270,6 +7319,7 @@ fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
             max_linear_iters: 64,
             tolerance: 1.0e-8,
             residual_warn_threshold: 1.0e-4,
+            solver_mesh_artifact_path: None,
         },
         OperationContext::new(None, None),
     )
@@ -7412,6 +7462,55 @@ fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
 }
 
 #[test]
+fn analysis_run_cfd_projects_the_canonical_solver_mesh_into_flow_topology() {
+    let _guard = analysis_test_guard();
+    let (mesh_root, mesh_path) = write_ready_minimal_analysis_mesh_artifact("cfd-solver-mesh");
+    let mut model = sample_model();
+    model.steps[0].kind = AnalysisStepKind::Cfd;
+    model.boundary_conditions = sample_cfd_boundary_conditions(4.25);
+    model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
+
+    let envelope = analysis_run_cfd_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisCfdRunOptions {
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
+            ..AnalysisCfdRunOptions::default()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("CFD should consume the canonical solver mesh");
+
+    assert!(envelope.data.run.field(FEA_FIELD_CFD_VELOCITY).is_some());
+    let render_topology = envelope
+        .data
+        .render_topology
+        .as_ref()
+        .expect("mesh-backed CFD should expose render topology");
+    assert_eq!(render_topology.meshes[0].vertices.len(), 4);
+    assert_eq!(render_topology.meshes[0].triangles.len(), 4);
+    assert!(envelope.data.run.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "FEA_CFD_FLOW"
+            && diagnostic.message.contains("topology_basis=solver_mesh")
+    }));
+    assert!(envelope.data.run.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "FEA_CFD_ASSEMBLY"
+            && diagnostic
+                .message
+                .contains("topology_geometry_source=solver_mesh")
+            && diagnostic.message.contains("control_volume_count=1")
+            && diagnostic
+                .message
+                .contains("control_volume_boundary_face_count=4")
+            && diagnostic
+                .message
+                .contains("control_volume_connectivity_coverage_ratio=1")
+    }));
+
+    let _ = fs::remove_dir_all(mesh_root);
+}
+
+#[test]
 fn analysis_run_cfd_rejects_partial_authored_boundary_conditions() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
@@ -7454,6 +7553,7 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
             max_linear_iters: 64,
             tolerance: 1.0e-8,
             residual_warn_threshold: 1.0e-4,
+            solver_mesh_artifact_path: None,
         },
         OperationContext::new(None, None),
     )
@@ -7572,7 +7672,7 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
         .and_then(|field| field.shape.first().copied())
         .expect("thermal heat-flux snapshot should carry a recovery domain");
     let expected_interface_face_count =
-        fluid_interface_face_count(&CfdDomainTopology::from_model(&model));
+        fluid_interface_face_count(&CfdDomainTopology::from_model(&model, None));
     assert_eq!(solid_temperature.shape, fluid_temperature.shape);
     assert!(expected_interface_face_count >= thermal_flux_face_count);
     assert_eq!(
@@ -7633,6 +7733,7 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
             max_linear_iters: 64,
             tolerance: 1.0e-8,
             residual_warn_threshold: 1.0e-4,
+            solver_mesh_artifact_path: None,
         },
         OperationContext::new(None, None),
     )
@@ -7841,6 +7942,7 @@ fn analysis_run_transient_with_options_controls_timeline() {
             adapt_retry_growth_cap: 1.05,
             adapt_nonconverged_shrink: 0.75,
             dt_bucket_rel_tolerance: 0.0,
+            solver_mesh_artifact_path: None,
         },
         OperationContext::new(None, None),
     )
@@ -8718,6 +8820,7 @@ fn analysis_run_modal_with_options_controls_requested_mode_count() {
             quality_policy: QualityPolicy::Balanced,
             mode_count: 2,
             residual_warn_threshold: 1.0e-2,
+            solver_mesh_artifact_path: None,
         },
         OperationContext::new(None, None),
     )

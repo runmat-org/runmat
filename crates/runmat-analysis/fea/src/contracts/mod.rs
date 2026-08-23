@@ -412,6 +412,7 @@ impl Default for LinearStaticSolveOptions {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModalSolveOptions {
     pub mode_count: usize,
+    pub solver_mesh: Option<SolverMeshArtifact>,
     pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
     pub electro_thermal_context: Option<FeaElectroThermalContext>,
 }
@@ -420,6 +421,7 @@ impl Default for ModalSolveOptions {
     fn default() -> Self {
         Self {
             mode_count: 3,
+            solver_mesh: None,
             thermo_mechanical_context: None,
             electro_thermal_context: None,
         }
@@ -505,6 +507,7 @@ pub struct ElectromagneticSolveOptions {
     pub residual_target: f64,
     pub harmonic_tolerance: f64,
     pub harmonic_max_iterations: usize,
+    pub solver_mesh: Option<SolverMeshArtifact>,
 }
 
 impl Default for ElectromagneticSolveOptions {
@@ -513,6 +516,7 @@ impl Default for ElectromagneticSolveOptions {
             residual_target: 1.0e-6,
             harmonic_tolerance: 1.0e-7,
             harmonic_max_iterations: 96,
+            solver_mesh: None,
         }
     }
 }
@@ -522,6 +526,7 @@ pub struct ThermalSolveOptions {
     pub step_count: usize,
     pub time_step_s: f64,
     pub residual_target: f64,
+    pub solver_mesh: Option<SolverMeshArtifact>,
     pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
 }
 
@@ -531,6 +536,7 @@ impl Default for ThermalSolveOptions {
             step_count: 10,
             time_step_s: 1.0e-2,
             residual_target: 1.0e-4,
+            solver_mesh: None,
             thermo_mechanical_context: None,
         }
     }

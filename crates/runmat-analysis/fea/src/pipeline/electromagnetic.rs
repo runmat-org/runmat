@@ -6,7 +6,7 @@ use runmat_analysis_core::{
 };
 
 use crate::{
-    assembly::{assemble_linear_system, AssemblySummary},
+    assembly::assemble_linear_system,
     contracts::{
         ComputeBackend, ElectromagneticSolveOptions, FeaElectromagneticRunResult, FeaRunError,
         FeaRunResult, FEA_FIELD_EM_CURRENT_DENSITY_IMAG, FEA_FIELD_EM_CURRENT_DENSITY_REAL,
@@ -24,6 +24,8 @@ use crate::{
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::backend::kind::LinearAlgebraBackendKind,
 };
+
+mod solver_mesh_topology;
 
 pub fn run_electromagnetic(
     model: &AnalysisModel,
@@ -88,7 +90,8 @@ pub fn run_electromagnetic_with_options(
         Some(1),
         Some(5),
     );
-    let mut summary = assemble_linear_system(model, None, None, None);
+    let solver_mesh = options.solver_mesh.as_ref();
+    let mut summary = assemble_linear_system(model, options.solver_mesh.clone(), None, None);
     emit_phase(
         "fea.run_electromagnetic",
         FeaProgressPhase::ModelAssembly,
@@ -106,7 +109,9 @@ pub fn run_electromagnetic_with_options(
         Some(2),
         Some(5),
     );
-    let node_count = summary.dof_count.max(8);
+    let node_count = solver_mesh
+        .map(|mesh| mesh.topology.nodes.len())
+        .unwrap_or_else(|| summary.dof_count.max(8));
     let coefficient_profile =
         electromagnetic_coefficient_profile(model, domain.reference_frequency_hz)?;
     let material_stats = coefficient_profile.stats;
@@ -531,7 +536,7 @@ pub fn run_electromagnetic_with_options(
     let base_rhs_real = rhs_real;
     let base_rhs_imag = rhs_imag;
     let maxwell_topology =
-        MaxwellEdgeTopology::from_assembly_or_line(&summary, node_count, h, &constrained);
+        MaxwellEdgeTopology::from_solver_mesh_or_line(solver_mesh, node_count, h, &constrained);
     let edge_operator = maxwell_topology.assemble_curl_curl_operator(CurlCurlAssemblyInputs {
         nodal_operator: &summary.operator,
         node_mu_r: &node_mu_r,
@@ -2152,12 +2157,47 @@ struct CurlCurlAssemblyInputs<'a> {
 }
 
 impl MaxwellEdgeTopology {
-    fn from_assembly_or_line(
-        _summary: &AssemblySummary,
+    fn from_solver_mesh_or_line(
+        solver_mesh: Option<&runmat_meshing_core::SolverMeshArtifact>,
         node_count: usize,
         spacing: f64,
         constrained: &[bool],
     ) -> Self {
+        if let Some(topology) =
+            solver_mesh.and_then(solver_mesh_topology::MaxwellMeshTopology::derive)
+        {
+            let full_topology_edge_count = topology.edges.len();
+            let full_topology_element_count = topology.elements.len();
+            return Self {
+                basis: MaxwellEdgeTopologyBasis::SolverMeshEdgeCurlConforming,
+                edges: topology
+                    .edges
+                    .into_iter()
+                    .map(|edge| MaxwellEdge {
+                        from_node: edge.from_node,
+                        to_node: edge.to_node,
+                        orientation: 1.0,
+                        length: edge.length_m,
+                        constrained: constrained.get(edge.from_node).copied().unwrap_or(false)
+                            || constrained.get(edge.to_node).copied().unwrap_or(false),
+                    })
+                    .collect(),
+                elements: topology
+                    .elements
+                    .into_iter()
+                    .map(|element| MaxwellElementIncidence {
+                        edge_indices: element.edge_indices,
+                        orientations: element.orientations,
+                        area_m2: element.area_m2,
+                    })
+                    .collect(),
+                gauge_anchor_nodes: gauge_anchor_nodes(constrained),
+                full_topology_edge_count,
+                full_topology_element_count,
+                vector_basis_dimension_count: 3,
+                reference_element_area_m2: topology.reference_element_area_m2,
+            };
+        }
         Self::line_graph(node_count, spacing, constrained)
     }
 
@@ -2660,12 +2700,14 @@ impl MaxwellEdgeResidualMetrics {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MaxwellEdgeTopologyBasis {
     LineEdgeCurlConforming,
+    SolverMeshEdgeCurlConforming,
 }
 
 impl MaxwellEdgeTopologyBasis {
     fn as_str(self) -> &'static str {
         match self {
             Self::LineEdgeCurlConforming => "line_edge_curl_conforming",
+            Self::SolverMeshEdgeCurlConforming => "solver_mesh_edge_curl_conforming",
         }
     }
 }

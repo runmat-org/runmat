@@ -1,3 +1,4 @@
+use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 
@@ -27,6 +28,8 @@ pub struct NonlinearSolveOptions {
     pub max_line_search_backtracks: usize,
     pub line_search_reduction: f64,
     pub tangent_refresh_interval: usize,
+    #[serde(default)]
+    pub solver_mesh: Option<SolverMeshArtifact>,
     pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
     pub electro_thermal_context: Option<FeaElectroThermalContext>,
     pub plasticity_context: Option<FeaPlasticityConstitutiveContext>,
@@ -45,6 +48,7 @@ impl Default for NonlinearSolveOptions {
             max_line_search_backtracks: 6,
             line_search_reduction: 0.5,
             tangent_refresh_interval: 2,
+            solver_mesh: None,
             thermo_mechanical_context: None,
             electro_thermal_context: None,
             plasticity_context: None,
@@ -128,6 +132,7 @@ pub fn solve_nonlinear_system(
     let transient = solve_transient_system(
         summary,
         TransientSolveOptions {
+            solver_mesh: None,
             time_step_s: 1.0 / options.increment_count as f64,
             min_time_step_s: 1.0 / options.increment_count as f64,
             max_time_step_s: 1.0 / options.increment_count as f64,
