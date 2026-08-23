@@ -88,11 +88,11 @@ pub(super) fn create_author_study_object_from_args(args: Vec<Value>) -> BuiltinR
                     "StructuralForceN",
                 )?);
             }
-            "analysismeshartifactpath" | "meshartifactpath" => {
+            "solvermeshartifactpath" => {
                 solver_mesh_artifact_path =
                     Some(scalar_string(&pair[1], AUTHOR_STUDY_NAME, &ERROR_INPUT)?);
             }
-            "analysismeshevidenceartifactpath" | "meshevidenceartifactpath" => {
+            "meshingevidenceartifactpath" => {
                 meshing_evidence_artifact_path =
                     Some(scalar_string(&pair[1], AUTHOR_STUDY_NAME, &ERROR_INPUT)?);
             }
@@ -293,12 +293,6 @@ mod tests {
                 "mesh_id": "mesh_authoring_fixture",
                 "solve_ready": true,
                 "backend": "solid",
-                "tetrahedron_generation_family": "structured_box",
-                "tetrahedron_generation_attempted_family_count": 2,
-                "tetrahedron_generation_rejected_family_count": 1,
-                "tetrahedron_generation_selected_family_index": 2,
-                "tetrahedron_generation_interior_support_candidate_count": 17,
-                "tetrahedron_generation_interior_support_accepted_count": 1,
                 "topology": {
                     "node_count": 4,
                     "volume_element_count": 1,
@@ -594,6 +588,29 @@ mod tests {
             run_data.solver_mesh_artifact_path.as_deref(),
             Some(mesh_path.as_str())
         );
+    }
+
+    #[test]
+    fn rejects_retired_mesh_artifact_option_names() {
+        for retired_name in [
+            "AnalysisMeshArtifactPath",
+            "MeshArtifactPath",
+            "AnalysisMeshEvidenceArtifactPath",
+            "MeshEvidenceArtifactPath",
+        ] {
+            let error = create_author_study_object_from_args(vec![
+                Value::String("retired_mesh_option".to_string()),
+                generic_authoring_geometry_value(),
+                authoring_summary_value(),
+                Value::String("Profile".to_string()),
+                Value::String("linear_static_structural".to_string()),
+                Value::String(retired_name.to_string()),
+                Value::String("retired.mesh".to_string()),
+            ])
+            .expect_err("retired mesh artifact option should be rejected");
+
+            assert!(error.message.contains("unsupported fea.authorStudy option"));
+        }
     }
 
     #[test]

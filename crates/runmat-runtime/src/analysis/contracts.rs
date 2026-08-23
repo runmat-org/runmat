@@ -4,7 +4,7 @@ use runmat_analysis_fea::{ComputeBackend, FeaProgressEvent, FeaRunResult};
 use runmat_geometry_core::GeometryAsset;
 use runmat_meshing::RegionMeshMapping;
 use runmat_meshing_core::MeshingRequestSettings;
-use runmat_meshing_evidence::{MeshAuthoringNestedTetrahedronShellSummary, MeshAuthoringSummary};
+use runmat_meshing_evidence::MeshAuthoringSummary;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
@@ -2429,23 +2429,6 @@ pub struct AnalysisStudyAuthoringEvidence {
     pub schema_version: String,
     pub mesh_id: String,
     pub mesh_authoring_summary_schema_version: String,
-    #[serde(default)]
-    pub tetrahedron_generation_family: String,
-    #[serde(default)]
-    pub tetrahedron_generation_attempted_family_count: usize,
-    #[serde(default)]
-    pub tetrahedron_generation_rejected_family_count: usize,
-    #[serde(default)]
-    pub tetrahedron_generation_selected_family_index: usize,
-    #[serde(default)]
-    pub tetrahedron_generation_interior_support_candidate_count: usize,
-    #[serde(default)]
-    pub tetrahedron_generation_interior_support_accepted_count: usize,
-    #[serde(
-        default,
-        skip_serializing_if = "MeshAuthoringNestedTetrahedronShellSummary::is_empty"
-    )]
-    pub nested_tetrahedron_shell: MeshAuthoringNestedTetrahedronShellSummary,
     pub selected_material_region_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_boundary_condition_region_id: Option<String>,
