@@ -17,6 +17,9 @@ mod volume_quality;
 mod volume_refinement;
 mod volume_sliver;
 
+#[cfg(test)]
+mod test_fixtures;
+
 pub use adaptive_coarsening::{
     coarsen_marked_delaunay_volume, validate_marked_delaunay_volume_coarsening,
     DelaunayAdaptiveCoarseningError, DelaunayAdaptiveCoarseningErrorKind,

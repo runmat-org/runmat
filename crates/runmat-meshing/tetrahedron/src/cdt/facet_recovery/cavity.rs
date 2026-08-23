@@ -29,11 +29,13 @@ use crate::{
 
 mod footprint;
 mod sides;
+mod simultaneous;
 pub(super) mod star;
 mod steiner;
 
 use footprint::facet_footprint_crosses_face;
 use sides::side_cavities;
+use simultaneous::refill_simultaneous_sides;
 use star::star_refill;
 pub(super) use steiner::{steiner_identity, try_recover_facet_with_cavity};
 

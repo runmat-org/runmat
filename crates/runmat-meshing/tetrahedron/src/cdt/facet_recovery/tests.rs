@@ -9,6 +9,8 @@ use crate::cdt::{
     DelaunayConstraintSegment, DelaunayTopologyOptions, DelaunayVolumeNode,
 };
 
+#[path = "tests/same_facet_multi_steiner.rs"]
+mod same_facet_multi_steiner;
 #[path = "tests/scalable_cavity.rs"]
 mod scalable_cavity;
 
