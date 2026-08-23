@@ -1,3 +1,7 @@
+mod solver_mesh;
+
+pub use solver_mesh::canonical_tetrahedron_solver_mesh;
+
 use runmat_geometry_core::{
     EntityIdRange, EntityKind, GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region,
     RegionEntityMapping, SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile,

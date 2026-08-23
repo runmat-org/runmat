@@ -461,227 +461,41 @@ mod tests {
         .expect("diagram observation should convert")
     }
 
-    fn authoring_analysis_mesh_artifacts(dir: &std::path::Path) -> (String, String, Value) {
+    fn canonical_authoring_solver_mesh(dir: &std::path::Path) -> (String, Value) {
         use runmat_meshing_core::{
-            contracts::{
-                artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryEdge, AnalysisBoundaryFace,
-                AnalysisMeshArtifact, AnalysisMeshNode, AnalysisMeshProvenance,
-                AnalysisVolumeElement, BoundaryElementKind, MeshBackendSummary, VolumeElementKind,
-            },
-            quality::{AnalysisMeshQualityReport, ElementQuality},
-            AnalysisMeshValidationOptions, MeshSizingField,
+            CanonicalMeshingContract, ElementOrder, PersistentEntityId, PersistentEntityKind,
+            StableDigest,
         };
 
-        let mut mesh = AnalysisMeshArtifact {
-            schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
-            mesh_id: "mesh_authoring_fixture".to_string(),
-            nodes: vec![
-                AnalysisMeshNode {
-                    node_id: 1,
-                    coordinates_m: [0.0, 0.0, 0.0],
-                    provenance: Vec::new(),
-                },
-                AnalysisMeshNode {
-                    node_id: 2,
-                    coordinates_m: [1.0, 0.0, 0.0],
-                    provenance: Vec::new(),
-                },
-                AnalysisMeshNode {
-                    node_id: 3,
-                    coordinates_m: [0.0, 1.0, 0.0],
-                    provenance: Vec::new(),
-                },
-                AnalysisMeshNode {
-                    node_id: 4,
-                    coordinates_m: [0.0, 0.0, 1.0],
-                    provenance: Vec::new(),
-                },
-            ],
-            volume_elements: vec![AnalysisVolumeElement {
-                element_id: "tetrahedron_1".to_string(),
-                kind: VolumeElementKind::Tetrahedron4,
-                node_ids: vec![1, 2, 3, 4],
-                material_region_id: "solid".to_string(),
-                provenance: Vec::new(),
-            }],
-            boundary_faces: vec![
-                AnalysisBoundaryFace {
-                    face_id: "face_root".to_string(),
-                    kind: BoundaryElementKind::Tri3,
-                    node_ids: vec![1, 2, 3],
-                    adjacent_volume_element_ids: vec!["tetrahedron_1".to_string()],
-                    region_ids: vec!["root".to_string()],
-                    provenance: Vec::new(),
-                },
-                AnalysisBoundaryFace {
-                    face_id: "face_tip".to_string(),
-                    kind: BoundaryElementKind::Tri3,
-                    node_ids: vec![1, 2, 4],
-                    adjacent_volume_element_ids: vec!["tetrahedron_1".to_string()],
-                    region_ids: vec!["tip".to_string()],
-                    provenance: Vec::new(),
-                },
-                AnalysisBoundaryFace {
-                    face_id: "face_side_a".to_string(),
-                    kind: BoundaryElementKind::Tri3,
-                    node_ids: vec![1, 3, 4],
-                    adjacent_volume_element_ids: vec!["tetrahedron_1".to_string()],
-                    region_ids: Vec::new(),
-                    provenance: Vec::new(),
-                },
-                AnalysisBoundaryFace {
-                    face_id: "face_side_b".to_string(),
-                    kind: BoundaryElementKind::Tri3,
-                    node_ids: vec![2, 3, 4],
-                    adjacent_volume_element_ids: vec!["tetrahedron_1".to_string()],
-                    region_ids: Vec::new(),
-                    provenance: Vec::new(),
-                },
-            ],
-            boundary_edges: vec![
-                AnalysisBoundaryEdge {
-                    edge_id: "edge_1_2".to_string(),
-                    node_ids: [1, 2],
-                    adjacent_boundary_face_ids: vec![
-                        "face_root".to_string(),
-                        "face_tip".to_string(),
-                    ],
-                    region_ids: vec!["root".to_string(), "tip".to_string()],
-                    provenance: Vec::new(),
-                },
-                AnalysisBoundaryEdge {
-                    edge_id: "edge_1_3".to_string(),
-                    node_ids: [1, 3],
-                    adjacent_boundary_face_ids: vec![
-                        "face_root".to_string(),
-                        "face_side_a".to_string(),
-                    ],
-                    region_ids: vec!["root".to_string()],
-                    provenance: Vec::new(),
-                },
-                AnalysisBoundaryEdge {
-                    edge_id: "edge_2_3".to_string(),
-                    node_ids: [2, 3],
-                    adjacent_boundary_face_ids: vec![
-                        "face_root".to_string(),
-                        "face_side_b".to_string(),
-                    ],
-                    region_ids: vec!["root".to_string()],
-                    provenance: Vec::new(),
-                },
-                AnalysisBoundaryEdge {
-                    edge_id: "edge_1_4".to_string(),
-                    node_ids: [1, 4],
-                    adjacent_boundary_face_ids: vec![
-                        "face_tip".to_string(),
-                        "face_side_a".to_string(),
-                    ],
-                    region_ids: vec!["tip".to_string()],
-                    provenance: Vec::new(),
-                },
-                AnalysisBoundaryEdge {
-                    edge_id: "edge_2_4".to_string(),
-                    node_ids: [2, 4],
-                    adjacent_boundary_face_ids: vec![
-                        "face_tip".to_string(),
-                        "face_side_b".to_string(),
-                    ],
-                    region_ids: vec!["tip".to_string()],
-                    provenance: Vec::new(),
-                },
-                AnalysisBoundaryEdge {
-                    edge_id: "edge_3_4".to_string(),
-                    node_ids: [3, 4],
-                    adjacent_boundary_face_ids: vec![
-                        "face_side_a".to_string(),
-                        "face_side_b".to_string(),
-                    ],
-                    region_ids: Vec::new(),
-                    provenance: Vec::new(),
-                },
-            ],
-            quality: AnalysisMeshQualityReport {
-                min_scaled_jacobian: 0.5,
-                min_exact_scaled_jacobian: 0.45,
-                mean_aspect_ratio: 2.0,
-                max_aspect_ratio: 2.0,
-                inverted_element_count: 0,
-                mean_boundary_projection_error_m: 0.0,
-                max_boundary_projection_error_m: 0.0,
-                elements: vec![ElementQuality {
-                    element_id: "tetrahedron_1".to_string(),
-                    scaled_jacobian: 0.5,
-                    exact_scaled_jacobian: 0.45,
-                    aspect_ratio: 2.0,
-                    volume_m3: 1.0 / 6.0,
-                }],
-            },
-            sizing: MeshSizingField::default(),
-            field_topology: Vec::new(),
-            backend: MeshBackendSummary {
-                backend: "artifact_fixture".to_string(),
-                algorithm: "artifact_fixture".to_string(),
-                tetrahedron_generation_family: "artifact_fixture".to_string(),
-                tetrahedron_element_count: 1,
-                tetrahedron_material_region_count: 1,
-                tetrahedron_recovered_component_ratio: 1.0,
-                tetrahedron_recovered_boundary_face_count: 4,
-                ..MeshBackendSummary::default()
-            },
-            adaptive_iterations: Vec::new(),
-            provenance: AnalysisMeshProvenance {
-                algorithm: "artifact_fixture".to_string(),
-                source_geometry_id: "geo:authoring_fixture".to_string(),
-                source_geometry_revision: 1,
-                source_geometry_sha256: Some("hash-authoring".to_string()),
-            },
-        };
-        mesh.refresh_field_topology();
+        let mut mesh =
+            runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+        for (face_index, region_id) in [(0, "root"), (1, "tip")] {
+            mesh.topology.boundary_faces[face_index]
+                .provenance
+                .push(PersistentEntityId {
+                    kind: PersistentEntityKind::Face,
+                    source_topology_id: region_id.to_owned(),
+                    assembly_path: vec!["root".to_owned()],
+                });
+            mesh.topology.boundary_faces[face_index].provenance.sort();
+        }
+        mesh.topology.volume_elements[0].material_id = "mat_default_steel".to_owned();
+        mesh.topology.regions[0].material_id = "mat_default_steel".to_owned();
+        mesh.canonical_digest = StableDigest::ZERO;
+        mesh.seal_canonical_digest()
+            .expect("canonical authoring mesh should seal");
 
-        let validation = AnalysisMeshValidationOptions {
-            required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
-            required_material_region_ids: vec!["solid".to_string()],
-            ..AnalysisMeshValidationOptions::default()
-        };
-        runmat_meshing_core::validate_analysis_mesh_with_options(&mesh, validation.clone())
-            .expect("artifact-backed authoring mesh should validate");
-        let evidence = runmat_meshing_evidence::build_mesh_evidence_artifact(&mesh, &validation);
-        let summary = runmat_meshing_evidence::build_mesh_authoring_summary(&evidence);
-
-        let evidence_path = dir.join("mesh_evidence.json");
-        let mesh_path = dir.join("analysis_mesh.json");
-        std::fs::write(
-            &evidence_path,
-            serde_json::to_vec_pretty(&serde_json::json!({
-                "schema_version": "fea_study_mesh_evidence_artifact/v1",
-                "mesh_validation_options": validation,
-                "mesh_authoring_summary": summary,
-                "mesh_evidence": evidence,
-            }))
-            .expect("evidence payload should encode"),
-        )
-        .expect("evidence artifact should write");
+        let mesh_path = dir.join("solver_mesh.cbor");
         std::fs::write(
             &mesh_path,
-            serde_json::to_vec_pretty(&serde_json::json!({
-                "schema_version": "fea_study_analysis_mesh_artifact/v1",
-                "mesh_evidence_artifact_path": evidence_path.to_string_lossy(),
-                "mesh_validation_options": validation,
-                "mesh": mesh,
-            }))
-            .expect("mesh payload should encode"),
+            mesh.canonical_encode()
+                .expect("canonical authoring mesh should encode"),
         )
-        .expect("mesh artifact should write");
+        .expect("canonical authoring mesh should write");
 
-        let summary_value =
-            crate::builtins::io::json::jsondecode::value_from_json(&serde_json::json!({
-                "mesh_authoring_summary": summary,
-            }))
-            .expect("summary value should convert");
         (
             mesh_path.to_string_lossy().to_string(),
-            evidence_path.to_string_lossy().to_string(),
-            summary_value,
+            authoring_summary_value(),
         )
     }
 
@@ -728,9 +542,9 @@ mod tests {
     }
 
     #[test]
-    fn runs_with_analysis_mesh_artifact() {
+    fn runs_with_canonical_solver_mesh_artifact() {
         let tmp = tempfile::tempdir().expect("tempdir should be created");
-        let (mesh_path, evidence_path, summary) = authoring_analysis_mesh_artifacts(tmp.path());
+        let (mesh_path, summary) = canonical_authoring_solver_mesh(tmp.path());
         let study = create_author_study_object_from_args(vec![
             Value::String("authored_run_static".to_string()),
             generic_authoring_geometry_value(),
@@ -739,8 +553,6 @@ mod tests {
             Value::String("linear_static_structural".to_string()),
             Value::String("AnalysisMeshArtifactPath".to_string()),
             Value::String(mesh_path.clone()),
-            Value::String("AnalysisMeshEvidenceArtifactPath".to_string()),
-            Value::String(evidence_path.clone()),
             Value::String("StructuralForceN".to_string()),
             Value::Tensor(
                 Tensor::new_2d(vec![10.0, 0.0, -5.0], 1, 3).expect("force tensor should build"),
@@ -782,10 +594,6 @@ mod tests {
             run_data.analysis_mesh_artifact_path.as_deref(),
             Some(mesh_path.as_str())
         );
-        assert_eq!(
-            run_data.analysis_mesh_evidence_artifact_path.as_deref(),
-            Some(evidence_path.as_str())
-        );
     }
 
     #[test]
@@ -824,7 +632,7 @@ mod tests {
     #[test]
     fn runs_generic_study_from_minimal_authoring_inputs() {
         let tmp = tempfile::tempdir().expect("tempdir should be created");
-        let (mesh_path, evidence_path, summary) = authoring_analysis_mesh_artifacts(tmp.path());
+        let (mesh_path, summary) = canonical_authoring_solver_mesh(tmp.path());
         let study = create_author_study_object_from_args(vec![
             Value::String("authored_minimal_static".to_string()),
             generic_authoring_geometry_value(),
@@ -833,8 +641,6 @@ mod tests {
             Value::String("linear_static_structural".to_string()),
             Value::String("AnalysisMeshArtifactPath".to_string()),
             Value::String(mesh_path.clone()),
-            Value::String("AnalysisMeshEvidenceArtifactPath".to_string()),
-            Value::String(evidence_path.clone()),
         ])
         .expect("minimal authoring inputs should produce a runnable generic study");
 
@@ -863,12 +669,6 @@ mod tests {
             decoded_study.analysis_mesh_artifact_path.as_deref(),
             Some(mesh_path.as_str())
         );
-        assert_eq!(
-            decoded_study
-                .analysis_mesh_evidence_artifact_path
-                .as_deref(),
-            Some(evidence_path.as_str())
-        );
 
         let run = block_on(fea_run_builtin(study)).expect("minimal authored study should run");
         let Value::Object(run_object) = run else {
@@ -888,10 +688,6 @@ mod tests {
         assert_eq!(
             run_data.analysis_mesh_artifact_path.as_deref(),
             Some(mesh_path.as_str())
-        );
-        assert_eq!(
-            run_data.analysis_mesh_evidence_artifact_path.as_deref(),
-            Some(evidence_path.as_str())
         );
     }
 

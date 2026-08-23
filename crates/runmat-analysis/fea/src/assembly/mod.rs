@@ -1,9 +1,8 @@
 pub mod dofs;
 pub mod elements;
-pub mod solid;
-mod solid_boundary;
 mod solid_matrix;
 pub mod solver_solid;
+mod solver_solid_boundary;
 
 use std::{collections::BTreeMap, fmt};
 
@@ -11,7 +10,7 @@ use runmat_analysis_core::{
     AnalysisModel, BeamSectionModel, BoundaryConditionKind, LoadKind, ShellSectionModel,
     StructuralElementKind, StructuralModel,
 };
-use runmat_meshing_core::AnalysisMeshArtifact;
+use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 
 use self::elements::solid::SolidMaterial;
@@ -25,11 +24,10 @@ use self::{
         global_stiffness_matrix as shell_global_stiffness_matrix, ShellElementGeometry,
         ShellMaterial, ShellSection, SHELL_ELEMENT_DOF_COUNT, SHELL_NODE_DOF_COUNT,
     },
-    solid::{
-        assemble_solid_stiffness_csr_with_materials, solid_topology_from_analysis_mesh,
-        SolidAssemblyError,
+    solver_solid::{
+        assemble_solver_solid_stiffness_csr, solver_solid_topology, SolverSolidAssemblyError,
     },
-    solid_boundary::apply_analysis_mesh_structural_regions,
+    solver_solid_boundary::apply_solver_mesh_structural_regions,
 };
 
 use crate::operator::{CsrMatrix, OperatorSystem};
@@ -91,8 +89,8 @@ pub struct AssemblySummary {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LinearAssemblyError {
-    SolidStiffness(SolidAssemblyError),
-    AnalysisMeshRegionMapping(AnalysisMeshRegionMappingError),
+    SolidStiffness(SolverSolidAssemblyError),
+    SolverMeshRegionMapping(SolverMeshRegionMappingError),
 }
 
 impl fmt::Display for LinearAssemblyError {
@@ -101,7 +99,7 @@ impl fmt::Display for LinearAssemblyError {
             LinearAssemblyError::SolidStiffness(err) => {
                 write!(f, "solid stiffness assembly failed: {err:?}")
             }
-            LinearAssemblyError::AnalysisMeshRegionMapping(err) => {
+            LinearAssemblyError::SolverMeshRegionMapping(err) => {
                 write!(f, "{err}")
             }
         }
@@ -111,7 +109,7 @@ impl fmt::Display for LinearAssemblyError {
 impl std::error::Error for LinearAssemblyError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AnalysisMeshRegionMappingError {
+pub enum SolverMeshRegionMappingError {
     UnmappedLoadRegion {
         load_id: String,
         region_id: String,
@@ -124,24 +122,24 @@ pub enum AnalysisMeshRegionMappingError {
     },
 }
 
-impl fmt::Display for AnalysisMeshRegionMappingError {
+impl fmt::Display for SolverMeshRegionMappingError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AnalysisMeshRegionMappingError::UnmappedLoadRegion {
+            SolverMeshRegionMappingError::UnmappedLoadRegion {
                 load_id,
                 region_id,
                 load_kind,
             } => write!(
                 f,
-                "analysis mesh load region did not resolve to solver boundary entities: load_id={load_id} region_id={region_id} load_kind={load_kind}"
+                "solver mesh load region did not resolve to persistent boundary provenance: load_id={load_id} region_id={region_id} load_kind={load_kind}"
             ),
-            AnalysisMeshRegionMappingError::UnmappedBoundaryConditionRegion {
+            SolverMeshRegionMappingError::UnmappedBoundaryConditionRegion {
                 bc_id,
                 region_id,
                 boundary_condition_kind,
             } => write!(
                 f,
-                "analysis mesh boundary condition region did not resolve to solver boundary entities: bc_id={bc_id} region_id={region_id} boundary_condition_kind={boundary_condition_kind}"
+                "solver mesh boundary condition region did not resolve to persistent boundary provenance: bc_id={bc_id} region_id={region_id} boundary_condition_kind={boundary_condition_kind}"
             ),
         }
     }
@@ -376,14 +374,14 @@ pub struct ElectroThermalAssemblySummary {
 pub fn assemble_linear_system(
     model: &AnalysisModel,
     prep_context: Option<FeaPrepContext>,
-    analysis_mesh: Option<AnalysisMeshArtifact>,
+    solver_mesh: Option<SolverMeshArtifact>,
     thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
     electro_thermal_context: Option<FeaElectroThermalContext>,
 ) -> AssemblySummary {
     assemble_linear_system_impl(
         model,
         prep_context,
-        analysis_mesh,
+        solver_mesh,
         thermo_mechanical_context,
         electro_thermal_context,
         false,
@@ -394,14 +392,14 @@ pub fn assemble_linear_system(
 pub fn try_assemble_linear_system(
     model: &AnalysisModel,
     prep_context: Option<FeaPrepContext>,
-    analysis_mesh: Option<AnalysisMeshArtifact>,
+    solver_mesh: Option<SolverMeshArtifact>,
     thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
     electro_thermal_context: Option<FeaElectroThermalContext>,
 ) -> Result<AssemblySummary, LinearAssemblyError> {
     assemble_linear_system_impl(
         model,
         prep_context,
-        analysis_mesh,
+        solver_mesh,
         thermo_mechanical_context,
         electro_thermal_context,
         true,
@@ -411,12 +409,12 @@ pub fn try_assemble_linear_system(
 fn assemble_linear_system_impl(
     model: &AnalysisModel,
     prep_context: Option<FeaPrepContext>,
-    analysis_mesh: Option<AnalysisMeshArtifact>,
+    solver_mesh: Option<SolverMeshArtifact>,
     thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
     electro_thermal_context: Option<FeaElectroThermalContext>,
-    strict_analysis_mesh_stiffness: bool,
+    strict_solver_mesh_stiffness: bool,
 ) -> Result<AssemblySummary, LinearAssemblyError> {
-    if analysis_mesh.is_none() {
+    if solver_mesh.is_none() {
         if let Some(summary) = assemble_beam_system(model) {
             return Ok(summary);
         }
@@ -424,16 +422,16 @@ fn assemble_linear_system_impl(
 
     let base_dof_count = (model.loads.len() * 3).max(3);
     let prep_context_ref = prep_context.as_ref();
-    let solid_topology = analysis_mesh
+    let solid_topology = solver_mesh
         .as_ref()
-        .and_then(|mesh| solid_topology_from_analysis_mesh(mesh, base_dof_count).ok());
+        .and_then(|mesh| solver_solid_topology(mesh, base_dof_count).ok());
     let dof_count = solid_topology
         .as_ref()
         .map(|topology| topology.dof_count)
         .unwrap_or(base_dof_count);
-    let structural_solid_recovery = analysis_mesh
+    let structural_solid_recovery = solver_mesh
         .as_ref()
-        .map(solid_recovery_from_analysis_mesh)
+        .map(solid_recovery_from_solver_mesh)
         .unwrap_or_default();
 
     let avg_youngs_modulus = if model.materials.is_empty() {
@@ -586,16 +584,16 @@ fn assemble_linear_system_impl(
         rhs[dof] = 0.0;
     }
     let mut structural_wrench_lowering = Vec::new();
-    if let (Some(mesh), Some(_)) = (analysis_mesh.as_ref(), solid_topology.as_ref()) {
-        structural_wrench_lowering = apply_analysis_mesh_structural_regions(
+    if let (Some(mesh), Some(_)) = (solver_mesh.as_ref(), solid_topology.as_ref()) {
+        structural_wrench_lowering = apply_solver_mesh_structural_regions(
             model,
             mesh,
             &structural_dof_layout,
             &mut constrained,
             &mut rhs,
-            strict_analysis_mesh_stiffness,
+            strict_solver_mesh_stiffness,
         )
-        .map_err(LinearAssemblyError::AnalysisMeshRegionMapping)?;
+        .map_err(LinearAssemblyError::SolverMeshRegionMapping)?;
     }
 
     let mut prep_load_bonus = 0usize;
@@ -1065,18 +1063,18 @@ fn assemble_linear_system_impl(
         }
     }
 
-    let stiffness_csr = match analysis_mesh.as_ref() {
-        Some(mesh) => match assemble_solid_stiffness_csr_with_materials(
+    let stiffness_csr = match solver_mesh.as_ref() {
+        Some(mesh) => match assemble_solver_solid_stiffness_csr(
             mesh,
             SolidMaterial {
                 youngs_modulus_pa: structural_material.youngs_modulus_pa,
                 poisson_ratio: structural_material.poisson_ratio,
             },
-            &solid_materials_by_region(model),
+            &solid_materials_by_id(model),
             base_dof_count,
         ) {
             Ok(dense) => Some(dense),
-            Err(err) if strict_analysis_mesh_stiffness => {
+            Err(err) if strict_solver_mesh_stiffness => {
                 return Err(LinearAssemblyError::SolidStiffness(err));
             }
             Err(_) => None,
@@ -1149,17 +1147,17 @@ fn assemble_linear_system_impl(
     })
 }
 
-fn solid_recovery_from_analysis_mesh(
-    mesh: &AnalysisMeshArtifact,
-) -> Vec<SolidRecoveryElementSummary> {
+fn solid_recovery_from_solver_mesh(mesh: &SolverMeshArtifact) -> Vec<SolidRecoveryElementSummary> {
     let node_indices = mesh
+        .topology
         .nodes
         .iter()
         .enumerate()
         .map(|(index, node)| (node.node_id, index))
         .collect::<BTreeMap<_, _>>();
 
-    mesh.volume_elements
+    mesh.topology
+        .volume_elements
         .iter()
         .filter(|element| element.node_ids.len() == 4)
         .filter_map(|element| {
@@ -1168,11 +1166,11 @@ fn solid_recovery_from_analysis_mesh(
             for (local, node_id) in element.node_ids.iter().copied().enumerate() {
                 let node_index = *node_indices.get(&node_id)?;
                 indices[local] = node_index;
-                coordinates_m[local] = mesh.nodes.get(node_index)?.coordinates_m;
+                coordinates_m[local] = mesh.topology.nodes.get(node_index)?.coordinates_m;
             }
             Some(SolidRecoveryElementSummary {
-                element_id: element.element_id.clone(),
-                region_id: element.material_region_id.clone(),
+                element_id: element.element_id.to_string(),
+                region_id: element.region_id.source_topology_id.clone(),
                 node_indices: indices,
                 coordinates_m,
             })
@@ -1635,25 +1633,18 @@ fn structural_material_summary(model: &AnalysisModel) -> StructuralMaterialSumma
     }
 }
 
-fn solid_materials_by_region(model: &AnalysisModel) -> BTreeMap<String, SolidMaterial> {
-    let materials_by_id = model
+fn solid_materials_by_id(model: &AnalysisModel) -> BTreeMap<String, SolidMaterial> {
+    model
         .materials
         .iter()
-        .map(|material| (material.material_id.as_str(), material))
-        .collect::<BTreeMap<_, _>>();
-
-    model
-        .material_assignments
-        .iter()
-        .filter_map(|assignment| {
-            let material = materials_by_id.get(assignment.assigned_material_id.as_str())?;
-            Some((
-                assignment.region_id.clone(),
+        .map(|material| {
+            (
+                material.material_id.clone(),
                 SolidMaterial {
                     youngs_modulus_pa: material.mechanical.youngs_modulus_pa.max(1.0),
                     poisson_ratio: material.mechanical.poisson_ratio.clamp(0.0, 0.49),
                 },
-            ))
+            )
         })
         .collect()
 }
@@ -3148,13 +3139,11 @@ mod tests {
     use super::*;
     use crate::fixtures::{fixture_model, FixtureId};
     use runmat_meshing_core::{
-        contracts::artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryFace,
-        AnalysisMeshArtifact, AnalysisMeshNode, AnalysisMeshProvenance, AnalysisMeshQualityReport,
-        AnalysisVolumeElement, BoundaryElementKind, MeshSizingField, VolumeElementKind,
+        ElementOrder, PersistentEntityId, PersistentEntityKind, SolverMeshArtifact, StableDigest,
     };
 
     #[test]
-    fn analysis_mesh_populates_sparse_solid_stiffness_operator() {
+    fn solver_mesh_populates_sparse_solid_stiffness_operator() {
         let model = fixture_model(FixtureId::CantileverLinearStatic);
         let summary = assemble_linear_system(&model, None, Some(tetrahedron4_mesh()), None, None);
 
@@ -3179,7 +3168,7 @@ mod tests {
             .operator
             .stiffness_csr
             .as_ref()
-            .expect("analysis mesh should assemble a sparse solid stiffness matrix");
+            .expect("solver mesh should assemble a sparse solid stiffness matrix");
         assert_eq!(csr.row_offsets.len(), summary.dof_count + 1);
         assert_eq!(csr.row_offsets.last().copied(), Some(csr.values.len()));
         assert_eq!(csr.column_indices.len(), csr.values.len());
@@ -3201,7 +3190,7 @@ mod tests {
     }
 
     #[test]
-    fn analysis_mesh_preempts_explicit_beam_topology() {
+    fn solver_mesh_preempts_explicit_beam_topology() {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);
         model.structural = Some(runmat_analysis_core::StructuralModel {
             nodes: vec![
@@ -3248,7 +3237,7 @@ mod tests {
     }
 
     #[test]
-    fn analysis_mesh_material_regions_select_assigned_solid_materials() {
+    fn solver_mesh_material_regions_select_assigned_solid_materials() {
         let mut soft_model = fixture_model(FixtureId::CantileverLinearStatic);
         let mut hard = soft_model.materials[0].clone();
         hard.material_id = "mat_hard".to_string();
@@ -3265,7 +3254,7 @@ mod tests {
             confidence: runmat_analysis_core::EvidenceConfidence::Verified,
         }];
         let mut soft_mesh = tetrahedron4_mesh();
-        soft_mesh.volume_elements[0].material_region_id = "soft_region".to_string();
+        set_solver_mesh_material(&mut soft_mesh, "mat_soft", "soft_region");
 
         let mut hard_model = soft_model.clone();
         hard_model.material_assignments = vec![runmat_analysis_core::MaterialAssignment {
@@ -3274,7 +3263,8 @@ mod tests {
             assigned_material_id: "mat_hard".to_string(),
             confidence: runmat_analysis_core::EvidenceConfidence::Verified,
         }];
-        let hard_mesh = soft_mesh.clone();
+        let mut hard_mesh = soft_mesh.clone();
+        set_solver_mesh_material(&mut hard_mesh, "mat_hard", "soft_region");
 
         let soft_summary = assemble_linear_system(&soft_model, None, Some(soft_mesh), None, None);
         let hard_summary = assemble_linear_system(&hard_model, None, Some(hard_mesh), None, None);
@@ -3290,27 +3280,23 @@ mod tests {
     }
 
     #[test]
-    fn strict_analysis_mesh_assembly_rejects_invalid_tetrahedron4_stiffness() {
+    fn strict_solver_mesh_assembly_rejects_invalid_tetrahedron4_stiffness() {
         let model = fixture_model(FixtureId::CantileverLinearStatic);
         let mut mesh = tetrahedron4_mesh();
-        mesh.volume_elements[0].node_ids = vec![1, 3, 2, 4];
-        mesh.boundary_faces = vec![
-            boundary_face("root_face", vec![1, 2, 3], &["root"]),
-            boundary_face("tip_face", vec![1, 2, 4], &["tip"]),
-        ];
+        mesh.topology.volume_elements[0].node_ids = vec![1, 3, 2, 4];
+        set_boundary_regions(&mut mesh, 0, &["root"]);
+        set_boundary_regions(&mut mesh, 1, &["tip"]);
+        reseal(&mut mesh);
 
         let err = try_assemble_linear_system(&model, None, Some(mesh), None, None).expect_err(
-            "strict analysis mesh assembly should reject inverted Tetrahedron4 stiffness",
+            "strict solver mesh assembly should reject inverted Tetrahedron4 stiffness",
         );
 
-        assert!(matches!(
-            err,
-            LinearAssemblyError::SolidStiffness(SolidAssemblyError::ElementStiffness { .. })
-        ));
+        assert!(matches!(err, LinearAssemblyError::SolidStiffness(_)));
     }
 
     #[test]
-    fn analysis_mesh_boundary_regions_drive_solid_loads_and_constraints() {
+    fn solver_mesh_boundary_regions_drive_solid_loads_and_constraints() {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);
         model.boundary_conditions = vec![runmat_analysis_core::BoundaryCondition {
             bc_id: "fixed_root".to_string(),
@@ -3327,10 +3313,9 @@ mod tests {
             },
         }];
         let mut mesh = tetrahedron4_mesh();
-        mesh.boundary_faces = vec![
-            boundary_face("root_face", vec![1, 2, 3], &["root"]),
-            boundary_face("tip_face", vec![1, 2, 4], &["tip"]),
-        ];
+        set_boundary_regions(&mut mesh, 0, &["root"]);
+        set_boundary_regions(&mut mesh, 1, &["tip"]);
+        reseal(&mut mesh);
 
         let summary = assemble_linear_system(&model, None, Some(mesh), None, None);
 
@@ -3342,7 +3327,7 @@ mod tests {
     }
 
     #[test]
-    fn strict_analysis_mesh_assembly_rejects_unmapped_load_region() {
+    fn strict_solver_mesh_assembly_rejects_unmapped_load_region() {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);
         model.boundary_conditions = vec![runmat_analysis_core::BoundaryCondition {
             bc_id: "fixed_root".to_string(),
@@ -3359,15 +3344,17 @@ mod tests {
             },
         }];
         let mut mesh = tetrahedron4_mesh();
-        mesh.boundary_faces = vec![boundary_face("root_face", vec![1, 2, 3], &["root"])];
+        clear_boundary_regions(&mut mesh);
+        set_boundary_regions(&mut mesh, 0, &["root"]);
+        reseal(&mut mesh);
 
         let err = try_assemble_linear_system(&model, None, Some(mesh), None, None)
-            .expect_err("strict analysis mesh assembly should reject unmapped loads");
+            .expect_err("strict solver mesh assembly should reject unmapped loads");
 
         assert!(matches!(
             err,
-            LinearAssemblyError::AnalysisMeshRegionMapping(
-                AnalysisMeshRegionMappingError::UnmappedLoadRegion { .. }
+            LinearAssemblyError::SolverMeshRegionMapping(
+                SolverMeshRegionMappingError::UnmappedLoadRegion { .. }
             )
         ));
         let message = err.to_string();
@@ -3376,7 +3363,7 @@ mod tests {
     }
 
     #[test]
-    fn strict_analysis_mesh_assembly_rejects_unmapped_constraint_region() {
+    fn strict_solver_mesh_assembly_rejects_unmapped_constraint_region() {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);
         model.boundary_conditions = vec![runmat_analysis_core::BoundaryCondition {
             bc_id: "fixed_root".to_string(),
@@ -3393,15 +3380,17 @@ mod tests {
             },
         }];
         let mut mesh = tetrahedron4_mesh();
-        mesh.boundary_faces = vec![boundary_face("tip_face", vec![1, 2, 4], &["tip"])];
+        clear_boundary_regions(&mut mesh);
+        set_boundary_regions(&mut mesh, 0, &["tip"]);
+        reseal(&mut mesh);
 
         let err = try_assemble_linear_system(&model, None, Some(mesh), None, None)
-            .expect_err("strict analysis mesh assembly should reject unmapped constraints");
+            .expect_err("strict solver mesh assembly should reject unmapped constraints");
 
         assert!(matches!(
             err,
-            LinearAssemblyError::AnalysisMeshRegionMapping(
-                AnalysisMeshRegionMappingError::UnmappedBoundaryConditionRegion { .. }
+            LinearAssemblyError::SolverMeshRegionMapping(
+                SolverMeshRegionMappingError::UnmappedBoundaryConditionRegion { .. }
             )
         ));
         let message = err.to_string();
@@ -3410,7 +3399,7 @@ mod tests {
     }
 
     #[test]
-    fn analysis_mesh_boundary_regions_integrate_pressure_loads() {
+    fn solver_mesh_boundary_regions_integrate_pressure_loads() {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);
         model.boundary_conditions = Vec::new();
         model.loads = vec![runmat_analysis_core::LoadCase {
@@ -3419,7 +3408,8 @@ mod tests {
             kind: LoadKind::Pressure { magnitude_pa: 12.0 },
         }];
         let mut mesh = tetrahedron4_mesh();
-        mesh.boundary_faces = vec![boundary_face("tip_face", vec![1, 2, 4], &["tip"])];
+        set_boundary_regions(&mut mesh, 1, &["tip"]);
+        reseal(&mut mesh);
 
         let summary = assemble_linear_system(&model, None, Some(mesh), None, None);
 
@@ -3429,7 +3419,7 @@ mod tests {
     }
 
     #[test]
-    fn analysis_mesh_boundary_regions_lower_wrench_moments() {
+    fn solver_mesh_boundary_regions_lower_wrench_moments() {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);
         model.boundary_conditions = Vec::new();
         model.loads = vec![runmat_analysis_core::LoadCase {
@@ -3448,7 +3438,8 @@ mod tests {
             },
         }];
         let mut mesh = tetrahedron4_mesh();
-        mesh.boundary_faces = vec![boundary_face("tip_face", vec![1, 2, 4], &["tip"])];
+        set_boundary_regions(&mut mesh, 1, &["tip"]);
+        reseal(&mut mesh);
 
         let summary = assemble_linear_system(&model, None, Some(mesh), None, None);
 
@@ -3462,57 +3453,49 @@ mod tests {
         assert!(summary.operator.rhs.iter().any(|value| value.abs() > 0.0));
     }
 
-    fn tetrahedron4_mesh() -> AnalysisMeshArtifact {
-        let mut mesh = AnalysisMeshArtifact {
-            schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
-            mesh_id: "unit_tetrahedron".to_string(),
-            nodes: vec![
-                node(1, [0.0, 0.0, 0.0]),
-                node(2, [1.0, 0.0, 0.0]),
-                node(3, [0.0, 1.0, 0.0]),
-                node(4, [0.0, 0.0, 1.0]),
-            ],
-            volume_elements: vec![AnalysisVolumeElement {
-                element_id: "tetrahedron_1".to_string(),
-                kind: VolumeElementKind::Tetrahedron4,
-                node_ids: vec![1, 2, 3, 4],
-                material_region_id: "solid".to_string(),
-                provenance: Vec::new(),
-            }],
-            boundary_faces: Vec::new(),
-            boundary_edges: Vec::new(),
-            quality: AnalysisMeshQualityReport::default(),
-            sizing: MeshSizingField::default(),
-            field_topology: Vec::new(),
-            backend: Default::default(),
-            adaptive_iterations: Vec::new(),
-            provenance: AnalysisMeshProvenance {
-                algorithm: "test".to_string(),
-                source_geometry_id: "geo:test".to_string(),
-                source_geometry_revision: 1,
-                source_geometry_sha256: None,
-            },
-        };
-        mesh.refresh_field_topology();
-        mesh
+    fn tetrahedron4_mesh() -> SolverMeshArtifact {
+        crate::assembly::solver_solid::tests::artifact(ElementOrder::Tet4)
     }
 
-    fn boundary_face(
-        face_id: &str,
-        node_ids: Vec<u32>,
-        region_ids: &[&str],
-    ) -> AnalysisBoundaryFace {
-        AnalysisBoundaryFace {
-            face_id: face_id.to_string(),
-            kind: BoundaryElementKind::Tri3,
-            node_ids,
-            adjacent_volume_element_ids: Vec::new(),
-            region_ids: region_ids
-                .iter()
-                .map(|region| (*region).to_string())
-                .collect(),
-            provenance: Vec::new(),
+    fn set_boundary_regions(mesh: &mut SolverMeshArtifact, face_index: usize, regions: &[&str]) {
+        mesh.topology.boundary_faces[face_index].provenance = regions
+            .iter()
+            .map(|region| PersistentEntityId {
+                kind: PersistentEntityKind::Face,
+                source_topology_id: (*region).to_owned(),
+                assembly_path: vec!["root".to_owned()],
+            })
+            .collect();
+        mesh.topology.boundary_faces[face_index].provenance.sort();
+    }
+
+    fn clear_boundary_regions(mesh: &mut SolverMeshArtifact) {
+        for (index, face) in mesh.topology.boundary_faces.iter_mut().enumerate() {
+            face.provenance = vec![PersistentEntityId {
+                kind: PersistentEntityKind::Face,
+                source_topology_id: format!("unselected:{index}"),
+                assembly_path: vec!["root".to_owned()],
+            }];
         }
+    }
+
+    fn set_solver_mesh_material(mesh: &mut SolverMeshArtifact, material_id: &str, region_id: &str) {
+        let region = PersistentEntityId {
+            kind: PersistentEntityKind::Region,
+            source_topology_id: region_id.to_owned(),
+            assembly_path: vec!["root".to_owned()],
+        };
+        mesh.topology.volume_elements[0].material_id = material_id.to_owned();
+        mesh.topology.volume_elements[0].region_id = region.clone();
+        mesh.topology.regions[0].material_id = material_id.to_owned();
+        mesh.topology.regions[0].region_id = region;
+        reseal(mesh);
+    }
+
+    fn reseal(mesh: &mut SolverMeshArtifact) {
+        mesh.canonical_digest = StableDigest::ZERO;
+        mesh.seal_canonical_digest()
+            .expect("test solver mesh should remain canonical");
     }
 
     fn assert_close(actual: f64, expected: f64) {
@@ -3527,19 +3510,11 @@ mod tests {
             .operator
             .stiffness_csr
             .as_ref()
-            .expect("analysis mesh should assemble CSR stiffness");
+            .expect("solver mesh should assemble CSR stiffness");
         csr.column_indices[csr.row_offsets[0]..csr.row_offsets[1]]
             .iter()
             .zip(csr.values[csr.row_offsets[0]..csr.row_offsets[1]].iter())
             .find_map(|(&column, &value)| (column == 0).then_some(value.abs()))
             .expect("first row should contain diagonal")
-    }
-
-    fn node(node_id: u32, coordinates_m: [f64; 3]) -> AnalysisMeshNode {
-        AnalysisMeshNode {
-            node_id,
-            coordinates_m,
-            provenance: Vec::new(),
-        }
     }
 }

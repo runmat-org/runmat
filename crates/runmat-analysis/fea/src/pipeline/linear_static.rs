@@ -70,20 +70,19 @@ pub fn run_linear_static_with_options(
     let summary = try_assemble_linear_system(
         model,
         options.prep_context.clone(),
-        options.analysis_mesh.clone(),
+        options.solver_mesh.clone(),
         options.thermo_mechanical_context,
         options.electro_thermal_context,
     )
     .map_err(|err| FeaRunError::Assembly(err.to_string()))?;
     super::validate_rotational_dof_targets(model, &summary)?;
-    let analysis_mesh_present = options.analysis_mesh.is_some();
-    if options.require_analysis_mesh_for_solid
-        && !analysis_mesh_present
+    let solver_mesh_present = options.solver_mesh.is_some();
+    if options.require_solver_mesh_for_solid
+        && !solver_mesh_present
         && !model_has_explicit_structural_elements(model)
     {
         return Err(FeaRunError::InvalidModel(
-            "linear static solid continuum studies require an analysis mesh; generate or provide analysis_mesh_artifact_path before solve"
-                .to_string(),
+            "linear static solid continuum studies require a canonical solver mesh".to_string(),
         ));
     }
     emit_phase(
@@ -186,23 +185,23 @@ pub fn run_linear_static_with_options(
             solve_result.preconditioner,
         ),
     }];
-    if let Some(path) = options.analysis_mesh_artifact_path.as_ref() {
+    if let Some(path) = options.solver_mesh_artifact_path.as_ref() {
         let mesh_summary = options
-            .analysis_mesh
+            .solver_mesh
             .as_ref()
             .map(|mesh| {
                 format!(
-                    " analysis_mesh_node_count={} analysis_mesh_volume_element_count={} analysis_mesh_boundary_face_count={}",
-                    mesh.nodes.len(),
-                    mesh.volume_elements.len(),
-                    mesh.boundary_faces.len()
+                    " solver_mesh_node_count={} solver_mesh_volume_element_count={} solver_mesh_boundary_face_count={}",
+                    mesh.topology.nodes.len(),
+                    mesh.topology.volume_elements.len(),
+                    mesh.topology.boundary_faces.len()
                 )
             })
             .unwrap_or_default();
         diagnostics.push(FeaDiagnostic {
-            code: "FEA_ANALYSIS_MESH_REFERENCE".to_string(),
+            code: "FEA_SOLVER_MESH_REFERENCE".to_string(),
             severity: FeaDiagnosticSeverity::Info,
-            message: format!("analysis_mesh_artifact_path={path}{mesh_summary}"),
+            message: format!("solver_mesh_artifact_path={path}{mesh_summary}"),
         });
     }
     if let Some(diagnostic) = structural_solid_assembly_diagnostic(&summary) {
