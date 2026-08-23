@@ -4,8 +4,8 @@ use std::collections::BTreeSet;
 
 use runmat_execution::value::{ValueLimits, ValuePayload, ValueRef, ValueRefKind};
 use runmat_meshing_core::{
-    CanonicalMeshingContract, MeshingCanonicalLimits, MeshingFailure, MeshingWorkloadResult,
-    StableDigest,
+    CanonicalMeshingContract, MeshingCanonicalLimits, MeshingFailure, MeshingStageEvidence,
+    MeshingWorkloadResult, StableDigest,
 };
 use serde::{Deserialize, Serialize};
 
@@ -14,7 +14,7 @@ use crate::{
     MeshingHostWorkload, MeshingSerialExecutionError, MESHING_STAGE_MANIFEST_MEDIA_TYPE,
 };
 
-pub const MESHING_HOST_RESPONSE_SCHEMA_VERSION: u16 = 2;
+pub const MESHING_HOST_RESPONSE_SCHEMA_VERSION: u16 = 3;
 const MAX_RESULT_OBJECTS: usize = 65_538;
 const STAGE_MANIFEST_SCHEMA: &str = "runmat.meshing.stage-manifest.v2";
 
@@ -24,6 +24,7 @@ pub enum MeshingHostResponse {
     Validated {
         schema_version: u16,
         stage_manifest_digest: StableDigest,
+        stage_evidence: Box<MeshingStageEvidence>,
         root: ValueRef,
         result_objects: Vec<ValueRef>,
     },
@@ -55,6 +56,7 @@ impl MeshingHostResponse {
         let response = Self::Validated {
             schema_version: MESHING_HOST_RESPONSE_SCHEMA_VERSION,
             stage_manifest_digest: *stage_manifest_digest,
+            stage_evidence: Box::new(completed.stage_evidence().clone()),
             root: (**root).clone(),
             result_objects: attempt.result_objects,
         };
@@ -83,6 +85,7 @@ impl MeshingHostResponse {
         match self {
             Self::Validated {
                 stage_manifest_digest,
+                stage_evidence,
                 root,
                 result_objects: _,
                 ..
@@ -91,6 +94,15 @@ impl MeshingHostResponse {
                     stage_manifest_digest: *stage_manifest_digest,
                 }
                 .validate_against(&host.workload)?;
+                stage_evidence.validate()?;
+                if stage_evidence.stage != host.workload.stage
+                    || stage_evidence.partition != host.workload.partition
+                    || stage_evidence.stage_result_digest != *stage_manifest_digest
+                {
+                    return Err(MeshingExecutionError::Invalid(
+                        "meshing host stage evidence does not bind its workload result".into(),
+                    ));
+                }
                 validate_access(root, &host.artifact_access)?;
             }
             Self::Failed { failure, .. } => {
@@ -140,11 +152,18 @@ impl MeshingHostResponse {
             Self::Validated {
                 schema_version,
                 stage_manifest_digest,
+                stage_evidence,
                 root,
                 result_objects,
             } => {
                 validate_version(*schema_version)?;
                 stage_manifest_digest.validate_nonzero("host response manifest digest")?;
+                stage_evidence.validate()?;
+                if stage_evidence.stage_result_digest != *stage_manifest_digest {
+                    return Err(MeshingExecutionError::Invalid(
+                        "host response evidence digest differs from its result manifest".into(),
+                    ));
+                }
                 if root.logical_digest.bytes() != stage_manifest_digest.bytes()
                     || root.kind != ValueRefKind::ResultObject
                     || root.media_type != MESHING_STAGE_MANIFEST_MEDIA_TYPE

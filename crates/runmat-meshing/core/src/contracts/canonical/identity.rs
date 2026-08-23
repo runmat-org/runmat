@@ -82,7 +82,7 @@ impl GeometryRevisionRef {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CanonicalEntityRange {
     pub first: PersistentEntityId,
@@ -104,7 +104,7 @@ impl CanonicalEntityRange {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MeshingPartitionKind {
     WholeStage,
@@ -113,7 +113,7 @@ pub enum MeshingPartitionKind {
     DisconnectedComponent,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MeshingPartitionDescriptor {
     pub kind: MeshingPartitionKind,

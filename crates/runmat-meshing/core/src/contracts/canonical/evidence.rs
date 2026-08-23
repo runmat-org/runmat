@@ -4,13 +4,14 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     validate_finite, validate_token, AlgorithmVersionSet, CanonicalMeshingContract,
-    GeometryRevisionRef, MeshingContractError, MeshingResourceBudget, MeshingStageKind,
-    PersistentEntityId, StableDigest,
+    GeometryRevisionRef, MeshingContractError, MeshingPartitionDescriptor, MeshingResourceBudget,
+    MeshingStageKind, PersistentEntityId, StableDigest,
 };
 
-pub const MESHING_EVIDENCE_SCHEMA_VERSION: u16 = 2;
+pub const MESHING_EVIDENCE_SCHEMA_VERSION: u16 = 3;
 const MAX_STAGE_COUNTERS: usize = 256;
 const MAX_STAGE_INVARIANTS: usize = 256;
+const MAX_STAGE_EVIDENCE: usize = 65_536;
 const MAX_SIZING_EVIDENCE: usize = 65_536;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -96,6 +97,7 @@ impl InvariantEvidence {
 #[serde(deny_unknown_fields)]
 pub struct MeshingStageEvidence {
     pub stage: MeshingStageKind,
+    pub partition: MeshingPartitionDescriptor,
     pub stage_result_digest: StableDigest,
     pub entity_counts: BTreeMap<String, u64>,
     pub invariants: Vec<InvariantEvidence>,
@@ -103,12 +105,17 @@ pub struct MeshingStageEvidence {
     pub completed_work: u64,
     pub estimated_work: u64,
     pub peak_memory_bytes: u64,
+    pub peak_scratch_bytes: u64,
+    pub search_work: u64,
+    pub maximum_recursion_depth: u32,
+    pub iterations: u64,
     pub elapsed_time_ms: u64,
     pub cancellation_checkpoints: u64,
 }
 
 impl MeshingStageEvidence {
-    fn validate(&self) -> Result<(), MeshingContractError> {
+    pub fn validate(&self) -> Result<(), MeshingContractError> {
+        self.partition.validate()?;
         self.stage_result_digest
             .validate_nonzero("stage evidence result digest")?;
         if self.entity_counts.len() > MAX_STAGE_COUNTERS
@@ -300,12 +307,20 @@ impl MeshingEvidence {
             .validate_nonzero("evidence artifact digest")?;
         self.algorithms.validate()?;
         self.platform.validate()?;
-        if self.stages.len() != MeshingStageKind::ALL.len()
-            || self
-                .stages
-                .iter()
-                .map(|value| value.stage)
-                .ne(MeshingStageKind::ALL)
+        if self.stages.is_empty()
+            || self.stages.len() > MAX_STAGE_EVIDENCE
+            || self.stages.last().map(|value| value.stage) != Some(MeshingStageKind::Serialization)
+            || !self.stages.windows(2).all(|pair| {
+                (
+                    pair[0].stage,
+                    &pair[0].partition,
+                    pair[0].stage_result_digest,
+                ) < (
+                    pair[1].stage,
+                    &pair[1].partition,
+                    pair[1].stage_result_digest,
+                )
+            })
             || self.sizing.len() > MAX_SIZING_EVIDENCE
             || !strictly_increasing_by(&self.sizing, |value| &value.scope)
         {
@@ -317,6 +332,10 @@ impl MeshingEvidence {
         for stage in &self.stages {
             stage.validate()?;
             if stage.peak_memory_bytes > self.resources.peak_memory_bytes
+                || stage.peak_scratch_bytes > self.resources.peak_scratch_bytes
+                || stage.search_work > self.resources.search_work
+                || stage.maximum_recursion_depth > self.resources.maximum_recursion_depth
+                || stage.iterations > self.resources.iterations
                 || stage.elapsed_time_ms > self.resources.wall_time_ms
             {
                 return Err(MeshingContractError::invalid(

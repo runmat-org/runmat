@@ -93,6 +93,7 @@ pub struct ValidatedMeshingStageOutput {
 pub struct CompletedMeshingStage {
     workload_result: MeshingWorkloadResult,
     publication: PreparedMeshingResultPublication,
+    stage_evidence: runmat_meshing_core::MeshingStageEvidence,
 }
 
 impl CompletedMeshingStage {
@@ -102,6 +103,10 @@ impl CompletedMeshingStage {
 
     pub const fn publication(&self) -> &PreparedMeshingResultPublication {
         &self.publication
+    }
+
+    pub const fn stage_evidence(&self) -> &runmat_meshing_core::MeshingStageEvidence {
+        &self.stage_evidence
     }
 
     pub fn attempt_success(&self) -> runmat_execution_runner::AttemptSuccess {
@@ -268,9 +273,12 @@ where
         stage_manifest_digest: manifest_digest,
     };
     workload_result.validate_against(&host.workload)?;
+    let stage_evidence = control.stage_evidence(host.workload.partition.clone(), manifest_digest);
+    stage_evidence.validate()?;
     Ok(CompletedMeshingStage {
         workload_result,
         publication,
+        stage_evidence,
     })
 }
 
