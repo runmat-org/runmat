@@ -10,4 +10,3 @@ pub mod optimize;
 mod protected_edges;
 pub mod reconnect;
 pub mod recover;
-pub mod structured_grid;

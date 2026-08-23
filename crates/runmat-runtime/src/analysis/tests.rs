@@ -2222,7 +2222,6 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
     }];
     spec.model = Some(model);
     let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
-        backend: runmat_meshing_core::MeshBackendKind::StructuredGridTetrahedron,
         ..runmat_meshing_core::VolumeMeshingOptions::default()
     };
     mesh_options.validation.quality = runmat_meshing_core::QualityThresholds {
@@ -2473,16 +2472,11 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
         .as_array()
         .expect("initial volume elements")
         .len();
-    let solid_mesh = payload["mesh"]["backend"]["backend"].as_str() == Some("solid");
-    if solid_mesh {
-        assert!(refined_volume_element_count >= initial_volume_element_count);
-        assert!(!refined_payload["mesh"]["sizing"]["applied_samples"]
-            .as_array()
-            .expect("refined sizing applications")
-            .is_empty());
-    } else {
-        assert!(refined_volume_element_count > initial_volume_element_count);
-    }
+    assert!(refined_volume_element_count >= initial_volume_element_count);
+    assert!(!refined_payload["mesh"]["sizing"]["applied_samples"]
+        .as_array()
+        .expect("refined sizing applications")
+        .is_empty());
     assert_eq!(
         refined_payload["mesh"]["adaptive_iterations"]
             .as_array()
@@ -2515,24 +2509,16 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
         run_payload["refined_analysis_mesh_evidence_artifact_path"].as_str(),
         Some(refined_evidence_path.as_str())
     );
-    if solid_mesh {
-        assert_eq!(
-            run_payload["refinement_effect"]["topology_changed"].as_bool(),
-            Some(false)
-        );
-        assert_eq!(
-            run_payload["refinement_effect"]["element_count_delta"].as_i64(),
-            Some(0)
-        );
-    } else {
-        assert_eq!(
-            run_payload["refinement_effect"]["topology_changed"].as_bool(),
-            Some(true)
-        );
-        assert!(run_payload["refinement_effect"]["element_count_delta"]
-            .as_i64()
-            .is_some_and(|delta| delta > 0));
-    }
+    let element_count_delta =
+        refined_volume_element_count as i64 - initial_volume_element_count as i64;
+    assert_eq!(
+        run_payload["refinement_effect"]["topology_changed"].as_bool(),
+        Some(element_count_delta != 0)
+    );
+    assert_eq!(
+        run_payload["refinement_effect"]["element_count_delta"].as_i64(),
+        Some(element_count_delta)
+    );
     let persisted = storage::load_run_result(&envelope.data.run_id)
         .expect("run load should succeed")
         .expect("run should be persisted");
@@ -2924,7 +2910,6 @@ fn analysis_author_study_persists_nested_shell_generation_evidence() {
     let _runtime_guard = scoped_study_artifact_root(&root);
     let geometry = nested_tetrahedron_shell_study_geometry();
     let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
-        backend: runmat_meshing_core::MeshBackendKind::Solid,
         target_size: runmat_meshing_core::MeshTargetSize::LengthM(10.0),
         ..runmat_meshing_core::VolumeMeshingOptions::default()
     };
@@ -3295,7 +3280,7 @@ fn analysis_author_study_rejects_not_solve_ready_mesh_summary() {
 }
 
 #[test]
-fn analysis_run_study_persists_solid_backend_analysis_mesh_artifact() {
+fn analysis_run_study_persists_generated_solid_mesh_artifact() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
     let root = temp_artifact_root("run-study-solid-analysis-mesh");
@@ -3304,7 +3289,6 @@ fn analysis_run_study_persists_solid_backend_analysis_mesh_artifact() {
     let mut spec = sample_linear_static_study_spec();
     spec.geometry = closed_cube_geometry_asset();
     let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
-        backend: runmat_meshing_core::MeshBackendKind::Solid,
         ..runmat_meshing_core::VolumeMeshingOptions::default()
     };
     mesh_options.refinement.strategy = runmat_meshing_core::RefinementStrategy::None;
@@ -3429,7 +3413,6 @@ fn analysis_run_study_consumes_generated_nested_shell_solid_artifact() {
         },
     }];
     let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
-        backend: runmat_meshing_core::MeshBackendKind::Solid,
         target_size: runmat_meshing_core::MeshTargetSize::LengthM(10.0),
         ..runmat_meshing_core::VolumeMeshingOptions::default()
     };
@@ -3558,7 +3541,6 @@ fn analysis_run_study_persists_solid_boundary_focus_sizing_evidence() {
     }];
     spec.model = Some(model);
     let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
-        backend: runmat_meshing_core::MeshBackendKind::Solid,
         ..runmat_meshing_core::VolumeMeshingOptions::default()
     };
     mesh_options.refinement.focus.loads = runmat_meshing_core::RefinementFocusLevel::Fine;
@@ -5986,7 +5968,6 @@ fn write_generated_through_hole_analysis_mesh_artifacts(
     fs::create_dir_all(root).expect("create generated analysis mesh artifact root");
     let geometry = through_hole_study_geometry();
     let options = runmat_meshing_core::VolumeMeshingOptions {
-        backend: runmat_meshing_core::MeshBackendKind::Solid,
         ..runmat_meshing_core::VolumeMeshingOptions::default()
     };
     let mesh = runmat_meshing::generate_analysis_mesh(&geometry, options.clone())
@@ -13283,7 +13264,6 @@ fn analysis_generate_study_run_figures_uses_generated_solid_through_hole_topolog
         },
     ];
     let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
-        backend: runmat_meshing_core::MeshBackendKind::Solid,
         ..runmat_meshing_core::VolumeMeshingOptions::default()
     };
     mesh_options.refinement.strategy = runmat_meshing_core::RefinementStrategy::None;
@@ -13390,7 +13370,6 @@ fn analysis_generate_study_run_figures_uses_generated_nested_shell_topology() {
         },
     }];
     let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
-        backend: runmat_meshing_core::MeshBackendKind::Solid,
         target_size: runmat_meshing_core::MeshTargetSize::LengthM(10.0),
         ..runmat_meshing_core::VolumeMeshingOptions::default()
     };

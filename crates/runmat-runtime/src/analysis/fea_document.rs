@@ -14,8 +14,8 @@ use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::{GeometryAsset, UnitSystem};
 use runmat_geometry_io::GeometryImportOptions;
 use runmat_meshing_core::{
-    MeshBackendKind, MeshElementOrder, MeshKindRequest, MeshProfile, MeshRefinementOptions,
-    MeshTargetSize, MeshValidationPolicyOptions, QualityThresholds, RefinementConvergenceOptions,
+    MeshElementOrder, MeshKindRequest, MeshProfile, MeshRefinementOptions, MeshTargetSize,
+    MeshValidationPolicyOptions, QualityThresholds, RefinementConvergenceOptions,
     RefinementFocusLevel, RefinementFocusOptions, RefinementIndicatorMode,
     RefinementIndicatorOverrides, RefinementStrategy, VolumeElementKind, VolumeMeshingOptions,
 };
@@ -127,8 +127,6 @@ struct FeaModelDocument {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FeaMeshDocument {
-    #[serde(default)]
-    backend: MeshBackendKind,
     #[serde(default = "default_mesh_kind")]
     kind: MeshKindRequest,
     #[serde(default = "default_mesh_element")]
@@ -748,7 +746,6 @@ fn resolve_mesh_options(
     validate_refinement_indicators(&mesh.refinement.indicators)?;
 
     Ok(Some(VolumeMeshingOptions {
-        backend: mesh.backend,
         kind: mesh.kind,
         element: mesh.element,
         element_order: mesh.element_order,
@@ -2096,7 +2093,6 @@ refinement:
             .expect("mesh options should resolve")
             .expect("mesh options should be present");
 
-        assert_eq!(options.backend, MeshBackendKind::Auto);
         assert_eq!(options.kind, MeshKindRequest::Solid);
         assert_eq!(options.element, VolumeElementKind::Tetrahedron4);
         assert_eq!(options.element_order, MeshElementOrder::Linear);
@@ -2287,7 +2283,6 @@ growth_rate: 0.95
         assert_eq!(options.kind, MeshKindRequest::Solid);
         assert_eq!(options.element, VolumeElementKind::Tetrahedron4);
         assert_eq!(options.profile, MeshProfile::AnalysisReady);
-        assert_eq!(options.backend, MeshBackendKind::Auto);
         assert_eq!(options.refinement.strategy, RefinementStrategy::Auto);
 
         let modal_default = resolve_mesh_options(
@@ -2300,19 +2295,13 @@ growth_rate: 0.95
     }
 
     #[test]
-    fn fea_document_mesh_options_accept_backend_selection() {
-        let mesh: FeaMeshDocument = serde_yaml::from_str(
+    fn fea_document_mesh_options_reject_removed_backend_selection() {
+        assert!(serde_yaml::from_str::<FeaMeshDocument>(
             r#"
-backend: structured_grid_tetrahedron
+backend: removed
 "#,
         )
-        .expect("mesh document should parse backend");
-
-        let options = resolve_linear_static_mesh_options(Some(&mesh))
-            .expect("mesh options should resolve")
-            .expect("mesh options should be present");
-
-        assert_eq!(options.backend, MeshBackendKind::StructuredGridTetrahedron);
+        .is_err());
     }
 
     #[test]

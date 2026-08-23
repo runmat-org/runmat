@@ -672,6 +672,6 @@ fn successful_evidence_admits_canonically_ordered_partition_observations() {
 #[test]
 fn solver_artifact_rejects_unknown_legacy_backend_evidence() {
     let mut value = serde_json::to_value(artifact()).unwrap();
-    value["backend"] = serde_json::json!("structured_grid_tetrahedron");
+    value["backend"] = serde_json::json!("removed");
     assert!(serde_json::from_value::<SolverMeshArtifact>(value).is_err());
 }

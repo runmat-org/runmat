@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::quality::QualityThresholds;
 
-use super::{backend::MeshBackendKind, topology::VolumeElementKind};
+use super::topology::VolumeElementKind;
 
 pub use runmat_meshing_size::refinement::{
     AdaptiveMeshingOptions, MeshRefinementOptions, RefinementConvergenceOptions,
@@ -71,7 +71,6 @@ impl Default for MeshValidationPolicyOptions {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VolumeMeshingOptions {
-    pub backend: MeshBackendKind,
     pub kind: MeshKindRequest,
     pub element: VolumeElementKind,
     pub element_order: MeshElementOrder,
@@ -92,7 +91,6 @@ pub struct VolumeMeshingOptions {
 impl Default for VolumeMeshingOptions {
     fn default() -> Self {
         Self {
-            backend: MeshBackendKind::Auto,
             kind: MeshKindRequest::Solid,
             element: VolumeElementKind::Tetrahedron4,
             element_order: MeshElementOrder::Linear,
