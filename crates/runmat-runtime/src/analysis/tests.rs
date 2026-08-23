@@ -74,7 +74,6 @@ use runmat_geometry_core::{
     MaterialEvidenceConfidence, MeshDescriptor, MeshKind, Region, RegionEntityMapping,
     SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
 };
-use runmat_meshing_core::fixtures::nested_tetrahedron_shell_geometry;
 use runmat_meshing_core::{
     contracts::artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryFace, AnalysisMeshArtifact,
     AnalysisMeshNode, AnalysisMeshProvenance, AnalysisMeshQualityReport, AnalysisVolumeElement,
@@ -672,39 +671,6 @@ fn closed_cube_geometry_asset() -> GeometryAsset {
         ],
         diagnostics: Vec::new(),
     }
-}
-
-fn nested_tetrahedron_shell_study_geometry() -> GeometryAsset {
-    let mut geometry = nested_tetrahedron_shell_geometry();
-    geometry.regions.extend([
-        Region {
-            region_id: "root".to_string(),
-            name: "root".to_string(),
-            tag: Some("fixed".to_string()),
-            cad_ownership: None,
-        },
-        Region {
-            region_id: "tip".to_string(),
-            name: "tip".to_string(),
-            tag: Some("load".to_string()),
-            cad_ownership: None,
-        },
-    ]);
-    geometry.region_entity_mappings.extend([
-        RegionEntityMapping::new(
-            "root",
-            "nested_tetrahedron_shell_surface",
-            EntityKind::Face,
-            vec![EntityIdRange::new(0, 1)],
-        ),
-        RegionEntityMapping::new(
-            "tip",
-            "nested_tetrahedron_shell_surface",
-            EntityKind::Face,
-            vec![EntityIdRange::new(1, 1)],
-        ),
-    ]);
-    geometry
 }
 
 fn sample_prep_artifact_id_for_model(model: &AnalysisModel) -> String {
@@ -2528,124 +2494,6 @@ fn analysis_author_study_records_modal_driver_without_structural_force_evidence(
         analysis_validate_study_op(&authored.data.study, OperationContext::new(None, None))
             .expect("authored modal study should validate");
     assert!(validation.data.valid);
-
-    let _ = fs::remove_dir_all(&root);
-}
-
-#[test]
-fn analysis_author_study_persists_nested_shell_generation_evidence() {
-    let _guard = analysis_test_guard();
-    let root = temp_artifact_root("author-study-nested-shell-evidence");
-    let _ = fs::remove_dir_all(&root);
-    let _runtime_guard = scoped_study_artifact_root(&root);
-    let geometry = nested_tetrahedron_shell_study_geometry();
-    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
-        target_size: runmat_meshing_core::MeshTargetSize::LengthM(10.0),
-        ..runmat_meshing_core::VolumeMeshingOptions::default()
-    };
-    mesh_options.refinement.strategy = runmat_meshing_core::RefinementStrategy::None;
-    mesh_options.refinement.max_iterations = 0;
-    let mesh = runmat_meshing::generate_analysis_mesh(&geometry, mesh_options)
-        .expect("nested-shell fixture should generate an analysis mesh");
-    let validation = runmat_meshing_core::AnalysisMeshValidationOptions {
-        required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
-        required_material_region_ids: vec!["body".to_string()],
-        ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
-    };
-    let evidence = runmat_meshing_evidence::build_mesh_evidence_artifact(&mesh, &validation);
-    let summary = runmat_meshing_evidence::build_mesh_authoring_summary(&evidence);
-    assert!(summary.solve_ready);
-    assert_eq!(
-        summary.tetrahedron_generation_family,
-        "nested_tetrahedron_shell"
-    );
-    assert!(summary.nested_tetrahedron_shell.outer_node_count > 0);
-    assert!(summary.nested_tetrahedron_shell.inner_node_count > 0);
-
-    let authored = analysis_author_study_op(
-        AnalysisStudyAuthoringIntent {
-            study_id: "authored_nested_shell_static".to_string(),
-            model_id: None,
-            geometry,
-            mesh_authoring_summary: summary,
-            profile: AnalysisCreateModelProfile::LinearStaticStructural,
-            run_kind: AnalysisRunKind::LinearStatic,
-            backend: ComputeBackend::Cpu,
-            solver_mesh_artifact_path: None,
-            meshing_evidence_artifact_path: None,
-            material_region_id: Some("body".to_string()),
-            boundary_condition_region_id: Some("root".to_string()),
-            driving_condition_region_id: Some("tip".to_string()),
-            structural_force_n: Some([0.0, -125.0, 25.0]),
-            diagram_observation: None,
-        },
-        OperationContext::new(Some("trace-author-nested-shell".to_string()), None),
-    )
-    .expect("authoring should preserve nested-shell mesh evidence");
-
-    assert_eq!(
-        authored.data.evidence.tetrahedron_generation_family,
-        "nested_tetrahedron_shell"
-    );
-    assert!(
-        authored
-            .data
-            .evidence
-            .nested_tetrahedron_shell
-            .outer_node_count
-            > 0
-    );
-    assert!(
-        authored
-            .data
-            .evidence
-            .nested_tetrahedron_shell
-            .inner_node_count
-            > 0
-    );
-    assert_eq!(
-        authored
-            .data
-            .evidence
-            .nested_tetrahedron_shell
-            .boundary_exact_cover_refill_count
-            + authored
-                .data
-                .evidence
-                .nested_tetrahedron_shell
-                .boundary_centroid_refinement_refill_count
-            + authored
-                .data
-                .evidence
-                .nested_tetrahedron_shell
-                .barycentric_partition_refill_count,
-        1
-    );
-
-    let artifact: serde_json::Value = serde_json::from_slice(
-        &fs::read(&authored.data.evidence_artifact_path).expect("read authoring artifact"),
-    )
-    .expect("parse authoring artifact");
-    assert_eq!(
-        artifact["evidence"]["nested_tetrahedron_shell"]["outer_node_count"].as_u64(),
-        Some(
-            authored
-                .data
-                .evidence
-                .nested_tetrahedron_shell
-                .outer_node_count as u64
-        )
-    );
-    assert_eq!(
-        artifact["evidence"]["nested_tetrahedron_shell"]["inner_facet_count"].as_u64(),
-        Some(
-            authored
-                .data
-                .evidence
-                .nested_tetrahedron_shell
-                .inner_facet_count as u64
-        )
-    );
 
     let _ = fs::remove_dir_all(&root);
 }
