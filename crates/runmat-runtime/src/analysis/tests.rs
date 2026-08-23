@@ -93,92 +93,6 @@ fn analysis_test_guard() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn sample_analysis_run_prep_context() -> AnalysisRunPrepContext {
-    AnalysisRunPrepContext {
-        prepared_mesh_count: 1,
-        prepared_node_count: 16,
-        prepared_element_count: 20,
-        mapped_region_count: 3,
-        min_scaled_jacobian: 0.86,
-        mean_aspect_ratio: 1.5,
-        inverted_element_count: 0,
-        mapped_load_count: 1,
-        mapped_bc_count: 3,
-        layout_seed: 29,
-        topology_dof_multiplier: 1.2,
-        topology_bandwidth_estimate: 4,
-        mapped_region_participation_ratio: 0.9,
-        topology_surface_patch_ratio: 0.35,
-        topology_volume_core_ratio: 0.55,
-        topology_mixed_family_ratio: 0.05,
-        topology_region_span_mean: 5.0,
-        topology_region_block_count: 3,
-        topology_region_mesh_mean: 4.0,
-        topology_region_mesh_variance: 0.5,
-        topology_triangle_family_ratio: 0.2,
-        topology_quad_family_ratio: 0.3,
-        topology_tetrahedron_family_ratio: 0.25,
-        topology_hex_family_ratio: 0.25,
-        coordinate_span_x_m: 2.4,
-        coordinate_span_y_m: 0.6,
-        coordinate_span_z_m: 0.4,
-        coordinate_active_dimension_count: 3,
-        coordinate_characteristic_length_m: 0.2,
-        element_geometry_node_count: 4,
-        element_geometry_edge_count: 5,
-        mean_element_edge_length_m: 0.2,
-        mean_element_area_m2: 0.04,
-        element_geometry_coverage_ratio: 1.0,
-        reference_element_coordinates_m: [[0.0, 0.0, 0.0], [0.4, 0.0, 0.0], [0.0, 0.2, 0.0]],
-        reference_element_area_m2: 0.04,
-        control_volume_cell_count: 15,
-        control_volume_face_count: 19,
-        control_volume_internal_face_count: 11,
-        control_volume_boundary_face_count: 8,
-        control_volume_connectivity_coverage_ratio: 1.0,
-        element_topology_sample_element_count: 2,
-        element_topology_sample_edge_count: 5,
-        element_topology_sample_edge_nodes: [
-            [0, 1],
-            [1, 2],
-            [0, 2],
-            [2, 3],
-            [0, 3],
-            [0, 0],
-            [0, 0],
-            [0, 0],
-        ],
-        element_topology_sample_node_coordinates_m: [
-            [0.0, 0.0, 0.0],
-            [0.4, 0.0, 0.0],
-            [0.0, 0.2, 0.0],
-            [0.4, 0.2, 0.0],
-            [0.0, 0.0, 0.0],
-            [0.0, 0.0, 0.0],
-            [0.0, 0.0, 0.0],
-            [0.0, 0.0, 0.0],
-        ],
-        element_topology_sample_element_edges: [[0, 1, 2], [2, 3, 4], [0, 0, 0], [0, 0, 0]],
-        element_topology_sample_element_orientations: [
-            [1, 1, -1],
-            [1, 1, -1],
-            [0, 0, 0],
-            [0, 0, 0],
-        ],
-        element_topology_sample_element_areas_m2: [0.04, 0.04, 0.0, 0.0],
-        element_topology_node_coordinates_m: vec![
-            [0.0, 0.0, 0.0],
-            [0.4, 0.0, 0.0],
-            [0.0, 0.2, 0.0],
-            [0.4, 0.2, 0.0],
-        ],
-        element_topology_edge_nodes: vec![[0, 1], [1, 2], [0, 2], [2, 3], [0, 3]],
-        element_topology_element_edges: vec![[0, 1, 2], [2, 3, 4]],
-        element_topology_element_orientations: vec![[1, 1, -1], [1, 1, -1]],
-        element_topology_element_areas_m2: vec![0.04, 0.04],
-    }
-}
-
 fn sample_model() -> AnalysisModel {
     AnalysisModel {
         model_id: AnalysisModelId("beam_model".to_string()),
@@ -671,19 +585,6 @@ fn closed_cube_geometry_asset() -> GeometryAsset {
         ],
         diagnostics: Vec::new(),
     }
-}
-
-fn sample_prep_artifact_id_for_model(model: &AnalysisModel) -> String {
-    let mut geometry = sample_geometry_asset();
-    geometry.geometry_id = model.geometry_id.clone();
-    geometry.revision = model.geometry_revision;
-    let prep = crate::geometry::geometry_prep_for_analysis_op(
-        &geometry,
-        crate::geometry::GeometryPrepForAnalysisSpec::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("prep should succeed");
-    prep.data.prep_artifact_id
 }
 
 fn sample_step_like_geometry_asset() -> GeometryAsset {
@@ -1390,18 +1291,6 @@ fn analysis_create_model_maps_invalid_intent_error() {
 }
 
 #[test]
-fn analysis_create_model_intent_rejects_retired_prep_context() {
-    let error = serde_json::from_value::<AnalysisCreateModelIntentSpec>(serde_json::json!({
-        "model_id": "retired_prep_model",
-        "profile": "linear_static_structural",
-        "prep_context": {}
-    }))
-    .expect_err("retired prep context must not be silently accepted");
-
-    assert!(error.to_string().contains("unknown field"));
-}
-
-#[test]
 fn analysis_create_model_supports_nonlinear_profile_template() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
@@ -1978,7 +1867,6 @@ fn analysis_run_study_executes_linear_static_path() {
     );
     assert!(envelope.data.study_fingerprint.starts_with("sha256:"));
     assert!(envelope.data.run_id.starts_with("run_"));
-    assert!(envelope.data.run_options["prep_artifact_id"].is_null());
     assert!(envelope.data.evidence_artifact_path.ends_with("run.json"));
 
     let persisted = storage::load_run_result(&envelope.data.run_id)
@@ -2559,7 +2447,6 @@ fn analysis_run_study_honors_electromagnetic_run_options() {
         resolved_options.harmonic_max_iterations,
         requested_options.harmonic_max_iterations
     );
-    assert!(resolved_options.prep_artifact_id.is_none());
     assert_eq!(envelope.data.run_operation, "fea.run_electromagnetic");
     assert_eq!(envelope.data.run_op_version, "fea.run_electromagnetic/v1");
 
@@ -2892,10 +2779,7 @@ fn analysis_validate_maps_invalid_moment_error_code() {
 #[test]
 fn analysis_run_linear_static_returns_typed_envelope() {
     let _guard = analysis_test_guard();
-    let _prep_guard = crate::geometry::prep_artifact_test_guard();
-    crate::geometry::reset_prep_artifact_store_for_tests();
     let model = sample_model();
-    let prep_artifact_id = sample_prep_artifact_id_for_model(&model);
     let context =
         OperationContext::new(Some("trace-a2".to_string()), Some("request-a2".to_string()));
     let envelope = analysis_run_linear_static_with_options(
@@ -2906,10 +2790,7 @@ fn analysis_run_linear_static_returns_typed_envelope() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Balanced,
-            prep_context: Some(sample_analysis_run_prep_context()),
-            prep_artifact_id: Some(prep_artifact_id),
             solver_mesh_artifact_path: None,
-            prep_calibration_profile: None,
         },
         context,
     )
@@ -2966,10 +2847,7 @@ fn analysis_run_linear_static_with_thermo_mechanical_coupling_reports_fields() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Balanced,
-            prep_context: None,
-            prep_artifact_id: None,
             solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
-            prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-linear-thermo-fields".to_string()), None),
     )
@@ -4990,10 +4868,7 @@ fn requested_preconditioner_fallback_is_recorded() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Amg,
             quality_policy: QualityPolicy::Balanced,
-            prep_context: None,
-            prep_artifact_id: None,
             solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
-            prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-preconditioner-fallback".to_string()), None),
     )
@@ -5022,10 +4897,7 @@ fn ilu_preconditioner_fallback_is_recorded_when_solver_uses_jacobi() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Ilu,
             quality_policy: QualityPolicy::Balanced,
-            prep_context: None,
-            prep_artifact_id: None,
             solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
-            prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-preconditioner-ilu".to_string()), None),
     )
@@ -5059,10 +4931,7 @@ fn quality_policy_exploratory_allows_publishable_warn_path() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Exploratory,
-            prep_context: None,
-            prep_artifact_id: None,
             solver_mesh_artifact_path: None,
-            prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-quality-policy-exploratory".to_string()), None),
     )
@@ -5120,10 +4989,7 @@ fn quality_policy_balanced_allows_publishable_with_quality_reasons() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Balanced,
-            prep_context: None,
-            prep_artifact_id: None,
             solver_mesh_artifact_path: None,
-            prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-quality-policy-balanced".to_string()), None),
     )
@@ -5178,10 +5044,7 @@ fn quality_policy_strict_rejects_publishable_with_quality_reasons() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Strict,
-            prep_context: None,
-            prep_artifact_id: None,
             solver_mesh_artifact_path: None,
-            prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-quality-policy-strict".to_string()), None),
     )
@@ -5205,10 +5068,7 @@ fn direct_solid_run_without_solver_mesh_fails_closed() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Balanced,
-            prep_context: None,
-            prep_artifact_id: None,
             solver_mesh_artifact_path: None,
-            prep_calibration_profile: None,
         },
         OperationContext::new(
             Some("trace-direct-solid-run-requires-solver-mesh".to_string()),
@@ -5786,9 +5646,6 @@ fn analysis_run_cht_uses_authored_conjugate_heat_transfer_interface() {
             max_linear_iters: 64,
             tolerance: 1.0e-8,
             residual_warn_threshold: 1.0e-4,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
         },
         OperationContext::new(None, None),
     )
@@ -5921,9 +5778,6 @@ fn analysis_run_fsi_uses_authored_fluid_structure_interface() {
             max_linear_iters: 64,
             tolerance: 1.0e-8,
             residual_warn_threshold: 1.0e-4,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
         },
         OperationContext::new(None, None),
     )
@@ -6906,120 +6760,6 @@ fn analysis_run_nonlinear_strict_rejects_iteration_cap_exhaustion() {
 }
 
 #[test]
-fn analysis_run_nonlinear_rejects_missing_prep_artifact_reference() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
-
-    let error = analysis_run_nonlinear_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        AnalysisNonlinearRunOptions {
-            prep_artifact_id: Some("prep:missing".to_string()),
-            ..AnalysisNonlinearRunOptions::solid_recommended()
-        },
-        OperationContext::new(None, None),
-    )
-    .expect_err("missing prep artifact reference should fail");
-    assert_eq!(error.error_code, "RM.FEA.RUN_PREP.NOT_FOUND");
-}
-
-#[test]
-fn analysis_run_nonlinear_rejects_mismatched_prep_artifact_reference() {
-    let _guard = analysis_test_guard();
-    let _prep_guard = crate::geometry::prep_artifact_test_guard();
-    let geometry = sample_step_like_geometry_asset();
-    let prep = crate::geometry::geometry_prep_for_analysis_op(
-        &geometry,
-        crate::geometry::GeometryPrepForAnalysisSpec::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("prep should succeed");
-
-    let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
-
-    let error = analysis_run_nonlinear_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        AnalysisNonlinearRunOptions {
-            prep_artifact_id: Some(prep.data.prep_artifact_id.clone()),
-            ..AnalysisNonlinearRunOptions::solid_recommended()
-        },
-        OperationContext::new(None, None),
-    )
-    .expect_err("mismatched prep artifact reference should fail");
-    assert_eq!(error.error_code, "RM.FEA.RUN_PREP.MISMATCH");
-}
-
-#[test]
-fn analysis_run_nonlinear_rejects_stale_prep_artifact_when_newer_revision_exists() {
-    let _guard = analysis_test_guard();
-    let _prep_guard = crate::geometry::prep_artifact_test_guard();
-    crate::geometry::reset_prep_artifact_store_for_tests();
-    crate::geometry::configure_prep_artifacts(crate::geometry::GeometryPrepArtifactConfig {
-        require_latest_revision: Some(true),
-        ..crate::geometry::GeometryPrepArtifactConfig::default()
-    })
-    .expect("prep artifact config should be configurable");
-
-    let mut geometry_v1 = sample_step_like_geometry_asset();
-    geometry_v1.revision = 1;
-    let mut geometry_v2 = geometry_v1.clone();
-    geometry_v2.revision = 2;
-
-    let prep_v1 = crate::geometry::geometry_prep_for_analysis_op(
-        &geometry_v1,
-        crate::geometry::GeometryPrepForAnalysisSpec::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("prep v1 should succeed");
-    let _prep_v2 = crate::geometry::geometry_prep_for_analysis_op(
-        &geometry_v2,
-        crate::geometry::GeometryPrepForAnalysisSpec::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("prep v2 should succeed");
-
-    let created = analysis_create_model_op(
-        &geometry_v1,
-        AnalysisCreateModelIntentSpec {
-            model_id: "stale_prep_model".to_string(),
-            profile: AnalysisCreateModelProfile::NonlinearStructural,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("create model should succeed");
-
-    let error = analysis_run_nonlinear_with_options_op(
-        &created.data,
-        ComputeBackend::Cpu,
-        AnalysisNonlinearRunOptions {
-            prep_artifact_id: Some(prep_v1.data.prep_artifact_id),
-            ..AnalysisNonlinearRunOptions::solid_recommended()
-        },
-        OperationContext::new(None, None),
-    )
-    .expect_err("stale prep artifact should fail");
-    assert_eq!(error.error_code, "RM.FEA.RUN_PREP.STALE");
-
-    let health = crate::geometry::geometry_prep_artifact_health_op(
-        crate::geometry::GeometryPrepArtifactHealthQuery::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("prep health should be queryable");
-    assert!(health.data.metrics.stale_reject_count >= 1);
-
-    crate::geometry::reset_prep_artifact_store_for_tests();
-}
-
-#[test]
 fn nonlinear_quality_policy_diverges_for_increment_failures() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
@@ -7530,9 +7270,6 @@ fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
             max_linear_iters: 64,
             tolerance: 1.0e-8,
             residual_warn_threshold: 1.0e-4,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
         },
         OperationContext::new(None, None),
     )
@@ -7675,75 +7412,6 @@ fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
 }
 
 #[test]
-fn analysis_run_cfd_uses_prep_control_volume_topology() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.steps[0].kind = AnalysisStepKind::Cfd;
-    model.boundary_conditions = sample_cfd_boundary_conditions(3.0);
-    model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
-
-    let run = solve_cfd_finite_volume_run(
-        &model,
-        model.cfd.as_ref().expect("cfd domain should exist"),
-        ComputeBackend::Cpu,
-        &AnalysisCfdRunOptions {
-            deterministic_mode: true,
-            precision_mode: PrecisionMode::Fp64,
-            quality_policy: QualityPolicy::Balanced,
-            time_step_s: 1.0e-3,
-            step_count: 2,
-            max_linear_iters: 32,
-            tolerance: 1.0e-8,
-            residual_warn_threshold: 1.0e-4,
-            prep_context: Some(sample_analysis_run_prep_context()),
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
-        },
-        Some(&sample_analysis_run_prep_context()),
-    );
-
-    let velocity = run
-        .field(FEA_FIELD_CFD_VELOCITY)
-        .expect("cfd velocity field should be present");
-    assert_eq!(velocity.shape, vec![15, 3]);
-    assert!(run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_CFD_ASSEMBLY"
-            && diag
-                .message
-                .contains("topology_basis=prep_control_volume_connectivity")
-            && diag
-                .message
-                .contains("topology_geometry_source=prep_element_geometry")
-            && diag.message.contains("control_volume_count=15")
-            && diag.message.contains("control_volume_face_count=19")
-            && diag
-                .message
-                .contains("control_volume_internal_face_count=11")
-            && diag
-                .message
-                .contains("control_volume_boundary_face_count=8")
-            && diag
-                .message
-                .contains("control_volume_connectivity_coverage_ratio=1")
-            && diag.message.contains("domain_length_m=2.4")
-            && diag.message.contains("face_area_m2=0.04")
-            && diag.message.contains("face_area_m2=")
-            && diag.message.contains("control_volume_volume_m3=")
-            && diag.message.contains("courant_number=")
-            && diag.message.contains("active_dimension_count=3")
-            && diag.message.contains("element_geometry_node_count=4")
-            && diag.message.contains("element_geometry_edge_count=5")
-            && diag.message.contains("element_geometry_coverage_ratio=1")
-            && diag
-                .message
-                .contains("element_topology_sample_element_count=2")
-            && diag
-                .message
-                .contains("element_topology_sample_edge_count=5")
-    }));
-}
-
-#[test]
 fn analysis_run_cfd_rejects_partial_authored_boundary_conditions() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
@@ -7786,9 +7454,6 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
             max_linear_iters: 64,
             tolerance: 1.0e-8,
             residual_warn_threshold: 1.0e-4,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
         },
         OperationContext::new(None, None),
     )
@@ -7907,7 +7572,7 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
         .and_then(|field| field.shape.first().copied())
         .expect("thermal heat-flux snapshot should carry a recovery domain");
     let expected_interface_face_count =
-        fluid_interface_face_count(&CfdDomainTopology::from_model(&model, None));
+        fluid_interface_face_count(&CfdDomainTopology::from_model(&model));
     assert_eq!(solid_temperature.shape, fluid_temperature.shape);
     assert!(expected_interface_face_count >= thermal_flux_face_count);
     assert_eq!(
@@ -7968,9 +7633,6 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
             max_linear_iters: 64,
             tolerance: 1.0e-8,
             residual_warn_threshold: 1.0e-4,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
         },
         OperationContext::new(None, None),
     )
@@ -8149,123 +7811,6 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
 }
 
 #[test]
-fn cht_prepared_topology_uses_boundary_faces_for_interface_fields() {
-    let _guard = analysis_test_guard();
-    let model = sample_cht_model();
-    let cfd_domain = model.cfd.as_ref().expect("cfd domain should exist");
-    let prep_context = sample_analysis_run_prep_context();
-    let topology = CfdDomainTopology::from_model(&model, Some(&prep_context));
-    let thermo_context = to_fea_thermo_mechanical_context(model_thermo_coupling_options(&model));
-    let thermal_run = run_thermal_with_options(
-        &model,
-        ComputeBackend::Cpu,
-        ThermalSolveOptions {
-            step_count: 4,
-            time_step_s: 1.0e-3,
-            residual_target: 1.0e-4,
-            prep_context: to_fea_prep_context(Some(&prep_context), None),
-            thermo_mechanical_context: thermo_context,
-        },
-    )
-    .expect("thermal run should succeed");
-
-    let (fields, closure) = build_cht_run_fields(
-        cfd_domain,
-        &topology,
-        &thermal_run,
-        cht_interface_conductance_w_per_m2k(&model),
-        64,
-        1.0e-8,
-    );
-    let heat_flux = fields
-        .iter()
-        .find(|field| field.field_id == fea_cht_interface_heat_flux_field_id(0))
-        .expect("CHT heat flux field should be present");
-    let temperature_jump = fields
-        .iter()
-        .find(|field| field.field_id == fea_cht_interface_temperature_jump_field_id(0))
-        .expect("CHT temperature jump field should be present");
-
-    assert_eq!(
-        topology.basis,
-        CfdDomainTopologyBasis::PrepControlVolumeConnectivity
-    );
-    assert_eq!(fluid_interface_face_count(&topology), 8);
-    assert_eq!(closure.interface_face_count, 8);
-    assert_eq!(closure.thermal_network_node_count, 8);
-    assert_eq!(closure.thermal_network_edge_count, 11);
-    assert_eq!(closure.interface_connectivity_coverage_ratio, 1.0);
-    assert_eq!(closure.mesh_backed_interface_connectivity_ratio, 1.0);
-    assert_eq!(closure.full_topology_edge_count, 5);
-    assert_eq!(closure.full_topology_element_count, 2);
-    assert_eq!(heat_flux.shape, vec![8]);
-    assert_eq!(temperature_jump.shape, vec![8]);
-}
-
-#[test]
-fn prepared_coupled_interface_graph_uses_element_topology_sample() {
-    let model = sample_cht_model();
-    let prep_context = sample_analysis_run_prep_context();
-    let topology = CfdDomainTopology::from_model(&model, Some(&prep_context));
-    let edges = coupled_interface_graph_edges_for_topology(
-        &topology,
-        fluid_interface_face_count(&topology),
-    );
-
-    assert!(edges.contains(&(0, 1)));
-    assert!(edges.contains(&(1, 2)));
-    assert!(edges.contains(&(0, 2)));
-    assert!(edges.contains(&(2, 3)));
-    assert!(edges.contains(&(3, 4)));
-    assert!(edges.contains(&(2, 4)));
-    assert_eq!(edges.len(), topology.control_volume_internal_face_count);
-}
-
-#[test]
-fn fsi_prepared_topology_uses_boundary_faces_for_interface_fields() {
-    let _guard = analysis_test_guard();
-    let model = sample_fsi_model();
-    let cfd_domain = model.cfd.as_ref().expect("cfd domain should exist");
-    let prep_context = sample_analysis_run_prep_context();
-    let topology = CfdDomainTopology::from_model(&model, Some(&prep_context));
-    let (fluid_velocity, fluid_pressure) = recover_cfd_velocity_pressure(cfd_domain, &topology, 0);
-    let (residual_momentum, residual_continuity) =
-        cfd_residual_norms(&fluid_velocity, &fluid_pressure, cfd_domain, &topology, 4);
-    let (fields, closure) = build_fsi_run_fields(
-        cfd_domain,
-        &topology,
-        4,
-        fsi_structural_compliance_per_pa(&model),
-        64,
-        1.0e-8,
-        &residual_momentum,
-        &residual_continuity,
-    );
-    let pressure = fields
-        .iter()
-        .find(|field| field.field_id == fea_fsi_interface_pressure_field_id(0))
-        .expect("FSI interface pressure field should be present");
-    let traction = fields
-        .iter()
-        .find(|field| field.field_id == fea_fsi_interface_traction_field_id(0))
-        .expect("FSI interface traction field should be present");
-
-    assert_eq!(
-        topology.basis,
-        CfdDomainTopologyBasis::PrepControlVolumeConnectivity
-    );
-    assert_eq!(fluid_interface_face_count(&topology), 8);
-    assert_eq!(closure.interface_face_count, 8);
-    assert_eq!(closure.structural_coupling_edge_count, 11);
-    assert_eq!(closure.interface_connectivity_coverage_ratio, 1.0);
-    assert_eq!(closure.mesh_backed_interface_connectivity_ratio, 1.0);
-    assert_eq!(closure.full_topology_edge_count, 5);
-    assert_eq!(closure.full_topology_element_count, 2);
-    assert_eq!(pressure.shape, vec![8]);
-    assert_eq!(traction.shape, vec![8, 3]);
-}
-
-#[test]
 fn analysis_run_transient_with_options_controls_timeline() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
@@ -8296,9 +7841,6 @@ fn analysis_run_transient_with_options_controls_timeline() {
             adapt_retry_growth_cap: 1.05,
             adapt_nonconverged_shrink: 0.75,
             dt_bucket_rel_tolerance: 0.0,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
         },
         OperationContext::new(None, None),
     )
@@ -9176,9 +8718,6 @@ fn analysis_run_modal_with_options_controls_requested_mode_count() {
             quality_policy: QualityPolicy::Balanced,
             mode_count: 2,
             residual_warn_threshold: 1.0e-2,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
         },
         OperationContext::new(None, None),
     )

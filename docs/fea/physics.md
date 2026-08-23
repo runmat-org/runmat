@@ -40,7 +40,7 @@ Common option themes include:
 - deterministic mode,
 - precision mode,
 - quality policy,
-- prep artifact or prep context,
+- canonical solver mesh artifact,
 - preconditioner mode where applicable.
 
 Families can add controls such as modal mode count, transient time stepping, nonlinear increment policy, or electromagnetic harmonic and sweep settings.

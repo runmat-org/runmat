@@ -2,7 +2,6 @@ use runmat_analysis_core::{AnalysisModel, EvidenceConfidence, LoadKind, Material
 
 use crate::{
     assembly,
-    contracts::{FeaPrepCalibrationProfile, FeaPrepContext},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
 };
 
@@ -10,11 +9,6 @@ use crate::{
 pub(crate) struct CommonRunDiagnosticInputs<'a> {
     pub(crate) model: &'a AnalysisModel,
     pub(crate) summary: &'a assembly::AssemblySummary,
-    pub(crate) prep_context: Option<FeaPrepContext>,
-    pub(crate) iteration_metric: f64,
-    pub(crate) residual_metric: f64,
-    pub(crate) requested_preconditioner: &'a str,
-    pub(crate) effective_preconditioner: &'a str,
 }
 
 pub(crate) fn extend_common_run_diagnostics(
@@ -24,18 +18,6 @@ pub(crate) fn extend_common_run_diagnostics(
     diagnostics.extend(material_assignment_diagnostics(
         &inputs.model.material_assignments,
     ));
-    if let Some(prep) = inputs.prep_context.as_ref() {
-        diagnostics.push(prep_diagnostic(prep));
-    }
-    if let Some(prep_summary) = inputs.summary.prep_assembly.as_ref() {
-        diagnostics.push(prep_assembly_diagnostic(prep_summary));
-        if let Some(prep) = inputs.prep_context.as_ref() {
-            diagnostics.push(prep_topology_diagnostic(prep, inputs.summary.dof_count));
-        }
-    }
-    if let Some(operator_topology) = inputs.summary.prep_operator_topology.as_ref() {
-        diagnostics.push(prep_operator_topology_diagnostic(operator_topology));
-    }
     if inputs.summary.structural_rotational_dof_count > 0
         || inputs.summary.structural_moment_load_count > 0
         || inputs.summary.structural_beam_element_count > 0
@@ -45,31 +27,6 @@ pub(crate) fn extend_common_run_diagnostics(
             inputs.model,
             inputs.summary,
         ));
-    }
-    if let Some(region_topology) = inputs.summary.prep_region_topology.as_ref() {
-        diagnostics.push(prep_region_topology_diagnostic(region_topology));
-    }
-    if let Some(element_assembly) = inputs.summary.prep_element_assembly.as_ref() {
-        diagnostics.push(prep_element_assembly_diagnostic(element_assembly));
-    }
-    if let Some(element_connectivity) = inputs.summary.prep_element_connectivity.as_ref() {
-        diagnostics.push(prep_element_connectivity_diagnostic(element_connectivity));
-    }
-    if let Some(graph_assembly) = inputs.summary.prep_graph_assembly.as_ref() {
-        diagnostics.push(prep_graph_assembly_diagnostic(graph_assembly));
-        diagnostics.push(prep_graph_solver_diagnostic(
-            graph_assembly,
-            inputs.iteration_metric,
-            inputs.residual_metric,
-            inputs.requested_preconditioner,
-            inputs.effective_preconditioner,
-        ));
-    }
-    if let Some(calibration) = inputs.summary.prep_calibration.as_ref() {
-        diagnostics.push(prep_calibration_diagnostic(calibration));
-    }
-    if let Some(acceptance) = inputs.summary.prep_acceptance.as_ref() {
-        diagnostics.push(prep_acceptance_diagnostic(acceptance));
     }
     if let Some(thermo_mechanical) = inputs.summary.thermo_mechanical.as_ref() {
         diagnostics.push(thermo_mechanical_diagnostic(thermo_mechanical));
@@ -197,274 +154,6 @@ pub(crate) fn material_assignment_diagnostics(
         });
     }
     out
-}
-
-pub(crate) fn prep_diagnostic(prep: &FeaPrepContext) -> FeaDiagnostic {
-    FeaDiagnostic {
-        code: "FEA_PREP_CONTEXT".to_string(),
-        severity: if prep.inverted_element_count == 0 {
-            FeaDiagnosticSeverity::Info
-        } else {
-            FeaDiagnosticSeverity::Warning
-        },
-        message: format!(
-            "prepared_mesh_count={} prepared_node_count={} prepared_element_count={} mapped_region_count={} mapped_load_count={} mapped_bc_count={} min_scaled_jacobian={} mean_aspect_ratio={} inverted_element_count={} topology_dof_multiplier={} topology_bandwidth_estimate={} mapped_region_participation_ratio={} topology_surface_patch_ratio={} topology_volume_core_ratio={} topology_mixed_family_ratio={} topology_region_span_mean={} topology_region_block_count={} topology_region_mesh_mean={} topology_region_mesh_variance={} topology_triangle_family_ratio={} topology_quad_family_ratio={} topology_tetrahedron_family_ratio={} topology_hex_family_ratio={} element_geometry_node_count={} element_geometry_edge_count={} mean_element_edge_length_m={} mean_element_area_m2={} element_geometry_coverage_ratio={} reference_element_area_m2={} element_topology_sample_element_count={} element_topology_sample_edge_count={} calibration_profile_override={}",
-            prep.prepared_mesh_count,
-            prep.prepared_node_count,
-            prep.prepared_element_count,
-            prep.mapped_region_count,
-            prep.mapped_load_count,
-            prep.mapped_bc_count,
-            prep.min_scaled_jacobian,
-            prep.mean_aspect_ratio,
-            prep.inverted_element_count,
-            prep.topology_dof_multiplier,
-            prep.topology_bandwidth_estimate,
-            prep.mapped_region_participation_ratio,
-            prep.topology_surface_patch_ratio,
-            prep.topology_volume_core_ratio,
-            prep.topology_mixed_family_ratio,
-            prep.topology_region_span_mean,
-            prep.topology_region_block_count,
-            prep.topology_region_mesh_mean,
-            prep.topology_region_mesh_variance,
-            prep.topology_triangle_family_ratio,
-            prep.topology_quad_family_ratio,
-            prep.topology_tetrahedron_family_ratio,
-            prep.topology_hex_family_ratio,
-            prep.element_geometry_node_count,
-            prep.element_geometry_edge_count,
-            prep.mean_element_edge_length_m,
-            prep.mean_element_area_m2,
-            prep.element_geometry_coverage_ratio,
-            prep.reference_element_area_m2,
-            prep.element_topology_sample_element_count,
-            prep.element_topology_sample_edge_count,
-            prep.calibration_profile_override
-                .map(|profile| match profile {
-                    FeaPrepCalibrationProfile::Fast => "fast",
-                    FeaPrepCalibrationProfile::Balanced => "balanced",
-                    FeaPrepCalibrationProfile::Conservative => "conservative",
-                })
-                .unwrap_or("auto"),
-        ),
-    }
-}
-
-pub(crate) fn prep_assembly_diagnostic(summary: &assembly::PrepAssemblySummary) -> FeaDiagnostic {
-    FeaDiagnostic {
-        code: "FEA_PREP_ASSEMBLY".to_string(),
-        severity: if summary.mapped_load_ratio > 0.0 || summary.constrained_prep_ratio > 0.0 {
-            FeaDiagnosticSeverity::Info
-        } else {
-            FeaDiagnosticSeverity::Warning
-        },
-        message: format!(
-            "active_region_count={} mapped_load_count={} mapped_bc_count={} mapped_load_ratio={} constrained_prep_ratio={} layout_seed={}",
-            summary.active_region_count,
-            summary.mapped_load_count,
-            summary.mapped_bc_count,
-            summary.mapped_load_ratio,
-            summary.constrained_prep_ratio,
-            summary.layout_seed
-        ),
-    }
-}
-
-pub(crate) fn prep_topology_diagnostic(prep: &FeaPrepContext, dof_count: usize) -> FeaDiagnostic {
-    FeaDiagnostic {
-        code: "FEA_PREP_TOPOLOGY".to_string(),
-        severity: FeaDiagnosticSeverity::Info,
-        message: format!(
-            "effective_dof_multiplier={} effective_dof_count={} coupling_bandwidth_estimate={} mapped_region_participation_ratio={} surface_patch_ratio={} volume_core_ratio={} mixed_family_ratio={} mean_region_span={}",
-            prep.topology_dof_multiplier,
-            dof_count,
-            prep.topology_bandwidth_estimate,
-            prep.mapped_region_participation_ratio,
-            prep.topology_surface_patch_ratio,
-            prep.topology_volume_core_ratio,
-            prep.topology_mixed_family_ratio,
-            prep.topology_region_span_mean,
-        ),
-    }
-}
-
-pub(crate) fn prep_operator_topology_diagnostic(
-    summary: &assembly::PrepOperatorTopologySummary,
-) -> FeaDiagnostic {
-    FeaDiagnostic {
-        code: "FEA_PREP_OPERATOR_TOPOLOGY".to_string(),
-        severity: FeaDiagnosticSeverity::Info,
-        message: format!(
-            "stiffness_scale={} mass_scale={} damping_scale={} rhs_scale={} coupling_nonzero_ratio={} stiffness_spread_ratio={} topology_fingerprint={}",
-            summary.stiffness_scale,
-            summary.mass_scale,
-            summary.damping_scale,
-            summary.rhs_scale,
-            summary.coupling_nonzero_ratio,
-            summary.stiffness_spread_ratio,
-            summary.topology_fingerprint,
-        ),
-    }
-}
-
-pub(crate) fn prep_region_topology_diagnostic(
-    summary: &assembly::PrepRegionTopologySummary,
-) -> FeaDiagnostic {
-    FeaDiagnostic {
-        code: "FEA_PREP_REGION_TOPOLOGY".to_string(),
-        severity: FeaDiagnosticSeverity::Info,
-        message: format!(
-            "region_block_count={} inter_block_edge_count={} coupling_nonzero_ratio={} block_size_min={} block_size_max={} block_size_mean={} region_topology_fingerprint={}",
-            summary.region_block_count,
-            summary.inter_block_edge_count,
-            summary.coupling_nonzero_ratio,
-            summary.block_size_min,
-            summary.block_size_max,
-            summary.block_size_mean,
-            summary.region_topology_fingerprint,
-        ),
-    }
-}
-
-pub(crate) fn prep_element_assembly_diagnostic(
-    summary: &assembly::PrepElementAssemblySummary,
-) -> FeaDiagnostic {
-    FeaDiagnostic {
-        code: "FEA_PREP_ELEMENT_ASSEMBLY".to_string(),
-        severity: FeaDiagnosticSeverity::Info,
-        message: format!(
-            "assembled_element_count={} triangle_element_count={} quad_element_count={} tetrahedron_element_count={} hex_element_count={} mixed_element_count={} scatter_nnz_count={} assembly_fingerprint={}",
-            summary.assembled_element_count,
-            summary.triangle_element_count,
-            summary.quad_element_count,
-            summary.tetrahedron_element_count,
-            summary.hex_element_count,
-            summary.mixed_element_count,
-            summary.scatter_nnz_count,
-            summary.assembly_fingerprint,
-        ),
-    }
-}
-
-pub(crate) fn prep_element_connectivity_diagnostic(
-    summary: &assembly::PrepElementConnectivitySummary,
-) -> FeaDiagnostic {
-    FeaDiagnostic {
-        code: "FEA_PREP_ELEMENT_CONNECTIVITY".to_string(),
-        severity: FeaDiagnosticSeverity::Info,
-        message: format!(
-            "assembled_element_count={} stiffness_offdiag_nnz_count={} mass_offdiag_nnz_count={} damping_offdiag_nnz_count={} triangle_contrib_share={} quad_contrib_share={} tetrahedron_contrib_share={} hex_contrib_share={} mixed_contrib_share={} mean_connectivity_hop={} connectivity_fingerprint={}",
-            summary.assembled_element_count,
-            summary.stiffness_offdiag_nnz_count,
-            summary.mass_offdiag_nnz_count,
-            summary.damping_offdiag_nnz_count,
-            summary.triangle_contrib_share,
-            summary.quad_contrib_share,
-            summary.tetrahedron_contrib_share,
-            summary.hex_contrib_share,
-            summary.mixed_contrib_share,
-            summary.mean_connectivity_hop,
-            summary.connectivity_fingerprint,
-        ),
-    }
-}
-
-pub(crate) fn prep_graph_assembly_diagnostic(
-    summary: &assembly::PrepGraphAssemblySummary,
-) -> FeaDiagnostic {
-    FeaDiagnostic {
-        code: "FEA_PREP_GRAPH_ASSEMBLY".to_string(),
-        severity: FeaDiagnosticSeverity::Info,
-        message: format!(
-            "node_count={} edge_count={} degree_min={} degree_max={} degree_mean={} degree_p95={} fill_ratio={} connected_component_count={} ordering_bandwidth_before={} ordering_bandwidth_after={} ordering_reduction_ratio={} ordering_fingerprint={} recommend_ilu0={} graph_fingerprint={}",
-            summary.node_count,
-            summary.edge_count,
-            summary.degree_min,
-            summary.degree_max,
-            summary.degree_mean,
-            summary.degree_p95,
-            summary.fill_ratio,
-            summary.connected_component_count,
-            summary.ordering_bandwidth_before,
-            summary.ordering_bandwidth_after,
-            summary.ordering_reduction_ratio,
-            summary.ordering_fingerprint,
-            summary.recommend_ilu0,
-            summary.graph_fingerprint,
-        ),
-    }
-}
-
-pub(crate) fn prep_graph_solver_diagnostic(
-    summary: &assembly::PrepGraphAssemblySummary,
-    iteration_metric: f64,
-    residual_metric: f64,
-    requested_preconditioner: &str,
-    effective_preconditioner: &str,
-) -> FeaDiagnostic {
-    FeaDiagnostic {
-        code: "FEA_PREP_GRAPH_SOLVER".to_string(),
-        severity: FeaDiagnosticSeverity::Info,
-        message: format!(
-            "ordering_bandwidth_before={} ordering_bandwidth_after={} ordering_reduction_ratio={} ordering_fingerprint={} recommend_ilu0={} requested_preconditioner={} effective_preconditioner={} iteration_metric={} residual_metric={} graph_fingerprint={}",
-            summary.ordering_bandwidth_before,
-            summary.ordering_bandwidth_after,
-            summary.ordering_reduction_ratio,
-            summary.ordering_fingerprint,
-            summary.recommend_ilu0,
-            requested_preconditioner,
-            effective_preconditioner,
-            iteration_metric,
-            residual_metric,
-            summary.graph_fingerprint,
-        ),
-    }
-}
-
-pub(crate) fn prep_calibration_diagnostic(
-    summary: &assembly::PrepCalibrationSummary,
-) -> FeaDiagnostic {
-    FeaDiagnostic {
-        code: "FEA_PREP_CALIBRATION".to_string(),
-        severity: FeaDiagnosticSeverity::Info,
-        message: format!(
-            "profile={} triangle_weight={} quad_weight={} tetrahedron_weight={} hex_weight={} mixed_weight={} stiffness_calibration_scale={} mass_calibration_scale={} damping_calibration_scale={} calibration_fingerprint={}",
-            summary.profile,
-            summary.triangle_weight,
-            summary.quad_weight,
-            summary.tetrahedron_weight,
-            summary.hex_weight,
-            summary.mixed_weight,
-            summary.stiffness_calibration_scale,
-            summary.mass_calibration_scale,
-            summary.damping_calibration_scale,
-            summary.calibration_fingerprint,
-        ),
-    }
-}
-
-pub(crate) fn prep_acceptance_diagnostic(
-    summary: &assembly::PrepAcceptanceSummary,
-) -> FeaDiagnostic {
-    FeaDiagnostic {
-        code: "FEA_PREP_ACCEPTANCE".to_string(),
-        severity: if summary.accepted {
-            FeaDiagnosticSeverity::Info
-        } else {
-            FeaDiagnosticSeverity::Warning
-        },
-        message: format!(
-            "profile={} accepted={} bounded_displacement_scale={} bounded_stress_scale={} bounded_connectivity_fill={} acceptance_score={} acceptance_fingerprint={}",
-            summary.profile,
-            summary.accepted,
-            summary.bounded_displacement_scale,
-            summary.bounded_stress_scale,
-            summary.bounded_connectivity_fill,
-            summary.acceptance_score,
-            summary.acceptance_fingerprint,
-        ),
-    }
 }
 
 pub(crate) fn thermo_mechanical_diagnostic(

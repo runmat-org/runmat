@@ -76,7 +76,6 @@ Host integrations can call lower-level operations:
 ```mermaid
 flowchart TD
   Geometry["geometry.load/v1"]
-  Prep["optional geometry.prep_for_analysis/v1"]
   Model["fea.create_model/v1"]
   Validate["fea.validate/v1"]
   Solve{"fea.run_*/v1"}
@@ -84,7 +83,7 @@ flowchart TD
   Compare["fea.results_compare/v1"]
   Trends["fea.trends/v1"]
 
-  Geometry --> Prep --> Model --> Validate --> Solve --> Query
+  Geometry --> Model --> Validate --> Solve --> Query
   Query --> Compare
   Query --> Trends
 ```

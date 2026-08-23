@@ -43,9 +43,7 @@ use runmat_runtime::analysis::{
 };
 use runmat_runtime::geometry::{
     geometry_capture_view_op, geometry_inspect_op, geometry_list_regions_op, geometry_load_op,
-    geometry_prep_artifact_health_op, geometry_prep_for_analysis_op, geometry_query_entities_op,
-    GeometryCaptureViewSpec, GeometryEntityQuery, GeometryPrepArtifactHealthQuery,
-    GeometryPrepForAnalysisSpec, GeometryPrepProfile,
+    geometry_query_entities_op, GeometryCaptureViewSpec, GeometryEntityQuery,
 };
 use runmat_runtime::operations::OperationContext;
 use serde_json::Value;
@@ -268,43 +266,6 @@ fn geometry_operation_contracts_are_v1_and_versioned() {
     assert_eq!(svg_capture.operation, "geometry.capture_view");
     assert_eq!(svg_capture.op_version, "geometry.capture_view/v1");
 
-    let prep = geometry_prep_for_analysis_op(
-        &load.data,
-        GeometryPrepForAnalysisSpec {
-            profile: GeometryPrepProfile::AnalysisReady,
-            target_element_budget: 100_000,
-        },
-        OperationContext::new(Some("trace-contract-1f".to_string()), None),
-    )
-    .expect("prep for analysis should succeed");
-    assert_eq!(prep.operation, "geometry.prep_for_analysis");
-    assert_eq!(prep.op_version, "geometry.prep_for_analysis/v1");
-    assert!(!prep.data.prep_artifact_id.is_empty());
-    assert!(!prep.data.prep.prepared_meshes.is_empty());
-
-    let adaptive_prep = geometry_prep_for_analysis_op(
-        &load.data,
-        GeometryPrepForAnalysisSpec {
-            profile: GeometryPrepProfile::AdaptiveRefine,
-            target_element_budget: 100_000,
-        },
-        OperationContext::new(Some("trace-contract-1f-adapt".to_string()), None),
-    )
-    .expect("adaptive prep for analysis should succeed");
-    assert_eq!(adaptive_prep.operation, "geometry.prep_for_analysis");
-    assert_eq!(adaptive_prep.op_version, "geometry.prep_for_analysis/v1");
-
-    let prep_health = geometry_prep_artifact_health_op(
-        GeometryPrepArtifactHealthQuery::default(),
-        OperationContext::new(Some("trace-contract-1g".to_string()), None),
-    )
-    .expect("prep artifact health should succeed");
-    assert_eq!(prep_health.operation, "geometry.prep_artifact_health");
-    assert_eq!(prep_health.op_version, "geometry.prep_artifact_health/v1");
-    assert_eq!(
-        prep_health.data.schema_version,
-        "geometry-prep-artifact-health/v1"
-    );
     assert_eq!(svg_capture.data.format, "svg");
 
     let invalid_capture_view = geometry_capture_view_op(
@@ -876,38 +837,6 @@ fn analysis_study_sweep_plan_contract_is_v1_and_typed() {
 }
 
 #[test]
-fn prep_metadata_only_step_without_topology_is_typed() {
-    let geometry = geometry_load_op(
-        "/assembly.step",
-        SIMPLE_STEP.as_bytes(),
-        OperationContext::new(
-            Some("trace-contract-prep-metadata-only-1".to_string()),
-            None,
-        ),
-    )
-    .expect("metadata-only STEP load should succeed");
-
-    let err = geometry_prep_for_analysis_op(
-        &geometry.data,
-        GeometryPrepForAnalysisSpec::default(),
-        OperationContext::new(
-            Some("trace-contract-prep-metadata-only-2".to_string()),
-            None,
-        ),
-    )
-    .expect_err("metadata-only STEP without topology should not prep for analysis");
-
-    assert_eq!(err.operation, "geometry.prep_for_analysis");
-    assert_eq!(err.op_version, "geometry.prep_for_analysis/v1");
-    assert_eq!(err.error_code, "RM.GEOMETRY.PREP_FOR_ANALYSIS.FAILED");
-    assert!(
-        err.message.contains("no mesh entity mapping"),
-        "unexpected prep failure message: {}",
-        err.message
-    );
-}
-
-#[test]
 fn analysis_create_model_infers_materials_from_step_metadata_contract() {
     let geometry = geometry_load_op(
         "/assembly.step",
@@ -1167,9 +1096,6 @@ fn analysis_run_modal_with_options_contract_controls_mode_budget() {
             quality_policy: QualityPolicy::Balanced,
             mode_count: 2,
             residual_warn_threshold: 1.0e-2,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-contract-modal-opts-3".to_string()), None),
     )
@@ -1195,9 +1121,6 @@ fn analysis_run_modal_with_options_contract_controls_mode_budget() {
             quality_policy: QualityPolicy::Balanced,
             mode_count: 0,
             residual_warn_threshold: 1.0e-3,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-contract-modal-opts-4".to_string()), None),
     )
@@ -2118,89 +2041,6 @@ fn analysis_run_nonlinear_policy_diverges_on_harder_fixture_profile() {
 }
 
 #[test]
-fn analysis_run_nonlinear_prep_reference_errors_are_typed() {
-    let model = fixture_model(FixtureId::NonlinearAssembly);
-    let missing = analysis_run_nonlinear_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        AnalysisNonlinearRunOptions {
-            prep_artifact_id: Some("prep:missing".to_string()),
-            ..AnalysisNonlinearRunOptions::solid_recommended()
-        },
-        OperationContext::new(Some("trace-contract-prep-ref-1".to_string()), None),
-    )
-    .expect_err("missing prep artifact should fail");
-    assert_eq!(missing.operation, "fea.run_nonlinear");
-    assert_eq!(missing.op_version, "fea.run_nonlinear/v1");
-    assert_eq!(missing.error_code, "RM.FEA.RUN_PREP.NOT_FOUND");
-}
-
-#[test]
-fn analysis_run_nonlinear_stale_prep_reference_is_typed() {
-    // Study execution and this test share the process-wide prep artifact store.
-    // Hold the same lock used by study workflow tests so resetting the store
-    // cannot invalidate an in-flight study's freshly prepared artifact.
-    let _study_artifact_env_guard = study_artifact_env_guard();
-    runmat_runtime::geometry::reset_prep_artifact_store_for_tests();
-    let _prep_latest_guard = EnvVarRestoreGuard {
-        key: "RUNMAT_GEOMETRY_PREP_REQUIRE_LATEST_REVISION",
-        previous: std::env::var("RUNMAT_GEOMETRY_PREP_REQUIRE_LATEST_REVISION").ok(),
-    };
-    std::env::set_var("RUNMAT_GEOMETRY_PREP_REQUIRE_LATEST_REVISION", "true");
-
-    let mut geometry_v1 = geometry_load_op(
-        "/part.stl",
-        TRIANGLE_STL.as_bytes(),
-        OperationContext::new(Some("trace-contract-prep-stale-1".to_string()), None),
-    )
-    .expect("geometry load should succeed")
-    .data;
-    geometry_v1.revision = 1;
-    let mut geometry_v2 = geometry_v1.clone();
-    geometry_v2.revision = 2;
-
-    let prep_v1 = geometry_prep_for_analysis_op(
-        &geometry_v1,
-        GeometryPrepForAnalysisSpec::default(),
-        OperationContext::new(Some("trace-contract-prep-stale-2".to_string()), None),
-    )
-    .expect("prep v1 should succeed");
-    let _prep_v2 = geometry_prep_for_analysis_op(
-        &geometry_v2,
-        GeometryPrepForAnalysisSpec::default(),
-        OperationContext::new(Some("trace-contract-prep-stale-3".to_string()), None),
-    )
-    .expect("prep v2 should succeed");
-
-    let model = analysis_create_model_op(
-        &geometry_v1,
-        AnalysisCreateModelIntentSpec {
-            model_id: "contract_stale_prep_model".to_string(),
-            profile: AnalysisCreateModelProfile::NonlinearStructural,
-        },
-        OperationContext::new(Some("trace-contract-prep-stale-4".to_string()), None),
-    )
-    .expect("create model should succeed")
-    .data;
-
-    let stale = analysis_run_nonlinear_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        AnalysisNonlinearRunOptions {
-            prep_artifact_id: Some(prep_v1.data.prep_artifact_id),
-            ..AnalysisNonlinearRunOptions::solid_recommended()
-        },
-        OperationContext::new(Some("trace-contract-prep-stale-5".to_string()), None),
-    )
-    .expect_err("stale prep artifact should fail");
-    assert_eq!(stale.operation, "fea.run_nonlinear");
-    assert_eq!(stale.op_version, "fea.run_nonlinear/v1");
-    assert_eq!(stale.error_code, "RM.FEA.RUN_PREP.STALE");
-
-    runmat_runtime::geometry::reset_prep_artifact_store_for_tests();
-}
-
-#[test]
 fn analysis_results_compare_contract_is_v1_and_handles_missing_run_ids() {
     let model = fixture_model(FixtureId::NonlinearAssembly);
     let baseline = analysis_run_nonlinear_op(
@@ -2307,9 +2147,6 @@ fn analysis_run_transient_with_options_contract_controls_execution_window() {
             adapt_retry_growth_cap: 1.05,
             adapt_nonconverged_shrink: 0.75,
             dt_bucket_rel_tolerance: 0.0,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-contract-transient-opts-1".to_string()), None),
     )
@@ -2825,10 +2662,7 @@ fn analysis_run_deterministic_contract_is_stable_across_replays() {
         precision_mode: PrecisionMode::Fp64,
         preconditioner_mode: PreconditionerMode::Auto,
         quality_policy: QualityPolicy::Balanced,
-        prep_context: None,
-        prep_artifact_id: None,
         solver_mesh_artifact_path: None,
-        prep_calibration_profile: None,
     };
 
     let first = analysis_run_linear_static_with_options(
@@ -3111,10 +2945,7 @@ fn strict_policy_quality_reasons_propagate_to_results_contracts() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Strict,
-            prep_context: None,
-            prep_artifact_id: None,
             solver_mesh_artifact_path: None,
-            prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-contract-11-run".to_string()), None),
     )
@@ -3206,10 +3037,7 @@ fn balanced_and_strict_diverge_for_same_field_promotion_fallback() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Balanced,
-            prep_context: None,
-            prep_artifact_id: None,
             solver_mesh_artifact_path: None,
-            prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-contract-12-balanced".to_string()), None),
     )
@@ -3223,10 +3051,7 @@ fn balanced_and_strict_diverge_for_same_field_promotion_fallback() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Strict,
-            prep_context: None,
-            prep_artifact_id: None,
             solver_mesh_artifact_path: None,
-            prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-contract-12-strict".to_string()), None),
     )
@@ -3302,10 +3127,7 @@ fn balanced_and_strict_divergence_propagates_through_results_endpoints() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Balanced,
-            prep_context: None,
-            prep_artifact_id: None,
             solver_mesh_artifact_path: None,
-            prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-contract-13-balanced-run".to_string()), None),
     )
@@ -3318,10 +3140,7 @@ fn balanced_and_strict_divergence_propagates_through_results_endpoints() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Strict,
-            prep_context: None,
-            prep_artifact_id: None,
             solver_mesh_artifact_path: None,
-            prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-contract-13-strict-run".to_string()), None),
     )

@@ -258,7 +258,7 @@ See [MATLAB Language Compatibility](/docs/runtime/matlab-compatibility) for the 
 
 ### `[runtime.fea]`
 
-FEA settings configure study execution, run artifact storage, geometry prep artifacts, and coupled-field artifact roots.
+FEA settings configure study execution, run artifact storage, and coupled-field artifact roots.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
@@ -267,11 +267,6 @@ FEA settings configure study execution, run artifact storage, geometry prep arti
 | `artifact_max_runs` | integer | unset | Optional global retained run limit. |
 | `artifact_max_runs_per_kind` | integer | unset | Optional retained run limit per physics family. |
 | `study_artifact_root` | string | `"artifacts/studies"` | Study validate, plan, run, and sweep evidence root. |
-| `geometry_prep_artifact_root` | string | `"artifacts/geometry-prep"` | Geometry prep artifact root. |
-| `geometry_prep_max_artifacts` | integer | unset | Optional global retained prep artifact limit. |
-| `geometry_prep_max_artifacts_per_geometry` | integer | unset | Optional retained prep artifact limit per geometry id. |
-| `geometry_prep_max_age_seconds` | integer | unset | Optional prep artifact age limit. |
-| `geometry_prep_require_latest_revision` | boolean | unset | When true, prep-aware runs reject stale geometry revisions. |
 | `thermo_field_artifact_root` | string | `"artifacts/thermo-fields"` | Thermo-field artifact root for coupled thermal paths. |
 
 Example:
@@ -283,11 +278,6 @@ artifact_root = "artifacts"
 artifact_max_runs = 1000
 artifact_max_runs_per_kind = 100
 study_artifact_root = "artifacts/studies"
-geometry_prep_artifact_root = "artifacts/geometry-prep"
-geometry_prep_max_artifacts = 500
-geometry_prep_max_artifacts_per_geometry = 20
-geometry_prep_max_age_seconds = 2592000
-geometry_prep_require_latest_revision = true
 thermo_field_artifact_root = "artifacts/thermo-fields"
 ```
 
@@ -344,11 +334,6 @@ FEA runtime config is preferred. These environment variables are supported as fa
 - `RUNMAT_FEA_ARTIFACT_MAX_RUNS`
 - `RUNMAT_FEA_ARTIFACT_MAX_RUNS_PER_KIND`
 - `RUNMAT_FEA_STUDY_ARTIFACT_ROOT`
-- `RUNMAT_GEOMETRY_PREP_ARTIFACT_ROOT`
-- `RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS`
-- `RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS_PER_GEOMETRY`
-- `RUNMAT_GEOMETRY_PREP_MAX_AGE_SECONDS`
-- `RUNMAT_GEOMETRY_PREP_REQUIRE_LATEST_REVISION`
 - `RUNMAT_THERMO_FIELD_ARTIFACT_ROOT`
 
 ## Full Reference Example
@@ -428,11 +413,6 @@ artifact_root = "artifacts"
 artifact_max_runs = 1000
 artifact_max_runs_per_kind = 100
 study_artifact_root = "artifacts/studies"
-geometry_prep_artifact_root = "artifacts/geometry-prep"
-geometry_prep_max_artifacts = 500
-geometry_prep_max_artifacts_per_geometry = 20
-geometry_prep_max_age_seconds = 2592000
-geometry_prep_require_latest_revision = true
 thermo_field_artifact_root = "artifacts/thermo-fields"
 
 [runtime.telemetry]

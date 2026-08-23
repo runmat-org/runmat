@@ -56,7 +56,6 @@ pub fn run_transient_with_options(
         Some(5),
     );
     check_cancelled("fea.run_transient")?;
-    let prep_context = options.prep_context.clone();
     let thermo_context = options.thermo_mechanical_context.clone();
     let electro_context = options.electro_thermal_context.clone();
 
@@ -68,13 +67,7 @@ pub fn run_transient_with_options(
         Some(1),
         Some(5),
     );
-    let summary = assemble_linear_system(
-        model,
-        prep_context.clone(),
-        None,
-        thermo_context,
-        electro_context,
-    );
+    let summary = assemble_linear_system(model, None, thermo_context, electro_context);
     super::validate_rotational_dof_targets(model, &summary)?;
     emit_phase(
         "fea.run_transient",
@@ -119,15 +112,6 @@ pub fn run_transient_with_options(
         CommonRunDiagnosticInputs {
             model,
             summary: &summary,
-            prep_context,
-            iteration_metric: transient.converged_steps as f64,
-            residual_metric: transient
-                .residual_norms
-                .iter()
-                .copied()
-                .fold(0.0_f64, f64::max),
-            requested_preconditioner: "auto",
-            effective_preconditioner: &transient.preconditioner,
         },
     );
 

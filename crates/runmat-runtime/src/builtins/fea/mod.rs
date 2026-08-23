@@ -2551,13 +2551,6 @@ fn run_options_fields_from_name_values(
     for pair in expect_name_value_tail(RUN_OPTIONS_NAME, args)? {
         let raw = scalar_string(pair.name, RUN_OPTIONS_NAME, &ERROR_INPUT)?;
         let key = canonical_field_name(&raw);
-        if key == "prep_context" {
-            return Err(builtin_error(
-                RUN_OPTIONS_NAME,
-                &ERROR_INPUT,
-                "fea.runOptions does not expose the internal PrepContext; use PrepArtifactId or PrepCalibrationProfile",
-            ));
-        }
         let value = if EXACT_FIELDS.contains(&key.as_str()) {
             serde_json::Value::from(usize_from_value(RUN_OPTIONS_NAME, pair.value)? as u64)
         } else {
@@ -2628,8 +2621,6 @@ fn create_results_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
             "nonlinear_iteration_spike_count",
             "nonlinear_convergence_stall_count",
             "nonlinear_backtrack_burst_count",
-            "prep_calibration_fingerprint",
-            "prep_acceptance_fingerprint",
             "thermo_coupling_fingerprint",
             "electro_thermal_coupling_fingerprint",
             "iteration_counts",
@@ -4267,8 +4258,6 @@ fn canonical_field_name(text: &str) -> String {
         "precisionmode" => "precision_mode".to_string(),
         "preconditionermode" => "preconditioner_mode".to_string(),
         "qualitypolicy" => "quality_policy".to_string(),
-        "prepcalibrationprofile" => "prep_calibration_profile".to_string(),
-        "prepartifactid" => "prep_artifact_id".to_string(),
         "sweepfrequencyhz" => "sweep_frequency_hz".to_string(),
         "sweepenabled" => "sweep_enabled".to_string(),
         _ => out.trim_matches('_').to_string(),
@@ -5795,14 +5784,6 @@ mod tests {
                 Some(Value::Num(1.0))
             ));
         }
-
-        let prep_context = block_on(fea_run_options_builtin(vec![
-            Value::String("modal".into()),
-            Value::String("PrepContext".into()),
-            Value::String("internal".into()),
-        ]))
-        .expect_err("internal prep context must not be public");
-        assert_eq!(prep_context.identifier(), Some("RunMat:fea:InvalidInput"));
 
         let extra_step = block_on(fea_step_builtin(vec![
             Value::String("step".into()),

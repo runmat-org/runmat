@@ -7,74 +7,6 @@ use runmat_meshing_evidence::MeshAuthoringSummary;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
-fn default_prep_coordinate_span_m() -> f64 {
-    1.0
-}
-
-fn default_prep_coordinate_secondary_span_m() -> f64 {
-    0.0
-}
-
-fn default_prep_coordinate_active_dimension_count() -> usize {
-    1
-}
-
-fn default_prep_coordinate_characteristic_length_m() -> f64 {
-    1.0
-}
-
-fn default_zero_usize() -> usize {
-    0
-}
-
-fn default_zero_f64() -> f64 {
-    0.0
-}
-
-fn default_reference_element_coordinates_m() -> [[f64; 3]; 3] {
-    [[0.0; 3]; 3]
-}
-
-fn default_element_topology_sample_edge_nodes() -> [[u32; 2]; 8] {
-    [[0; 2]; 8]
-}
-
-fn default_element_topology_sample_node_coordinates_m() -> [[f64; 3]; 8] {
-    [[0.0; 3]; 8]
-}
-
-fn default_element_topology_sample_element_edges() -> [[u32; 3]; 4] {
-    [[0; 3]; 4]
-}
-
-fn default_element_topology_sample_element_orientations() -> [[i8; 3]; 4] {
-    [[0; 3]; 4]
-}
-
-fn default_element_topology_sample_element_areas_m2() -> [f64; 4] {
-    [0.0; 4]
-}
-
-fn default_element_topology_node_coordinates_m() -> Vec<[f64; 3]> {
-    Vec::new()
-}
-
-fn default_element_topology_edge_nodes() -> Vec<[u32; 2]> {
-    Vec::new()
-}
-
-fn default_element_topology_element_edges() -> Vec<[u32; 3]> {
-    Vec::new()
-}
-
-fn default_element_topology_element_orientations() -> Vec<[i8; 3]> {
-    Vec::new()
-}
-
-fn default_element_topology_element_areas_m2() -> Vec<f64> {
-    Vec::new()
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct AnalysisValidateResult {
     pub valid: bool,
@@ -85,92 +17,6 @@ pub struct AnalysisValidateResult {
 pub struct AnalysisCreateModelIntentSpec {
     pub model_id: String,
     pub profile: AnalysisCreateModelProfile,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AnalysisRunPrepContext {
-    pub prepared_mesh_count: usize,
-    pub prepared_node_count: usize,
-    pub prepared_element_count: usize,
-    pub mapped_region_count: usize,
-    pub min_scaled_jacobian: f64,
-    pub mean_aspect_ratio: f64,
-    pub inverted_element_count: usize,
-    pub mapped_load_count: usize,
-    pub mapped_bc_count: usize,
-    pub layout_seed: u64,
-    pub topology_dof_multiplier: f64,
-    pub topology_bandwidth_estimate: u32,
-    pub mapped_region_participation_ratio: f64,
-    pub topology_surface_patch_ratio: f64,
-    pub topology_volume_core_ratio: f64,
-    pub topology_mixed_family_ratio: f64,
-    pub topology_region_span_mean: f64,
-    pub topology_region_block_count: usize,
-    pub topology_region_mesh_mean: f64,
-    pub topology_region_mesh_variance: f64,
-    pub topology_triangle_family_ratio: f64,
-    pub topology_quad_family_ratio: f64,
-    pub topology_tetrahedron_family_ratio: f64,
-    pub topology_hex_family_ratio: f64,
-    #[serde(default = "default_prep_coordinate_span_m")]
-    pub coordinate_span_x_m: f64,
-    #[serde(default = "default_prep_coordinate_secondary_span_m")]
-    pub coordinate_span_y_m: f64,
-    #[serde(default = "default_prep_coordinate_secondary_span_m")]
-    pub coordinate_span_z_m: f64,
-    #[serde(default = "default_prep_coordinate_active_dimension_count")]
-    pub coordinate_active_dimension_count: usize,
-    #[serde(default = "default_prep_coordinate_characteristic_length_m")]
-    pub coordinate_characteristic_length_m: f64,
-    #[serde(default = "default_zero_usize")]
-    pub element_geometry_node_count: usize,
-    #[serde(default = "default_zero_usize")]
-    pub element_geometry_edge_count: usize,
-    #[serde(default = "default_zero_f64")]
-    pub mean_element_edge_length_m: f64,
-    #[serde(default = "default_zero_f64")]
-    pub mean_element_area_m2: f64,
-    #[serde(default = "default_zero_f64")]
-    pub element_geometry_coverage_ratio: f64,
-    #[serde(default = "default_reference_element_coordinates_m")]
-    pub reference_element_coordinates_m: [[f64; 3]; 3],
-    #[serde(default = "default_zero_f64")]
-    pub reference_element_area_m2: f64,
-    #[serde(default = "default_zero_usize")]
-    pub control_volume_cell_count: usize,
-    #[serde(default = "default_zero_usize")]
-    pub control_volume_face_count: usize,
-    #[serde(default = "default_zero_usize")]
-    pub control_volume_internal_face_count: usize,
-    #[serde(default = "default_zero_usize")]
-    pub control_volume_boundary_face_count: usize,
-    #[serde(default = "default_zero_f64")]
-    pub control_volume_connectivity_coverage_ratio: f64,
-    #[serde(default = "default_zero_usize")]
-    pub element_topology_sample_element_count: usize,
-    #[serde(default = "default_zero_usize")]
-    pub element_topology_sample_edge_count: usize,
-    #[serde(default = "default_element_topology_sample_edge_nodes")]
-    pub element_topology_sample_edge_nodes: [[u32; 2]; 8],
-    #[serde(default = "default_element_topology_sample_node_coordinates_m")]
-    pub element_topology_sample_node_coordinates_m: [[f64; 3]; 8],
-    #[serde(default = "default_element_topology_sample_element_edges")]
-    pub element_topology_sample_element_edges: [[u32; 3]; 4],
-    #[serde(default = "default_element_topology_sample_element_orientations")]
-    pub element_topology_sample_element_orientations: [[i8; 3]; 4],
-    #[serde(default = "default_element_topology_sample_element_areas_m2")]
-    pub element_topology_sample_element_areas_m2: [f64; 4],
-    #[serde(default = "default_element_topology_node_coordinates_m")]
-    pub element_topology_node_coordinates_m: Vec<[f64; 3]>,
-    #[serde(default = "default_element_topology_edge_nodes")]
-    pub element_topology_edge_nodes: Vec<[u32; 2]>,
-    #[serde(default = "default_element_topology_element_edges")]
-    pub element_topology_element_edges: Vec<[u32; 3]>,
-    #[serde(default = "default_element_topology_element_orientations")]
-    pub element_topology_element_orientations: Vec<[i8; 3]>,
-    #[serde(default = "default_element_topology_element_areas_m2")]
-    pub element_topology_element_areas_m2: Vec<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -516,15 +362,6 @@ pub enum QualityPolicy {
     Exploratory,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PrepCalibrationProfile {
-    Auto,
-    Fast,
-    Balanced,
-    Conservative,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ThermoRegionTemperatureDelta {
     pub region_id: String,
@@ -692,13 +529,7 @@ pub struct AnalysisRunOptions {
     pub preconditioner_mode: PreconditionerMode,
     pub quality_policy: QualityPolicy,
     #[serde(default)]
-    pub prep_context: Option<AnalysisRunPrepContext>,
-    #[serde(default)]
-    pub prep_artifact_id: Option<String>,
-    #[serde(default)]
     pub solver_mesh_artifact_path: Option<String>,
-    #[serde(default)]
-    pub prep_calibration_profile: Option<PrepCalibrationProfile>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -709,12 +540,6 @@ pub struct AnalysisElectromagneticRunOptions {
     pub residual_target: f64,
     pub harmonic_tolerance: f64,
     pub harmonic_max_iterations: usize,
-    #[serde(default)]
-    pub prep_context: Option<AnalysisRunPrepContext>,
-    #[serde(default)]
-    pub prep_artifact_id: Option<String>,
-    #[serde(default)]
-    pub prep_calibration_profile: Option<PrepCalibrationProfile>,
     #[serde(default)]
     pub sweep_enabled: bool,
     #[serde(default)]
@@ -730,9 +555,6 @@ impl Default for AnalysisElectromagneticRunOptions {
             residual_target: 1.0e-6,
             harmonic_tolerance: 1.0e-7,
             harmonic_max_iterations: 96,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
             sweep_enabled: false,
             sweep_frequency_hz: Vec::new(),
         }
@@ -746,10 +568,7 @@ impl Default for AnalysisRunOptions {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Balanced,
-            prep_context: None,
-            prep_artifact_id: None,
             solver_mesh_artifact_path: None,
-            prep_calibration_profile: None,
         }
     }
 }
@@ -774,12 +593,6 @@ pub struct AnalysisTransientRunOptions {
     pub adapt_retry_growth_cap: f64,
     pub adapt_nonconverged_shrink: f64,
     pub dt_bucket_rel_tolerance: f64,
-    #[serde(default)]
-    pub prep_context: Option<AnalysisRunPrepContext>,
-    #[serde(default)]
-    pub prep_artifact_id: Option<String>,
-    #[serde(default)]
-    pub prep_calibration_profile: Option<PrepCalibrationProfile>,
 }
 
 impl Default for AnalysisTransientRunOptions {
@@ -803,9 +616,6 @@ impl Default for AnalysisTransientRunOptions {
             adapt_retry_growth_cap: 1.05,
             adapt_nonconverged_shrink: 0.75,
             dt_bucket_rel_tolerance: 0.0,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
         }
     }
 }
@@ -817,12 +627,6 @@ pub struct AnalysisAcousticRunOptions {
     pub quality_policy: QualityPolicy,
     pub mode_count: usize,
     pub residual_warn_threshold: f64,
-    #[serde(default)]
-    pub prep_context: Option<AnalysisRunPrepContext>,
-    #[serde(default)]
-    pub prep_artifact_id: Option<String>,
-    #[serde(default)]
-    pub prep_calibration_profile: Option<PrepCalibrationProfile>,
 }
 
 impl Default for AnalysisAcousticRunOptions {
@@ -833,9 +637,6 @@ impl Default for AnalysisAcousticRunOptions {
             quality_policy: QualityPolicy::Balanced,
             mode_count: 3,
             residual_warn_threshold: 1.0e-3,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
         }
     }
 }
@@ -850,12 +651,6 @@ pub struct AnalysisCfdRunOptions {
     pub max_linear_iters: usize,
     pub tolerance: f64,
     pub residual_warn_threshold: f64,
-    #[serde(default)]
-    pub prep_context: Option<AnalysisRunPrepContext>,
-    #[serde(default)]
-    pub prep_artifact_id: Option<String>,
-    #[serde(default)]
-    pub prep_calibration_profile: Option<PrepCalibrationProfile>,
 }
 
 impl Default for AnalysisCfdRunOptions {
@@ -869,9 +664,6 @@ impl Default for AnalysisCfdRunOptions {
             max_linear_iters: 128,
             tolerance: 1.0e-8,
             residual_warn_threshold: 1.0e-5,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
         }
     }
 }
@@ -886,12 +678,6 @@ pub struct AnalysisChtRunOptions {
     pub max_linear_iters: usize,
     pub tolerance: f64,
     pub residual_warn_threshold: f64,
-    #[serde(default)]
-    pub prep_context: Option<AnalysisRunPrepContext>,
-    #[serde(default)]
-    pub prep_artifact_id: Option<String>,
-    #[serde(default)]
-    pub prep_calibration_profile: Option<PrepCalibrationProfile>,
 }
 
 impl Default for AnalysisChtRunOptions {
@@ -905,9 +691,6 @@ impl Default for AnalysisChtRunOptions {
             max_linear_iters: 128,
             tolerance: 1.0e-8,
             residual_warn_threshold: 1.0e-4,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
         }
     }
 }
@@ -922,12 +705,6 @@ pub struct AnalysisFsiRunOptions {
     pub max_linear_iters: usize,
     pub tolerance: f64,
     pub residual_warn_threshold: f64,
-    #[serde(default)]
-    pub prep_context: Option<AnalysisRunPrepContext>,
-    #[serde(default)]
-    pub prep_artifact_id: Option<String>,
-    #[serde(default)]
-    pub prep_calibration_profile: Option<PrepCalibrationProfile>,
 }
 
 impl Default for AnalysisFsiRunOptions {
@@ -941,9 +718,6 @@ impl Default for AnalysisFsiRunOptions {
             max_linear_iters: 128,
             tolerance: 1.0e-8,
             residual_warn_threshold: 1.0e-4,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
         }
     }
 }
@@ -956,12 +730,6 @@ pub struct AnalysisThermalRunOptions {
     pub step_count: usize,
     pub time_step_s: f64,
     pub residual_warn_threshold: f64,
-    #[serde(default)]
-    pub prep_context: Option<AnalysisRunPrepContext>,
-    #[serde(default)]
-    pub prep_artifact_id: Option<String>,
-    #[serde(default)]
-    pub prep_calibration_profile: Option<PrepCalibrationProfile>,
 }
 
 impl Default for AnalysisThermalRunOptions {
@@ -973,9 +741,6 @@ impl Default for AnalysisThermalRunOptions {
             step_count: 10,
             time_step_s: 1.0e-2,
             residual_warn_threshold: 1.0e-4,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
         }
     }
 }
@@ -1001,9 +766,6 @@ impl AnalysisTransientRunOptions {
             adapt_retry_growth_cap: 1.02,
             adapt_nonconverged_shrink: 0.7,
             dt_bucket_rel_tolerance: 0.02,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
         }
     }
 
@@ -1041,9 +803,6 @@ impl AnalysisTransientRunOptions {
             adapt_retry_growth_cap: 1.03,
             adapt_nonconverged_shrink: 0.8,
             dt_bucket_rel_tolerance: 0.005,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
         }
     }
 }
@@ -1055,12 +814,6 @@ pub struct AnalysisModalRunOptions {
     pub quality_policy: QualityPolicy,
     pub mode_count: usize,
     pub residual_warn_threshold: f64,
-    #[serde(default)]
-    pub prep_context: Option<AnalysisRunPrepContext>,
-    #[serde(default)]
-    pub prep_artifact_id: Option<String>,
-    #[serde(default)]
-    pub prep_calibration_profile: Option<PrepCalibrationProfile>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1077,12 +830,6 @@ pub struct AnalysisNonlinearRunOptions {
     pub max_line_search_backtracks: usize,
     pub line_search_reduction: f64,
     pub tangent_refresh_interval: usize,
-    #[serde(default)]
-    pub prep_context: Option<AnalysisRunPrepContext>,
-    #[serde(default)]
-    pub prep_artifact_id: Option<String>,
-    #[serde(default)]
-    pub prep_calibration_profile: Option<PrepCalibrationProfile>,
 }
 
 impl Default for AnalysisNonlinearRunOptions {
@@ -1100,9 +847,6 @@ impl Default for AnalysisNonlinearRunOptions {
             max_line_search_backtracks: 6,
             line_search_reduction: 0.5,
             tangent_refresh_interval: 2,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
         }
     }
 }
@@ -1122,9 +866,6 @@ impl AnalysisNonlinearRunOptions {
             max_line_search_backtracks: 0,
             line_search_reduction: 0.6,
             tangent_refresh_interval: 4,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
         }
     }
 
@@ -1146,9 +887,6 @@ impl AnalysisNonlinearRunOptions {
             max_line_search_backtracks: 10,
             line_search_reduction: 0.5,
             tangent_refresh_interval: 1,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
         }
     }
 
@@ -1166,9 +904,6 @@ impl AnalysisNonlinearRunOptions {
             max_line_search_backtracks: 8,
             line_search_reduction: 0.5,
             tangent_refresh_interval: 2,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
         }
     }
 }
@@ -1181,9 +916,6 @@ impl Default for AnalysisModalRunOptions {
             quality_policy: QualityPolicy::Balanced,
             mode_count: 3,
             residual_warn_threshold: 1.0e-3,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
         }
     }
 }
@@ -1196,9 +928,6 @@ impl AnalysisModalRunOptions {
             quality_policy: QualityPolicy::Exploratory,
             mode_count: 2,
             residual_warn_threshold: 5.0e-3,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
         }
     }
 
@@ -1213,9 +942,6 @@ impl AnalysisModalRunOptions {
             quality_policy: QualityPolicy::Strict,
             mode_count: 8,
             residual_warn_threshold: 5.0e-4,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
         }
     }
 }
@@ -2177,11 +1903,6 @@ pub struct AnalysisResultsSummary {
     pub nonlinear_iteration_spike_count: Option<usize>,
     pub nonlinear_convergence_stall_count: Option<usize>,
     pub nonlinear_backtrack_burst_count: Option<usize>,
-    pub prep_calibration_profile: Option<String>,
-    pub prep_calibration_fingerprint: Option<u64>,
-    pub prep_acceptance_score: Option<f64>,
-    pub prep_acceptance_passed: Option<bool>,
-    pub prep_acceptance_fingerprint: Option<u64>,
     pub thermo_coupling_enabled: Option<bool>,
     pub thermo_coupling_fingerprint: Option<u64>,
     pub thermo_constitutive_temperature_factor: Option<f64>,
@@ -2697,10 +2418,6 @@ pub struct AnalysisTrendKindSummary {
     pub failed_increment_rate: Option<f64>,
     pub mean_spike_count: Option<f64>,
     pub mean_stall_count: Option<f64>,
-    pub prep_acceptance_rate: Option<f64>,
-    pub prep_calibration_fast_rate: Option<f64>,
-    pub prep_calibration_balanced_rate: Option<f64>,
-    pub prep_calibration_conservative_rate: Option<f64>,
     pub thermo_coupling_enabled_rate: Option<f64>,
     pub thermo_transient_warn_rate: Option<f64>,
     pub thermo_nonlinear_warn_rate: Option<f64>,

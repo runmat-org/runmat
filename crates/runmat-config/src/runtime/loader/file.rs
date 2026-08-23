@@ -73,14 +73,9 @@ plotting = { mode = "auto", force_headless = false, backend = "auto", scatter_ta
 # artifact_store = "filesystem" # default; use "in_memory" for ephemeral/test runs
 # artifact_root = "artifacts"
 # study_artifact_root = "artifacts/studies"
-# geometry_prep_artifact_root = "artifacts/geometry-prep"
 # thermo_field_artifact_root = "artifacts/thermo-fields"
 # artifact_max_runs = 0
 # artifact_max_runs_per_kind = 0
-# geometry_prep_max_artifacts = 0
-# geometry_prep_max_artifacts_per_geometry = 0
-# geometry_prep_max_age_seconds = 0
-geometry_prep_require_latest_revision = true
 "#;
     sample.to_string()
 }

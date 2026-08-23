@@ -8,14 +8,6 @@ from pathlib import Path
 if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from scripts.fea.prep_calibration.evaluate_prep_calibration_drift import (
-    evaluate_report_drift,
-    evaluate_rolling_drift,
-    load_evidence,
-    recommend_profile_shifts,
-)
-
-
 NONLINEAR_FIXTURES = {
     "nonlinear_assembly_gpu_provider",
     "nonlinear_assembly_stress_gpu_provider",
@@ -71,7 +63,6 @@ def collect_metrics(reports, window):
                     if fixture == "nonlinear_softening_benchmark_gpu_provider"
                     else threshold_value(record, "nonlinear_path_mix_total_increments"),
                     "publishable": bool(record.get("publishable", False)),
-                    "prep_acceptance_score": record.get("prep_acceptance_score"),
                     "thermo_coupling_enabled": record.get("thermo_coupling_enabled"),
                     "thermo_effective_modulus_scale": record.get(
                         "thermo_effective_modulus_scale"
@@ -109,14 +100,14 @@ def collect_metrics(reports, window):
 def summarize(samples):
     lines = ["## Nonlinear Trend Summary", ""]
     lines.append(
-        "| Fixture | Samples | Median GPU ms | Median speedup | Publishable rate | Median acceptance score | Thermo enabled rate | Median thermo modulus scale | Median thermo spread ratio | Median thermo heterogeneity | Median thermo transient sev | Median thermo nonlinear sev | Electro enabled rate | Median electro joule scale | Median electro spread ratio | Median electro transient sev | Median electro nonlinear sev | Median plastic nonlinear sev | Median contact nonlinear sev |"
+        "| Fixture | Samples | Median GPU ms | Median speedup | Publishable rate | Thermo enabled rate | Median thermo modulus scale | Median thermo spread ratio | Median thermo heterogeneity | Median thermo transient sev | Median thermo nonlinear sev | Electro enabled rate | Median electro joule scale | Median electro spread ratio | Median electro transient sev | Median electro nonlinear sev | Median plastic nonlinear sev | Median contact nonlinear sev |"
     )
     lines.append(
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
     )
     for fixture, values in sorted(samples.items()):
         if not values:
-            lines.append(f"| {fixture} | 0 | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - |")
+            lines.append(f"| {fixture} | 0 | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - |")
             continue
         gpu = [v["gpu_run_ms"] for v in values if isinstance(v["gpu_run_ms"], (int, float))]
         speedup = [
@@ -125,11 +116,6 @@ def summarize(samples):
             if isinstance(v["gpu_speedup_ratio"], (int, float))
         ]
         publishable_rate = sum(1 for v in values if v["publishable"]) / len(values)
-        acceptance_scores = [
-            v["prep_acceptance_score"]
-            for v in values
-            if isinstance(v.get("prep_acceptance_score"), (int, float))
-        ]
         thermo_enabled_values = [
             v["thermo_coupling_enabled"]
             for v in values
@@ -196,13 +182,12 @@ def summarize(samples):
             if isinstance(v.get("contact_nonlinear_severity"), (int, float))
         ]
         lines.append(
-            "| {} | {} | {} | {} | {:.2f} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
+            "| {} | {} | {} | {} | {:.2f} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
                 fixture,
                 len(values),
                 f"{statistics.median(gpu):.3f}" if gpu else "-",
                 f"{statistics.median(speedup):.3f}" if speedup else "-",
                 publishable_rate,
-                f"{statistics.median(acceptance_scores):.3f}" if acceptance_scores else "-",
                 (
                     f"{sum(1 for v in thermo_enabled_values if v) / len(thermo_enabled_values):.3f}"
                     if thermo_enabled_values
@@ -310,38 +295,6 @@ def main():
     samples = collect_metrics(reports, max(window, 1))
     summary = summarize(samples)
     print(summary)
-
-    evidence_path = Path(
-        os.getenv(
-            "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_EVIDENCE",
-            "scripts/fea/prep_calibration/evidence/prep_calibration_evidence.json",
-        )
-    )
-    evidence = load_evidence(evidence_path)
-    if evidence is not None:
-        latest_report = reports[-1]
-        drift_rows = evaluate_report_drift(latest_report, evidence)
-        if drift_rows:
-            max_drift = max(row.get("drift_ratio", 0.0) for row in drift_rows)
-            drift_slopes = evaluate_rolling_drift(reports[-max(window, 1) :], evidence)
-            max_drift_slope = max(drift_slopes.values()) if drift_slopes else 0.0
-            recommendations = recommend_profile_shifts(
-                latest_report,
-                reports[-max(window, 1) :],
-                evidence,
-                drift_trigger=float(
-                    os.getenv("RUNMAT_RELEASE_READINESS_PREP_RETRAIN_TRIGGER_DRIFT", "0.1")
-                ),
-            )
-            recommendation_pressure = (
-                len(recommendations) / len(NONLINEAR_FIXTURES) if NONLINEAR_FIXTURES else 0.0
-            )
-            print("\nCalibration drift summary:")
-            print(f"- max drift ratio: {max_drift:.3f}")
-            print(f"- max drift slope: {max_drift_slope:.4f}")
-            print(
-                f"- recommendation pressure: {recommendation_pressure:.3f} ({len(recommendations)} fixtures)"
-            )
 
     warnings = []
     for fixture, values in samples.items():

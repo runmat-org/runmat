@@ -39,7 +39,6 @@ use runmat_analysis_fea::{
     FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{GeometryAsset, MaterialEvidenceConfidence, UnitSystem};
-use runmat_meshing::{ElementFamilyHint, MeshConnectivityClass};
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -169,29 +168,28 @@ pub use contracts::{
     AnalysisRenderTriangleRange, AnalysisResultsCompareData, AnalysisResultsCompareQuery,
     AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary,
     AnalysisRunDatasetFieldPagingPolicy, AnalysisRunDatasetPayload, AnalysisRunDatasetStudyRef,
-    AnalysisRunKind, AnalysisRunOptions, AnalysisRunPrepContext, AnalysisRunResult,
-    AnalysisRuntimeCapabilities, AnalysisRuntimePhysicsProfileCatalogEntry,
-    AnalysisRuntimePhysicsProfileDefaultOutput, AnalysisStudyAuthoringData,
-    AnalysisStudyAuthoringEvidence, AnalysisStudyAuthoringIntent, AnalysisStudyDiagramObservation,
-    AnalysisStudyIssue, AnalysisStudyPlanData, AnalysisStudyRunData, AnalysisStudySpec,
-    AnalysisStudySweepData, AnalysisStudySweepFailureEntry, AnalysisStudySweepPlanData,
-    AnalysisStudySweepPlanEntry, AnalysisStudySweepRunEntry, AnalysisStudySweepSpec,
-    AnalysisStudySweepValidateData, AnalysisStudySweepValidateEntry, AnalysisStudyValidateResult,
-    AnalysisThermalRunOptions, AnalysisTransientRunOptions, AnalysisTrendKindSummary,
-    AnalysisTrendsData, AnalysisTrendsQuery, AnalysisValidateResult, ContactInterfaceOptions,
-    ElectroRegionConductivityScale, ElectroThermalCouplingOptions, ElectroTimeProfilePoint,
-    ElectromagneticResultsData, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData,
-    NonlinearMethod, NonlinearResultsData, PlasticityConstitutiveOptions, PrecisionMode,
-    PreconditionerMode, PrepCalibrationProfile, QualityGate, QualityPolicy, QualityReason,
-    QualityReasonCode, RunProvenance, RunStatus, ThermalResultsData, ThermoFieldInterpolationMode,
-    ThermoFieldSource, ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta,
-    ThermoTimeProfilePoint, TransientIntegrationMethod, TransientResultsData,
-    ANALYSIS_ARTIFACT_MANIFEST_KIND, ANALYSIS_DATASET_ARTIFACT_KIND,
-    ANALYSIS_DIAGNOSTICS_ARTIFACT_KIND, ANALYSIS_DIAGNOSTICS_SCHEMA_VERSION,
-    ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT, ANALYSIS_FIELD_DEFAULT_PAGE_SIZE,
-    ANALYSIS_FIELD_DESCRIPTORS_ARTIFACT_KIND, ANALYSIS_FIELD_DESCRIPTORS_SCHEMA_VERSION,
-    ANALYSIS_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION, ANALYSIS_RUN_DATASET_KIND,
-    ANALYSIS_RUN_DATASET_SCHEMA_VERSION,
+    AnalysisRunKind, AnalysisRunOptions, AnalysisRunResult, AnalysisRuntimeCapabilities,
+    AnalysisRuntimePhysicsProfileCatalogEntry, AnalysisRuntimePhysicsProfileDefaultOutput,
+    AnalysisStudyAuthoringData, AnalysisStudyAuthoringEvidence, AnalysisStudyAuthoringIntent,
+    AnalysisStudyDiagramObservation, AnalysisStudyIssue, AnalysisStudyPlanData,
+    AnalysisStudyRunData, AnalysisStudySpec, AnalysisStudySweepData,
+    AnalysisStudySweepFailureEntry, AnalysisStudySweepPlanData, AnalysisStudySweepPlanEntry,
+    AnalysisStudySweepRunEntry, AnalysisStudySweepSpec, AnalysisStudySweepValidateData,
+    AnalysisStudySweepValidateEntry, AnalysisStudyValidateResult, AnalysisThermalRunOptions,
+    AnalysisTransientRunOptions, AnalysisTrendKindSummary, AnalysisTrendsData, AnalysisTrendsQuery,
+    AnalysisValidateResult, ContactInterfaceOptions, ElectroRegionConductivityScale,
+    ElectroThermalCouplingOptions, ElectroTimeProfilePoint, ElectromagneticResultsData,
+    ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData, NonlinearMethod,
+    NonlinearResultsData, PlasticityConstitutiveOptions, PrecisionMode, PreconditionerMode,
+    QualityGate, QualityPolicy, QualityReason, QualityReasonCode, RunProvenance, RunStatus,
+    ThermalResultsData, ThermoFieldInterpolationMode, ThermoFieldSource,
+    ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
+    TransientIntegrationMethod, TransientResultsData, ANALYSIS_ARTIFACT_MANIFEST_KIND,
+    ANALYSIS_DATASET_ARTIFACT_KIND, ANALYSIS_DIAGNOSTICS_ARTIFACT_KIND,
+    ANALYSIS_DIAGNOSTICS_SCHEMA_VERSION, ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT,
+    ANALYSIS_FIELD_DEFAULT_PAGE_SIZE, ANALYSIS_FIELD_DESCRIPTORS_ARTIFACT_KIND,
+    ANALYSIS_FIELD_DESCRIPTORS_SCHEMA_VERSION, ANALYSIS_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION,
+    ANALYSIS_RUN_DATASET_KIND, ANALYSIS_RUN_DATASET_SCHEMA_VERSION,
 };
 pub use fea_document::{
     is_fea_file_path, load_fea_document_from_path_async, parse_and_resolve_fea_document,
@@ -467,7 +465,7 @@ pub fn analysis_create_model_op(
         ));
     }
 
-    let fixed_region_id = select_fixed_region_id(geometry, None)
+    let fixed_region_id = select_fixed_region_id(geometry)
         .or_else(|| {
             geometry
                 .regions
@@ -475,7 +473,7 @@ pub fn analysis_create_model_op(
                 .map(|region| region.region_id.clone())
         })
         .unwrap_or_else(|| "region_default".to_string());
-    let load_region_id = select_load_region_id(geometry, None)
+    let load_region_id = select_load_region_id(geometry)
         .or_else(|| {
             geometry
                 .regions
@@ -499,7 +497,7 @@ pub fn analysis_create_model_op(
             material.electrical = Some(runmat_analysis_core::MaterialElectricalModel::default());
         }
     }
-    let inferred_assignments = infer_material_assignments(geometry, &inferred_materials, None);
+    let inferred_assignments = infer_material_assignments(geometry, &inferred_materials);
 
     let (default_bc, default_load, default_steps) = match intent.profile {
         AnalysisCreateModelProfile::LinearStaticStructural => (
@@ -1910,24 +1908,11 @@ pub fn analysis_run_modal_with_options_op(
         }
     }
 
-    let prep_context = resolve_run_prep_context(
-        model,
-        options.prep_artifact_id.as_deref(),
-        options.prep_context.clone(),
-        ANALYSIS_RUN_MODAL_OPERATION,
-        ANALYSIS_RUN_MODAL_OP_VERSION,
-        &context,
-    )?;
-
     let modal_run = run_modal_with_options(
         model,
         backend,
         ModalSolveOptions {
             mode_count: options.mode_count,
-            prep_context: to_fea_prep_context(
-                prep_context.as_ref(),
-                options.prep_calibration_profile,
-            ),
             thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
             electro_thermal_context: to_fea_electro_thermal_context(electro_options),
         },
@@ -2068,7 +2053,7 @@ pub fn analysis_run_modal_with_options_op(
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
         run,
-        render_topology: render_topology_from_prep_context(prep_context.as_ref()),
+        render_topology: None,
         modal_results: Some(ModalResultsData {
             modal_payload_version: "modal_results/v1".to_string(),
             eigenvalues_hz: modal_run.eigenvalues_hz,
@@ -2329,22 +2314,13 @@ pub fn analysis_run_acoustic_with_options_op(
         }
     }
 
-    let prep_context = resolve_run_prep_context(
-        model,
-        options.prep_artifact_id.as_deref(),
-        options.prep_context.clone(),
-        ANALYSIS_RUN_ACOUSTIC_OPERATION,
-        ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
-        &context,
-    )?;
-    let render_topology = render_topology_from_prep_context(prep_context.as_ref());
+    let render_topology = None;
 
     let solve_start = Instant::now();
     let mut run = solve_acoustic_harmonic(
         model,
         backend,
         options.mode_count,
-        prep_context,
         options.residual_warn_threshold,
     );
     let solve_ms = solve_start.elapsed().as_secs_f64() * 1000.0;
@@ -2494,10 +2470,9 @@ fn solve_acoustic_harmonic(
     model: &AnalysisModel,
     backend: ComputeBackend,
     mode_count: usize,
-    prep_context: Option<AnalysisRunPrepContext>,
     residual_warn_threshold: f64,
 ) -> FeaRunResult {
-    let node_count = acoustic_node_count(model, prep_context.as_ref());
+    let node_count = acoustic_node_count(model);
     let material_summary = acoustic_material_summary(model, mode_count);
     let boundary_summary = acoustic_boundary_summary(
         model,
@@ -2509,7 +2484,7 @@ fn solve_acoustic_harmonic(
     let damping_ratio = material_summary.damping_ratio;
     let source_real = acoustic_source_vector(model, node_count);
     let source_imag = vec![0.0; node_count];
-    let domain = acoustic_domain_topology(node_count, prep_context.as_ref());
+    let domain = acoustic_domain_topology(node_count);
     let system = acoustic_helmholtz_operator(
         domain,
         node_count,
@@ -2859,14 +2834,8 @@ fn acoustic_sweep_frequencies_hz(drive_frequency_hz: f64) -> Vec<f64> {
     frequencies
 }
 
-fn acoustic_node_count(
-    model: &AnalysisModel,
-    prep_context: Option<&AnalysisRunPrepContext>,
-) -> usize {
-    prep_context
-        .map(|prep| prep.prepared_node_count.max(3))
-        .unwrap_or_else(|| model.loads.len().saturating_mul(3).max(3))
-        .min(512)
+fn acoustic_node_count(model: &AnalysisModel) -> usize {
+    model.loads.len().saturating_mul(3).clamp(3, 512)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -3076,25 +3045,9 @@ struct AcousticDomainSystem {
     edges: Vec<AcousticGraphEdge>,
 }
 
-fn acoustic_domain_topology(
-    node_count: usize,
-    prep_context: Option<&AnalysisRunPrepContext>,
-) -> AcousticDomainTopology {
+fn acoustic_domain_topology(node_count: usize) -> AcousticDomainTopology {
     let n = node_count.max(1);
-    let volume_hint = prep_context
-        .map(|prep| {
-            prep.topology_volume_core_ratio
-                + prep.topology_tetrahedron_family_ratio
-                + prep.topology_hex_family_ratio
-        })
-        .unwrap_or(0.0);
-    let z_dim = if n >= 8 && volume_hint > 0.05 {
-        (n as f64).cbrt().round().max(2.0) as usize
-    } else if n >= 24 {
-        2
-    } else {
-        1
-    };
+    let z_dim = if n >= 24 { 2 } else { 1 };
     let y_dim = if n >= 3 {
         ((n as f64 / z_dim as f64).sqrt().ceil() as usize).max(2)
     } else {
@@ -3450,14 +3403,8 @@ fn cfd_profile_scale(domain: &runmat_analysis_core::CfdDomain, step_index: usize
         .unwrap_or(1.0)
 }
 
-fn cfd_node_count_from_model(
-    model: &AnalysisModel,
-    prep_context: Option<&AnalysisRunPrepContext>,
-) -> usize {
-    prep_context
-        .map(|prep| prep.prepared_node_count.max(3))
-        .unwrap_or_else(|| model.loads.len().saturating_mul(3).max(3))
-        .min(512)
+fn cfd_node_count_from_model(model: &AnalysisModel) -> usize {
+    model.loads.len().saturating_mul(3).clamp(3, 512)
 }
 
 #[derive(Clone, Debug)]
@@ -3486,12 +3433,8 @@ struct CfdDomainTopology {
 }
 
 impl CfdDomainTopology {
-    fn from_model(model: &AnalysisModel, prep_context: Option<&AnalysisRunPrepContext>) -> Self {
-        let node_count = cfd_node_count_from_model(model, prep_context);
-        match prep_context {
-            Some(prep) => Self::from_prep(node_count, prep),
-            None => Self::implicit_channel(node_count),
-        }
+    fn from_model(model: &AnalysisModel) -> Self {
+        Self::implicit_channel(cfd_node_count_from_model(model))
     }
 
     fn implicit_channel(node_count: usize) -> Self {
@@ -3522,89 +3465,6 @@ impl CfdDomainTopology {
         }
     }
 
-    fn from_prep(node_count: usize, prep: &AnalysisRunPrepContext) -> Self {
-        let has_control_volume_connectivity = prep.control_volume_cell_count > 0
-            && prep.control_volume_face_count > 0
-            && prep.control_volume_connectivity_coverage_ratio > 0.0;
-        let control_volume_count = if has_control_volume_connectivity {
-            prep.control_volume_cell_count.max(1)
-        } else {
-            node_count.max(2).saturating_sub(1).max(1)
-        };
-        let node_count = if has_control_volume_connectivity {
-            control_volume_count.saturating_add(1).max(2)
-        } else {
-            node_count.max(2)
-        };
-        let fallback_length = finite_positive_or(prep.coordinate_characteristic_length_m, 1.0)
-            * control_volume_count as f64;
-        let domain_length_m = finite_positive_or(prep.coordinate_span_x_m, fallback_length);
-        let transverse_y = finite_positive_or(prep.coordinate_span_y_m, 0.0);
-        let transverse_z = finite_positive_or(prep.coordinate_span_z_m, 0.0);
-        let hydraulic_diameter_m = if transverse_y > 0.0 && transverse_z > 0.0 {
-            (2.0 * transverse_y * transverse_z / (transverse_y + transverse_z)).max(1.0e-12)
-        } else {
-            finite_positive_or(prep.coordinate_characteristic_length_m, 1.0)
-        };
-        let coordinate_face_area_m2 = hydraulic_diameter_m.max(1.0e-12).powi(2);
-        let has_element_geometry = prep.element_geometry_coverage_ratio > 0.0
-            && prep.mean_element_area_m2.is_finite()
-            && prep.mean_element_area_m2 > 0.0;
-        let face_area_m2 = if has_element_geometry {
-            prep.mean_element_area_m2
-        } else {
-            coordinate_face_area_m2
-        };
-        let hydraulic_diameter_m = if has_element_geometry {
-            (4.0 * face_area_m2 / std::f64::consts::PI)
-                .sqrt()
-                .max(1.0e-12)
-        } else {
-            hydraulic_diameter_m
-        };
-        Self {
-            basis: CfdDomainTopologyBasis::PrepControlVolumeConnectivity,
-            geometry_source: if has_element_geometry {
-                CfdDomainGeometrySource::PrepElementGeometry
-            } else {
-                CfdDomainGeometrySource::CoordinateSpan
-            },
-            node_count,
-            control_volume_count,
-            control_volume_face_count: if has_control_volume_connectivity {
-                prep.control_volume_face_count
-            } else {
-                control_volume_count.saturating_add(1)
-            },
-            control_volume_internal_face_count: if has_control_volume_connectivity {
-                prep.control_volume_internal_face_count
-            } else {
-                control_volume_count.saturating_sub(1)
-            },
-            control_volume_boundary_face_count: if has_control_volume_connectivity {
-                prep.control_volume_boundary_face_count
-            } else {
-                2
-            },
-            control_volume_connectivity_coverage_ratio: prep
-                .control_volume_connectivity_coverage_ratio
-                .clamp(0.0, 1.0),
-            domain_length_m,
-            hydraulic_diameter_m,
-            face_area_m2,
-            dx_m: domain_length_m / control_volume_count as f64,
-            active_dimension_count: prep.coordinate_active_dimension_count.max(1),
-            element_geometry_node_count: prep.element_geometry_node_count,
-            element_geometry_edge_count: prep.element_geometry_edge_count,
-            element_geometry_coverage_ratio: prep.element_geometry_coverage_ratio.clamp(0.0, 1.0),
-            element_topology_sample_element_count: prep.element_topology_sample_element_count,
-            element_topology_sample_edge_count: prep.element_topology_sample_edge_count,
-            element_topology_sample_element_edges: prep.element_topology_sample_element_edges,
-            element_topology_edge_nodes: prep.element_topology_edge_nodes.clone(),
-            element_topology_element_edges: prep.element_topology_element_edges.clone(),
-        }
-    }
-
     fn face_area_m2(&self) -> f64 {
         self.face_area_m2.max(1.0e-12)
     }
@@ -3616,14 +3476,12 @@ impl CfdDomainTopology {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CfdDomainTopologyBasis {
-    PrepControlVolumeConnectivity,
     ImplicitChannel,
 }
 
 impl CfdDomainTopologyBasis {
     fn as_str(self) -> &'static str {
         match self {
-            Self::PrepControlVolumeConnectivity => "prep_control_volume_connectivity",
             Self::ImplicitChannel => "implicit_channel",
         }
     }
@@ -3632,25 +3490,13 @@ impl CfdDomainTopologyBasis {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CfdDomainGeometrySource {
     ImplicitChannel,
-    CoordinateSpan,
-    PrepElementGeometry,
 }
 
 impl CfdDomainGeometrySource {
     fn as_str(self) -> &'static str {
         match self {
             Self::ImplicitChannel => "implicit_channel",
-            Self::CoordinateSpan => "coordinate_span",
-            Self::PrepElementGeometry => "prep_element_geometry",
         }
-    }
-}
-
-fn finite_positive_or(value: f64, fallback: f64) -> f64 {
-    if value.is_finite() && value > 0.0 {
-        value
-    } else {
-        fallback
     }
 }
 
@@ -4533,28 +4379,13 @@ fn coupled_interface_connectivity_coverage_ratio(
     (edge_count as f64 / target as f64).clamp(0.0, 1.0)
 }
 
-fn coupled_interface_mesh_backed_connectivity_ratio(
-    topology: &CfdDomainTopology,
-    edge_count: usize,
-) -> f64 {
-    if topology.basis == CfdDomainTopologyBasis::PrepControlVolumeConnectivity
-        && topology.control_volume_connectivity_coverage_ratio > 0.0
-        && edge_count > 0
-    {
-        1.0
-    } else {
-        0.0
-    }
-}
-
 fn solve_cfd_finite_volume_run(
     model: &AnalysisModel,
     domain: &runmat_analysis_core::CfdDomain,
     backend: ComputeBackend,
     options: &AnalysisCfdRunOptions,
-    prep_context: Option<&AnalysisRunPrepContext>,
 ) -> FeaRunResult {
-    let topology = CfdDomainTopology::from_model(model, prep_context);
+    let topology = CfdDomainTopology::from_model(model);
     let node_count = topology.node_count;
     let step_count = options.step_count.max(1);
     let field_step = match domain.solve_family {
@@ -4947,8 +4778,7 @@ fn solve_cht_conjugate_interface(
         interface_count,
         thermal_network_edges.len(),
     );
-    let mesh_backed_interface_connectivity_ratio =
-        coupled_interface_mesh_backed_connectivity_ratio(topology, thermal_network_edges.len());
+    let mesh_backed_interface_connectivity_ratio = 0.0;
     let mut operator = vec![vec![0.0; interface_count]; interface_count];
     for (row, diagonal) in operator.iter_mut().enumerate() {
         diagonal[row] = anchor_conductance;
@@ -5456,8 +5286,7 @@ fn solve_fsi_partitioned_interface(
         interface_face_count,
         structural_coupling_edges.len(),
     );
-    let mesh_backed_interface_connectivity_ratio =
-        coupled_interface_mesh_backed_connectivity_ratio(topology, structural_coupling_edges.len());
+    let mesh_backed_interface_connectivity_ratio = 0.0;
     let mut interface_pressure = vec![0.0; face_pressure.len()];
     let mut structural_traction = vec![0.0; face_pressure.len()];
     let mut structural_face_displacement = vec![0.0; face_pressure.len() * 3];
@@ -6191,18 +6020,8 @@ pub fn analysis_run_cfd_with_options_op(
         ));
     }
 
-    let prep_context = resolve_run_prep_context(
-        model,
-        options.prep_artifact_id.as_deref(),
-        options.prep_context.clone(),
-        ANALYSIS_RUN_CFD_OPERATION,
-        ANALYSIS_RUN_CFD_OP_VERSION,
-        &context,
-    )?;
-
     let solve_start = Instant::now();
-    let mut run =
-        solve_cfd_finite_volume_run(model, cfd_domain, backend, &options, prep_context.as_ref());
+    let mut run = solve_cfd_finite_volume_run(model, cfd_domain, backend, &options);
     let solve_ms = solve_start.elapsed().as_secs_f64() * 1000.0;
     run.diagnostics
         .push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
@@ -6221,7 +6040,7 @@ pub fn analysis_run_cfd_with_options_op(
         );
     }
 
-    let flow_topology = CfdDomainTopology::from_model(model, prep_context.as_ref());
+    let flow_topology = CfdDomainTopology::from_model(model);
     let flow_boundary_summary = CfdBoundarySummary::from_model(model, cfd_domain, 2);
     let flow_inlet_velocity = flow_boundary_summary.nominal_inlet_velocity_m_per_s;
     let reynolds_number = cfd_reynolds_number_for_velocity(cfd_domain, flow_inlet_velocity);
@@ -6347,7 +6166,7 @@ pub fn analysis_run_cfd_with_options_op(
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
         run,
-        render_topology: render_topology_from_prep_context(prep_context.as_ref()),
+        render_topology: None,
         modal_results: None,
         thermal_results: None,
         transient_results: None,
@@ -6694,15 +6513,6 @@ pub fn analysis_run_cht_with_options_op(
     }
     let applied_temperature_delta_k = thermo_options.applied_temperature_delta_k;
 
-    let prep_context = resolve_run_prep_context(
-        model,
-        options.prep_artifact_id.as_deref(),
-        options.prep_context.clone(),
-        ANALYSIS_RUN_CHT_OPERATION,
-        ANALYSIS_RUN_CHT_OP_VERSION,
-        &context,
-    )?;
-
     let solve_start = Instant::now();
     let thermal_run = run_thermal_with_options(
         model,
@@ -6711,10 +6521,6 @@ pub fn analysis_run_cht_with_options_op(
             step_count: options.step_count,
             time_step_s: options.time_step_s,
             residual_target: options.residual_warn_threshold,
-            prep_context: to_fea_prep_context(
-                prep_context.as_ref(),
-                options.prep_calibration_profile,
-            ),
             thermo_mechanical_context: to_fea_thermo_mechanical_context(Some(
                 thermo_options.clone(),
             )),
@@ -6732,7 +6538,7 @@ pub fn analysis_run_cht_with_options_op(
         )
     })?;
 
-    let topology = CfdDomainTopology::from_model(model, prep_context.as_ref());
+    let topology = CfdDomainTopology::from_model(model);
     let node_count = topology.node_count;
     let field_step = match cfd_domain.solve_family {
         runmat_analysis_core::CfdSolveFamily::SteadyState => 0,
@@ -7008,7 +6814,7 @@ pub fn analysis_run_cht_with_options_op(
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
         run,
-        render_topology: render_topology_from_prep_context(prep_context.as_ref()),
+        render_topology: None,
         modal_results: None,
         thermal_results: Some(ThermalResultsData {
             thermal_payload_version: "thermal_results/v1".to_string(),
@@ -7313,17 +7119,8 @@ pub fn analysis_run_fsi_with_options_op(
         ));
     }
 
-    let prep_context = resolve_run_prep_context(
-        model,
-        options.prep_artifact_id.as_deref(),
-        options.prep_context.clone(),
-        ANALYSIS_RUN_FSI_OPERATION,
-        ANALYSIS_RUN_FSI_OP_VERSION,
-        &context,
-    )?;
-
     let solve_start = Instant::now();
-    let topology = CfdDomainTopology::from_model(model, prep_context.as_ref());
+    let topology = CfdDomainTopology::from_model(model);
     let node_count = topology.node_count;
     let field_step = match cfd_domain.solve_family {
         runmat_analysis_core::CfdSolveFamily::SteadyState => 0,
@@ -7602,7 +7399,7 @@ pub fn analysis_run_fsi_with_options_op(
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
         run,
-        render_topology: render_topology_from_prep_context(prep_context.as_ref()),
+        render_topology: None,
         modal_results: None,
         thermal_results: None,
         transient_results: None,
@@ -7713,15 +7510,6 @@ pub fn analysis_run_thermal_with_options_op(
         ));
     }
 
-    let prep_context = resolve_run_prep_context(
-        model,
-        options.prep_artifact_id.as_deref(),
-        options.prep_context.clone(),
-        ANALYSIS_RUN_THERMAL_OPERATION,
-        ANALYSIS_RUN_THERMAL_OP_VERSION,
-        &context,
-    )?;
-
     let thermal_run = run_thermal_with_options(
         model,
         backend,
@@ -7729,10 +7517,6 @@ pub fn analysis_run_thermal_with_options_op(
             step_count: options.step_count,
             time_step_s: options.time_step_s,
             residual_target: options.residual_warn_threshold,
-            prep_context: to_fea_prep_context(
-                prep_context.as_ref(),
-                options.prep_calibration_profile,
-            ),
             thermo_mechanical_context: to_fea_thermo_mechanical_context(Some(thermo_options)),
         },
     )
@@ -7832,7 +7616,7 @@ pub fn analysis_run_thermal_with_options_op(
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
         run,
-        render_topology: render_topology_from_prep_context(prep_context.as_ref()),
+        render_topology: None,
         modal_results: None,
         thermal_results: Some(ThermalResultsData {
             thermal_payload_version: "thermal_results/v1".to_string(),
@@ -8069,14 +7853,6 @@ pub fn analysis_run_transient_with_options_op(
         }
     }
 
-    let prep_context = resolve_run_prep_context(
-        model,
-        options.prep_artifact_id.as_deref(),
-        options.prep_context.clone(),
-        ANALYSIS_RUN_TRANSIENT_OPERATION,
-        ANALYSIS_RUN_TRANSIENT_OP_VERSION,
-        &context,
-    )?;
     let transient_run = run_transient_with_options(
         model,
         backend,
@@ -8097,10 +7873,6 @@ pub fn analysis_run_transient_with_options_op(
             adapt_nonconverged_shrink: options.adapt_nonconverged_shrink,
             dt_bucket_rel_tolerance: options.dt_bucket_rel_tolerance,
             progress_operation: ANALYSIS_RUN_TRANSIENT_OPERATION.to_string(),
-            prep_context: to_fea_prep_context(
-                prep_context.as_ref(),
-                options.prep_calibration_profile,
-            ),
             thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
             electro_thermal_context: to_fea_electro_thermal_context(electro_options),
         },
@@ -8376,7 +8148,7 @@ pub fn analysis_run_transient_with_options_op(
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
         run,
-        render_topology: render_topology_from_prep_context(prep_context.as_ref()),
+        render_topology: None,
         modal_results: None,
         thermal_results: None,
         transient_results: Some(TransientResultsData {
@@ -8703,14 +8475,6 @@ pub fn analysis_run_nonlinear_with_options_op(
         }
     }
 
-    let prep_context = resolve_run_prep_context(
-        model,
-        options.prep_artifact_id.as_deref(),
-        options.prep_context.clone(),
-        ANALYSIS_RUN_NONLINEAR_OPERATION,
-        ANALYSIS_RUN_NONLINEAR_OP_VERSION,
-        &context,
-    )?;
     let nonlinear_run = run_nonlinear_with_options(
         model,
         backend,
@@ -8724,10 +8488,6 @@ pub fn analysis_run_nonlinear_with_options_op(
             max_line_search_backtracks: options.max_line_search_backtracks,
             line_search_reduction: options.line_search_reduction,
             tangent_refresh_interval: options.tangent_refresh_interval,
-            prep_context: to_fea_prep_context(
-                prep_context.as_ref(),
-                options.prep_calibration_profile,
-            ),
             thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
             electro_thermal_context: to_fea_electro_thermal_context(electro_options),
             plasticity_context: to_fea_plasticity_constitutive_context(plasticity_options),
@@ -9043,7 +8803,7 @@ pub fn analysis_run_nonlinear_with_options_op(
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
         run,
-        render_topology: render_topology_from_prep_context(prep_context.as_ref()),
+        render_topology: None,
         modal_results: None,
         thermal_results: None,
         transient_results: None,
@@ -9191,14 +8951,6 @@ pub fn analysis_run_linear_static_with_options(
             }
         }
     };
-    let prep_context = resolve_run_prep_context(
-        model,
-        options.prep_artifact_id.as_deref(),
-        options.prep_context.clone(),
-        ANALYSIS_RUN_OPERATION,
-        ANALYSIS_RUN_OP_VERSION,
-        &context,
-    )?;
     let solver_mesh = resolve_solver_mesh_artifact(
         options.solver_mesh_artifact_path.as_deref(),
         ANALYSIS_RUN_OPERATION,
@@ -9211,10 +8963,6 @@ pub fn analysis_run_linear_static_with_options(
         LinearStaticSolveOptions {
             preconditioner_kind: requested_preconditioner,
             algebra_backend_kind: requested_solver_backend,
-            prep_context: to_fea_prep_context(
-                prep_context.as_ref(),
-                options.prep_calibration_profile,
-            ),
             solver_mesh_artifact_path: options.solver_mesh_artifact_path.clone(),
             solver_mesh: solver_mesh.clone(),
             require_solver_mesh_for_solid: true,
@@ -9364,8 +9112,7 @@ pub fn analysis_run_linear_static_with_options(
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
         run,
-        render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref())
-            .or_else(|| render_topology_from_prep_context(prep_context.as_ref())),
+        render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: None,
         thermal_results: None,
         transient_results: None,
@@ -9845,15 +9592,6 @@ pub fn analysis_run_electromagnetic_with_options_op(
     }
     validate_electromagnetic_run_model(model, &context)?;
 
-    let prep_context = resolve_run_prep_context(
-        model,
-        options.prep_artifact_id.as_deref(),
-        options.prep_context.clone(),
-        ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
-        ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
-        &context,
-    )?;
-
     let sweep_frequency_hz = normalize_em_sweep_frequency_hz(
         em_domain.reference_frequency_hz,
         options.sweep_enabled,
@@ -9875,7 +9613,6 @@ pub fn analysis_run_electromagnetic_with_options_op(
         )
     })?;
     let solve_options = ElectromagneticSolveOptions {
-        prep_context: to_fea_prep_context(prep_context.as_ref(), options.prep_calibration_profile),
         residual_target: options.residual_target,
         harmonic_tolerance: options.harmonic_tolerance,
         harmonic_max_iterations: options.harmonic_max_iterations,
@@ -10466,7 +10203,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
         run,
-        render_topology: render_topology_from_prep_context(prep_context.as_ref()),
+        render_topology: None,
         modal_results: None,
         thermal_results: None,
         transient_results: None,
@@ -11105,31 +10842,6 @@ pub fn analysis_results_op(
         )
     };
 
-    let prep_calibration_profile = diagnostic_metric_string(
-        &run_result.run.diagnostics,
-        "FEA_PREP_CALIBRATION",
-        "profile",
-    );
-    let prep_calibration_fingerprint = diagnostic_metric_u64(
-        &run_result.run.diagnostics,
-        "FEA_PREP_CALIBRATION",
-        "calibration_fingerprint",
-    );
-    let prep_acceptance_score = diagnostic_metric(
-        &run_result.run.diagnostics,
-        "FEA_PREP_ACCEPTANCE",
-        "acceptance_score",
-    );
-    let prep_acceptance_passed = diagnostic_metric_bool(
-        &run_result.run.diagnostics,
-        "FEA_PREP_ACCEPTANCE",
-        "accepted",
-    );
-    let prep_acceptance_fingerprint = diagnostic_metric_u64(
-        &run_result.run.diagnostics,
-        "FEA_PREP_ACCEPTANCE",
-        "acceptance_fingerprint",
-    );
     let thermo_coupling_enabled =
         diagnostic_metric_bool(&run_result.run.diagnostics, "FEA_TM_COUPLING", "enabled");
     let thermo_coupling_fingerprint = diagnostic_metric_u64(
@@ -11565,11 +11277,6 @@ pub fn analysis_results_op(
         nonlinear_iteration_spike_count,
         nonlinear_convergence_stall_count,
         nonlinear_backtrack_burst_count,
-        prep_calibration_profile,
-        prep_calibration_fingerprint,
-        prep_acceptance_score,
-        prep_acceptance_passed,
-        prep_acceptance_fingerprint,
         thermo_coupling_enabled,
         thermo_coupling_fingerprint,
         thermo_constitutive_temperature_factor,
@@ -12428,22 +12135,6 @@ pub fn analysis_trends_op(
         } else {
             None
         };
-        let prep_acceptance_rate = {
-            let values = entries
-                .iter()
-                .filter_map(|run| {
-                    diagnostic_metric_bool(&run.run.diagnostics, "FEA_PREP_ACCEPTANCE", "accepted")
-                })
-                .collect::<Vec<_>>();
-            if values.is_empty() {
-                None
-            } else {
-                Some(values.iter().filter(|value| **value).count() as f64 / values.len() as f64)
-            }
-        };
-        let prep_calibration_fast_rate = calibration_profile_rate(&entries, "fast");
-        let prep_calibration_balanced_rate = calibration_profile_rate(&entries, "balanced");
-        let prep_calibration_conservative_rate = calibration_profile_rate(&entries, "conservative");
         let thermo_coupling_enabled_rate = {
             let values = entries
                 .iter()
@@ -12917,10 +12608,6 @@ pub fn analysis_trends_op(
             failed_increment_rate,
             mean_spike_count,
             mean_stall_count,
-            prep_acceptance_rate,
-            prep_calibration_fast_rate,
-            prep_calibration_balanced_rate,
-            prep_calibration_conservative_rate,
             thermo_coupling_enabled_rate,
             thermo_transient_warn_rate,
             thermo_nonlinear_warn_rate,
@@ -13354,100 +13041,6 @@ fn fs_read_to_string(path: impl Into<PathBuf>) -> std::io::Result<String> {
     runmat_filesystem::read_to_string(path.into())
 }
 
-fn to_fea_prep_context(
-    context: Option<&AnalysisRunPrepContext>,
-    calibration_profile: Option<PrepCalibrationProfile>,
-) -> Option<runmat_analysis_fea::FeaPrepContext> {
-    context.map(|prep| runmat_analysis_fea::FeaPrepContext {
-        prepared_mesh_count: prep.prepared_mesh_count,
-        prepared_node_count: prep.prepared_node_count,
-        prepared_element_count: prep.prepared_element_count,
-        mapped_region_count: prep.mapped_region_count,
-        min_scaled_jacobian: prep.min_scaled_jacobian,
-        mean_aspect_ratio: prep.mean_aspect_ratio,
-        inverted_element_count: prep.inverted_element_count,
-        mapped_load_count: prep.mapped_load_count,
-        mapped_bc_count: prep.mapped_bc_count,
-        layout_seed: prep.layout_seed,
-        topology_dof_multiplier: prep.topology_dof_multiplier,
-        topology_bandwidth_estimate: prep.topology_bandwidth_estimate,
-        mapped_region_participation_ratio: prep.mapped_region_participation_ratio,
-        topology_surface_patch_ratio: prep.topology_surface_patch_ratio,
-        topology_volume_core_ratio: prep.topology_volume_core_ratio,
-        topology_mixed_family_ratio: prep.topology_mixed_family_ratio,
-        topology_region_span_mean: prep.topology_region_span_mean,
-        topology_region_block_count: prep.topology_region_block_count,
-        topology_region_mesh_mean: prep.topology_region_mesh_mean,
-        topology_region_mesh_variance: prep.topology_region_mesh_variance,
-        topology_triangle_family_ratio: prep.topology_triangle_family_ratio,
-        topology_quad_family_ratio: prep.topology_quad_family_ratio,
-        topology_tetrahedron_family_ratio: prep.topology_tetrahedron_family_ratio,
-        topology_hex_family_ratio: prep.topology_hex_family_ratio,
-        coordinate_span_x_m: prep.coordinate_span_x_m,
-        coordinate_span_y_m: prep.coordinate_span_y_m,
-        coordinate_span_z_m: prep.coordinate_span_z_m,
-        coordinate_active_dimension_count: prep.coordinate_active_dimension_count,
-        coordinate_characteristic_length_m: prep.coordinate_characteristic_length_m,
-        element_geometry_node_count: prep.element_geometry_node_count,
-        element_geometry_edge_count: prep.element_geometry_edge_count,
-        mean_element_edge_length_m: prep.mean_element_edge_length_m,
-        mean_element_area_m2: prep.mean_element_area_m2,
-        element_geometry_coverage_ratio: prep.element_geometry_coverage_ratio,
-        reference_element_coordinates_m: prep.reference_element_coordinates_m,
-        reference_element_area_m2: prep.reference_element_area_m2,
-        element_topology_sample_element_count: prep.element_topology_sample_element_count,
-        element_topology_sample_edge_count: prep.element_topology_sample_edge_count,
-        element_topology_sample_edge_nodes: prep.element_topology_sample_edge_nodes,
-        element_topology_sample_node_coordinates_m: prep.element_topology_sample_node_coordinates_m,
-        element_topology_sample_element_edges: prep.element_topology_sample_element_edges,
-        element_topology_sample_element_orientations: prep
-            .element_topology_sample_element_orientations,
-        element_topology_sample_element_areas_m2: prep.element_topology_sample_element_areas_m2,
-        element_topology_node_coordinates_m: prep.element_topology_node_coordinates_m.clone(),
-        element_topology_edge_nodes: prep.element_topology_edge_nodes.clone(),
-        element_topology_element_edges: prep.element_topology_element_edges.clone(),
-        element_topology_element_orientations: prep.element_topology_element_orientations.clone(),
-        element_topology_element_areas_m2: prep.element_topology_element_areas_m2.clone(),
-        calibration_profile_override: calibration_profile.and_then(map_calibration_profile),
-    })
-}
-
-fn render_topology_from_prep_context(
-    context: Option<&AnalysisRunPrepContext>,
-) -> Option<AnalysisRenderTopology> {
-    let prep = context?;
-    if prep.element_topology_node_coordinates_m.is_empty()
-        || prep.element_topology_edge_nodes.is_empty()
-        || prep.element_topology_element_edges.is_empty()
-    {
-        return None;
-    }
-
-    let triangles = prep
-        .element_topology_element_edges
-        .iter()
-        .filter_map(|element_edges| triangle_from_element_edges(element_edges, prep))
-        .collect::<Vec<_>>();
-    if triangles.is_empty() {
-        return None;
-    }
-
-    Some(AnalysisRenderTopology {
-        schema_version: "analysis_render_topology/v1".to_string(),
-        source: AnalysisRenderTopologySource::SolverPrep,
-        meshes: vec![AnalysisRenderMesh {
-            mesh_id: "solver_surface".to_string(),
-            vertices: prep.element_topology_node_coordinates_m.clone(),
-            triangles,
-            regions: Vec::new(),
-            vertex_volume_node_indices: (0..prep.element_topology_node_coordinates_m.len())
-                .map(Some)
-                .collect(),
-            triangle_volume_element_indices: Vec::new(),
-        }],
-    })
-}
-
 fn render_topology_from_solver_mesh(
     mesh: Option<&SolverMeshArtifact>,
 ) -> Option<AnalysisRenderTopology> {
@@ -13564,41 +13157,6 @@ fn render_regions_from_triangle_indices(
             })
         })
         .collect()
-}
-
-fn triangle_from_element_edges(
-    element_edges: &[u32; 3],
-    prep: &AnalysisRunPrepContext,
-) -> Option<[u32; 3]> {
-    let mut nodes = Vec::<u32>::with_capacity(3);
-    for edge_index in element_edges {
-        let edge = prep.element_topology_edge_nodes.get(*edge_index as usize)?;
-        for node in edge {
-            if !nodes.contains(node) {
-                nodes.push(*node);
-            }
-        }
-    }
-    if nodes.len() == 3 {
-        Some([nodes[0], nodes[1], nodes[2]])
-    } else {
-        None
-    }
-}
-
-fn map_calibration_profile(
-    profile: PrepCalibrationProfile,
-) -> Option<runmat_analysis_fea::FeaPrepCalibrationProfile> {
-    match profile {
-        PrepCalibrationProfile::Auto => None,
-        PrepCalibrationProfile::Fast => Some(runmat_analysis_fea::FeaPrepCalibrationProfile::Fast),
-        PrepCalibrationProfile::Balanced => {
-            Some(runmat_analysis_fea::FeaPrepCalibrationProfile::Balanced)
-        }
-        PrepCalibrationProfile::Conservative => {
-            Some(runmat_analysis_fea::FeaPrepCalibrationProfile::Conservative)
-        }
-    }
 }
 
 fn model_thermo_coupling_options(model: &AnalysisModel) -> Option<ThermoMechanicalCouplingOptions> {
@@ -14715,612 +14273,6 @@ fn resolve_thermo_coupling_options(
     Ok(Some(options))
 }
 
-fn resolve_run_prep_context(
-    model: &AnalysisModel,
-    prep_artifact_id: Option<&str>,
-    legacy_prep_context: Option<AnalysisRunPrepContext>,
-    operation: &'static str,
-    op_version: &'static str,
-    context: &OperationContext,
-) -> Result<Option<AnalysisRunPrepContext>, OperationErrorEnvelope> {
-    if prep_artifact_id.is_none() {
-        if legacy_prep_context.is_some() {
-            return Err(operation_error(
-                operation,
-                op_version,
-                context,
-                OperationErrorSpec {
-                    error_code: "RM.FEA.RUN_PREP.UNTRUSTED_CONTEXT",
-                    error_type: OperationErrorType::Input,
-                    retryable: false,
-                    severity: OperationErrorSeverity::Error,
-                },
-                "FEA run prep_context must be referenced by prep_artifact_id",
-                BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
-            ));
-        }
-        return Ok(None);
-    }
-
-    let prep_artifact_id = prep_artifact_id.expect("checked is_some");
-    let Some(artifact) = crate::geometry::load_prep_artifact(prep_artifact_id).map_err(|err| {
-        operation_error(
-            operation,
-            op_version,
-            context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_PREP.STORE_FAILED",
-                error_type: OperationErrorType::Internal,
-                retryable: true,
-                severity: OperationErrorSeverity::Error,
-            },
-            format!("failed to load prep artifact: {err}"),
-            BTreeMap::from([("prep_artifact_id".to_string(), prep_artifact_id.to_string())]),
-        )
-    })?
-    else {
-        return Err(operation_error(
-            operation,
-            op_version,
-            context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_PREP.NOT_FOUND",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            format!("prep artifact '{}' was not found", prep_artifact_id),
-            BTreeMap::from([("prep_artifact_id".to_string(), prep_artifact_id.to_string())]),
-        ));
-    };
-
-    if artifact.schema_version != "geometry_prep_artifact/v1" {
-        return Err(operation_error(
-            operation,
-            op_version,
-            context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_PREP.SCHEMA_UNSUPPORTED",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            format!(
-                "prep artifact schema '{}' is not supported",
-                artifact.schema_version
-            ),
-            BTreeMap::from([("prep_artifact_id".to_string(), prep_artifact_id.to_string())]),
-        ));
-    }
-
-    if artifact.source_geometry_id != model.geometry_id
-        || artifact.source_geometry_revision != model.geometry_revision
-    {
-        crate::geometry::record_prep_mismatch_reject();
-        return Err(operation_error(
-            operation,
-            op_version,
-            context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_PREP.MISMATCH",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "prep artifact geometry lineage does not match FEA model",
-            BTreeMap::from([
-                ("prep_artifact_id".to_string(), prep_artifact_id.to_string()),
-                ("model_geometry_id".to_string(), model.geometry_id.clone()),
-                (
-                    "model_geometry_revision".to_string(),
-                    model.geometry_revision.to_string(),
-                ),
-                (
-                    "prep_geometry_id".to_string(),
-                    artifact.source_geometry_id.clone(),
-                ),
-                (
-                    "prep_geometry_revision".to_string(),
-                    artifact.source_geometry_revision.to_string(),
-                ),
-            ]),
-        ));
-    }
-
-    if crate::geometry::require_latest_prep_revision() {
-        if let Some(latest_revision) = crate::geometry::latest_prep_revision_for_geometry(
-            &model.geometry_id,
-        )
-        .map_err(|err| {
-            operation_error(
-                operation,
-                op_version,
-                context,
-                OperationErrorSpec {
-                    error_code: "RM.FEA.RUN_PREP.STORE_FAILED",
-                    error_type: OperationErrorType::Internal,
-                    retryable: true,
-                    severity: OperationErrorSeverity::Error,
-                },
-                format!("failed to evaluate prep artifact freshness: {err}"),
-                BTreeMap::from([("prep_artifact_id".to_string(), prep_artifact_id.to_string())]),
-            )
-        })? {
-            if artifact.source_geometry_revision < latest_revision {
-                crate::geometry::record_prep_stale_reject();
-                return Err(operation_error(
-                    operation,
-                    op_version,
-                    context,
-                    OperationErrorSpec {
-                        error_code: "RM.FEA.RUN_PREP.STALE",
-                        error_type: OperationErrorType::Validation,
-                        retryable: false,
-                        severity: OperationErrorSeverity::Error,
-                    },
-                    "prep artifact is stale; a newer geometry revision prep artifact exists",
-                    BTreeMap::from([
-                        ("prep_artifact_id".to_string(), prep_artifact_id.to_string()),
-                        (
-                            "prep_geometry_revision".to_string(),
-                            artifact.source_geometry_revision.to_string(),
-                        ),
-                        (
-                            "latest_geometry_revision".to_string(),
-                            latest_revision.to_string(),
-                        ),
-                    ]),
-                ));
-            }
-        }
-    }
-
-    let prepared_mesh_count = artifact.prep.prepared_meshes.len();
-    let prepared_node_count = artifact
-        .prep
-        .prepared_meshes
-        .iter()
-        .map(|mesh| mesh.node_count as usize)
-        .sum::<usize>();
-    let prepared_element_count = artifact
-        .prep
-        .prepared_meshes
-        .iter()
-        .map(|mesh| mesh.element_count as usize)
-        .sum::<usize>();
-    let mesh_count = prepared_mesh_count.max(1) as f64;
-    let topology_surface_patch_ratio = artifact
-        .prep
-        .prepared_meshes
-        .iter()
-        .filter(|mesh| mesh.connectivity_class == MeshConnectivityClass::SurfacePatch)
-        .count() as f64
-        / mesh_count;
-    let topology_volume_core_ratio = artifact
-        .prep
-        .prepared_meshes
-        .iter()
-        .filter(|mesh| mesh.connectivity_class == MeshConnectivityClass::VolumeCore)
-        .count() as f64
-        / mesh_count;
-    let topology_mixed_family_ratio = artifact
-        .prep
-        .prepared_meshes
-        .iter()
-        .filter(|mesh| mesh.element_family_hint == ElementFamilyHint::Mixed)
-        .count() as f64
-        / mesh_count;
-    let topology_triangle_family_ratio = artifact
-        .prep
-        .prepared_meshes
-        .iter()
-        .filter(|mesh| mesh.element_family_hint == ElementFamilyHint::Triangle)
-        .count() as f64
-        / mesh_count;
-    let topology_quad_family_ratio = artifact
-        .prep
-        .prepared_meshes
-        .iter()
-        .filter(|mesh| mesh.element_family_hint == ElementFamilyHint::Quad)
-        .count() as f64
-        / mesh_count;
-    let topology_tetrahedron_family_ratio = artifact
-        .prep
-        .prepared_meshes
-        .iter()
-        .filter(|mesh| mesh.element_family_hint == ElementFamilyHint::Tetrahedron)
-        .count() as f64
-        / mesh_count;
-    let topology_hex_family_ratio = artifact
-        .prep
-        .prepared_meshes
-        .iter()
-        .filter(|mesh| mesh.element_family_hint == ElementFamilyHint::Hex)
-        .count() as f64
-        / mesh_count;
-    let topology_region_span_mean = artifact
-        .prep
-        .prepared_meshes
-        .iter()
-        .map(|mesh| mesh.region_span_hint as f64)
-        .sum::<f64>()
-        / mesh_count;
-    let region_block_count = artifact.prep.region_mappings.len().max(1);
-    let region_mesh_counts = artifact
-        .prep
-        .region_mappings
-        .iter()
-        .map(|mapping| mapping.prepared_mesh_ids.len().max(1) as f64)
-        .collect::<Vec<_>>();
-    let topology_region_mesh_mean = if region_mesh_counts.is_empty() {
-        1.0
-    } else {
-        region_mesh_counts.iter().sum::<f64>() / region_mesh_counts.len() as f64
-    };
-    let topology_region_mesh_variance = if region_mesh_counts.len() <= 1 {
-        0.0
-    } else {
-        region_mesh_counts
-            .iter()
-            .map(|count| {
-                let delta = *count - topology_region_mesh_mean;
-                delta * delta
-            })
-            .sum::<f64>()
-            / region_mesh_counts.len() as f64
-    };
-    let topology_dof_multiplier = if model.loads.is_empty() {
-        1.0
-    } else {
-        ((prepared_node_count as f64 / (model.loads.len() as f64 * 3.0)).clamp(1.0, 4.0) * 0.35
-            + 1.0)
-            .min(4.0)
-    };
-    let topology_bandwidth_estimate = artifact
-        .prep
-        .prepared_meshes
-        .iter()
-        .map(|mesh| mesh.region_span_hint)
-        .sum::<u32>()
-        .clamp(1, 128);
-    let mapped_region_participation_ratio = if artifact.prep.region_mappings.is_empty() {
-        0.0
-    } else {
-        (artifact
-            .prep
-            .region_mappings
-            .iter()
-            .filter(|mapping| {
-                model
-                    .loads
-                    .iter()
-                    .any(|load| load.region_id == mapping.region_id)
-                    || model
-                        .boundary_conditions
-                        .iter()
-                        .any(|bc| bc.region_id == mapping.region_id)
-            })
-            .count() as f64
-            / artifact.prep.region_mappings.len() as f64)
-            .clamp(0.0, 1.0)
-    };
-    let coordinate_span_x_m = artifact
-        .prep
-        .prepared_meshes
-        .iter()
-        .map(|mesh| mesh.coordinate_span_m[0])
-        .fold(0.0_f64, f64::max)
-        .max(1.0e-12);
-    let coordinate_span_y_m = artifact
-        .prep
-        .prepared_meshes
-        .iter()
-        .map(|mesh| mesh.coordinate_span_m[1])
-        .fold(0.0_f64, f64::max);
-    let coordinate_span_z_m = artifact
-        .prep
-        .prepared_meshes
-        .iter()
-        .map(|mesh| mesh.coordinate_span_m[2])
-        .fold(0.0_f64, f64::max);
-    let coordinate_active_dimension_count = artifact
-        .prep
-        .prepared_meshes
-        .iter()
-        .map(|mesh| mesh.coordinate_active_dimension_count as usize)
-        .max()
-        .unwrap_or(1)
-        .max(1);
-    let (coordinate_length_sum, coordinate_length_weight) = artifact
-        .prep
-        .prepared_meshes
-        .iter()
-        .filter_map(|mesh| {
-            let length = mesh.coordinate_characteristic_length_m;
-            (length.is_finite() && length > 0.0)
-                .then_some((length, mesh.element_count.max(1) as f64))
-        })
-        .fold((0.0_f64, 0.0_f64), |(sum, weight_sum), (length, weight)| {
-            (sum + length * weight, weight_sum + weight)
-        });
-    let coordinate_characteristic_length_m = if coordinate_length_weight > 0.0 {
-        coordinate_length_sum / coordinate_length_weight
-    } else {
-        1.0
-    };
-    let element_geometry_node_count = artifact
-        .prep
-        .prepared_meshes
-        .iter()
-        .map(|mesh| mesh.element_geometry_node_count as usize)
-        .sum::<usize>();
-    let element_geometry_edge_count = artifact
-        .prep
-        .prepared_meshes
-        .iter()
-        .map(|mesh| mesh.element_geometry_edge_count as usize)
-        .sum::<usize>();
-    let (edge_length_sum, edge_length_weight) = artifact
-        .prep
-        .prepared_meshes
-        .iter()
-        .filter_map(|mesh| {
-            let length = mesh.mean_element_edge_length_m;
-            (length.is_finite() && length > 0.0)
-                .then_some((length, mesh.element_count.max(1) as f64))
-        })
-        .fold((0.0_f64, 0.0_f64), |(sum, weight_sum), (length, weight)| {
-            (sum + length * weight, weight_sum + weight)
-        });
-    let mean_element_edge_length_m = if edge_length_weight > 0.0 {
-        edge_length_sum / edge_length_weight
-    } else {
-        0.0
-    };
-    let (area_sum, area_weight) = artifact
-        .prep
-        .prepared_meshes
-        .iter()
-        .filter_map(|mesh| {
-            let area = mesh.mean_element_area_m2;
-            (area.is_finite() && area > 0.0).then_some((area, mesh.element_count.max(1) as f64))
-        })
-        .fold((0.0_f64, 0.0_f64), |(sum, weight_sum), (area, weight)| {
-            (sum + area * weight, weight_sum + weight)
-        });
-    let mean_element_area_m2 = if area_weight > 0.0 {
-        area_sum / area_weight
-    } else {
-        0.0
-    };
-    let (coverage_sum, coverage_weight) = artifact
-        .prep
-        .prepared_meshes
-        .iter()
-        .map(|mesh| {
-            (
-                mesh.element_geometry_coverage_ratio.clamp(0.0, 1.0),
-                mesh.element_count.max(1) as f64,
-            )
-        })
-        .fold(
-            (0.0_f64, 0.0_f64),
-            |(sum, weight_sum), (coverage, weight)| (sum + coverage * weight, weight_sum + weight),
-        );
-    let element_geometry_coverage_ratio = if coverage_weight > 0.0 {
-        coverage_sum / coverage_weight
-    } else {
-        0.0
-    };
-    let (reference_element_coordinates_m, reference_element_area_m2) = artifact
-        .prep
-        .prepared_meshes
-        .iter()
-        .find_map(|mesh| {
-            let area = mesh.reference_element_area_m2;
-            (area.is_finite() && area > 0.0).then_some((mesh.reference_element_coordinates_m, area))
-        })
-        .unwrap_or(([[0.0; 3]; 3], 0.0));
-    let (
-        element_topology_sample_element_count,
-        element_topology_sample_edge_count,
-        element_topology_sample_edge_nodes,
-        element_topology_sample_node_coordinates_m,
-        element_topology_sample_element_edges,
-        element_topology_sample_element_orientations,
-        element_topology_sample_element_areas_m2,
-    ) = artifact
-        .prep
-        .prepared_meshes
-        .iter()
-        .find_map(|mesh| {
-            (mesh.element_topology_sample_element_count > 0
-                && mesh.element_topology_sample_edge_count > 0)
-                .then_some((
-                    mesh.element_topology_sample_element_count as usize,
-                    mesh.element_topology_sample_edge_count as usize,
-                    mesh.element_topology_sample_edge_nodes,
-                    mesh.element_topology_sample_node_coordinates_m,
-                    mesh.element_topology_sample_element_edges,
-                    mesh.element_topology_sample_element_orientations,
-                    mesh.element_topology_sample_element_areas_m2,
-                ))
-        })
-        .unwrap_or((
-            0,
-            0,
-            [[0; 2]; 8],
-            [[0.0; 3]; 8],
-            [[0; 3]; 4],
-            [[0; 3]; 4],
-            [0.0; 4],
-        ));
-    let mut element_topology_node_coordinates_m = Vec::<[f64; 3]>::new();
-    let mut element_topology_edge_nodes = Vec::<[u32; 2]>::new();
-    let mut element_topology_element_edges = Vec::<[u32; 3]>::new();
-    let mut element_topology_element_orientations = Vec::<[i8; 3]>::new();
-    let mut element_topology_element_areas_m2 = Vec::<f64>::new();
-    let mut node_offset = 0_u32;
-    let mut edge_offset = 0_u32;
-    for mesh in &artifact.prep.prepared_meshes {
-        let node_count = mesh.element_topology_node_coordinates_m.len();
-        element_topology_node_coordinates_m
-            .extend(mesh.element_topology_node_coordinates_m.iter().copied());
-        for edge in &mesh.element_topology_edge_nodes {
-            if let (Some(left), Some(right)) = (
-                edge[0].checked_add(node_offset),
-                edge[1].checked_add(node_offset),
-            ) {
-                element_topology_edge_nodes.push([left, right]);
-            }
-        }
-        for element_edges in &mesh.element_topology_element_edges {
-            if let (Some(a), Some(b), Some(c)) = (
-                element_edges[0].checked_add(edge_offset),
-                element_edges[1].checked_add(edge_offset),
-                element_edges[2].checked_add(edge_offset),
-            ) {
-                element_topology_element_edges.push([a, b, c]);
-            }
-        }
-        element_topology_element_orientations
-            .extend(mesh.element_topology_element_orientations.iter().copied());
-        element_topology_element_areas_m2
-            .extend(mesh.element_topology_element_areas_m2.iter().copied());
-        node_offset = node_offset.saturating_add(node_count as u32);
-        edge_offset = edge_offset.saturating_add(mesh.element_topology_edge_nodes.len() as u32);
-    }
-    let control_volume_cell_count = artifact
-        .prep
-        .prepared_meshes
-        .iter()
-        .map(|mesh| mesh.control_volume_cell_count as usize)
-        .sum::<usize>();
-    let control_volume_face_count = artifact
-        .prep
-        .prepared_meshes
-        .iter()
-        .map(|mesh| mesh.control_volume_face_count as usize)
-        .sum::<usize>();
-    let control_volume_internal_face_count = artifact
-        .prep
-        .prepared_meshes
-        .iter()
-        .map(|mesh| mesh.control_volume_internal_face_count as usize)
-        .sum::<usize>();
-    let control_volume_boundary_face_count = artifact
-        .prep
-        .prepared_meshes
-        .iter()
-        .map(|mesh| mesh.control_volume_boundary_face_count as usize)
-        .sum::<usize>();
-    let (control_volume_coverage_sum, control_volume_coverage_weight) = artifact
-        .prep
-        .prepared_meshes
-        .iter()
-        .map(|mesh| {
-            (
-                mesh.control_volume_connectivity_coverage_ratio
-                    .clamp(0.0, 1.0),
-                mesh.element_count.max(1) as f64,
-            )
-        })
-        .fold(
-            (0.0_f64, 0.0_f64),
-            |(sum, weight_sum), (coverage, weight)| (sum + coverage * weight, weight_sum + weight),
-        );
-    let control_volume_connectivity_coverage_ratio = if control_volume_coverage_weight > 0.0 {
-        control_volume_coverage_sum / control_volume_coverage_weight
-    } else {
-        0.0
-    };
-
-    Ok(Some(AnalysisRunPrepContext {
-        prepared_mesh_count,
-        prepared_node_count,
-        prepared_element_count,
-        mapped_region_count: artifact.prep.region_mappings.len(),
-        min_scaled_jacobian: artifact.prep.quality.min_scaled_jacobian,
-        mean_aspect_ratio: artifact.prep.quality.mean_aspect_ratio,
-        inverted_element_count: artifact.prep.quality.inverted_element_count as usize,
-        mapped_load_count: model
-            .loads
-            .iter()
-            .filter(|load| {
-                artifact
-                    .prep
-                    .region_mappings
-                    .iter()
-                    .any(|mapping| mapping.region_id == load.region_id)
-            })
-            .count(),
-        mapped_bc_count: model
-            .boundary_conditions
-            .iter()
-            .filter(|bc| {
-                artifact
-                    .prep
-                    .region_mappings
-                    .iter()
-                    .any(|mapping| mapping.region_id == bc.region_id)
-            })
-            .count(),
-        layout_seed: {
-            let mut seed = 1469598103934665603_u64;
-            for mapping in &artifact.prep.region_mappings {
-                for byte in mapping.region_id.as_bytes() {
-                    seed ^= *byte as u64;
-                    seed = seed.wrapping_mul(1099511628211_u64);
-                }
-            }
-            seed
-        },
-        topology_dof_multiplier,
-        topology_bandwidth_estimate,
-        mapped_region_participation_ratio,
-        topology_surface_patch_ratio,
-        topology_volume_core_ratio,
-        topology_mixed_family_ratio,
-        topology_region_span_mean,
-        topology_region_block_count: region_block_count,
-        topology_region_mesh_mean,
-        topology_region_mesh_variance,
-        topology_triangle_family_ratio,
-        topology_quad_family_ratio,
-        topology_tetrahedron_family_ratio,
-        topology_hex_family_ratio,
-        coordinate_span_x_m,
-        coordinate_span_y_m,
-        coordinate_span_z_m,
-        coordinate_active_dimension_count,
-        coordinate_characteristic_length_m,
-        element_geometry_node_count,
-        element_geometry_edge_count,
-        mean_element_edge_length_m,
-        mean_element_area_m2,
-        element_geometry_coverage_ratio,
-        reference_element_coordinates_m,
-        reference_element_area_m2,
-        control_volume_cell_count,
-        control_volume_face_count,
-        control_volume_internal_face_count,
-        control_volume_boundary_face_count,
-        control_volume_connectivity_coverage_ratio,
-        element_topology_sample_element_count,
-        element_topology_sample_edge_count,
-        element_topology_sample_edge_nodes,
-        element_topology_sample_node_coordinates_m,
-        element_topology_sample_element_edges,
-        element_topology_sample_element_orientations,
-        element_topology_sample_element_areas_m2,
-        element_topology_node_coordinates_m,
-        element_topology_edge_nodes,
-        element_topology_element_edges,
-        element_topology_element_orientations,
-        element_topology_element_areas_m2,
-    }))
-}
-
 fn run_solve_ms(run: &AnalysisRunResult) -> Option<f64> {
     for code in [
         "FEA_NONLINEAR_COST",
@@ -15386,22 +14338,6 @@ fn diagnostic_metric_bool(
         .and_then(|value| value.parse::<bool>().ok())
 }
 
-fn diagnostic_metric_string(
-    diagnostics: &[runmat_analysis_fea::diagnostics::FeaDiagnostic],
-    code: &str,
-    key: &str,
-) -> Option<String> {
-    diagnostics
-        .iter()
-        .find(|diag| diag.code == code)
-        .and_then(|diag| {
-            diag.message
-                .split_whitespace()
-                .find_map(|token| token.strip_prefix(&format!("{key}=")))
-        })
-        .map(|value| value.to_string())
-}
-
 fn percentile(sorted_samples: &[f64], ratio: f64) -> Option<f64> {
     if sorted_samples.is_empty() {
         return None;
@@ -15416,25 +14352,6 @@ fn mean(values: &[f64]) -> f64 {
     } else {
         values.iter().sum::<f64>() / values.len() as f64
     }
-}
-
-fn calibration_profile_rate(entries: &[AnalysisRunResult], profile: &str) -> Option<f64> {
-    let values = entries
-        .iter()
-        .filter_map(|run| {
-            diagnostic_metric_string(&run.run.diagnostics, "FEA_PREP_CALIBRATION", "profile")
-        })
-        .collect::<Vec<_>>();
-    if values.is_empty() {
-        return None;
-    }
-    Some(
-        values
-            .iter()
-            .filter(|value| value.as_str() == profile)
-            .count() as f64
-            / values.len() as f64,
-    )
 }
 
 fn diagnostic_warning_rate(entries: &[AnalysisRunResult], code: &str) -> Option<f64> {
@@ -15520,18 +14437,10 @@ fn infer_material_models(geometry: &GeometryAsset) -> Vec<MaterialModel> {
     materials
 }
 
-fn select_fixed_region_id(
-    geometry: &GeometryAsset,
-    prep_regions: Option<&HashSet<String>>,
-) -> Option<String> {
+fn select_fixed_region_id(geometry: &GeometryAsset) -> Option<String> {
     geometry
         .regions
         .iter()
-        .filter(|region| {
-            prep_regions
-                .map(|mapped| mapped.contains(&region.region_id))
-                .unwrap_or(true)
-        })
         .find(|region| {
             let key = format!(
                 "{} {}",
@@ -15550,18 +14459,10 @@ fn select_fixed_region_id(
         .map(|region| region.region_id.clone())
 }
 
-fn select_load_region_id(
-    geometry: &GeometryAsset,
-    prep_regions: Option<&HashSet<String>>,
-) -> Option<String> {
+fn select_load_region_id(geometry: &GeometryAsset) -> Option<String> {
     geometry
         .regions
         .iter()
-        .filter(|region| {
-            prep_regions
-                .map(|mapped| mapped.contains(&region.region_id))
-                .unwrap_or(true)
-        })
         .find(|region| {
             let key = format!(
                 "{} {}",
@@ -15745,7 +14646,6 @@ fn em_sweep_known_answer_diagnostic(
 fn infer_material_assignments(
     geometry: &GeometryAsset,
     materials: &[MaterialModel],
-    prep_regions: Option<&HashSet<String>>,
 ) -> Vec<MaterialAssignment> {
     let default_material = materials
         .first()
@@ -15802,20 +14702,11 @@ fn infer_material_assignments(
         } else {
             EvidenceConfidence::Inferred
         };
-        let confidence = if prep_regions
-            .map(|mapped| mapped.contains(&region.region_id))
-            .unwrap_or(false)
-        {
-            EvidenceConfidence::Verified
-        } else {
-            evidence_confidence
-        };
-
         assignments.push(MaterialAssignment {
             region_id: region.region_id.clone(),
             expected_material_id: assigned_material.clone(),
             assigned_material_id: assigned_material,
-            confidence,
+            confidence: evidence_confidence,
         });
     }
 

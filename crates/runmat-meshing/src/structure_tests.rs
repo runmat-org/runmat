@@ -8,6 +8,33 @@ fn read_source(path: &Path) -> String {
         .replace("\r\n", "\n")
 }
 
+fn collect_active_source_files(root: &Path, files: &mut Vec<std::path::PathBuf>) {
+    for entry in fs::read_dir(root).unwrap_or_else(|error| {
+        panic!(
+            "source directory {} should be readable: {error}",
+            root.display()
+        )
+    }) {
+        let path = entry
+            .expect("source directory entry should be readable")
+            .path();
+        if path.is_dir() {
+            if matches!(
+                path.file_name().and_then(|name| name.to_str()),
+                Some("artifacts" | "target")
+            ) {
+                continue;
+            }
+            collect_active_source_files(&path, files);
+        } else if matches!(
+            path.extension().and_then(|extension| extension.to_str()),
+            Some("json" | "md" | "py" | "rs" | "toml" | "ts" | "tsx" | "yaml" | "yml")
+        ) {
+            files.push(path);
+        }
+    }
+}
+
 #[test]
 fn meshing_crate_layout_keeps_stage_implementations_out_of_core() {
     let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -170,5 +197,42 @@ fn meshing_development_observability_stays_feature_gated() {
     assert!(
         constrained_cavity_exact_cover_mod.contains("#[cfg(test)]\npub(crate) use diagnostics::*;"),
         "exact-cover diagnostic exports should stay test-only"
+    );
+}
+
+#[test]
+fn retired_synthetic_preparation_contracts_are_absent() {
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("meshing crate should be nested beneath the workspace root");
+    let mut files = Vec::new();
+    for relative_root in [".github", "crates", "docs", "scripts"] {
+        collect_active_source_files(&workspace_root.join(relative_root), &mut files);
+    }
+
+    let retired_fragments = [
+        ["analysis", "_prep"].concat(),
+        ["geometry", ".prep_for_analysis"].concat(),
+        ["geometry", ".prep_artifact_health"].concat(),
+        ["geometry", "_prep_"].concat(),
+        ["prep", "_artifact_id"].concat(),
+        ["Meshing", "PrepResult"].concat(),
+        ["Fea", "PrepContext"].concat(),
+    ];
+
+    let mut violations = Vec::new();
+    for path in files {
+        let source = read_source(&path);
+        for retired in &retired_fragments {
+            if source.contains(retired) {
+                violations.push(format!("{} contains {retired}", path.display()));
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "retired synthetic preparation contracts remain:\n{}",
+        violations.join("\n")
     );
 }

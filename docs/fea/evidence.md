@@ -1,13 +1,13 @@
 # Evidence & Artifacts
 
-FEA results need records. RunMat writes records at the boundaries where a workflow can fail, change behavior, or need review: geometry import, prep, study validation, planning, solving, result queries, comparisons, and governance checks.
+FEA results need records. RunMat writes records at the boundaries where a workflow can fail, change behavior, or need review: geometry import, meshing, study validation, planning, solving, result queries, comparisons, and governance checks.
 
 ## Evidence Flow
 
 ```mermaid
 flowchart TD
   Geometry["Geometry asset"]
-  Prep["Prep artifact"]
+  Mesh["Solver mesh artifact"]
   Validate["Study validation"]
   Plan["Study plan"]
   Run["Run artifact"]
@@ -15,9 +15,9 @@ flowchart TD
   Compare["Compare and trend"]
   Governance["Governance records"]
 
-  Geometry --> Prep
+  Geometry --> Mesh
   Geometry --> Validate --> Plan --> Run --> Query --> Compare --> Governance
-  Prep --> Run
+  Mesh --> Run
 ```
 
 ## Record Types
@@ -104,7 +104,7 @@ artifact_store = "filesystem"
 artifact_root = "artifacts"
 ```
 
-The default FEA artifact root is `./artifacts`. Run artifacts are stored under `runs`, study validation/plan/run evidence under `studies`, geometry prep artifacts under `geometry-prep`, and thermo-field artifacts under `thermo-fields`. The runtime uses the same filesystem provider for these paths that it uses for study and geometry input, so local, remote, sandboxed, and hosted filesystems follow the same path rules.
+The default FEA artifact root is `./artifacts`. Run artifacts are stored under `runs`, study validation/plan/run evidence under `studies`, and thermo-field artifacts under `thermo-fields`. Meshing artifacts use the meshing artifact store described in [Meshing](/docs/fea/meshing). The runtime uses the same filesystem provider for these paths that it uses for study and geometry input, so local, remote, sandboxed, and hosted filesystems follow the same path rules.
 
 Use the artifact roots when a workflow needs reproducibility, auditability, trend analysis, or release governance.
 
@@ -125,7 +125,7 @@ stress = fea.field(results, "von_mises");
 
 ## Governance Inputs
 
-Governance scripts consume benchmark reports, external-reference artifacts, threshold reports, promotion calibration records, prep calibration records, thermo-field artifacts, and trend summaries.
+Governance scripts consume benchmark reports, external-reference artifacts, threshold reports, promotion calibration records, thermo-field artifacts, and trend summaries.
 
 Governance checks answer questions such as:
 
@@ -134,7 +134,7 @@ Governance checks answer questions such as:
 | Did the operation contract stay stable? | Operation envelopes, typed errors, payload snapshots. |
 | Did a benchmark stay within accepted thresholds? | Diagnostics, metrics, quality gates, quality reasons. |
 | Is a family ready to promote? | Readiness reports, missing-evidence checks, trend posture, reference comparisons. |
-| Did calibration drift? | Prep and promotion calibration artifacts. |
-| Can the run be explained later? | Study plan, run artifact, provenance, diagnostics, geometry/prep artifacts. |
+| Did calibration drift? | Promotion calibration artifacts. |
+| Can the run be explained later? | Study plan, run artifact, provenance, diagnostics, geometry and mesh artifacts. |
 
 For the correctness standard behind those records, see [Verification & Validation](/docs/fea/validation).

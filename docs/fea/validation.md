@@ -35,13 +35,11 @@ Use these labels in [Current Status](/docs/fea/status):
 | Source | What it covers |
 | --- | --- |
 | `crates/runmat-analysis/fea` tests | Core FEA solver behavior, invalid fixtures, diagnostics, deterministic replay, backend parity/fallback behavior where covered. |
-| `crates/runmat-runtime/src/analysis/tests.rs` | Runtime study, sweep, run, result, artifact, prep, option, and `.fea` parsing behavior. |
+| `crates/runmat-runtime/src/analysis/tests.rs` | Runtime study, sweep, run, result, artifact, option, and `.fea` parsing behavior. |
 | `crates/runmat-runtime/tests/operation_contracts.rs` | Public operation contracts, error codes, result queries, quality propagation, provenance, and study artifacts. |
 | `crates/runmat-runtime/tests/analysis` | Conformance manifest and benchmark report harness across the supported families. |
-| `crates/runmat-runtime/tests/geometry_prep_conformance.rs` | Geometry prep determinism and region mapping expectations. |
-| `crates/runmat-runtime/tests/prep_solve_conformance.rs` | Prep-aware solve behavior and documented quality limits. |
 | `scripts/fea/governance` | Benchmark report validation, external references, readiness, thresholds, and promotion calibration. |
-| `scripts/fea/prep_calibration` and `scripts/fea/thermo_artifacts` | Prep and thermo-field artifact drift, promotion, and validation workflows. |
+| `scripts/fea/thermo_artifacts` | Thermo-field artifact drift, promotion, and validation workflows. |
 
 These checks provide strong L0-L2 evidence across many paths. Families marked L2 in the summary below have reached the L2 bar for their currently exposed public contract: solver behavior, fields, diagnostics, invalid-case classes, and backend parity or documented fallback are covered by automated evidence. L3-L5 require deeper family-specific known-answer, convergence, external-reference, and governance evidence.
 

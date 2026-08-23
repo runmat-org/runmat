@@ -296,7 +296,6 @@ fn configure_plotting_from_config(config: &RunMatRuntimeConfig) {
 
 fn configure_analysis_from_config(config: &RunMatRuntimeConfig) -> Result<()> {
     use runmat_runtime::analysis::{self, storage};
-    use runmat_runtime::geometry;
 
     let artifact_root = config
         .fea
@@ -332,18 +331,6 @@ fn configure_analysis_from_config(config: &RunMatRuntimeConfig) -> Result<()> {
             .or_else(|| Some(artifact_root.join("thermo-fields"))),
     })
     .map_err(|err| anyhow::anyhow!("Failed to configure FEA runtime: {err}"))?;
-    geometry::configure_prep_artifacts(geometry::GeometryPrepArtifactConfig {
-        artifact_root: config
-            .fea
-            .geometry_prep_artifact_root
-            .clone()
-            .or_else(|| Some(artifact_root.join("geometry-prep"))),
-        max_artifacts: config.fea.geometry_prep_max_artifacts,
-        max_artifacts_per_geometry: config.fea.geometry_prep_max_artifacts_per_geometry,
-        max_age_seconds: config.fea.geometry_prep_max_age_seconds,
-        require_latest_revision: config.fea.geometry_prep_require_latest_revision,
-    })
-    .map_err(|err| anyhow::anyhow!("Failed to configure geometry prep artifacts: {err}"))?;
     Ok(())
 }
 

@@ -1,13 +1,6 @@
 //! Topology-first meshing pipeline orchestration.
 
-pub mod analysis_prep;
 pub mod visualization;
-
-pub use analysis_prep::{
-    prepare_geometry_for_analysis, ElementFamilyHint, MeshConnectivityClass, MeshingOptions,
-    MeshingPrepResult, MeshingProfile, MeshingProvenance, MeshingQualityReport,
-    PreparedMeshDescriptor, RegionMeshMapping,
-};
 pub use visualization::{
     map_nodal_vector_field_to_boundary_faces, map_nodal_vector_field_to_boundary_nodes,
     map_volume_scalar_field_to_boundary_faces, BoundaryFaceScalarValue, BoundaryFaceVectorValue,

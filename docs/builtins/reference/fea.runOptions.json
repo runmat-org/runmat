@@ -10,7 +10,7 @@
     "Supported solver families are `linear_static`, `modal`, `acoustic`, `thermal`, `transient`, `cfd`, `cht`, `fsi`, `nonlinear`, and `electromagnetic`.",
     "Count and iteration fields are nonnegative exact structural scalars at construction. All eight integer classes and ordinary integral doubles are accepted exactly; fractional, nonfinite, negative, out-of-range, nonscalar, and resident controls reject. Solver-specific positivity checks run before execution.",
     "Tolerance, time, scale, ratio, exponent, frequency, and residual fields are real physical scalars. Integer inputs cross once into binary64 after kind, field, and scalar-shape validation; solver-specific finiteness and range checks run before execution.",
-    "Logical controls require logical scalars. `PrecisionMode`, `PreconditionerMode`, `QualityPolicy`, `PrepArtifactId`, and `PrepCalibrationProfile` are text. Public `PrepContext` injection is rejected because prep context is internal runtime state.",
+    "Logical controls require logical scalars. `PrecisionMode`, `PreconditionerMode`, and `QualityPolicy` are text.",
     "Unknown or duplicate normalized options reject before object construction. Structural option properties remain exact typed integers; true floating options remain double."
   ],
   "integer_forms": [
@@ -27,8 +27,7 @@
   "defaults": [
     "Every family defaults `DeterministicMode` to false, `PrecisionMode` to `fp64`, and `QualityPolicy` to `balanced`.",
     "`linear_static` additionally defaults `PreconditionerMode` to `auto` and has no numeric count or physical scalar option.",
-    "Transient defaults `AdaptiveTimeStep` to true; nonlinear defaults `LineSearch` to true; electromagnetic defaults `SweepEnabled` to false and `SweepFrequencyHz` to empty.",
-    "Prep artifact id and calibration profile default to absent."
+    "Transient defaults `AdaptiveTimeStep` to true; nonlinear defaults `LineSearch` to true; electromagnetic defaults `SweepEnabled` to false and `SweepFrequencyHz` to empty."
   ],
   "examples": [{ "description": "Configure an exact transient step count", "input": "opts = fea.runOptions(\"transient\", \"StepCount\", uint32(20), \"TimeStepS\", 5e-4);" }],
   "faqs": [{ "question": "Why is an integer accepted for a tolerance?", "answer": "It is accepted as a finite real scalar and converted once to the option's binary64 physics field; count fields instead remain exact integers." }],

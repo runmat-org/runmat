@@ -16,11 +16,7 @@ use runmat_runtime::analysis::{
     ElectroThermalCouplingOptions, ElectroTimeProfilePoint, PlasticityConstitutiveOptions,
     ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
 };
-use runmat_runtime::geometry::{geometry_prep_for_analysis_op, GeometryPrepForAnalysisSpec};
 use sha2::{Digest, Sha256};
-
-const SYNTHETIC_TWO_TRIANGLE_PREP_OBJ: &str =
-    "o thermal_prep\nv 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf 1 2 3\nf 1 3 4\n";
 
 fn thermo_field_payload_hash_for_value(payload: &serde_json::Value) -> String {
     let schema = payload
@@ -657,147 +653,16 @@ fn electro_coupling_for_fixture(spec_id: &str) -> Option<ElectroThermalCouplingO
     }
 }
 
-fn electro_thermal_prep_artifact_id_for_fixture(
-    spec_id: &str,
-    model: &AnalysisModel,
-) -> Option<String> {
-    if !matches!(
-        spec_id,
-        "electro_thermal_joule_benign_gpu_provider"
-            | "electro_thermal_joule_pathological_gpu_provider"
-    ) {
-        return None;
-    }
-
-    let mut geometry = geometry_load_op(
-        &format!("/synthetic/{spec_id}_prep.stl"),
-        SYNTHETIC_TRIANGLE_STL.as_bytes(),
-        OperationContext::new(Some(format!("trace-prep-geometry-{spec_id}")), None),
-    )
-    .expect("load synthetic prep geometry for electro-thermal fixture")
-    .data;
-    geometry.geometry_id = model.geometry_id.clone();
-    geometry.revision = model.geometry_revision;
-
-    let prep = geometry_prep_for_analysis_op(
-        &geometry,
-        GeometryPrepForAnalysisSpec::default(),
-        OperationContext::new(Some(format!("trace-prep-artifact-{spec_id}")), None),
-    )
-    .expect("prepare trusted electro-thermal fixture geometry");
-    Some(prep.data.prep_artifact_id)
-}
-
-fn thermal_prep_artifact_id_for_fixture(spec_id: &str, model: &AnalysisModel) -> Option<String> {
-    if !matches!(
-        spec_id,
-        "thermal_standalone_ramp_cpu"
-            | "thermal_standalone_ramp_gpu_provider"
-            | "thermal_standalone_ramp_gpu_fallback"
-    ) {
-        return None;
-    }
-
-    let mut geometry = geometry_load_op(
-        &format!("/synthetic/{spec_id}_prep.obj"),
-        SYNTHETIC_TWO_TRIANGLE_PREP_OBJ.as_bytes(),
-        OperationContext::new(Some(format!("trace-prep-geometry-{spec_id}")), None),
-    )
-    .expect("load synthetic prep geometry for thermal fixture")
-    .data;
-    geometry.geometry_id = model.geometry_id.clone();
-    geometry.revision = model.geometry_revision;
-
-    let prep = geometry_prep_for_analysis_op(
-        &geometry,
-        GeometryPrepForAnalysisSpec::default(),
-        OperationContext::new(Some(format!("trace-prep-artifact-{spec_id}")), None),
-    )
-    .expect("prepare trusted thermal fixture geometry");
-    Some(prep.data.prep_artifact_id)
-}
-
-fn electromagnetic_prep_artifact_id_for_fixture(
-    spec_id: &str,
-    model: &AnalysisModel,
-) -> Option<String> {
-    if !spec_id.starts_with("electromagnetic_reference_") {
-        return None;
-    }
-
-    let mut geometry = geometry_load_op(
-        &format!("/synthetic/{spec_id}_prep.obj"),
-        SYNTHETIC_TWO_TRIANGLE_PREP_OBJ.as_bytes(),
-        OperationContext::new(Some(format!("trace-prep-geometry-{spec_id}")), None),
-    )
-    .expect("load synthetic prep geometry for electromagnetic fixture")
-    .data;
-    geometry.geometry_id = model.geometry_id.clone();
-    geometry.revision = model.geometry_revision;
-
-    let prep = geometry_prep_for_analysis_op(
-        &geometry,
-        GeometryPrepForAnalysisSpec::default(),
-        OperationContext::new(Some(format!("trace-prep-artifact-{spec_id}")), None),
-    )
-    .expect("prepare trusted electromagnetic fixture geometry");
-    Some(prep.data.prep_artifact_id)
-}
-
-fn coupled_flow_prep_artifact_id_for_fixture(
-    spec_id: &str,
-    model: &AnalysisModel,
-) -> Option<String> {
-    if !matches!(
-        spec_id,
-        "cht_coupled_cpu"
-            | "cht_coupled_channel_slab_cpu"
-            | "cht_coupled_gpu_provider"
-            | "cht_coupled_gpu_fallback"
-            | "fsi_coupled_cpu"
-            | "fsi_coupled_pipe_plate_cpu"
-            | "fsi_coupled_gpu_provider"
-            | "fsi_coupled_gpu_fallback"
-    ) {
-        return None;
-    }
-
-    let mut geometry = geometry_load_op(
-        &format!("/synthetic/{spec_id}_prep.stl"),
-        SYNTHETIC_TRIANGLE_STL.as_bytes(),
-        OperationContext::new(Some(format!("trace-prep-geometry-{spec_id}")), None),
-    )
-    .expect("load synthetic prep geometry for coupled-flow fixture")
-    .data;
-    geometry.geometry_id = model.geometry_id.clone();
-    geometry.revision = model.geometry_revision;
-
-    let prep = geometry_prep_for_analysis_op(
-        &geometry,
-        GeometryPrepForAnalysisSpec::default(),
-        OperationContext::new(Some(format!("trace-prep-artifact-{spec_id}")), None),
-    )
-    .expect("prepare trusted coupled-flow fixture geometry");
-    Some(prep.data.prep_artifact_id)
-}
-
-fn thermal_options_for_spec(
-    spec: &FixtureSpec,
-    model: &AnalysisModel,
-) -> AnalysisThermalRunOptions {
+fn thermal_options_for_spec(spec: &FixtureSpec) -> AnalysisThermalRunOptions {
     AnalysisThermalRunOptions {
         step_count: spec
             .transient_step_count
             .unwrap_or(AnalysisThermalRunOptions::default().step_count),
-        prep_artifact_id: thermal_prep_artifact_id_for_fixture(spec.id, model),
         ..AnalysisThermalRunOptions::default()
     }
 }
 
-fn electromagnetic_options_for_spec(
-    spec: &FixtureSpec,
-    model: &AnalysisModel,
-) -> AnalysisElectromagneticRunOptions {
+fn electromagnetic_options_for_spec(spec: &FixtureSpec) -> AnalysisElectromagneticRunOptions {
     AnalysisElectromagneticRunOptions {
         deterministic_mode: true,
         precision_mode: PrecisionMode::Fp64,
@@ -805,18 +670,12 @@ fn electromagnetic_options_for_spec(
         residual_target: 1.0e-6,
         harmonic_tolerance: 1.0e-7,
         harmonic_max_iterations: 96,
-        prep_context: None,
-        prep_artifact_id: electromagnetic_prep_artifact_id_for_fixture(spec.id, model),
-        prep_calibration_profile: None,
         sweep_enabled: !electromagnetic_sweep_frequency_hz_for_fixture(spec.id).is_empty(),
         sweep_frequency_hz: electromagnetic_sweep_frequency_hz_for_fixture(spec.id),
     }
 }
 
-fn transient_options_for_spec(
-    spec: &FixtureSpec,
-    model: &AnalysisModel,
-) -> AnalysisTransientRunOptions {
+fn transient_options_for_spec(spec: &FixtureSpec) -> AnalysisTransientRunOptions {
     let requested_bucket_rel_tol = std::env::var("RUNMAT_TRANSIENT_DT_BUCKET_REL_TOL")
         .ok()
         .and_then(|value| value.parse::<f64>().ok());
@@ -826,8 +685,6 @@ fn transient_options_for_spec(
             .unwrap_or(AnalysisTransientRunOptions::default().step_count),
         dt_bucket_rel_tolerance: requested_bucket_rel_tol
             .unwrap_or(AnalysisTransientRunOptions::solid_recommended().dt_bucket_rel_tolerance),
-        prep_context: None,
-        prep_artifact_id: electro_thermal_prep_artifact_id_for_fixture(spec.id, model),
         ..AnalysisTransientRunOptions::solid_recommended()
     }
 }
@@ -2741,13 +2598,13 @@ fn run_fixture_cpu(spec: &FixtureSpec, model: &AnalysisModel) -> FixtureRunResul
         AnalysisRunKind::Transient => analysis_run_transient_with_options_op(
             model,
             ComputeBackend::Cpu,
-            transient_options_for_spec(spec, model),
+            transient_options_for_spec(spec),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
         AnalysisRunKind::Thermal => analysis_run_thermal_with_options_op(
             model,
             ComputeBackend::Cpu,
-            thermal_options_for_spec(spec, model),
+            thermal_options_for_spec(spec),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
         AnalysisRunKind::Cfd => analysis_run_cfd_with_options_op(
@@ -2764,9 +2621,6 @@ fn run_fixture_cpu(spec: &FixtureSpec, model: &AnalysisModel) -> FixtureRunResul
                 max_linear_iters: 128,
                 tolerance: 1.0e-8,
                 residual_warn_threshold: 1.0e-4,
-                prep_context: None,
-                prep_artifact_id: None,
-                prep_calibration_profile: None,
             },
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
@@ -2784,9 +2638,6 @@ fn run_fixture_cpu(spec: &FixtureSpec, model: &AnalysisModel) -> FixtureRunResul
                 max_linear_iters: 128,
                 tolerance: 1.0e-8,
                 residual_warn_threshold: 1.0e-4,
-                prep_context: None,
-                prep_artifact_id: coupled_flow_prep_artifact_id_for_fixture(spec.id, model),
-                prep_calibration_profile: None,
             },
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
@@ -2804,9 +2655,6 @@ fn run_fixture_cpu(spec: &FixtureSpec, model: &AnalysisModel) -> FixtureRunResul
                 max_linear_iters: 128,
                 tolerance: 1.0e-8,
                 residual_warn_threshold: 1.0e-4,
-                prep_context: None,
-                prep_artifact_id: coupled_flow_prep_artifact_id_for_fixture(spec.id, model),
-                prep_calibration_profile: None,
             },
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
@@ -2819,7 +2667,7 @@ fn run_fixture_cpu(spec: &FixtureSpec, model: &AnalysisModel) -> FixtureRunResul
         AnalysisRunKind::Electromagnetic => analysis_run_electromagnetic_with_options_op(
             model,
             ComputeBackend::Cpu,
-            electromagnetic_options_for_spec(spec, model),
+            electromagnetic_options_for_spec(spec),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
     })
@@ -2858,13 +2706,13 @@ fn run_fixture_gpu(spec: &FixtureSpec, model: &AnalysisModel, mode: GpuMode) -> 
         AnalysisRunKind::Transient => analysis_run_transient_with_options_op(
             model,
             ComputeBackend::Gpu,
-            transient_options_for_spec(spec, model),
+            transient_options_for_spec(spec),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
         AnalysisRunKind::Thermal => analysis_run_thermal_with_options_op(
             model,
             ComputeBackend::Gpu,
-            thermal_options_for_spec(spec, model),
+            thermal_options_for_spec(spec),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
         AnalysisRunKind::Cfd => analysis_run_cfd_with_options_op(
@@ -2881,9 +2729,6 @@ fn run_fixture_gpu(spec: &FixtureSpec, model: &AnalysisModel, mode: GpuMode) -> 
                 max_linear_iters: 128,
                 tolerance: 1.0e-8,
                 residual_warn_threshold: 1.0e-4,
-                prep_context: None,
-                prep_artifact_id: None,
-                prep_calibration_profile: None,
             },
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
@@ -2901,9 +2746,6 @@ fn run_fixture_gpu(spec: &FixtureSpec, model: &AnalysisModel, mode: GpuMode) -> 
                 max_linear_iters: 128,
                 tolerance: 1.0e-8,
                 residual_warn_threshold: 1.0e-4,
-                prep_context: None,
-                prep_artifact_id: coupled_flow_prep_artifact_id_for_fixture(spec.id, model),
-                prep_calibration_profile: None,
             },
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
@@ -2921,9 +2763,6 @@ fn run_fixture_gpu(spec: &FixtureSpec, model: &AnalysisModel, mode: GpuMode) -> 
                 max_linear_iters: 128,
                 tolerance: 1.0e-8,
                 residual_warn_threshold: 1.0e-4,
-                prep_context: None,
-                prep_artifact_id: coupled_flow_prep_artifact_id_for_fixture(spec.id, model),
-                prep_calibration_profile: None,
             },
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
@@ -2936,7 +2775,7 @@ fn run_fixture_gpu(spec: &FixtureSpec, model: &AnalysisModel, mode: GpuMode) -> 
         AnalysisRunKind::Electromagnetic => analysis_run_electromagnetic_with_options_op(
             model,
             ComputeBackend::Gpu,
-            electromagnetic_options_for_spec(spec, model),
+            electromagnetic_options_for_spec(spec),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
     };
@@ -3409,34 +3248,6 @@ fn push_thermal_standalone_threshold_assertions(
         fixture_id,
         assertions,
         failures,
-        "thermal_standalone_prep_recovery_edge_count",
-        "FEA_THERMAL_FIELD_RECOVERY",
-        diagnostic_metric(
-            run,
-            "FEA_THERMAL_FIELD_RECOVERY",
-            "prep_recovery_edge_count",
-        ),
-        Some(0.0),
-        None,
-    );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        "thermal_standalone_prep_triangle_element_count",
-        "FEA_THERMAL_FIELD_RECOVERY",
-        diagnostic_metric(
-            run,
-            "FEA_THERMAL_FIELD_RECOVERY",
-            "prep_triangle_element_count",
-        ),
-        Some(1.0),
-        None,
-    );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
         "thermal_standalone_full_topology_element_count",
         "FEA_THERMAL_FIELD_RECOVERY",
         diagnostic_metric(
@@ -3451,7 +3262,7 @@ fn push_thermal_standalone_threshold_assertions(
         fixture_id,
         assertions,
         failures,
-        "thermal_standalone_prep_active_dimension_count",
+        "thermal_standalone_active_dimension_count",
         "FEA_THERMAL_FIELD_RECOVERY",
         diagnostic_metric(
             run,
@@ -3622,20 +3433,6 @@ fn push_em_reference_topology_threshold_assertions(
         "electromagnetic_oriented_edge_count",
         "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
         diagnostic_metric(run, "FEA_EM_MAXWELL_EDGE_TOPOLOGY", "oriented_edge_count"),
-        Some(1.0),
-        None,
-    );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        "electromagnetic_prep_recovery_edge_count",
-        "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
-        diagnostic_metric(
-            run,
-            "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
-            "prep_recovery_edge_count",
-        ),
         Some(1.0),
         None,
     );
@@ -4379,11 +4176,6 @@ pub(super) fn run_fixture(
     let mut gpu_solver_prepared_build_ms = None;
     let mut gpu_solver_solve_ms = None;
     let mut gpu_solver_fallback_apply_count = None;
-    let mut prep_calibration_profile = None;
-    let mut prep_calibration_fingerprint = None;
-    let mut prep_acceptance_score = None;
-    let mut prep_acceptance_passed = None;
-    let mut prep_acceptance_fingerprint = None;
     let mut thermo_coupling_enabled = None;
     let mut thermo_coupling_fingerprint = None;
     let mut thermo_constitutive_temperature_factor = None;
@@ -4509,11 +4301,6 @@ pub(super) fn run_fixture(
                     gpu_solver_prepared_build_ms,
                     gpu_solver_solve_ms,
                     gpu_solver_fallback_apply_count,
-                    prep_calibration_profile,
-                    prep_calibration_fingerprint,
-                    prep_acceptance_score,
-                    prep_acceptance_passed,
-                    prep_acceptance_fingerprint,
                     thermo_coupling_enabled,
                     thermo_coupling_fingerprint,
                     thermo_constitutive_temperature_factor,
@@ -9603,20 +9390,6 @@ pub(super) fn run_fixture(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
-                            "em_homogeneous_prep_recovery_edge_count",
-                            "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
-                                "prep_recovery_edge_count",
-                            ),
-                            Some(1.0),
-                            None,
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
                             "em_homogeneous_incidence_element_count",
                             "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
                             diagnostic_metric(
@@ -10656,11 +10429,6 @@ pub(super) fn run_fixture(
                                 gpu_solver_prepared_build_ms,
                                 gpu_solver_solve_ms,
                                 gpu_solver_fallback_apply_count,
-                                prep_calibration_profile,
-                                prep_calibration_fingerprint,
-                                prep_acceptance_score,
-                                prep_acceptance_passed,
-                                prep_acceptance_fingerprint,
                                 thermo_coupling_enabled,
                                 thermo_coupling_fingerprint,
                                 thermo_constitutive_temperature_factor,
@@ -10754,15 +10522,6 @@ pub(super) fn run_fixture(
                     {
                         failures.push("fea.results contract version mismatch".to_string());
                     }
-
-                    prep_calibration_profile =
-                        gpu_results.data.summary.prep_calibration_profile.clone();
-                    prep_calibration_fingerprint =
-                        gpu_results.data.summary.prep_calibration_fingerprint;
-                    prep_acceptance_score = gpu_results.data.summary.prep_acceptance_score;
-                    prep_acceptance_passed = gpu_results.data.summary.prep_acceptance_passed;
-                    prep_acceptance_fingerprint =
-                        gpu_results.data.summary.prep_acceptance_fingerprint;
                     thermo_coupling_enabled = gpu_results.data.summary.thermo_coupling_enabled;
                     thermo_coupling_fingerprint =
                         gpu_results.data.summary.thermo_coupling_fingerprint;
@@ -11123,11 +10882,6 @@ pub(super) fn run_fixture(
                                     gpu_solver_prepared_build_ms,
                                     gpu_solver_solve_ms,
                                     gpu_solver_fallback_apply_count,
-                                    prep_calibration_profile,
-                                    prep_calibration_fingerprint,
-                                    prep_acceptance_score,
-                                    prep_acceptance_passed,
-                                    prep_acceptance_fingerprint,
                                     thermo_coupling_enabled,
                                     thermo_coupling_fingerprint,
                                     thermo_constitutive_temperature_factor,
@@ -11294,11 +11048,6 @@ pub(super) fn run_fixture(
         gpu_solver_prepared_build_ms,
         gpu_solver_solve_ms,
         gpu_solver_fallback_apply_count,
-        prep_calibration_profile,
-        prep_calibration_fingerprint,
-        prep_acceptance_score,
-        prep_acceptance_passed,
-        prep_acceptance_fingerprint,
         thermo_coupling_enabled,
         thermo_coupling_fingerprint,
         thermo_constitutive_temperature_factor,

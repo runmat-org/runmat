@@ -166,11 +166,7 @@ pub(super) fn solve_implicit_step_system(
 }
 
 fn graph_tuned_preconditioner_kind(summary: &AssemblySummary) -> SpdPreconditionerKind {
-    if let Some(graph) = summary.prep_graph_assembly.as_ref() {
-        if graph.recommend_ilu0 {
-            return SpdPreconditionerKind::Ilu0;
-        }
-    }
+    let _ = summary;
     SpdPreconditionerKind::Jacobi
 }
 

@@ -11,7 +11,7 @@ use crate::{
     },
     progress::{emit_phase, is_cancelled, FeaProgressPhase, FeaProgressStatus},
     solve::runtime_tensor_solver::RuntimeTensorPreparedLinearSystem,
-    ComputeBackend, FeaElectroThermalContext, FeaPrepContext, FeaThermoMechanicalContext,
+    ComputeBackend, FeaElectroThermalContext, FeaThermoMechanicalContext,
 };
 
 mod diagnostics;
@@ -42,7 +42,6 @@ pub struct TransientSolveOptions {
     pub dt_bucket_rel_tolerance: f64,
     #[serde(default = "default_progress_operation")]
     pub progress_operation: String,
-    pub prep_context: Option<FeaPrepContext>,
     pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
     pub electro_thermal_context: Option<FeaElectroThermalContext>,
 }
@@ -70,7 +69,6 @@ impl Default for TransientSolveOptions {
             adapt_nonconverged_shrink: 0.75,
             dt_bucket_rel_tolerance: 0.0,
             progress_operation: default_progress_operation(),
-            prep_context: None,
             thermo_mechanical_context: None,
             electro_thermal_context: None,
         }
