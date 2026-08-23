@@ -12,6 +12,7 @@ mod diagnostic;
 mod dispatcher;
 mod domain_model_objects;
 mod error;
+mod evaluator_provider;
 mod evidence;
 mod evidence_objects;
 mod exact_dag;
@@ -54,10 +55,7 @@ pub use budget::{
     MeshingProgressSink, MeshingStageCheckpoint, MeshingStageControl, NoopMeshingProgress,
 };
 pub use curve_join_kernel::ExactCurveJoinKernel;
-pub use curve_kernel::{
-    ExactCurveEvaluatorProvider, ExactCurveGeometryEvaluation, ExactCurveStageKernel,
-    PortableCurveEvaluatorProvider,
-};
+pub use curve_kernel::ExactCurveStageKernel;
 pub use curve_refinement_kernel::ExactCurveRefinementKernel;
 pub use dispatcher::MeshingKernelDispatcher;
 pub use domain_model_objects::{
@@ -66,6 +64,7 @@ pub use domain_model_objects::{
     PreparedDomainModelObjects,
 };
 pub use error::{MeshingExecutionError, MeshingExecutionResult};
+pub use evaluator_provider::{ExactMeshingEvaluatorProvider, PortableMeshingEvaluatorProvider};
 pub use evidence::{assemble_meshing_evidence, MeshingEvidenceContext};
 pub use evidence_objects::{
     import_evidence_input, import_evidence_objects, prepare_evidence_input,
@@ -108,9 +107,7 @@ pub use serial::{
     execute_serial_stage, CompletedMeshingStage, MeshingSerialExecutionError,
     MeshingStageInvocation, MeshingStageKernel, PreparedMeshingInput, ValidatedMeshingStageOutput,
 };
-pub use solver_projection_kernel::{
-    ExactSolverEvaluatorProvider, ExactSolverProjectionKernel, PortableSolverEvaluatorProvider,
-};
+pub use solver_projection_kernel::ExactSolverProjectionKernel;
 pub use solver_terminal_kernel::{
     SolverPublicationKernel, SolverSerializationKernel, SolverValidationKernel,
 };

@@ -16,20 +16,20 @@ use crate::curve_kernel::{curve_failure, curve_options, map_curve_error, resolve
 use crate::surface_join_kernel::partition_record;
 use crate::surface_kernel::{curve_record, exact_surface_join_options};
 use crate::{
-    ExactCurveEvaluatorProvider, MeshingStageCheckpoint, MeshingStageInvocation,
-    MeshingStageKernel, PortableCurveEvaluatorProvider, PreparedExactGeometryObjects,
+    ExactMeshingEvaluatorProvider, MeshingStageCheckpoint, MeshingStageInvocation,
+    MeshingStageKernel, PortableMeshingEvaluatorProvider, PreparedExactGeometryObjects,
     PreparedMeshingInput, PreparedMeshingResultPublication, ValidatedMeshingStageOutput,
 };
 
 #[derive(Clone, Debug)]
-pub struct ExactCurveRefinementKernel<P = PortableCurveEvaluatorProvider> {
+pub struct ExactCurveRefinementKernel<P = PortableMeshingEvaluatorProvider> {
     evaluator_provider: P,
 }
 
-impl Default for ExactCurveRefinementKernel<PortableCurveEvaluatorProvider> {
+impl Default for ExactCurveRefinementKernel<PortableMeshingEvaluatorProvider> {
     fn default() -> Self {
         Self {
-            evaluator_provider: PortableCurveEvaluatorProvider,
+            evaluator_provider: PortableMeshingEvaluatorProvider,
         }
     }
 }
@@ -40,7 +40,7 @@ impl<P> ExactCurveRefinementKernel<P> {
     }
 }
 
-impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactCurveRefinementKernel<P> {
+impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactCurveRefinementKernel<P> {
     fn execute(
         &self,
         invocation: MeshingStageInvocation<'_, '_>,

@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
 use runmat_execution::Digest;
-use runmat_geometry_core::{GeometryContractError, GeometryModel, PortableExactEvaluator};
 use runmat_meshing_core::{
     CanonicalMeshingContract, MeshingChunkMediaType, MeshingChunkStream, MeshingDiagnosticEntry,
     MeshingDiagnosticValue, MeshingFailure, MeshingFailureCategory, MeshingPartitionKind,
@@ -13,56 +12,27 @@ use runmat_meshing_surface::{
 };
 use runmat_meshing_tetrahedron::cdt::{
     build_delaunay_solver_topology, decode_delaunay_volume_mesh, DelaunayExactEvaluation,
-    DelaunayExactEvaluator, DelaunaySolverTopologyError, DelaunaySolverTopologyErrorKind,
-    DelaunaySolverTopologyInput, DelaunaySolverTopologyOptions,
-    DELAUNAY_VOLUME_MESH_SCHEMA_VERSION,
+    DelaunaySolverTopologyError, DelaunaySolverTopologyErrorKind, DelaunaySolverTopologyInput,
+    DelaunaySolverTopologyOptions, DELAUNAY_VOLUME_MESH_SCHEMA_VERSION,
 };
 
 use crate::volume_kernel::volume_options;
 use crate::{
-    MeshingStageCheckpoint, MeshingStageInvocation, MeshingStageKernel, PreparedDomainModelInput,
+    ExactMeshingEvaluatorProvider, MeshingStageCheckpoint, MeshingStageInvocation,
+    MeshingStageKernel, PortableMeshingEvaluatorProvider, PreparedDomainModelInput,
     PreparedExactGeometryObjects, PreparedMeshingInput, PreparedMeshingResultPublication,
     ValidatedMeshingStageOutput,
 };
 
-pub trait ExactSolverEvaluatorProvider: Send + Sync {
-    fn evaluator<'a>(
-        &self,
-        geometry: &'a PreparedExactGeometryObjects,
-    ) -> Result<Box<dyn DelaunayExactEvaluator + 'a>, GeometryContractError>;
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub struct PortableSolverEvaluatorProvider;
-
-impl ExactSolverEvaluatorProvider for PortableSolverEvaluatorProvider {
-    fn evaluator<'a>(
-        &self,
-        geometry: &'a PreparedExactGeometryObjects,
-    ) -> Result<Box<dyn DelaunayExactEvaluator + 'a>, GeometryContractError> {
-        let GeometryModel::ExactBRep { model } = &geometry.document.model else {
-            return Err(GeometryContractError::invalid(
-                "solver projection geometry",
-                "solver projection requires exact B-rep geometry",
-            ));
-        };
-        Ok(Box::new(PortableExactEvaluator::new(
-            &geometry.evaluators,
-            &geometry.topology,
-            model,
-        )?))
-    }
-}
-
 #[derive(Clone, Debug)]
-pub struct ExactSolverProjectionKernel<P = PortableSolverEvaluatorProvider> {
+pub struct ExactSolverProjectionKernel<P = PortableMeshingEvaluatorProvider> {
     evaluator_provider: P,
 }
 
-impl Default for ExactSolverProjectionKernel<PortableSolverEvaluatorProvider> {
+impl Default for ExactSolverProjectionKernel<PortableMeshingEvaluatorProvider> {
     fn default() -> Self {
         Self {
-            evaluator_provider: PortableSolverEvaluatorProvider,
+            evaluator_provider: PortableMeshingEvaluatorProvider,
         }
     }
 }
@@ -73,7 +43,7 @@ impl<P> ExactSolverProjectionKernel<P> {
     }
 }
 
-impl<P: ExactSolverEvaluatorProvider> MeshingStageKernel for ExactSolverProjectionKernel<P> {
+impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProjectionKernel<P> {
     fn execute(
         &self,
         invocation: MeshingStageInvocation<'_, '_>,
