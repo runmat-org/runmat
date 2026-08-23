@@ -174,6 +174,7 @@ fn inputs(
             }
             PreparedMeshingInput::ExactGeometry(_)
             | PreparedMeshingInput::FacetedGeometry(_)
+            | PreparedMeshingInput::DomainModel(_)
             | PreparedMeshingInput::StageArtifact(_) => {
                 return Err(invalid_input("surface partition input kinds are invalid"));
             }

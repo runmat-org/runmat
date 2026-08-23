@@ -180,6 +180,31 @@ fn faceted_geometry_inputs_use_the_authoritative_geometry_object_shape() {
 }
 
 #[test]
+fn domain_model_inputs_use_the_authoritative_driver_object_shape() {
+    let mut fixture = Fixture::new(MeshingStageKind::SurfaceMesh);
+    fixture.identity.prerequisites[0].kind = MeshingInputKind::DomainModel;
+    fixture.workload.inputs = fixture.identity.prerequisites.clone();
+    fixture.workload.stage_identity_digest = fixture.identity.canonical_digest().unwrap();
+    fixture.input.kind = ValueRefKind::DriverObject;
+    fixture.input.media_type = runmat_meshing_core::MESHING_DOMAIN_MODEL_MEDIA_TYPE.into();
+    fixture.input.value_schema = crate::domain_model_objects::DOMAIN_MODEL_VALUE_SCHEMA.into();
+
+    fixture.submit(MeshingTaskEffectPolicy::UnknownEffect);
+
+    fixture.input.kind = ValueRefKind::ResultObject;
+    assert!(build_task_submission(
+        &fixture.workload,
+        &fixture.identity,
+        &fixture.request,
+        std::slice::from_ref(&fixture.input),
+        BTreeSet::new(),
+        &fixture.context,
+        MeshingTaskEffectPolicy::UnknownEffect,
+    )
+    .is_err());
+}
+
+#[test]
 fn incomplete_or_inconsistent_capability_declarations_are_rejected() {
     let fixture = Fixture::new(MeshingStageKind::SurfaceMesh);
     let mut missing_host = fixture.workload.clone();

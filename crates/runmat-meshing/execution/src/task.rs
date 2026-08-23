@@ -16,9 +16,11 @@ use runmat_execution_runner::TaskSubmission;
 use runmat_meshing_core::{
     CanonicalMeshingContract, ElementOrder, MeshingCapabilityRequirement, MeshingInputKind,
     MeshingPartitionIdentity, MeshingRequest, MeshingStageIdentity, MeshingStageKind,
-    MeshingWorkloadRequest, StableDigest, MESHING_IDENTITY_SCHEMA_VERSION,
+    MeshingWorkloadRequest, StableDigest, MESHING_DOMAIN_MODEL_MEDIA_TYPE,
+    MESHING_IDENTITY_SCHEMA_VERSION,
 };
 
+use crate::domain_model_objects::DOMAIN_MODEL_VALUE_SCHEMA;
 use crate::{
     MeshingArtifactAccess, MeshingExecutionError, MeshingExecutionResult,
     MESHING_STAGE_MANIFEST_MEDIA_TYPE,
@@ -183,6 +185,11 @@ pub(crate) fn validate_input(
             root.kind == ValueRefKind::DriverObject
                 && root.media_type == runmat_geometry_core::FACETED_SOLID_MEDIA_TYPE
                 && root.value_schema == FACETED_GEOMETRY_SCHEMA
+        }
+        MeshingInputKind::DomainModel => {
+            root.kind == ValueRefKind::DriverObject
+                && root.media_type == MESHING_DOMAIN_MODEL_MEDIA_TYPE
+                && root.value_schema == DOMAIN_MODEL_VALUE_SCHEMA
         }
     };
     if root.logical_digest.bytes() != input.digest.bytes()
