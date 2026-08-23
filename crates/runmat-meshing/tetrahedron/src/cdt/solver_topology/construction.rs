@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
+use runmat_geometry_core::PersistentEntityId;
 use runmat_meshing_core::{
     solver_volume_element_identity, ElementOrder, MeshNeighbor, MeshingCancellationSignal,
     SolverMeshNode, SolverMeshTopology, SolverVolumeElement, StableDigest,
@@ -23,7 +23,7 @@ pub(super) fn construct(
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<SolverMeshTopology, DelaunaySolverTopologyError> {
     let node_indices = node_indices(input)?;
-    let materials = validate_materials(input)?;
+    let materials = validate_domain_model(input)?;
     let nodes = build_nodes(input, &node_indices, options, cancellation)?;
     let volume_elements = build_elements(input, &materials)?;
     let neighbors = build_neighbors(input);
@@ -68,7 +68,7 @@ fn node_indices(
     Ok(indices)
 }
 
-fn validate_materials<'a>(
+fn validate_domain_model<'a>(
     input: &'a DelaunaySolverTopologyInput<'_>,
 ) -> Result<BTreeMap<&'a PersistentEntityId, &'a str>, DelaunaySolverTopologyError> {
     let exact_regions = input
@@ -86,34 +86,20 @@ fn validate_materials<'a>(
         .map(|region| &region.region_id)
         .collect::<BTreeSet<_>>();
     if exact_regions != mesh_regions {
-        return Err(invalid_materials(
+        return Err(invalid_domain_model(
             "solver projection requires one nonempty mesh region for every exact region",
         ));
     }
-    let mut materials = BTreeMap::new();
-    let mut previous = None;
-    for assignment in input.region_materials {
-        if previous.is_some_and(|prior| prior >= &assignment.region_id)
-            || assignment.region_id.kind != PersistentEntityKind::Region
-            || assignment.region_id.validate().is_err()
-            || assignment.material_id.is_empty()
-            || assignment.material_id.len() > 256
-            || assignment.material_id.chars().any(char::is_control)
-            || materials
-                .insert(&assignment.region_id, assignment.material_id.as_str())
-                .is_some()
-        {
-            return Err(invalid_materials(
-                "region materials must be valid, nonempty, unique, and canonically ordered",
-            ));
-        }
-        previous = Some(&assignment.region_id);
-    }
-    if materials.keys().copied().collect::<BTreeSet<_>>() != exact_regions {
-        return Err(invalid_materials(
-            "region materials must classify every exact region exactly once",
-        ));
-    }
+    input
+        .domain_model
+        .validate_against_exact_topology(input.exact_topology)
+        .map_err(|error| invalid_domain_model(error.to_string()))?;
+    let materials = input
+        .domain_model
+        .region_materials
+        .iter()
+        .map(|assignment| (&assignment.region_id, assignment.material_id.as_str()))
+        .collect();
     Ok(materials)
 }
 
@@ -217,7 +203,7 @@ fn build_elements(
                 .ok_or_else(|| invalid_mesh("volume tetrahedron has no assigned region"))?;
             let material = materials
                 .get(&region)
-                .ok_or_else(|| invalid_materials("volume region has no material assignment"))?;
+                .ok_or_else(|| invalid_domain_model("volume region has no material assignment"))?;
             Ok(SolverVolumeElement {
                 element_id: index as u64 + 1,
                 stable_identity: solver_volume_element_identity(
@@ -264,6 +250,6 @@ fn invalid_mesh(reason: impl Into<String>) -> DelaunaySolverTopologyError {
     error::failure(DelaunaySolverTopologyErrorKind::InvalidMesh, reason)
 }
 
-fn invalid_materials(reason: impl Into<String>) -> DelaunaySolverTopologyError {
-    error::failure(DelaunaySolverTopologyErrorKind::InvalidMaterials, reason)
+fn invalid_domain_model(reason: impl Into<String>) -> DelaunaySolverTopologyError {
+    error::failure(DelaunaySolverTopologyErrorKind::InvalidDomainModel, reason)
 }

@@ -19,6 +19,7 @@ runmat-meshing-size = { workspace = true }
 robust = "1.2"
 
 [dev-dependencies]
+runmat-geometry-fixtures = { workspace = true }
 
 [features]
 default = []

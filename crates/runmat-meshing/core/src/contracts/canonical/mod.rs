@@ -7,6 +7,7 @@ mod artifact_types;
 mod cancellation;
 mod chunk;
 mod codec;
+mod domain_model;
 mod error;
 mod evidence;
 mod failure;
@@ -38,6 +39,9 @@ pub use chunk::{
     MeshingChunkedPayload,
 };
 pub use codec::{CanonicalMeshingContract, MeshingCanonicalLimits};
+pub use domain_model::{
+    MeshingDomainModel, RegionMaterialAssignment, MESHING_DOMAIN_MODEL_SCHEMA_VERSION,
+};
 pub use error::MeshingContractError;
 pub use evidence::{
     CacheAdmissionDecision, ErrorDistribution, InvariantEvidence, MeshingEvidence,
