@@ -16,6 +16,8 @@ runmat-execution = { workspace = true }
 runmat-execution-artifact = { workspace = true }
 runmat-execution-runner = { workspace = true }
 runmat-execution-transport-native = { workspace = true }
+runmat-geometry-core = { workspace = true }
+runmat-geometry-io = { workspace = true, optional = true }
 runmat-meshing-core = { workspace = true }
 runmat-meshing-execution = { workspace = true }
 runmat-process-host = { workspace = true }
@@ -41,7 +43,6 @@ windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 rcgen = "0.14"
-runmat-geometry-core = { workspace = true }
 runmat-geometry-fixtures = { workspace = true }
 runmat-meshing-curve = { workspace = true }
 runmat-test = { workspace = true }
@@ -51,3 +52,7 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 name = "meshing_process_conformance"
 path = "tests/meshing_process_conformance.rs"
 harness = false
+
+[features]
+default = []
+occt-native = ["dep:runmat-geometry-io", "runmat-geometry-io/occt-native"]

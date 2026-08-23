@@ -3,6 +3,10 @@ use runmat_meshing_tetrahedron::cdt::DelaunayExactEvaluator;
 
 use crate::PreparedExactGeometryObjects;
 
+pub trait ExactMeshingGeometryEvaluation: DelaunayExactEvaluator {}
+
+impl<T> ExactMeshingGeometryEvaluation for T where T: DelaunayExactEvaluator {}
+
 /// Reconstructs the exact evaluator admitted by a geometry closure.
 ///
 /// The provider is a host-composition port: meshing selects which queries it needs, while the
@@ -11,7 +15,7 @@ pub trait ExactMeshingEvaluatorProvider: Send + Sync {
     fn evaluator<'a>(
         &self,
         geometry: &'a PreparedExactGeometryObjects,
-    ) -> Result<Box<dyn DelaunayExactEvaluator + 'a>, GeometryContractError>;
+    ) -> Result<Box<dyn ExactMeshingGeometryEvaluation + 'a>, GeometryContractError>;
 }
 
 impl<T> ExactMeshingEvaluatorProvider for &T
@@ -21,7 +25,7 @@ where
     fn evaluator<'a>(
         &self,
         geometry: &'a PreparedExactGeometryObjects,
-    ) -> Result<Box<dyn DelaunayExactEvaluator + 'a>, GeometryContractError> {
+    ) -> Result<Box<dyn ExactMeshingGeometryEvaluation + 'a>, GeometryContractError> {
         (**self).evaluator(geometry)
     }
 }
@@ -34,7 +38,7 @@ impl ExactMeshingEvaluatorProvider for PortableMeshingEvaluatorProvider {
     fn evaluator<'a>(
         &self,
         geometry: &'a PreparedExactGeometryObjects,
-    ) -> Result<Box<dyn DelaunayExactEvaluator + 'a>, GeometryContractError> {
+    ) -> Result<Box<dyn ExactMeshingGeometryEvaluation + 'a>, GeometryContractError> {
         let GeometryModel::ExactBRep { model } = &geometry.document.model else {
             return Err(GeometryContractError::invalid(
                 "meshing evaluator geometry",

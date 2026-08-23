@@ -6,6 +6,7 @@ mod durable;
 mod error;
 mod local_store;
 mod materialized_project;
+mod meshing_evaluator;
 mod meshing_host;
 mod object_store;
 mod program_session;
@@ -19,6 +20,7 @@ mod worker;
 pub use config::NativeExecutionConfig;
 pub use driver::NATIVE_OBJECT_STORE_ROOT_ENV;
 pub use error::{NativeExecutionError, NativeExecutionResult};
+pub use meshing_evaluator::{native_meshing_kernel_dispatcher, NativeMeshingEvaluatorProvider};
 pub use meshing_host::{
     execute_meshing_program_request, run_meshing_worker_stdio, NativeMeshingHostLimits,
 };
