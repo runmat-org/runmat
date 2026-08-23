@@ -148,4 +148,58 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
         solver_projection.topology.volume_elements[0].material_id,
         "steel"
     );
+
+    let projection_root = root(projection.publication().root_output());
+    let validation_stage = planner.solver_validation(projection_root.clone()).unwrap();
+    let validation = execute_serial_stage(
+        &validation_stage.program_request(revision()).unwrap(),
+        &mut fixture.store,
+        &crate::MeshingKernelDispatcher,
+        &NeverCancelled,
+        &mut Progress::default(),
+        chunk_policy(1_000_000),
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let validation_streams = validation
+        .publication()
+        .stage_objects()
+        .decoded_streams()
+        .unwrap();
+    let validation_receipt = runmat_meshing_core::SolverMeshValidation::canonical_decode(
+        &validation_streams[0].records[0],
+    )
+    .unwrap();
+    validation_receipt
+        .validate_against(&solver_projection)
+        .unwrap();
+
+    let validation_root = root(validation.publication().root_output());
+    let serialization_stage = planner
+        .solver_serialization(projection_root, validation_root.clone())
+        .unwrap();
+    let serialized = execute_serial_stage(
+        &serialization_stage.program_request(revision()).unwrap(),
+        &mut fixture.store,
+        &crate::MeshingKernelDispatcher,
+        &NeverCancelled,
+        &mut Progress::default(),
+        chunk_policy(1_000_000),
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let artifact_streams = serialized
+        .publication()
+        .stage_objects()
+        .decoded_streams()
+        .unwrap();
+    let artifact =
+        runmat_meshing_core::SolverMeshArtifact::canonical_decode(&artifact_streams[0].records[0])
+            .unwrap();
+    artifact.validate().unwrap();
+    assert_eq!(
+        artifact.root_stage_manifest_digest.bytes(),
+        validation_root.logical_digest.bytes()
+    );
+    assert_eq!(artifact.topology, solver_projection.topology);
 }
