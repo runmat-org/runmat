@@ -38,15 +38,7 @@ fn collect_active_source_files(root: &Path, files: &mut Vec<std::path::PathBuf>)
 #[test]
 fn meshing_crate_layout_keeps_stage_implementations_out_of_core() {
     let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    for stage_crate in [
-        "size",
-        "curve",
-        "surface",
-        "plc",
-        "tetrahedron",
-        "opt",
-        "evidence",
-    ] {
+    for stage_crate in ["size", "curve", "surface", "tetrahedron", "evidence"] {
         assert!(
             crate_root.join(stage_crate).join("Cargo.toml").is_file(),
             "missing stage crate: {stage_crate}"
@@ -72,9 +64,7 @@ fn meshing_crate_layout_keeps_stage_implementations_out_of_core() {
     for implementation_crate in [
         "runmat-meshing-curve",
         "runmat-meshing-surface",
-        "runmat-meshing-plc",
         "runmat-meshing-tetrahedron",
-        "runmat-meshing-opt",
         "runmat-meshing-evidence",
     ] {
         assert!(
@@ -111,6 +101,10 @@ fn meshing_crate_layout_keeps_stage_implementations_out_of_core() {
         "surface/src/param_tri/mod.rs",
         "surface/src/recovery/mod.rs",
         "surface/src/validate/mod.rs",
+        "plc/Cargo.toml",
+        "plc/src/lib.rs",
+        "opt/Cargo.toml",
+        "opt/src/lib.rs",
         "src/solid/mod.rs",
         "src/solid/artifact/mod.rs",
         "src/solid/artifact/backend_counts.rs",
@@ -168,6 +162,35 @@ fn tessellation_derived_cad_authority_is_absent() {
     assert!(
         violations.is_empty(),
         "tessellation-derived CAD authority remains:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
+fn retired_standalone_plc_and_optimization_authorities_are_absent() {
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("meshing crate should be nested beneath the workspace root");
+    let mut files = Vec::new();
+    collect_active_source_files(&workspace_root.join("crates"), &mut files);
+
+    let retired_fragments = [
+        ["runmat", "_meshing_plc"].concat(),
+        ["runmat", "_meshing_opt"].concat(),
+    ];
+    let mut violations = Vec::new();
+    for path in files {
+        let source = read_source(&path);
+        for retired in &retired_fragments {
+            if source.contains(retired) {
+                violations.push(format!("{} contains {retired}", path.display()));
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "retired standalone meshing authority remains:\n{}",
         violations.join("\n")
     );
 }

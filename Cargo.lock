@@ -6839,21 +6839,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "runmat-meshing-opt"
-version = "0.6.2"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "runmat-meshing-plc"
-version = "0.6.2"
-dependencies = [
- "runmat-meshing-core",
- "serde",
-]
-
-[[package]]
 name = "runmat-meshing-size"
 version = "0.6.2"
 dependencies = [
@@ -6885,8 +6870,6 @@ dependencies = [
  "runmat-geometry-core",
  "runmat-meshing-core",
  "runmat-meshing-curve",
- "runmat-meshing-opt",
- "runmat-meshing-plc",
  "runmat-meshing-size",
  "runmat-meshing-surface",
  "serde",
