@@ -6,6 +6,7 @@ use crate::MeshEvidenceArtifact;
 pub const MESH_AUTHORING_SUMMARY_SCHEMA_VERSION: &str = "mesh-authoring-summary/v1";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MeshAuthoringSummary {
     pub schema_version: String,
     pub mesh_id: String,
@@ -15,57 +16,10 @@ pub struct MeshAuthoringSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub validation_error_message: Option<String>,
     pub backend: String,
-    pub tetrahedron_generation_family: String,
-    #[serde(default)]
-    pub tetrahedron_generation_attempted_family_count: usize,
-    #[serde(default)]
-    pub tetrahedron_generation_rejected_family_count: usize,
-    #[serde(default)]
-    pub tetrahedron_generation_selected_family_index: usize,
-    #[serde(default)]
-    pub tetrahedron_generation_interior_support_candidate_count: usize,
-    #[serde(default)]
-    pub tetrahedron_generation_interior_support_accepted_count: usize,
-    #[serde(
-        default,
-        skip_serializing_if = "MeshAuthoringNestedTetrahedronShellSummary::is_empty"
-    )]
-    pub nested_tetrahedron_shell: MeshAuthoringNestedTetrahedronShellSummary,
     pub topology: MeshAuthoringTopologySummary,
     pub quality: MeshAuthoringQualitySummary,
     pub recovery: MeshAuthoringRecoverySummary,
     pub regions: MeshAuthoringRegionSummary,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MeshAuthoringNestedTetrahedronShellSummary {
-    pub outer_node_count: usize,
-    pub inner_node_count: usize,
-    pub generated_node_count: usize,
-    pub refill_boundary_face_count: usize,
-    pub boundary_centroid_refinement_attempt_count: usize,
-    pub boundary_centroid_refinement_rejected_count: usize,
-    pub boundary_exact_cover_refill_count: usize,
-    pub boundary_centroid_refinement_refill_count: usize,
-    pub barycentric_partition_refill_count: usize,
-    pub outer_facet_count: usize,
-    pub inner_facet_count: usize,
-}
-
-impl MeshAuthoringNestedTetrahedronShellSummary {
-    pub fn is_empty(&self) -> bool {
-        self.outer_node_count == 0
-            && self.inner_node_count == 0
-            && self.generated_node_count == 0
-            && self.refill_boundary_face_count == 0
-            && self.boundary_centroid_refinement_attempt_count == 0
-            && self.boundary_centroid_refinement_rejected_count == 0
-            && self.boundary_exact_cover_refill_count == 0
-            && self.boundary_centroid_refinement_refill_count == 0
-            && self.barycentric_partition_refill_count == 0
-            && self.outer_facet_count == 0
-            && self.inner_facet_count == 0
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -145,57 +99,6 @@ pub fn build_mesh_authoring_summary(evidence: &MeshEvidenceArtifact) -> MeshAuth
         validation_error_code: evidence.validation.validation_error_code.clone(),
         validation_error_message: evidence.validation.validation_error_message.clone(),
         backend: evidence.backend.backend.clone(),
-        tetrahedron_generation_family: evidence.backend.tetrahedron_generation_family.clone(),
-        tetrahedron_generation_attempted_family_count: evidence
-            .backend
-            .tetrahedron_generation_attempted_family_count,
-        tetrahedron_generation_rejected_family_count: evidence
-            .backend
-            .tetrahedron_generation_rejected_family_count,
-        tetrahedron_generation_selected_family_index: evidence
-            .backend
-            .tetrahedron_generation_selected_family_index,
-        tetrahedron_generation_interior_support_candidate_count: evidence
-            .backend
-            .tetrahedron_generation_interior_support_candidate_count,
-        tetrahedron_generation_interior_support_accepted_count: evidence
-            .backend
-            .tetrahedron_generation_interior_support_accepted_count,
-        nested_tetrahedron_shell: MeshAuthoringNestedTetrahedronShellSummary {
-            outer_node_count: evidence
-                .backend
-                .tetrahedron_generation_nested_shell_outer_node_count,
-            inner_node_count: evidence
-                .backend
-                .tetrahedron_generation_nested_shell_inner_node_count,
-            generated_node_count: evidence
-                .backend
-                .tetrahedron_generation_nested_shell_generated_node_count,
-            refill_boundary_face_count: evidence
-                .backend
-                .tetrahedron_generation_nested_shell_refill_boundary_face_count,
-            boundary_centroid_refinement_attempt_count: evidence
-                .backend
-                .tetrahedron_generation_nested_shell_boundary_centroid_refinement_attempt_count,
-            boundary_centroid_refinement_rejected_count: evidence
-                .backend
-                .tetrahedron_generation_nested_shell_boundary_centroid_refinement_rejected_count,
-            boundary_exact_cover_refill_count: evidence
-                .backend
-                .tetrahedron_generation_nested_shell_boundary_exact_cover_refill_count,
-            boundary_centroid_refinement_refill_count: evidence
-                .backend
-                .tetrahedron_generation_nested_shell_boundary_centroid_refinement_refill_count,
-            barycentric_partition_refill_count: evidence
-                .backend
-                .tetrahedron_generation_nested_shell_barycentric_partition_refill_count,
-            outer_facet_count: evidence
-                .backend
-                .tetrahedron_generation_nested_shell_outer_facet_count,
-            inner_facet_count: evidence
-                .backend
-                .tetrahedron_generation_nested_shell_inner_facet_count,
-        },
         topology: MeshAuthoringTopologySummary {
             node_count: evidence.topology.node_count,
             volume_element_count: evidence.topology.volume_element_count,

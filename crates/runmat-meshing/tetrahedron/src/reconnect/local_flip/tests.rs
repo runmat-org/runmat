@@ -326,7 +326,6 @@ fn local_flip_improvement_rejects_candidate_that_does_not_improve_quality_or_cou
 fn two_tetrahedron_mesh(coordinates: [[f64; 3]; 5]) -> TetrahedronMesh {
     TetrahedronMesh {
         mesh_id: "local_reconnection_fixture".to_string(),
-        tetrahedron_generation_family: "unknown".to_string(),
         nodes: coordinates
             .into_iter()
             .enumerate()

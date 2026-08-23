@@ -13,9 +13,8 @@ pub use artifact::{
 };
 pub use authoring::{
     build_mesh_authoring_summary, MeshAuthoringBoundaryRegion, MeshAuthoringMaterialRegion,
-    MeshAuthoringNestedTetrahedronShellSummary, MeshAuthoringQualitySummary,
-    MeshAuthoringRecoverySummary, MeshAuthoringRegionSummary, MeshAuthoringSummary,
-    MeshAuthoringTopologySummary, MESH_AUTHORING_SUMMARY_SCHEMA_VERSION,
+    MeshAuthoringQualitySummary, MeshAuthoringRecoverySummary, MeshAuthoringRegionSummary,
+    MeshAuthoringSummary, MeshAuthoringTopologySummary, MESH_AUTHORING_SUMMARY_SCHEMA_VERSION,
 };
 pub use cad::MeshCadEvidence;
 

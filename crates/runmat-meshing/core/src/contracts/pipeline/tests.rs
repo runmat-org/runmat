@@ -351,7 +351,6 @@ fn protected_boundary_complex() -> ProtectedBoundaryComplex {
 fn tetrahedron_mesh(recovery_complete: bool, quality_optimized: bool) -> TetrahedronMesh {
     TetrahedronMesh {
         mesh_id: "tetrahedron".to_string(),
-        tetrahedron_generation_family: "unknown".to_string(),
         nodes: vec![],
         elements: vec![],
         boundary_faces: vec![],

@@ -221,23 +221,6 @@ pub fn analysis_author_study_op(
         schema_version: "fea_study_authoring_evidence/v1".to_string(),
         mesh_id: intent.mesh_authoring_summary.mesh_id.clone(),
         mesh_authoring_summary_schema_version: intent.mesh_authoring_summary.schema_version.clone(),
-        tetrahedron_generation_family: intent.mesh_authoring_summary.tetrahedron_generation_family,
-        tetrahedron_generation_attempted_family_count: intent
-            .mesh_authoring_summary
-            .tetrahedron_generation_attempted_family_count,
-        tetrahedron_generation_rejected_family_count: intent
-            .mesh_authoring_summary
-            .tetrahedron_generation_rejected_family_count,
-        tetrahedron_generation_selected_family_index: intent
-            .mesh_authoring_summary
-            .tetrahedron_generation_selected_family_index,
-        tetrahedron_generation_interior_support_candidate_count: intent
-            .mesh_authoring_summary
-            .tetrahedron_generation_interior_support_candidate_count,
-        tetrahedron_generation_interior_support_accepted_count: intent
-            .mesh_authoring_summary
-            .tetrahedron_generation_interior_support_accepted_count,
-        nested_tetrahedron_shell: intent.mesh_authoring_summary.nested_tetrahedron_shell,
         selected_material_region_id: material_region_id,
         selected_boundary_condition_region_id: boundary_condition_region_id,
         selected_driving_condition_region_id: driving_condition_region_id,
