@@ -168,6 +168,7 @@ pub(crate) fn import_exact_cad_shape(
         evaluators: projection.evaluators,
         model: projection.model,
         healing_report: None,
+        source_face_ids: projection.source_face_ids,
         analysis: options.analysis.clone(),
         kernel_body_shapes: projection.kernel_body_shapes,
     };

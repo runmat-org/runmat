@@ -4980,6 +4980,22 @@ fn persistent_face(source_topology_id: &str) -> PersistentEntityId {
 }
 
 #[test]
+fn canonical_meshing_boundary_ids_replace_display_face_aliases() {
+    let mut model = sample_model();
+    model.boundary_conditions[0].region_id = "face_000001".to_owned();
+    model.loads[0].region_id = "face_000002".to_owned();
+    let aliases = BTreeMap::from([
+        ("face_000001".to_owned(), persistent_face("exact-face-a")),
+        ("face_000002".to_owned(), persistent_face("exact-face-b")),
+    ]);
+
+    super::meshing::apply_boundary_region_ids(&mut model, &aliases);
+
+    assert_eq!(model.boundary_conditions[0].region_id, "exact-face-a");
+    assert_eq!(model.loads[0].region_id, "exact-face-b");
+}
+
+#[test]
 fn analysis_results_by_run_id_legacy_nonlinear_artifacts_remain_loadable() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();

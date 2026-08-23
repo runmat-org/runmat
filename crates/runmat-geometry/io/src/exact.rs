@@ -34,6 +34,9 @@ pub struct ImportedExactCad {
     pub model: ExactBRepModel,
     /// Present only when the kernel changed authoritative topology under the admitted policy.
     pub healing_report: Option<GeometryHealingReport>,
+    /// Kernel-authored mapping from display-import face ordinals to exact persistent faces.
+    /// This selector metadata does not enter canonical geometry identity.
+    pub source_face_ids: BTreeMap<u64, runmat_geometry_core::PersistentEntityId>,
     /// Analysis identity and mutation policy admitted before the kernel import. Keeping this on
     /// the imported object prevents closure construction from claiming a different tolerance or
     /// healing policy than the one under which topology was produced.

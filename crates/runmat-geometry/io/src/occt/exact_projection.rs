@@ -24,6 +24,7 @@ pub(super) struct ExactProjection {
     pub evaluators: ExactEvaluatorRegistry,
     pub model: ExactBRepModel,
     pub kernel_body_shapes: BTreeMap<runmat_geometry_core::MassPropertiesEvaluatorId, Vec<u64>>,
+    pub source_face_ids: BTreeMap<u64, runmat_geometry_core::PersistentEntityId>,
 }
 
 pub(super) fn project_exact_contracts(
@@ -174,6 +175,7 @@ pub(super) fn project_exact_contracts(
         .coedges
         .sort_by(|left, right| left.id.cmp(&right.id));
 
+    let mut source_face_ids = BTreeMap::new();
     topology.faces = payload
         .faces
         .iter()
@@ -192,13 +194,15 @@ pub(super) fn project_exact_contracts(
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             inner_wire_ids.sort();
+            let id = names.shape_id(
+                PersistentEntityKind::Face,
+                face.shape_key,
+                face.occurrence_index,
+                path,
+            )?;
+            source_face_ids.insert(face.source_face_index, id.clone());
             Ok(ExactFace {
-                id: names.shape_id(
-                    PersistentEntityKind::Face,
-                    face.shape_key,
-                    face.occurrence_index,
-                    path,
-                )?,
+                id,
                 orientation: orientation(face.reversed),
                 surface_evaluator_id: names.surface_id(face.shape_key)?,
                 trim_classifier_id: names.trim_id(face.shape_key)?,
@@ -348,6 +352,7 @@ pub(super) fn project_exact_contracts(
         evaluators,
         model,
         kernel_body_shapes: body_projection.kernel_shapes,
+        source_face_ids,
     })
 }
 

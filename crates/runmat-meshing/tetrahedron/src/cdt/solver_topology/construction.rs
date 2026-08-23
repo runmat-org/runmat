@@ -2,8 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_geometry_core::PersistentEntityId;
 use runmat_meshing_core::{
-    solver_volume_element_identity, ElementOrder, MeshNeighbor, MeshingCancellationSignal,
-    SolverMeshNode, SolverMeshTopology, SolverVolumeElement, StableDigest,
+    quality::predicate::tetrahedron_signed_volume, solver_volume_element_identity, ElementOrder,
+    MeshNeighbor, MeshingCancellationSignal, SolverMeshNode, SolverMeshTopology,
+    SolverVolumeElement, StableDigest,
 };
 
 use super::{
@@ -26,7 +27,7 @@ pub(super) fn construct(
     let materials = validate_domain_model(input)?;
     let nodes = build_nodes(input, &node_indices, options, cancellation)?;
     let volume_elements = build_elements(input, &materials)?;
-    let neighbors = build_neighbors(input);
+    let neighbors = build_neighbors(input)?;
     let (boundary_faces, classes) = build_faces(input, &node_indices, options, cancellation)?;
     let boundary_edges = build_edges(input, &boundary_faces, options, cancellation)?;
     let regions = build_regions(input, &materials)?;
@@ -204,19 +205,15 @@ fn build_elements(
             let material = materials
                 .get(&region)
                 .ok_or_else(|| invalid_domain_model("volume region has no material assignment"))?;
+            let (vertices, _) = solver_vertices(input, tetrahedron.vertex_indices)?;
             Ok(SolverVolumeElement {
                 element_id: index as u64 + 1,
                 stable_identity: solver_volume_element_identity(
-                    tetrahedron
-                        .vertex_indices
+                    vertices
                         .map(|vertex| input.volume_mesh.topology.nodes[vertex as usize].identity),
                 ),
                 order: ElementOrder::Tet4,
-                node_ids: tetrahedron
-                    .vertex_indices
-                    .iter()
-                    .map(|vertex| *vertex as u64 + 1)
-                    .collect(),
+                node_ids: vertices.iter().map(|vertex| *vertex as u64 + 1).collect(),
                 region_id: region.clone(),
                 material_id: (*material).to_owned(),
                 provenance: vec![region],
@@ -225,25 +222,53 @@ fn build_elements(
         .collect()
 }
 
-fn build_neighbors(input: &DelaunaySolverTopologyInput<'_>) -> Vec<MeshNeighbor> {
+fn build_neighbors(
+    input: &DelaunaySolverTopologyInput<'_>,
+) -> Result<Vec<MeshNeighbor>, DelaunaySolverTopologyError> {
     input
         .volume_mesh
         .topology
         .tetrahedra
         .iter()
         .enumerate()
-        .flat_map(|(index, tetrahedron)| {
-            tetrahedron
-                .neighbors
-                .iter()
+        .map(|(index, tetrahedron)| {
+            let (_, source_face_by_solver_face) =
+                solver_vertices(input, tetrahedron.vertex_indices)?;
+            Ok(source_face_by_solver_face
+                .into_iter()
                 .enumerate()
-                .map(move |(face, adjacent)| MeshNeighbor {
+                .map(|(face, source_face)| MeshNeighbor {
                     element_id: index as u64 + 1,
                     local_face_index: face as u8,
-                    adjacent_element_id: adjacent.map(|value| value as u64 + 1),
+                    adjacent_element_id: tetrahedron.neighbors[source_face]
+                        .map(|value| value as u64 + 1),
                 })
+                .collect::<Vec<_>>())
         })
-        .collect()
+        .collect::<Result<Vec<_>, _>>()
+        .map(|neighbors| neighbors.into_iter().flatten().collect())
+}
+
+/// Converts the CDT's robust-predicate orientation into the positive Jacobian convention used
+/// by solver elements. The same permutation maps solver-local faces back to CDT-local faces.
+fn solver_vertices(
+    input: &DelaunaySolverTopologyInput<'_>,
+    mut vertices: [u32; 4],
+) -> Result<([u32; 4], [usize; 4]), DelaunaySolverTopologyError> {
+    let points =
+        vertices.map(|vertex| input.volume_mesh.topology.nodes[vertex as usize].coordinates_m);
+    let signed_volume = tetrahedron_signed_volume(points);
+    if !signed_volume.is_finite() || signed_volume == 0.0 {
+        return Err(invalid_mesh(
+            "volume tetrahedron has zero or non-finite solver Jacobian",
+        ));
+    }
+    let mut source_face_by_solver_face = [0, 1, 2, 3];
+    if signed_volume < 0.0 {
+        vertices.swap(0, 1);
+        source_face_by_solver_face.swap(0, 1);
+    }
+    Ok((vertices, source_face_by_solver_face))
 }
 
 fn invalid_mesh(reason: impl Into<String>) -> DelaunaySolverTopologyError {

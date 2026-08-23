@@ -1,0 +1,19 @@
+version: 1
+kind: study
+id: canonical_box_static
+
+geometry:
+  path: ../../../runmat-geometry/io/tests/fixtures/box.brep
+  units: meter
+
+model:
+  profile: linear_static_structural
+
+mesh:
+  target_edge_length_m: 10.0
+  maximum_chordal_deviation_m: 0.1
+  maximum_elements: 10000
+  deterministic_seed: 7
+
+run:
+  backend: cpu

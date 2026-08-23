@@ -28,7 +28,8 @@ pub use exact_geometry_admission::{
 };
 pub use exact_meshing_executor::{NativeExactMeshingExecutor, NativeMeshingExecutionPolicy};
 pub use exact_meshing_job::{
-    mesh_exact_geometry, NativeExactMeshingJob, NativeExactMeshingJobError, NativeMeshingDomain,
+    mesh_exact_geometry, NativeExactMeshingJob, NativeExactMeshingJobError,
+    NativeExactMeshingResult, NativeMeshingDomain,
 };
 pub use meshing_evaluator::{native_meshing_kernel_dispatcher, NativeMeshingEvaluatorProvider};
 pub use meshing_host::{

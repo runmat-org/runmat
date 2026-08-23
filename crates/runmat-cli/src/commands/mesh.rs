@@ -5,16 +5,20 @@ use anyhow::{Context, Result};
 use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_runner_native::{
-    mesh_exact_geometry, NativeExactMeshingJob, NativeExecutionConfig, NativeMeshingDomain,
-    NativeMeshingExecutionPolicy,
+    mesh_exact_geometry, NativeExactMeshingJob, NativeExactMeshingResult, NativeExecutionConfig,
+    NativeMeshingDomain, NativeMeshingExecutionPolicy,
 };
+use runmat_geometry_core::UnitSystem;
 use runmat_geometry_io::ExactCadImportOptions;
 use runmat_meshing_core::{
     resolve_meshing_request, CacheAdmissionDecision, CanonicalMeshingContract, ElementOrder,
     MeshingEvidence, MeshingRequestSettings, PlatformBuildIdentity, SolverMeshArtifact,
     StableDigest,
 };
-use runmat_meshing_execution::MeshingRunEvidenceContext;
+use runmat_meshing_execution::{ExactMeshingDagRunResult, MeshingRunEvidenceContext};
+use runmat_runtime::analysis::{
+    AnalysisMeshingOutput, AnalysisMeshingProvider, AnalysisMeshingRequest,
+};
 
 use crate::cli::MeshElementOrderArg;
 use crate::presentation;
@@ -33,6 +37,13 @@ pub struct MeshCommand {
     pub json: bool,
 }
 
+struct NativeMeshRequest {
+    source: PathBuf,
+    source_units: UnitSystem,
+    settings: MeshingRequestSettings,
+    domain: NativeMeshingDomain,
+}
+
 pub fn execute(command: MeshCommand) -> Result<()> {
     let output = command
         .output
@@ -44,16 +55,6 @@ pub fn execute(command: MeshCommand) -> Result<()> {
         .unwrap_or_else(|| command.source.with_extension("meshing-evidence.cbor"));
     validate_output_paths(&output, &evidence, command.force)?;
 
-    let source_bytes = runmat_filesystem::read(&command.source)
-        .with_context(|| format!("failed to read {}", command.source.display()))?;
-    let import_options = ExactCadImportOptions::default();
-    let tolerance = runmat_geometry_core::GeometryTolerancePolicy {
-        source_tolerance_m: 0.0,
-        absolute_floor_m: import_options.analysis.absolute_tolerance_floor_m,
-        model_relative_term: import_options.analysis.model_relative_tolerance,
-        requested_deviation_m: import_options.analysis.requested_deviation_m,
-        maximum_healing_displacement_m: import_options.analysis.maximum_healing_displacement_m,
-    };
     let mut settings = MeshingRequestSettings {
         element_order: match command.element_order {
             MeshElementOrderArg::Tet4 => ElementOrder::Tet4,
@@ -65,59 +66,16 @@ pub fn execute(command: MeshCommand) -> Result<()> {
         ..MeshingRequestSettings::default()
     };
     settings.resources.maximum_elements = command.maximum_elements;
-    let request = resolve_meshing_request(tolerance, settings)
-        .context("invalid canonical meshing request")?;
-    let request_bytes = request
-        .canonical_encode()
-        .context("failed to encode canonical meshing request")?;
-    let cohort = format!("native-{}-{}", std::env::consts::ARCH, std::env::consts::OS);
-    let build_digest = StableDigest::from_bytes(
-        *Digest::sha256(format!("runmat-meshing-build:{}", env!("CARGO_PKG_VERSION")).as_bytes())
-            .bytes(),
-    );
-    let program_revision = ProgramRevision::new(
-        Digest::sha256(&request_bytes),
-        Digest::sha256(&source_bytes),
-        ProgramEnvironment::new(
-            1,
-            1,
-            Digest::sha256(env!("CARGO_PKG_VERSION").as_bytes()),
-            Digest::sha256(b"runmat-meshing-catalog/v1"),
-            "matlab",
-        )?,
-    )?;
-    let source_name = command.source.to_string_lossy().into_owned();
-    let result = mesh_exact_geometry(
-        NativeExecutionConfig::for_current_executable()
-            .context("failed to locate the RunMat meshing worker executable")?,
-        NativeExactMeshingJob {
-            source_name: &source_name,
-            source_bytes: &source_bytes,
-            import_options,
-            request,
-            domain: NativeMeshingDomain {
-                default_material_id: Some(command.material),
-                region_materials: Default::default(),
-            },
-            program_revision,
-            capability_cohort: Some(cohort.clone()),
-            preferred_edges_per_partition: 8,
-            preferred_faces_per_partition: 8,
-            inventory_limits: ObjectInventoryLimits::default(),
-            evidence: MeshingRunEvidenceContext {
-                platform: PlatformBuildIdentity {
-                    capability_cohort: cohort,
-                    target_triple: format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS),
-                    build_digest,
-                    exact_kernel_abi: None,
-                },
-                sizing: Vec::new(),
-                cache_admission: CacheAdmissionDecision::Admitted,
-            },
-            execution: NativeMeshingExecutionPolicy::default(),
+    let generated = generate_native_mesh(NativeMeshRequest {
+        source: command.source.clone(),
+        source_units: UnitSystem::Meter,
+        settings,
+        domain: NativeMeshingDomain {
+            default_material_id: Some(command.material.clone()),
+            region_materials: Default::default(),
         },
-    )
-    .context("exact meshing failed")?;
+    })?;
+    let result = &generated.dag_result;
 
     write_atomic(
         &output,
@@ -137,6 +95,81 @@ pub fn execute(command: MeshCommand) -> Result<()> {
     )?;
     verify_persisted_outputs(&output, &evidence, &result.artifact, &result.evidence)?;
 
+    print_result(&command, &output, &evidence, result)
+}
+
+fn generate_native_mesh(request: NativeMeshRequest) -> Result<NativeExactMeshingResult> {
+    let source_bytes = runmat_filesystem::read(&request.source)
+        .with_context(|| format!("failed to read {}", request.source.display()))?;
+    let import_options = ExactCadImportOptions {
+        source_units: request.source_units,
+        ..ExactCadImportOptions::default()
+    };
+    let tolerance = runmat_geometry_core::GeometryTolerancePolicy {
+        source_tolerance_m: 0.0,
+        absolute_floor_m: import_options.analysis.absolute_tolerance_floor_m,
+        model_relative_term: import_options.analysis.model_relative_tolerance,
+        requested_deviation_m: import_options.analysis.requested_deviation_m,
+        maximum_healing_displacement_m: import_options.analysis.maximum_healing_displacement_m,
+    };
+    let canonical_request = resolve_meshing_request(tolerance, request.settings)
+        .context("invalid canonical meshing request")?;
+    let request_bytes = canonical_request
+        .canonical_encode()
+        .context("failed to encode canonical meshing request")?;
+    let cohort = format!("native-{}-{}", std::env::consts::ARCH, std::env::consts::OS);
+    let build_digest = StableDigest::from_bytes(
+        *Digest::sha256(format!("runmat-meshing-build:{}", env!("CARGO_PKG_VERSION")).as_bytes())
+            .bytes(),
+    );
+    let program_revision = ProgramRevision::new(
+        Digest::sha256(&request_bytes),
+        Digest::sha256(&source_bytes),
+        ProgramEnvironment::new(
+            1,
+            1,
+            Digest::sha256(env!("CARGO_PKG_VERSION").as_bytes()),
+            Digest::sha256(b"runmat-meshing-catalog/v1"),
+            "matlab",
+        )?,
+    )?;
+    let source_name = request.source.to_string_lossy().into_owned();
+    mesh_exact_geometry(
+        NativeExecutionConfig::for_current_executable()
+            .context("failed to locate the RunMat meshing worker executable")?,
+        NativeExactMeshingJob {
+            source_name: &source_name,
+            source_bytes: &source_bytes,
+            import_options,
+            request: canonical_request,
+            domain: request.domain,
+            program_revision,
+            capability_cohort: Some(cohort.clone()),
+            preferred_edges_per_partition: 8,
+            preferred_faces_per_partition: 8,
+            inventory_limits: ObjectInventoryLimits::default(),
+            evidence: MeshingRunEvidenceContext {
+                platform: PlatformBuildIdentity {
+                    capability_cohort: cohort,
+                    target_triple: format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS),
+                    build_digest,
+                    exact_kernel_abi: None,
+                },
+                sizing: Vec::new(),
+                cache_admission: CacheAdmissionDecision::Admitted,
+            },
+            execution: NativeMeshingExecutionPolicy::default(),
+        },
+    )
+    .context("exact meshing failed")
+}
+
+fn print_result(
+    command: &MeshCommand,
+    output: &Path,
+    evidence: &Path,
+    result: &ExactMeshingDagRunResult,
+) -> Result<()> {
     if command.json {
         println!(
             "{}",
@@ -173,6 +206,30 @@ pub fn execute(command: MeshCommand) -> Result<()> {
         );
     }
     Ok(())
+}
+
+pub(crate) fn analysis_meshing_provider() -> AnalysisMeshingProvider {
+    std::sync::Arc::new(|request: &AnalysisMeshingRequest| {
+        generate_native_mesh(NativeMeshRequest {
+            source: request.source_path.clone(),
+            source_units: request.source_units,
+            settings: request.settings.clone(),
+            domain: NativeMeshingDomain {
+                default_material_id: request.default_material_id.clone(),
+                region_materials: request.region_materials.clone(),
+            },
+        })
+        .map(|result| AnalysisMeshingOutput {
+            artifact: result.dag_result.artifact,
+            evidence: result.dag_result.evidence,
+            boundary_region_ids: result
+                .source_face_ids
+                .into_iter()
+                .map(|(index, id)| (format!("face_{:06}", index + 1), id))
+                .collect(),
+        })
+        .map_err(|error| error.to_string())
+    })
 }
 
 fn validate_output_paths(output: &Path, evidence: &Path, force: bool) -> Result<()> {

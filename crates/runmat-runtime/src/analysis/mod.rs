@@ -72,6 +72,7 @@ mod fea_document;
 mod fea_document_authoring;
 #[cfg(feature = "plot-core")]
 mod figures;
+mod meshing;
 mod policy;
 mod promotion;
 mod solver_mesh_artifact;
@@ -205,6 +206,10 @@ pub use fea_document_authoring::{
 pub use figures::{
     analysis_generate_study_run_figures, AnalysisFigureGenerationOptions, AnalysisFigureMeshSource,
     AnalysisGeneratedFigure, AnalysisGeneratedFigureKind,
+};
+pub use meshing::{
+    replace_analysis_meshing_provider, AnalysisMeshingOutput, AnalysisMeshingProvider,
+    AnalysisMeshingProviderGuard, AnalysisMeshingRequest,
 };
 pub use runmat_analysis_fea::{FeaProgressEvent, FeaProgressPhase, FeaProgressStatus};
 pub use study_authoring::analysis_author_study_op;
@@ -1242,17 +1247,6 @@ pub fn analysis_run_study_op(
     let run_operation = run_operation_for_kind(spec.run_kind).to_string();
     let run_op_version = run_operation_version_for_kind(spec.run_kind).to_string();
     let operation_sequence = study_operation_sequence(spec, &run_op_version);
-    let solver_mesh_artifact_path = spec.solver_mesh_artifact_path.clone();
-    if let Some(path) = solver_mesh_artifact_path.as_deref() {
-        resolve_solver_mesh_artifact(
-            Some(path),
-            ANALYSIS_RUN_STUDY_OPERATION,
-            ANALYSIS_RUN_STUDY_OP_VERSION,
-            &context,
-        )?;
-    }
-    let meshing_evidence_artifact_path = spec.meshing_evidence_artifact_path.clone();
-
     let study_prep = crate::geometry::geometry_prep_for_analysis_op(
         &spec.geometry,
         crate::geometry::GeometryPrepForAnalysisSpec::default(),
@@ -1267,19 +1261,37 @@ pub fn analysis_run_study_op(
         region_mappings: study_prep.prep.region_mappings.clone(),
     });
 
-    let model = match &spec.model {
+    let mut model = match &spec.model {
         Some(model) => model.clone(),
         None => {
             analysis_create_model_op(&spec.geometry, create_model_intent.clone(), context.clone())?
                 .data
         }
     };
+    let study_mesh = meshing::resolve_study_mesh(spec, &model).map_err(|message| {
+        operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.MESHING_FAILED",
+                error_type: OperationErrorType::Backend,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            message,
+            BTreeMap::new(),
+        )
+    })?;
+    let solver_mesh_artifact_path = study_mesh.artifact_path;
+    let meshing_evidence_artifact_path = study_mesh.evidence_path;
     analysis_validate(
         &model,
         spec.geometry.units,
         &ReferenceFrame::Global,
         context.clone(),
     )?;
+    meshing::apply_boundary_region_ids(&mut model, &study_mesh.boundary_region_ids);
     let (run_envelope, resolved_run_options, resolved_electromagnetic_run_options) = match spec
         .run_kind
     {

@@ -128,8 +128,10 @@ void append_exact_topology(OcctExactShapePayload& result,
             [](const auto& left, const auto& right) { return left.shape_key < right.shape_key; });
 
   std::set<std::uint64_t> face_keys;
+  std::uint64_t source_face_index = static_cast<std::uint64_t>(result.faces.size());
   for (TopExp_Explorer explorer(root, TopAbs_FACE); explorer.More(); explorer.Next()) {
     check_cancelled(options);
+    const std::uint64_t current_source_face_index = source_face_index++;
     const TopoDS_Face face = TopoDS::Face(explorer.Current());
     const std::uint64_t face_key = shape_key(shape_set, face, "face");
     if (!face_keys.insert(face_key).second) {
@@ -145,6 +147,7 @@ void append_exact_topology(OcctExactShapePayload& result,
 
     OcctExactFacePayload face_payload;
     face_payload.occurrence_index = occurrence_index;
+    face_payload.source_face_index = current_source_face_index;
     face_payload.shape_key = face_key;
     identity_context.append(face_payload.identity_digest,
                             shape_set.Shape(static_cast<Standard_Integer>(face_key)),

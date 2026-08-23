@@ -161,6 +161,12 @@ fn validated_tet4_projects_to_one_canonical_solver_topology() {
             .count()
             == 3
     }));
+    assert!(result.volume_elements.iter().all(|element| {
+        let points = std::array::from_fn(|index| {
+            result.nodes[element.node_ids[index] as usize - 1].coordinates_m
+        });
+        runmat_meshing_core::quality::predicate::tetrahedron_signed_volume(points) > 0.0
+    }));
     for face in &result.boundary_faces {
         let element = &result.volume_elements[face.adjacent_volume_element_ids[0] as usize - 1];
         let opposite = element
