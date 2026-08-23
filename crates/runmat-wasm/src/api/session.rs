@@ -1165,12 +1165,6 @@ impl RunMatWasm {
                     thermo_field_artifact_root: None,
                 },
             );
-            let _ = runmat_runtime::geometry::configure_prep_artifacts(
-                runmat_runtime::geometry::GeometryPrepArtifactConfig {
-                    artifact_root: Some(root),
-                    ..Default::default()
-                },
-            );
         }
         let mut payload = run_fea_path(path).await.map_err(|err| js_error(&err))?;
         payload.progress_events = progress_events

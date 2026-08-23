@@ -9752,16 +9752,6 @@
       "tolerance_rel": null
     },
     {
-      "name": "electromagnetic_prep_recovery_edge_count",
-      "fixture_id": "electromagnetic_reference_boundary_kernel_gpu_provider",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "electromagnetic_prep_recovery_edge_count",
-      "reference": 3.0,
-      "tolerance_abs": 0,
-      "tolerance_rel": null
-    },
-    {
       "name": "electromagnetic_source_energy_consistency_ratio",
       "fixture_id": "electromagnetic_reference_boundary_kernel_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -9997,16 +9987,6 @@
       "source": "threshold_assertion",
       "assertion_name": "electromagnetic_oriented_edge_count",
       "reference": 7.0,
-      "tolerance_abs": 0,
-      "tolerance_rel": null
-    },
-    {
-      "name": "electromagnetic_prep_recovery_edge_count",
-      "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "electromagnetic_prep_recovery_edge_count",
-      "reference": 3.0,
       "tolerance_abs": 0,
       "tolerance_rel": null
     },
@@ -10250,16 +10230,6 @@
       "tolerance_rel": null
     },
     {
-      "name": "electromagnetic_prep_recovery_edge_count",
-      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "electromagnetic_prep_recovery_edge_count",
-      "reference": 3.0,
-      "tolerance_abs": 0,
-      "tolerance_rel": null
-    },
-    {
       "name": "electromagnetic_source_energy_consistency_ratio",
       "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -10489,16 +10459,6 @@
       "tolerance_rel": null
     },
     {
-      "name": "electromagnetic_prep_recovery_edge_count",
-      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "electromagnetic_prep_recovery_edge_count",
-      "reference": 3.0,
-      "tolerance_abs": 0,
-      "tolerance_rel": null
-    },
-    {
       "name": "electromagnetic_source_energy_consistency_ratio",
       "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -10719,16 +10679,6 @@
       "tolerance_rel": null
     },
     {
-      "name": "em_homogeneous_prep_recovery_edge_count",
-      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "em_homogeneous_prep_recovery_edge_count",
-      "reference": 3.0,
-      "tolerance_abs": 0,
-      "tolerance_rel": null
-    },
-    {
       "name": "electromagnetic_assigned_coefficient_coverage_ratio",
       "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
       "field": "electromagnetic_assigned_coefficient_coverage_ratio",
@@ -10884,16 +10834,6 @@
       "source": "threshold_assertion",
       "assertion_name": "electromagnetic_oriented_edge_count",
       "reference": 8.0,
-      "tolerance_abs": 0,
-      "tolerance_rel": null
-    },
-    {
-      "name": "electromagnetic_prep_recovery_edge_count",
-      "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "electromagnetic_prep_recovery_edge_count",
-      "reference": 3.0,
       "tolerance_abs": 0,
       "tolerance_rel": null
     },
@@ -11249,16 +11189,6 @@
       "source": "threshold_assertion",
       "assertion_name": "electromagnetic_oriented_edge_count",
       "reference": 8.0,
-      "tolerance_abs": 0,
-      "tolerance_rel": null
-    },
-    {
-      "name": "electromagnetic_prep_recovery_edge_count",
-      "fixture_id": "electromagnetic_reference_multiregion_assignments_gpu_provider",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "electromagnetic_prep_recovery_edge_count",
-      "reference": 3.0,
       "tolerance_abs": 0,
       "tolerance_rel": null
     },
@@ -11688,16 +11618,6 @@
       "tolerance_rel": null
     },
     {
-      "name": "electromagnetic_prep_recovery_edge_count",
-      "fixture_id": "electromagnetic_reference_overlap_interference_gpu_provider",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "electromagnetic_prep_recovery_edge_count",
-      "reference": 3.0,
-      "tolerance_abs": 0,
-      "tolerance_rel": null
-    },
-    {
       "name": "electromagnetic_source_energy_consistency_ratio",
       "fixture_id": "electromagnetic_reference_overlap_interference_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -11923,16 +11843,6 @@
       "source": "threshold_assertion",
       "assertion_name": "electromagnetic_oriented_edge_count",
       "reference": 7.0,
-      "tolerance_abs": 0,
-      "tolerance_rel": null
-    },
-    {
-      "name": "electromagnetic_prep_recovery_edge_count",
-      "fixture_id": "electromagnetic_reference_sparse_assignments_gpu_provider",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "electromagnetic_prep_recovery_edge_count",
-      "reference": 3.0,
       "tolerance_abs": 0,
       "tolerance_rel": null
     },
@@ -14127,31 +14037,11 @@
       "tolerance_rel": 0.5
     },
     {
-      "name": "thermal_standalone_prep_active_dimension_count",
+      "name": "thermal_standalone_active_dimension_count",
       "fixture_id": "thermal_standalone_ramp_cpu",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "thermal_standalone_prep_active_dimension_count",
-      "reference": 2.0,
-      "tolerance_abs": 0,
-      "tolerance_rel": null
-    },
-    {
-      "name": "thermal_standalone_prep_recovery_edge_count",
-      "fixture_id": "thermal_standalone_ramp_cpu",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "thermal_standalone_prep_recovery_edge_count",
-      "reference": 1.0,
-      "tolerance_abs": 0,
-      "tolerance_rel": null
-    },
-    {
-      "name": "thermal_standalone_prep_triangle_element_count",
-      "fixture_id": "thermal_standalone_ramp_cpu",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "thermal_standalone_prep_triangle_element_count",
+      "assertion_name": "thermal_standalone_active_dimension_count",
       "reference": 2.0,
       "tolerance_abs": 0,
       "tolerance_rel": null
@@ -14207,31 +14097,11 @@
       "tolerance_rel": 0.5
     },
     {
-      "name": "thermal_standalone_prep_active_dimension_count",
+      "name": "thermal_standalone_active_dimension_count",
       "fixture_id": "thermal_standalone_ramp_gpu_fallback",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "thermal_standalone_prep_active_dimension_count",
-      "reference": 2.0,
-      "tolerance_abs": 0,
-      "tolerance_rel": null
-    },
-    {
-      "name": "thermal_standalone_prep_recovery_edge_count",
-      "fixture_id": "thermal_standalone_ramp_gpu_fallback",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "thermal_standalone_prep_recovery_edge_count",
-      "reference": 1.0,
-      "tolerance_abs": 0,
-      "tolerance_rel": null
-    },
-    {
-      "name": "thermal_standalone_prep_triangle_element_count",
-      "fixture_id": "thermal_standalone_ramp_gpu_fallback",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "thermal_standalone_prep_triangle_element_count",
+      "assertion_name": "thermal_standalone_active_dimension_count",
       "reference": 2.0,
       "tolerance_abs": 0,
       "tolerance_rel": null
@@ -14287,31 +14157,11 @@
       "tolerance_rel": 0.5
     },
     {
-      "name": "thermal_standalone_prep_active_dimension_count",
+      "name": "thermal_standalone_active_dimension_count",
       "fixture_id": "thermal_standalone_ramp_gpu_provider",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "thermal_standalone_prep_active_dimension_count",
-      "reference": 2.0,
-      "tolerance_abs": 0,
-      "tolerance_rel": null
-    },
-    {
-      "name": "thermal_standalone_prep_recovery_edge_count",
-      "fixture_id": "thermal_standalone_ramp_gpu_provider",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "thermal_standalone_prep_recovery_edge_count",
-      "reference": 1.0,
-      "tolerance_abs": 0,
-      "tolerance_rel": null
-    },
-    {
-      "name": "thermal_standalone_prep_triangle_element_count",
-      "fixture_id": "thermal_standalone_ramp_gpu_provider",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "thermal_standalone_prep_triangle_element_count",
+      "assertion_name": "thermal_standalone_active_dimension_count",
       "reference": 2.0,
       "tolerance_abs": 0,
       "tolerance_rel": null

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Instant;
 
 use crate::{
-    assembly::{AssemblySummary, PrepRecoveryEdgeSummary, StructuralMaterialSummary},
+    assembly::{AssemblySummary, StructuralMaterialSummary},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     physics::{
         coupling::{electro_thermal, nonlinear as coupling_nonlinear, thermo_mechanical},
@@ -10,13 +10,11 @@ use crate::{
     },
     solve::transient::{solve_transient_system, TransientSolveOptions},
     ComputeBackend, FeaContactInterfaceContext, FeaElectroThermalContext,
-    FeaPlasticityConstitutiveContext, FeaPrepContext, FeaThermoMechanicalContext,
+    FeaPlasticityConstitutiveContext, FeaThermoMechanicalContext,
 };
 
 const VECTOR_COMPONENT_COUNT: usize = 3;
 const TENSOR_COMPONENT_COUNT: usize = 6;
-type LocalTriangleCoordinates = [[f64; 2]; 3];
-type LocalFrame = [[f64; 3]; 3];
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NonlinearSolveOptions {
@@ -29,7 +27,6 @@ pub struct NonlinearSolveOptions {
     pub max_line_search_backtracks: usize,
     pub line_search_reduction: f64,
     pub tangent_refresh_interval: usize,
-    pub prep_context: Option<FeaPrepContext>,
     pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
     pub electro_thermal_context: Option<FeaElectroThermalContext>,
     pub plasticity_context: Option<FeaPlasticityConstitutiveContext>,
@@ -48,7 +45,6 @@ impl Default for NonlinearSolveOptions {
             max_line_search_backtracks: 6,
             line_search_reduction: 0.5,
             tangent_refresh_interval: 2,
-            prep_context: None,
             thermo_mechanical_context: None,
             electro_thermal_context: None,
             plasticity_context: None,
@@ -148,7 +144,6 @@ pub fn solve_nonlinear_system(
             adapt_nonconverged_shrink: 1.0,
             dt_bucket_rel_tolerance: 0.0,
             progress_operation: "fea.run_nonlinear".to_string(),
-            prep_context: options.prep_context,
             thermo_mechanical_context: options.thermo_mechanical_context.clone(),
             electro_thermal_context: options.electro_thermal_context.clone(),
         },
@@ -459,12 +454,10 @@ pub fn solve_nonlinear_system(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "basis={} element_count={} active_recovery_edge_count={} prep_recovery_edge_count={} constrained_recovery_edge_count={} mean_edge_length_m={} max_edge_strain_norm={} strain_component_coverage_ratio={}",
+            "basis={} element_count={} active_recovery_edge_count={} mean_edge_length_m={} max_edge_strain_norm={} strain_component_coverage_ratio={}",
             recovery_topology.basis,
             recovery_topology.element_count,
             recovery_topology.active_recovery_edge_count,
-            recovery_topology.prep_recovery_edge_count,
-            recovery_topology.constrained_recovery_edge_count,
             recovery_topology.mean_edge_length_m(),
             recovery_topology.max_edge_strain_norm(
                 displacement_snapshots.last().map(Vec::as_slice)
@@ -740,11 +733,8 @@ struct NonlinearRecoveryTopology {
     basis: &'static str,
     element_count: usize,
     active_recovery_edge_count: usize,
-    prep_recovery_edge_count: usize,
-    constrained_recovery_edge_count: usize,
     use_dof_adjacency_fallback: bool,
     edges: Vec<NonlinearRecoveryEdge>,
-    b_matrix_elements: Vec<NonlinearBMatrixElement>,
 }
 
 impl NonlinearRecoveryTopology {
@@ -763,19 +753,6 @@ impl NonlinearRecoveryTopology {
         let Some(displacement) = displacement else {
             return 0.0;
         };
-        if !self.b_matrix_elements.is_empty() {
-            return self
-                .b_matrix_elements
-                .iter()
-                .map(|element| {
-                    nonlinear_b_matrix_strain_tensor(displacement, element)
-                        .iter()
-                        .map(|value| value * value)
-                        .sum::<f64>()
-                        .sqrt()
-                })
-                .fold(0.0_f64, f64::max);
-        }
         self.edges
             .iter()
             .map(|edge| {
@@ -792,20 +769,6 @@ impl NonlinearRecoveryTopology {
         let Some(displacement) = displacement else {
             return 0.0;
         };
-        if !self.b_matrix_elements.is_empty() {
-            let expected_component_count = self.b_matrix_elements.len() * TENSOR_COMPONENT_COUNT;
-            let active_component_count = self
-                .b_matrix_elements
-                .iter()
-                .map(|element| {
-                    nonlinear_b_matrix_strain_tensor(displacement, element)
-                        .iter()
-                        .filter(|value| value.abs() > 0.0)
-                        .count()
-                })
-                .sum::<usize>();
-            return active_component_count as f64 / expected_component_count as f64;
-        }
         let expected_component_count = self.edges.len() * TENSOR_COMPONENT_COUNT;
         if expected_component_count == 0 {
             return 0.0;
@@ -834,41 +797,7 @@ struct NonlinearRecoveryEdge {
     shear_pair: (usize, usize),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct NonlinearBMatrixElement {
-    nodes: [usize; 3],
-    coordinates_m: [[f64; 3]; 3],
-}
-
 fn nonlinear_recovery_topology(summary: &AssemblySummary) -> NonlinearRecoveryTopology {
-    let prep_edges = nonlinear_prep_recovery_edges(summary);
-    let constrained_recovery_edge_count = constrained_prep_recovery_edge_count(summary);
-    let b_matrix_elements = nonlinear_prep_b_matrix_elements(summary, &prep_edges);
-    if !b_matrix_elements.is_empty() {
-        return NonlinearRecoveryTopology {
-            basis: "prep_constant_strain_b_matrix",
-            element_count: b_matrix_elements.len(),
-            active_recovery_edge_count: prep_edges.len(),
-            prep_recovery_edge_count: prep_edges.len(),
-            constrained_recovery_edge_count,
-            use_dof_adjacency_fallback: false,
-            edges: prep_edges,
-            b_matrix_elements,
-        };
-    }
-    if !prep_edges.is_empty() {
-        return NonlinearRecoveryTopology {
-            basis: "prep_element_connectivity",
-            element_count: prep_edges.len(),
-            active_recovery_edge_count: prep_edges.len(),
-            prep_recovery_edge_count: prep_edges.len(),
-            constrained_recovery_edge_count,
-            use_dof_adjacency_fallback: false,
-            edges: prep_edges,
-            b_matrix_elements: Vec::new(),
-        };
-    }
-
     let fallback_count = summary
         .dof_count
         .div_ceil(VECTOR_COMPONENT_COUNT)
@@ -895,205 +824,9 @@ fn nonlinear_recovery_topology(summary: &AssemblySummary) -> NonlinearRecoveryTo
         basis: "dof_adjacency_fallback",
         element_count: fallback_count,
         active_recovery_edge_count: edges.len(),
-        prep_recovery_edge_count: 0,
-        constrained_recovery_edge_count: 0,
         use_dof_adjacency_fallback: true,
         edges,
-        b_matrix_elements: Vec::new(),
     }
-}
-
-fn nonlinear_prep_b_matrix_elements(
-    summary: &AssemblySummary,
-    prep_edges: &[NonlinearRecoveryEdge],
-) -> Vec<NonlinearBMatrixElement> {
-    let Some(prep_coordinates) = summary.prep_coordinates.as_ref() else {
-        return Vec::new();
-    };
-    if prep_coordinates.element_geometry_coverage_ratio <= 0.0
-        || prep_coordinates.element_geometry_node_count < 3
-        || prep_coordinates.reference_element_area_m2 <= 0.0
-        || !prep_coordinates.reference_element_area_m2.is_finite()
-        || !nonlinear_reference_coordinates_are_valid(
-            prep_coordinates.reference_element_coordinates_m,
-        )
-    {
-        return Vec::new();
-    }
-
-    let node_count = summary.dof_count.div_ceil(VECTOR_COMPONENT_COUNT);
-    let sample_elements = nonlinear_prep_sample_b_matrix_elements(
-        summary,
-        node_count,
-        prep_coordinates
-            .element_topology_sample_element_count
-            .min(4),
-        prep_coordinates.element_topology_sample_edge_count.min(8),
-        prep_coordinates.element_topology_sample_element_edges,
-        prep_coordinates.element_topology_sample_edge_nodes,
-        prep_coordinates.element_topology_sample_node_coordinates_m,
-    );
-    if !sample_elements.is_empty() {
-        return sample_elements;
-    }
-
-    let mut nodes = prep_edges
-        .iter()
-        .flat_map(|edge| {
-            [
-                edge.from_dof / VECTOR_COMPONENT_COUNT,
-                edge.to_dof / VECTOR_COMPONENT_COUNT,
-            ]
-        })
-        .filter(|node| *node < node_count && nonlinear_node_has_unconstrained_dof(summary, *node))
-        .collect::<Vec<_>>();
-    nodes.sort_unstable();
-    nodes.dedup();
-    if nodes.len() < 3 {
-        nodes = (0..node_count)
-            .filter(|node| nonlinear_node_has_unconstrained_dof(summary, *node))
-            .take(3)
-            .collect();
-    }
-
-    nodes
-        .chunks_exact(3)
-        .map(|chunk| NonlinearBMatrixElement {
-            nodes: [chunk[0], chunk[1], chunk[2]],
-            coordinates_m: prep_coordinates.reference_element_coordinates_m,
-        })
-        .collect()
-}
-
-fn nonlinear_prep_sample_b_matrix_elements(
-    summary: &AssemblySummary,
-    node_count: usize,
-    sample_element_count: usize,
-    sample_edge_count: usize,
-    element_edges: [[u32; 3]; 4],
-    edge_nodes: [[u32; 2]; 8],
-    node_coordinates_m: [[f64; 3]; 8],
-) -> Vec<NonlinearBMatrixElement> {
-    if sample_element_count == 0 || sample_edge_count < 3 {
-        return Vec::new();
-    }
-    element_edges
-        .iter()
-        .take(sample_element_count)
-        .filter_map(|sample_edges| {
-            let mut nodes = Vec::with_capacity(3);
-            for edge_index in sample_edges {
-                let edge_index = *edge_index as usize;
-                if edge_index >= sample_edge_count {
-                    return None;
-                }
-                for node in edge_nodes[edge_index] {
-                    let node = node as usize;
-                    if node < node_count
-                        && node < node_coordinates_m.len()
-                        && nonlinear_node_has_unconstrained_dof(summary, node)
-                        && !nodes.contains(&node)
-                    {
-                        nodes.push(node);
-                    }
-                }
-            }
-            if nodes.len() != 3 {
-                return None;
-            }
-            let coordinates_m = [
-                node_coordinates_m[nodes[0]],
-                node_coordinates_m[nodes[1]],
-                node_coordinates_m[nodes[2]],
-            ];
-            nonlinear_reference_coordinates_are_valid(coordinates_m).then_some(
-                NonlinearBMatrixElement {
-                    nodes: [nodes[0], nodes[1], nodes[2]],
-                    coordinates_m,
-                },
-            )
-        })
-        .collect()
-}
-
-fn nonlinear_prep_recovery_edges(summary: &AssemblySummary) -> Vec<NonlinearRecoveryEdge> {
-    summary
-        .prep_recovery_edges
-        .iter()
-        .filter_map(|edge| nonlinear_prep_recovery_edge(summary, *edge))
-        .collect()
-}
-
-fn nonlinear_prep_recovery_edge(
-    summary: &AssemblySummary,
-    edge: PrepRecoveryEdgeSummary,
-) -> Option<NonlinearRecoveryEdge> {
-    let from_dof = edge.from_dof.min(edge.to_dof);
-    let to_dof = edge.from_dof.max(edge.to_dof);
-    if from_dof == to_dof
-        || to_dof >= summary.dof_count
-        || summary
-            .operator
-            .constrained
-            .get(from_dof)
-            .copied()
-            .unwrap_or(false)
-        || summary
-            .operator
-            .constrained
-            .get(to_dof)
-            .copied()
-            .unwrap_or(false)
-    {
-        return None;
-    }
-    let component = from_dof % VECTOR_COMPONENT_COUNT;
-    Some(NonlinearRecoveryEdge {
-        from_dof,
-        to_dof,
-        component,
-        hop: to_dof.abs_diff(from_dof).max(1),
-        edge_length_m: finite_positive_or(
-            edge.edge_length_m,
-            to_dof.abs_diff(from_dof).max(1) as f64,
-        ),
-        shear_pair: (
-            (component + 1) % VECTOR_COMPONENT_COUNT,
-            (component + 2) % VECTOR_COMPONENT_COUNT,
-        ),
-    })
-}
-
-fn finite_positive_or(value: f64, fallback: f64) -> f64 {
-    if value.is_finite() && value > 0.0 {
-        value
-    } else {
-        fallback
-    }
-}
-
-fn constrained_prep_recovery_edge_count(summary: &AssemblySummary) -> usize {
-    summary
-        .prep_recovery_edges
-        .iter()
-        .filter(|edge| {
-            let from_dof = edge.from_dof.min(edge.to_dof);
-            let to_dof = edge.from_dof.max(edge.to_dof);
-            to_dof < summary.dof_count
-                && (summary
-                    .operator
-                    .constrained
-                    .get(from_dof)
-                    .copied()
-                    .unwrap_or(false)
-                    || summary
-                        .operator
-                        .constrained
-                        .get(to_dof)
-                        .copied()
-                        .unwrap_or(false))
-        })
-        .count()
 }
 
 fn recover_increment_strain(
@@ -1109,14 +842,6 @@ fn recover_increment_strain(
         0.0,
     );
     let mut strain = vec![0.0; element_count * TENSOR_COMPONENT_COUNT];
-    if !recovery_topology.b_matrix_elements.is_empty() {
-        for (element_index, element) in recovery_topology.b_matrix_elements.iter().enumerate() {
-            let offset = element_index * TENSOR_COMPONENT_COUNT;
-            let element_strain = nonlinear_b_matrix_strain_tensor(&padded, element);
-            strain[offset..offset + TENSOR_COMPONENT_COUNT].copy_from_slice(&element_strain);
-        }
-        return strain;
-    }
     if recovery_topology.use_dof_adjacency_fallback {
         for element_index in 0..element_count {
             let base = element_index * VECTOR_COMPONENT_COUNT;
@@ -1140,142 +865,12 @@ fn recover_increment_strain(
     strain
 }
 
-fn nonlinear_reference_coordinates_are_valid(coordinates: [[f64; 3]; 3]) -> bool {
-    coordinates.iter().flatten().all(|value| value.is_finite())
-        && nonlinear_triangle_area_3d_m2(coordinates) > 0.0
-}
-
-fn nonlinear_node_has_unconstrained_dof(summary: &AssemblySummary, node: usize) -> bool {
-    let base = node * VECTOR_COMPONENT_COUNT;
-    (0..VECTOR_COMPONENT_COUNT).any(|component| {
-        !summary
-            .operator
-            .constrained
-            .get(base + component)
-            .copied()
-            .unwrap_or(false)
-    })
-}
-
-fn nonlinear_b_matrix_strain_tensor(
-    displacement: &[f64],
-    element: &NonlinearBMatrixElement,
-) -> [f64; 6] {
-    let Some((local_coordinates, local_basis)) =
-        nonlinear_local_triangle_coordinates(element.coordinates_m)
-    else {
-        return [0.0; TENSOR_COMPONENT_COUNT];
-    };
-    let denominator = nonlinear_triangle_signed_area2(local_coordinates);
-    if !denominator.is_finite() || denominator.abs() <= f64::EPSILON {
-        return [0.0; TENSOR_COMPONENT_COUNT];
-    }
-
-    let mut local_displacement = [[0.0_f64; 3]; 3];
-    for (i, node) in element.nodes.iter().copied().enumerate() {
-        let displacement_vector = nonlinear_nodal_displacement(displacement, node);
-        local_displacement[i] = [
-            nonlinear_dot3(displacement_vector, local_basis[0]),
-            nonlinear_dot3(displacement_vector, local_basis[1]),
-            nonlinear_dot3(displacement_vector, local_basis[2]),
-        ];
-    }
-
-    let b = [
-        local_coordinates[1][1] - local_coordinates[2][1],
-        local_coordinates[2][1] - local_coordinates[0][1],
-        local_coordinates[0][1] - local_coordinates[1][1],
-    ];
-    let c = [
-        local_coordinates[2][0] - local_coordinates[1][0],
-        local_coordinates[0][0] - local_coordinates[2][0],
-        local_coordinates[1][0] - local_coordinates[0][0],
-    ];
-
-    let mut du_dx = 0.0_f64;
-    let mut du_dy = 0.0_f64;
-    let mut dv_dx = 0.0_f64;
-    let mut dv_dy = 0.0_f64;
-    let mut dw_dx = 0.0_f64;
-    let mut dw_dy = 0.0_f64;
-    for i in 0..3 {
-        du_dx += b[i] * local_displacement[i][0];
-        du_dy += c[i] * local_displacement[i][0];
-        dv_dx += b[i] * local_displacement[i][1];
-        dv_dy += c[i] * local_displacement[i][1];
-        dw_dx += b[i] * local_displacement[i][2];
-        dw_dy += c[i] * local_displacement[i][2];
-    }
-
-    [
-        du_dx / denominator,
-        dv_dy / denominator,
-        0.0,
-        (du_dy + dv_dx) / denominator,
-        dw_dy / denominator,
-        dw_dx / denominator,
-    ]
-}
-
-fn nonlinear_local_triangle_coordinates(
-    coordinates: [[f64; 3]; 3],
-) -> Option<(LocalTriangleCoordinates, LocalFrame)> {
-    let origin = coordinates[0];
-    let edge01 = nonlinear_sub3(coordinates[1], origin);
-    let edge02 = nonlinear_sub3(coordinates[2], origin);
-    let e1 = nonlinear_normalize3(edge01)?;
-    let normal = nonlinear_normalize3(nonlinear_cross3(edge01, edge02))?;
-    let e2 = nonlinear_normalize3(nonlinear_cross3(normal, e1))?;
-    let local = coordinates.map(|point| {
-        let relative = nonlinear_sub3(point, origin);
-        [nonlinear_dot3(relative, e1), nonlinear_dot3(relative, e2)]
-    });
-    Some((local, [e1, e2, normal]))
-}
-
-fn nonlinear_triangle_signed_area2(coordinates: LocalTriangleCoordinates) -> f64 {
-    coordinates[0][0] * (coordinates[1][1] - coordinates[2][1])
-        + coordinates[1][0] * (coordinates[2][1] - coordinates[0][1])
-        + coordinates[2][0] * (coordinates[0][1] - coordinates[1][1])
-}
-
-fn nonlinear_triangle_area_3d_m2(coordinates: [[f64; 3]; 3]) -> f64 {
-    let edge01 = nonlinear_sub3(coordinates[1], coordinates[0]);
-    let edge02 = nonlinear_sub3(coordinates[2], coordinates[0]);
-    0.5 * nonlinear_norm3(nonlinear_cross3(edge01, edge02))
-}
-
-fn nonlinear_sub3(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
-    [left[0] - right[0], left[1] - right[1], left[2] - right[2]]
-}
-
-fn nonlinear_dot3(left: [f64; 3], right: [f64; 3]) -> f64 {
-    left[0] * right[0] + left[1] * right[1] + left[2] * right[2]
-}
-
-fn nonlinear_cross3(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
-    [
-        left[1] * right[2] - left[2] * right[1],
-        left[2] * right[0] - left[0] * right[2],
-        left[0] * right[1] - left[1] * right[0],
-    ]
-}
-
-fn nonlinear_norm3(value: [f64; 3]) -> f64 {
-    nonlinear_dot3(value, value).sqrt()
-}
-
-fn nonlinear_normalize3(value: [f64; 3]) -> Option<[f64; 3]> {
-    let norm = nonlinear_norm3(value);
-    (norm.is_finite() && norm > f64::EPSILON).then_some([
-        value[0] / norm,
-        value[1] / norm,
-        value[2] / norm,
-    ])
-}
-
 fn nonlinear_edge_strain_tensor(displacement: &[f64], edge: &NonlinearRecoveryEdge) -> [f64; 6] {
-    let length = finite_positive_or(edge.edge_length_m, edge.hop.max(1) as f64);
+    let length = if edge.edge_length_m.is_finite() && edge.edge_length_m > 0.0 {
+        edge.edge_length_m
+    } else {
+        edge.hop.max(1) as f64
+    };
     let from_node = edge.from_dof / VECTOR_COMPONENT_COUNT;
     let to_node = edge.to_dof / VECTOR_COMPONENT_COUNT;
     if from_node == to_node {

@@ -195,7 +195,7 @@ print("bracket_von_mises.png", "-dpng");
 
 The same host-only physical-value boundary applies to the documented numeric fields of `fea.material`, `fea.loadCase`, `fea.domain`, and `fea.interface`: field names, scalar/vector shape, finiteness, and kind-specific requirements are validated before one binary64 model-storage conversion, and sufficiently wide integers can round. Nested domain revision values, geometry/model revisions, plan counts, field shape/count metadata, and comparison count deltas are structural integers instead; they remain exact and do not enter the physical-value conversion. The conventional plotting handle remains a double at the scripting boundary. Resident numeric constructor fields are rejected because typed FEA object construction performs no provider execution.
 
-`fea.runOptions` distinguishes structural controls from physical solver settings. Mode, step, iteration, retry, backtrack, and tangent-refresh counts accept all eight integer classes and ordinary integral doubles exactly; tolerances, time steps, scales, ratios, frequencies, and residual thresholds cross one checked binary64 boundary. Logical settings require logical scalars. Public `PrepContext` injection is rejected because it is internal runtime state, while `PrepArtifactId` and `PrepCalibrationProfile` remain optional text settings. The complete per-family option/default table is in the [operation reference](./operation-reference).
+`fea.runOptions` distinguishes structural controls from physical solver settings. Mode, step, iteration, retry, backtrack, and tangent-refresh counts accept all eight integer classes and ordinary integral doubles exactly; tolerances, time steps, scales, ratios, frequencies, and residual thresholds cross one checked binary64 boundary. Logical settings require logical scalars. The complete per-family option/default table is in the [operation reference](./operation-reference).
 
 `fea.results` uses positive one-based exact vectors for `ModeIndices` and `TransientSnapshotIndices`, matching normal RunMat indexing. Its inclusion flags accept logical scalars or exact numeric zero and one. Selector shape, positivity, integrality, and range are validated before artifact lookup; resident selectors reject without provider access. Structural result metadata such as shapes, counts, indexes, byte sizes, iteration counts, and fingerprints remains exact, while field values and physical/timing/residual quantities remain double. `fea.trends("WindowSize", n)` applies the same exact structural rule to a positive scalar and defaults to 16.
 
@@ -279,10 +279,9 @@ Use `[runtime.fea]` for FEA artifacts:
 [runtime.fea]
 artifact_store = "filesystem"
 artifact_root = "artifacts"
-geometry_prep_require_latest_revision = true
 ```
 
-When `artifact_root` is omitted, RunMat uses `./artifacts`. Run artifacts are written under `runs`, study evidence under `studies`, geometry prep under `geometry-prep`, and thermo-field artifacts under `thermo-fields`. Override the specific roots only when a host needs a different layout.
+When `artifact_root` is omitted, RunMat uses `./artifacts`. Run artifacts are written under `runs`, study evidence under `studies`, and thermo-field artifacts under `thermo-fields`. Override the specific roots only when a host needs a different layout.
 
 ## Rust Host Usage
 
@@ -305,7 +304,6 @@ let model = analysis_create_model_op(
     AnalysisCreateModelIntentSpec {
         model_id: "bracket_static_model".to_string(),
         profile: AnalysisCreateModelProfile::LinearStaticStructural,
-        prep_context: None,
     },
     context.clone(),
 )?.data;

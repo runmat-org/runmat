@@ -318,7 +318,6 @@ jobs:
       RUNMAT_ANALYSIS_ARTIFACT_ROOT: ${{ github.workspace }}/target/runmat-analysis-artifacts
       RUNMAT_FEA_ARTIFACT_ROOT: ${{ github.workspace }}/target/runmat-analysis-artifacts
       RUNMAT_THERMO_FIELD_ARTIFACT_ROOT: ${{ github.workspace }}/target/runmat-analysis-artifacts/thermo-fields
-      RUNMAT_GEOMETRY_PREP_ARTIFACT_ROOT: ${{ github.workspace }}/target/runmat-prep-artifacts
     steps:
       - uses: actions/checkout@v4
 
@@ -339,7 +338,7 @@ jobs:
         run: cargo test -p runmat-analysis-core -p runmat-analysis-fea
 
       - name: Run FEA runtime contract tests
-        run: cargo test -p runmat-runtime --test geometry_prep_conformance --test prep_solve_conformance --test operation_contracts
+        run: cargo test -p runmat-runtime --test operation_contracts
 
       - name: Run FEA benchmark conformance
         id: fea_benchmark_conformance
@@ -440,30 +439,6 @@ jobs:
       - name: Test FEA script logic
         run: scripts/test-fea-scripts.sh
 
-      - name: Validate prep calibration evidence
-        run: python3 scripts/fea/prep_calibration/validate_prep_calibration_evidence.py
-
-      - name: Generate prep calibration recommendations
-        env:
-          RUNMAT_RELEASE_READINESS_PREP_RETRAIN_TRIGGER_DRIFT: "0.1"
-        run: python3 scripts/fea/prep_calibration/generate_prep_calibration_recommendations.py
-
-      - name: Verify governance artifacts exist
-        run: |
-          test -f target/runmat-analysis-artifacts/prep_calibration_evidence_validation.json
-          test -f target/runmat-analysis-artifacts/prep_calibration_recommendations.json
-
-      - name: Validate prep calibration evidence promotion
-        env:
-          RUNMAT_PREP_CALIBRATION_EVIDENCE_CANDIDATE: scripts/fea/prep_calibration/evidence/prep_calibration_evidence.json
-          RUNMAT_PREP_CALIBRATION_EVIDENCE_APPROVED: target/runmat-analysis-artifacts/prep_calibration_evidence_approved.json
-          RUNMAT_PREP_CALIBRATION_RECOMMENDATIONS_INPUT: target/runmat-analysis-artifacts/prep_calibration_recommendations.json
-          RUNMAT_PREP_CALIBRATION_PROMOTION_MAX_RECOMMENDATIONS: "64"
-        run: python3 scripts/fea/prep_calibration/promote_prep_calibration_evidence.py
-
-      - name: Verify promotion artifact exists
-        run: test -f target/runmat-analysis-artifacts/prep_calibration_evidence_approved.json
-
       - name: Analyze nonlinear rolling trends
         if: always()
         env:
@@ -478,17 +453,6 @@ jobs:
         run: |
           python3 scripts/fea/reporting/summarize_analysis_report.py | tee fea-conformance-summary.md
           cat fea-conformance-summary.md >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Summarize prep artifact SLO
-        if: always()
-        env:
-          RUNMAT_PREP_SLO_WARN_ARTIFACT_COUNT: "64"
-          RUNMAT_PREP_SLO_FAIL_ARTIFACT_COUNT: "128"
-          RUNMAT_PREP_SLO_WARN_P95_AGE_SECONDS: "604800"
-          RUNMAT_PREP_SLO_FAIL_P95_AGE_SECONDS: "1209600"
-        run: |
-          python3 scripts/fea/prep_calibration/summarize_prep_artifacts.py | tee prep-artifact-slo.md
-          cat prep-artifact-slo.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Generate promotion threshold calibration
         if: always()
@@ -523,17 +487,9 @@ jobs:
         if: always()
         env:
           RUNMAT_RELEASE_READINESS_MAX_SLOWDOWN_RATIO: "1.25"
-          RUNMAT_RELEASE_READINESS_PREP_WARN_ARTIFACT_COUNT: "64"
-          RUNMAT_RELEASE_READINESS_PREP_FAIL_ARTIFACT_COUNT: "128"
-          RUNMAT_RELEASE_READINESS_PREP_WARN_P95_AGE_SECONDS: "604800"
-          RUNMAT_RELEASE_READINESS_PREP_FAIL_P95_AGE_SECONDS: "1209600"
-          RUNMAT_RELEASE_READINESS_PREP_MAX_REJECT_RATE: "0.25"
-          RUNMAT_RELEASE_READINESS_PREP_REQUIRE_RECOMMENDATION_ARTIFACT: "true"
-          RUNMAT_RELEASE_READINESS_PREP_CANDIDATE_MAX_AGE_DAYS: "14"
           RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_READY: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/heads/release/') }}
           RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_CALIBRATION: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/heads/release/') }}
           RUNMAT_RELEASE_READINESS_PROMOTION_CALIBRATION: target/runmat-analysis-artifacts/promotion_threshold_calibration.json
-          RUNMAT_PREP_CALIBRATION_RECOMMENDATIONS_INPUT: target/runmat-analysis-artifacts/prep_calibration_recommendations.json
           RUNMAT_THERMO_FIELD_SIGNING_KEY: ${{ secrets.RUNMAT_THERMO_FIELD_SIGNING_KEY }}
         run: |
           python3 scripts/fea/governance/release_readiness_fea.py | tee fea-release-readiness.md
@@ -558,17 +514,11 @@ jobs:
           python3 - <<'PY'
           import json
           from pathlib import Path
-          rec_path = Path("target/runmat-analysis-artifacts/prep_calibration_recommendations.json")
           ready_path = Path("target/runmat-analysis-artifacts/fea_release_readiness.json")
           ratchet_path = Path("target/runmat-analysis-artifacts/threshold_ratchet_report.json")
           promotion_calib_path = Path("target/runmat-analysis-artifacts/promotion_threshold_calibration.json")
           external_ref_path = Path("target/runmat-analysis-artifacts/external_reference_benchmark.json")
           lines = ["## Tier 7.5 Governance", ""]
-          if rec_path.exists():
-              rec = json.loads(rec_path.read_text())
-              lines.append(f"- Recommendation count: {rec.get('recommendation_count', 0)}")
-          else:
-              lines.append("- Recommendation artifact: missing")
           if ready_path.exists():
               ready = json.loads(ready_path.read_text())
               lines.append(f"- Governance profile: {ready.get('governance_profile', 'unknown')}")
@@ -911,16 +861,11 @@ jobs:
             target/runmat-analysis-artifacts/threshold_ratchet_report.md
             target/runmat-analysis-artifacts/promotion_threshold_calibration.json
             target/runmat-analysis-artifacts/external_reference_benchmark.json
-            target/runmat-analysis-artifacts/prep_calibration_evidence_validation.json
-            target/runmat-analysis-artifacts/prep_calibration_recommendations.json
-            target/runmat-analysis-artifacts/prep_calibration_evidence_approved.json
             target/runmat-analysis-artifacts/rolling/*.json
-            target/runmat-prep-artifacts/prep/*.json
             fea-conformance-summary.md
             fea-release-readiness.md
             nonlinear-trends.md
             thermo-field-trust-report.md
-            prep-artifact-slo.md
             tier75-governance-summary.md
             target/runmat-analysis-artifacts/thermo_field_trust_report.json
           if-no-files-found: warn

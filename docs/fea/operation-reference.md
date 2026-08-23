@@ -39,8 +39,6 @@ Error codes use `RM.<DOMAIN>.<OPERATION>.<REASON>`, for example `RM.FEA.RUN_STUD
 | `geometry.list_regions/v1` | Return known geometry regions. |
 | `geometry.query_entities/v1` | Return region, mesh, or entity references with a bounded query. |
 | `geometry.capture_view/v1` | Capture a geometry view through the installed adapter. |
-| `geometry.prep_for_analysis/v1` | Produce a prep artifact and `MeshingPrepResult`. |
-| `geometry.prep_artifact_health/v1` | Report prep artifact counts, ages, metrics, and lifecycle data. |
 
 ## FEA Operations
 
@@ -122,7 +120,7 @@ These constructors, planning operations, field projections, comparisons, and plo
 
 ### Run-option numeric contracts
 
-`fea.runOptions(solver, Name, Value, ...)` accepts solver families `linear_static`, `modal`, `acoustic`, `thermal`, `transient`, `cfd`, `cht`, `fsi`, `nonlinear`, and `electromagnetic`. Every family defaults `DeterministicMode=false`, `PrecisionMode="fp64"`, and `QualityPolicy="balanced"`; linear static also defaults `PreconditionerMode="auto"`. `PrepArtifactId` and `PrepCalibrationProfile` are optional text values, while public `PrepContext` injection is rejected because prep context is internal runtime state.
+`fea.runOptions(solver, Name, Value, ...)` accepts solver families `linear_static`, `modal`, `acoustic`, `thermal`, `transient`, `cfd`, `cht`, `fsi`, `nonlinear`, and `electromagnetic`. Every family defaults `DeterministicMode=false`, `PrecisionMode="fp64"`, and `QualityPolicy="balanced"`; linear static also defaults `PreconditionerMode="auto"`.
 
 | Solver | Exact structural options and defaults | Binary64 options and defaults |
 | --- | --- | --- |
@@ -207,11 +205,6 @@ Use `[runtime.fea]`:
 | `artifact_max_runs` | Optional global retained run limit. |
 | `artifact_max_runs_per_kind` | Optional retained run limit per family. |
 | `study_artifact_root` | Study validate, plan, run, and sweep artifact root. |
-| `geometry_prep_artifact_root` | Geometry prep artifact root. |
-| `geometry_prep_max_artifacts` | Optional global prep artifact retention limit. |
-| `geometry_prep_max_artifacts_per_geometry` | Optional per-geometry prep artifact retention limit. |
-| `geometry_prep_max_age_seconds` | Optional prep artifact age retention limit. |
-| `geometry_prep_require_latest_revision` | Whether prep-aware runs reject stale geometry revisions. |
 | `thermo_field_artifact_root` | Thermo-field artifact root for coupled thermal paths. |
 
 Preferred environment variables:
@@ -223,14 +216,7 @@ Preferred environment variables:
 | `RUNMAT_FEA_ARTIFACT_MAX_RUNS` | Optional global retained run limit. |
 | `RUNMAT_FEA_ARTIFACT_MAX_RUNS_PER_KIND` | Optional retained run limit per family. |
 | `RUNMAT_FEA_STUDY_ARTIFACT_ROOT` | Study validate, plan, run, and sweep artifact root. |
-| `RUNMAT_GEOMETRY_PREP_ARTIFACT_ROOT` | Geometry prep artifact root. |
-| `RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS` | Optional global prep artifact retention limit. |
-| `RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS_PER_GEOMETRY` | Optional per-geometry prep artifact retention limit. |
-| `RUNMAT_GEOMETRY_PREP_MAX_AGE_SECONDS` | Optional prep artifact age retention limit. |
-| `RUNMAT_GEOMETRY_PREP_REQUIRE_LATEST_REVISION` | Whether prep-aware runs reject stale revisions. |
 | `RUNMAT_THERMO_FIELD_ARTIFACT_ROOT` | Thermo-field artifact root. |
-
-Legacy `RUNMAT_ANALYSIS_*` variables remain compatibility fallbacks where supported.
 
 ## Evolution Rules
 

@@ -17,12 +17,12 @@ use crate::{
     fixtures::{fixture_model, FixtureId},
     parity::{assert_vectors_within_tolerance, ParityTolerance},
     solve::{nonlinear::NonlinearSolveOptions, transient::TransientSolveOptions},
-    ComputeBackend, FeaContactInterfaceContext, FeaElectroThermalContext, FeaPrepContext,
-    FeaRunResult, FeaThermoMechanicalContext, LinearStaticSolveOptions, ModalSolveOptions,
-    ThermalSolveOptions, FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY,
-    FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL,
-    FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
-    FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
+    ComputeBackend, FeaContactInterfaceContext, FeaElectroThermalContext, FeaRunResult,
+    FeaThermoMechanicalContext, LinearStaticSolveOptions, ModalSolveOptions, ThermalSolveOptions,
+    FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD,
+    FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL, FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT,
+    FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
+    FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
     FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE,
     FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS,
@@ -206,7 +206,7 @@ fn assembly_summary_reports_structural_dof_layout_metrics() {
         mz: 125.0,
     };
 
-    let summary = crate::assembly::assemble_linear_system(&model, None, None, None, None);
+    let summary = crate::assembly::assemble_linear_system(&model, None, None, None);
 
     assert_eq!(summary.dof_count, 3);
     assert_eq!(summary.structural_node_count, 1);
@@ -224,7 +224,7 @@ fn assembly_summary_reports_structural_dof_layout_metrics() {
 #[test]
 fn beam_assembly_uses_lumped_rotational_inertia() {
     let model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
-    let summary = crate::assembly::assemble_linear_system(&model, None, None, None, None);
+    let summary = crate::assembly::assemble_linear_system(&model, None, None, None);
     let layout = &summary.structural_dof_layout;
     let node = 0usize;
     let mass = &summary.operator.mass_diag;
@@ -653,105 +653,6 @@ fn solver_mesh_linear_static_reports_solid_assembly_basis() {
             && diag.message.contains("solver_mesh_node_count=4")
             && diag.message.contains("solver_mesh_element_count=1")
     }));
-}
-
-#[test]
-fn prep_context_without_solver_mesh_fails_for_solid_continuum() {
-    let model = fixture_model(FixtureId::CantileverLinearStatic);
-    let err = crate::run_linear_static_with_options(
-        &model,
-        ComputeBackend::Cpu,
-        LinearStaticSolveOptions {
-            prep_context: Some(FeaPrepContext {
-                prepared_mesh_count: 1,
-                prepared_node_count: 12,
-                prepared_element_count: 18,
-                mapped_region_count: 2,
-                min_scaled_jacobian: 0.82,
-                mean_aspect_ratio: 1.6,
-                inverted_element_count: 0,
-                mapped_load_count: 1,
-                mapped_bc_count: 1,
-                layout_seed: 17,
-                topology_dof_multiplier: 1.4,
-                topology_bandwidth_estimate: 3,
-                mapped_region_participation_ratio: 0.8,
-                topology_surface_patch_ratio: 0.25,
-                topology_volume_core_ratio: 0.65,
-                topology_mixed_family_ratio: 0.05,
-                topology_region_span_mean: 4.0,
-                topology_region_block_count: 2,
-                topology_region_mesh_mean: 3.0,
-                topology_region_mesh_variance: 0.4,
-                topology_triangle_family_ratio: 0.2,
-                topology_quad_family_ratio: 0.3,
-                topology_tetrahedron_family_ratio: 0.3,
-                topology_hex_family_ratio: 0.2,
-                coordinate_span_x_m: 2.4,
-                coordinate_span_y_m: 0.6,
-                coordinate_span_z_m: 0.4,
-                coordinate_active_dimension_count: 3,
-                coordinate_characteristic_length_m: 0.2,
-                element_geometry_node_count: 4,
-                element_geometry_edge_count: 5,
-                mean_element_edge_length_m: 0.2,
-                mean_element_area_m2: 0.04,
-                element_geometry_coverage_ratio: 1.0,
-                reference_element_coordinates_m: [
-                    [0.0, 0.0, 0.0],
-                    [0.4, 0.0, 0.0],
-                    [0.0, 0.2, 0.0],
-                ],
-                reference_element_area_m2: 0.04,
-                element_topology_sample_element_count: 2,
-                element_topology_sample_edge_count: 5,
-                element_topology_sample_edge_nodes: [
-                    [0, 1],
-                    [1, 2],
-                    [0, 2],
-                    [2, 3],
-                    [0, 3],
-                    [0, 0],
-                    [0, 0],
-                    [0, 0],
-                ],
-                element_topology_sample_node_coordinates_m: [
-                    [0.0, 0.0, 0.0],
-                    [0.4, 0.0, 0.0],
-                    [0.0, 0.2, 0.0],
-                    [0.4, 0.2, 0.0],
-                    [0.0, 0.0, 0.0],
-                    [0.0, 0.0, 0.0],
-                    [0.0, 0.0, 0.0],
-                    [0.0, 0.0, 0.0],
-                ],
-                element_topology_sample_element_edges: [[0, 1, 2], [2, 3, 4], [0, 0, 0], [0, 0, 0]],
-                element_topology_sample_element_orientations: [
-                    [1, 1, -1],
-                    [1, 1, -1],
-                    [0, 0, 0],
-                    [0, 0, 0],
-                ],
-                element_topology_sample_element_areas_m2: [0.04, 0.04, 0.0, 0.0],
-                element_topology_node_coordinates_m: vec![
-                    [0.0, 0.0, 0.0],
-                    [0.4, 0.0, 0.0],
-                    [0.0, 0.2, 0.0],
-                    [0.4, 0.2, 0.0],
-                ],
-                element_topology_edge_nodes: vec![[0, 1], [1, 2], [0, 2], [2, 3], [0, 3]],
-                element_topology_element_edges: vec![[0, 1, 2], [2, 3, 4]],
-                element_topology_element_orientations: vec![[1, 1, -1], [1, 1, -1]],
-                element_topology_element_areas_m2: vec![0.04, 0.04],
-                calibration_profile_override: None,
-            }),
-            ..LinearStaticSolveOptions::default()
-        },
-    )
-    .expect_err("prep-only solid continuum solve should fail closed");
-
-    assert!(matches!(err, crate::FeaRunError::InvalidModel(_)));
-    assert!(err.to_string().contains("require a canonical solver mesh"));
 }
 
 fn single_tetrahedron_solver_mesh() -> SolverMeshArtifact {
@@ -1194,131 +1095,6 @@ fn thermal_solver_emits_heat_transfer_fields() {
 }
 
 #[test]
-fn prepared_thermal_recovery_uses_prep_element_topology() {
-    let model = fixture_model(FixtureId::CantileverLinearStatic);
-    let result = crate::run_thermal_with_options(
-        &model,
-        ComputeBackend::Cpu,
-        ThermalSolveOptions {
-            step_count: 4,
-            prep_context: Some(FeaPrepContext {
-                prepared_mesh_count: 1,
-                prepared_node_count: 14,
-                prepared_element_count: 24,
-                mapped_region_count: 2,
-                min_scaled_jacobian: 0.86,
-                mean_aspect_ratio: 1.4,
-                inverted_element_count: 0,
-                mapped_load_count: 1,
-                mapped_bc_count: 1,
-                layout_seed: 23,
-                topology_dof_multiplier: 1.5,
-                topology_bandwidth_estimate: 3,
-                mapped_region_participation_ratio: 0.85,
-                topology_surface_patch_ratio: 0.2,
-                topology_volume_core_ratio: 0.7,
-                topology_mixed_family_ratio: 0.05,
-                topology_region_span_mean: 4.0,
-                topology_region_block_count: 2,
-                topology_region_mesh_mean: 3.0,
-                topology_region_mesh_variance: 0.4,
-                topology_triangle_family_ratio: 0.2,
-                topology_quad_family_ratio: 0.25,
-                topology_tetrahedron_family_ratio: 0.35,
-                topology_hex_family_ratio: 0.2,
-                coordinate_span_x_m: 2.0,
-                coordinate_span_y_m: 0.5,
-                coordinate_span_z_m: 0.4,
-                coordinate_active_dimension_count: 3,
-                coordinate_characteristic_length_m: 0.2,
-                element_geometry_node_count: 4,
-                element_geometry_edge_count: 5,
-                mean_element_edge_length_m: 0.2,
-                mean_element_area_m2: 0.04,
-                element_geometry_coverage_ratio: 1.0,
-                reference_element_coordinates_m: [
-                    [0.0, 0.0, 0.0],
-                    [0.4, 0.0, 0.0],
-                    [0.0, 0.2, 0.0],
-                ],
-                reference_element_area_m2: 0.04,
-                element_topology_sample_element_count: 2,
-                element_topology_sample_edge_count: 5,
-                element_topology_sample_edge_nodes: [
-                    [0, 1],
-                    [1, 2],
-                    [0, 2],
-                    [2, 3],
-                    [0, 3],
-                    [0, 0],
-                    [0, 0],
-                    [0, 0],
-                ],
-                element_topology_sample_node_coordinates_m: [
-                    [0.0, 0.0, 0.0],
-                    [0.4, 0.0, 0.0],
-                    [0.0, 0.2, 0.0],
-                    [0.4, 0.2, 0.0],
-                    [0.0, 0.0, 0.0],
-                    [0.0, 0.0, 0.0],
-                    [0.0, 0.0, 0.0],
-                    [0.0, 0.0, 0.0],
-                ],
-                element_topology_sample_element_edges: [[0, 1, 2], [2, 3, 4], [0, 0, 0], [0, 0, 0]],
-                element_topology_sample_element_orientations: [
-                    [1, 1, -1],
-                    [1, 1, -1],
-                    [0, 0, 0],
-                    [0, 0, 0],
-                ],
-                element_topology_sample_element_areas_m2: [0.04, 0.04, 0.0, 0.0],
-                element_topology_node_coordinates_m: vec![
-                    [0.0, 0.0, 0.0],
-                    [0.4, 0.0, 0.0],
-                    [0.0, 0.2, 0.0],
-                    [0.4, 0.2, 0.0],
-                ],
-                element_topology_edge_nodes: vec![[0, 1], [1, 2], [0, 2], [2, 3], [0, 3]],
-                element_topology_element_edges: vec![[0, 1, 2], [2, 3, 4]],
-                element_topology_element_orientations: vec![[1, 1, -1], [1, 1, -1]],
-                element_topology_element_areas_m2: vec![0.04, 0.04],
-                calibration_profile_override: None,
-            }),
-            thermo_mechanical_context: Some(FeaThermoMechanicalContext {
-                enabled: true,
-                reference_temperature_k: 293.15,
-                applied_temperature_delta_k: 50.0,
-                thermal_expansion_coefficient: 1.2e-5,
-                field_source: None,
-                region_temperature_deltas: Vec::new(),
-                time_profile: Vec::new(),
-            }),
-            ..ThermalSolveOptions::default()
-        },
-    )
-    .expect("prepared thermal solve should succeed");
-
-    let recovery = result
-        .run
-        .diagnostics
-        .iter()
-        .find(|diag| diag.code == "FEA_THERMAL_FIELD_RECOVERY")
-        .expect("thermal recovery diagnostic should be emitted");
-    assert!(recovery
-        .message
-        .contains("basis=prep_element_triangle_topology"));
-    assert!(recovery.message.contains("prep_recovery_edge_count="));
-    assert!(recovery.message.contains("prep_triangle_element_count=2"));
-    assert_eq!(result.temperature_gradient_snapshots[1].shape[0], 2);
-    assert_eq!(result.temperature_gradient_snapshots[1].shape[1], 3);
-    assert_eq!(
-        result.heat_flux_snapshots[1].shape,
-        result.temperature_gradient_snapshots[1].shape
-    );
-    assert_eq!(result.boundary_heat_flux_snapshots[1].shape, vec![6]);
-}
-
-#[test]
 fn modal_large_fixture_emits_orthogonality_and_separation_diagnostics() {
     let model = fixture_model(FixtureId::ModalLarge);
     let result = crate::run_modal_with_options(
@@ -1326,7 +1102,6 @@ fn modal_large_fixture_emits_orthogonality_and_separation_diagnostics() {
         ComputeBackend::Cpu,
         ModalSolveOptions {
             mode_count: 8,
-            prep_context: None,
             thermo_mechanical_context: None,
             electro_thermal_context: None,
         },
@@ -1808,119 +1583,6 @@ fn nonlinear_contact_reference_enforces_pressure_gap_complementarity() {
     assert!(known_answer
         .message
         .contains("closed_entity_coverage_ratio=1"));
-}
-
-#[test]
-fn nonlinear_prepared_state_recovery_uses_prep_connectivity_edges() {
-    let model = fixture_model(FixtureId::NonlinearLoadPathMix);
-    let result = crate::run_nonlinear_with_options(
-        &model,
-        ComputeBackend::Cpu,
-        NonlinearSolveOptions {
-            prep_context: Some(FeaPrepContext {
-                prepared_mesh_count: 1,
-                prepared_node_count: 14,
-                prepared_element_count: 22,
-                mapped_region_count: 3,
-                min_scaled_jacobian: 0.84,
-                mean_aspect_ratio: 1.7,
-                inverted_element_count: 0,
-                mapped_load_count: 2,
-                mapped_bc_count: 1,
-                layout_seed: 29,
-                topology_dof_multiplier: 1.6,
-                topology_bandwidth_estimate: 4,
-                mapped_region_participation_ratio: 0.85,
-                topology_surface_patch_ratio: 0.2,
-                topology_volume_core_ratio: 0.7,
-                topology_mixed_family_ratio: 0.08,
-                topology_region_span_mean: 5.0,
-                topology_region_block_count: 3,
-                topology_region_mesh_mean: 3.5,
-                topology_region_mesh_variance: 0.5,
-                topology_triangle_family_ratio: 0.2,
-                topology_quad_family_ratio: 0.25,
-                topology_tetrahedron_family_ratio: 0.35,
-                topology_hex_family_ratio: 0.2,
-                coordinate_span_x_m: 3.0,
-                coordinate_span_y_m: 0.8,
-                coordinate_span_z_m: 0.5,
-                coordinate_active_dimension_count: 3,
-                coordinate_characteristic_length_m: 0.25,
-                element_geometry_node_count: 4,
-                element_geometry_edge_count: 5,
-                mean_element_edge_length_m: 0.25,
-                mean_element_area_m2: 0.0625,
-                element_geometry_coverage_ratio: 1.0,
-                reference_element_coordinates_m: [
-                    [0.0, 0.0, 0.0],
-                    [0.5, 0.0, 0.0],
-                    [0.0, 0.25, 0.0],
-                ],
-                reference_element_area_m2: 0.0625,
-                element_topology_sample_element_count: 2,
-                element_topology_sample_edge_count: 5,
-                element_topology_sample_edge_nodes: [
-                    [0, 1],
-                    [1, 2],
-                    [0, 2],
-                    [2, 3],
-                    [0, 3],
-                    [0, 0],
-                    [0, 0],
-                    [0, 0],
-                ],
-                element_topology_sample_node_coordinates_m: [
-                    [0.0, 0.0, 0.0],
-                    [0.25, 0.0, 0.0],
-                    [0.0, 0.25, 0.0],
-                    [0.25, 0.25, 0.0],
-                    [0.0, 0.0, 0.0],
-                    [0.0, 0.0, 0.0],
-                    [0.0, 0.0, 0.0],
-                    [0.0, 0.0, 0.0],
-                ],
-                element_topology_sample_element_edges: [[0, 1, 2], [2, 3, 4], [0, 0, 0], [0, 0, 0]],
-                element_topology_sample_element_orientations: [
-                    [1, 1, -1],
-                    [1, 1, -1],
-                    [0, 0, 0],
-                    [0, 0, 0],
-                ],
-                element_topology_sample_element_areas_m2: [0.0625, 0.0625, 0.0, 0.0],
-                element_topology_node_coordinates_m: vec![
-                    [0.0, 0.0, 0.0],
-                    [0.25, 0.0, 0.0],
-                    [0.0, 0.25, 0.0],
-                    [0.25, 0.25, 0.0],
-                ],
-                element_topology_edge_nodes: vec![[0, 1], [1, 2], [0, 2], [2, 3], [0, 3]],
-                element_topology_element_edges: vec![[0, 1, 2], [2, 3, 4]],
-                element_topology_element_orientations: vec![[1, 1, -1], [1, 1, -1]],
-                element_topology_element_areas_m2: vec![0.0625, 0.0625],
-                calibration_profile_override: None,
-            }),
-            ..NonlinearSolveOptions::default()
-        },
-    )
-    .expect("prepared nonlinear solve should succeed");
-
-    let topology = result
-        .run
-        .diagnostics
-        .iter()
-        .find(|diag| diag.code == "FEA_NONLINEAR_STATE_TOPOLOGY")
-        .expect("nonlinear state topology diagnostic should be present");
-    assert!(topology
-        .message
-        .contains("basis=prep_constant_strain_b_matrix"));
-    assert!(topology.message.contains("element_count=2"));
-    assert!(topology.message.contains("prep_recovery_edge_count="));
-    assert!(topology.message.contains("mean_edge_length_m="));
-    assert!(topology.message.contains("max_edge_strain_norm="));
-    assert!(topology
-        .message
-        .contains("strain_component_coverage_ratio="));
 }
 
 #[test]

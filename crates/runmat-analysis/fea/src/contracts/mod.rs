@@ -307,151 +307,6 @@ impl FeaRunResult {
     }
 }
 
-fn default_prep_coordinate_span_m() -> f64 {
-    1.0
-}
-
-fn default_prep_coordinate_secondary_span_m() -> f64 {
-    0.0
-}
-
-fn default_prep_coordinate_active_dimension_count() -> usize {
-    1
-}
-
-fn default_prep_coordinate_characteristic_length_m() -> f64 {
-    1.0
-}
-
-fn default_zero_usize() -> usize {
-    0
-}
-
-fn default_zero_f64() -> f64 {
-    0.0
-}
-
-fn default_reference_element_coordinates_m() -> [[f64; 3]; 3] {
-    [[0.0; 3]; 3]
-}
-
-fn default_element_topology_sample_edge_nodes() -> [[u32; 2]; 8] {
-    [[0; 2]; 8]
-}
-
-fn default_element_topology_sample_node_coordinates_m() -> [[f64; 3]; 8] {
-    [[0.0; 3]; 8]
-}
-
-fn default_element_topology_sample_element_edges() -> [[u32; 3]; 4] {
-    [[0; 3]; 4]
-}
-
-fn default_element_topology_sample_element_orientations() -> [[i8; 3]; 4] {
-    [[0; 3]; 4]
-}
-
-fn default_element_topology_sample_element_areas_m2() -> [f64; 4] {
-    [0.0; 4]
-}
-
-fn default_element_topology_node_coordinates_m() -> Vec<[f64; 3]> {
-    Vec::new()
-}
-
-fn default_element_topology_edge_nodes() -> Vec<[u32; 2]> {
-    Vec::new()
-}
-
-fn default_element_topology_element_edges() -> Vec<[u32; 3]> {
-    Vec::new()
-}
-
-fn default_element_topology_element_orientations() -> Vec<[i8; 3]> {
-    Vec::new()
-}
-
-fn default_element_topology_element_areas_m2() -> Vec<f64> {
-    Vec::new()
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FeaPrepContext {
-    pub prepared_mesh_count: usize,
-    pub prepared_node_count: usize,
-    pub prepared_element_count: usize,
-    pub mapped_region_count: usize,
-    pub min_scaled_jacobian: f64,
-    pub mean_aspect_ratio: f64,
-    pub inverted_element_count: usize,
-    pub mapped_load_count: usize,
-    pub mapped_bc_count: usize,
-    pub layout_seed: u64,
-    pub topology_dof_multiplier: f64,
-    pub topology_bandwidth_estimate: u32,
-    pub mapped_region_participation_ratio: f64,
-    pub topology_surface_patch_ratio: f64,
-    pub topology_volume_core_ratio: f64,
-    pub topology_mixed_family_ratio: f64,
-    pub topology_region_span_mean: f64,
-    pub topology_region_block_count: usize,
-    pub topology_region_mesh_mean: f64,
-    pub topology_region_mesh_variance: f64,
-    pub topology_triangle_family_ratio: f64,
-    pub topology_quad_family_ratio: f64,
-    pub topology_tetrahedron_family_ratio: f64,
-    pub topology_hex_family_ratio: f64,
-    #[serde(default = "default_prep_coordinate_span_m")]
-    pub coordinate_span_x_m: f64,
-    #[serde(default = "default_prep_coordinate_secondary_span_m")]
-    pub coordinate_span_y_m: f64,
-    #[serde(default = "default_prep_coordinate_secondary_span_m")]
-    pub coordinate_span_z_m: f64,
-    #[serde(default = "default_prep_coordinate_active_dimension_count")]
-    pub coordinate_active_dimension_count: usize,
-    #[serde(default = "default_prep_coordinate_characteristic_length_m")]
-    pub coordinate_characteristic_length_m: f64,
-    #[serde(default = "default_zero_usize")]
-    pub element_geometry_node_count: usize,
-    #[serde(default = "default_zero_usize")]
-    pub element_geometry_edge_count: usize,
-    #[serde(default = "default_zero_f64")]
-    pub mean_element_edge_length_m: f64,
-    #[serde(default = "default_zero_f64")]
-    pub mean_element_area_m2: f64,
-    #[serde(default = "default_zero_f64")]
-    pub element_geometry_coverage_ratio: f64,
-    #[serde(default = "default_reference_element_coordinates_m")]
-    pub reference_element_coordinates_m: [[f64; 3]; 3],
-    #[serde(default = "default_zero_f64")]
-    pub reference_element_area_m2: f64,
-    #[serde(default = "default_zero_usize")]
-    pub element_topology_sample_element_count: usize,
-    #[serde(default = "default_zero_usize")]
-    pub element_topology_sample_edge_count: usize,
-    #[serde(default = "default_element_topology_sample_edge_nodes")]
-    pub element_topology_sample_edge_nodes: [[u32; 2]; 8],
-    #[serde(default = "default_element_topology_sample_node_coordinates_m")]
-    pub element_topology_sample_node_coordinates_m: [[f64; 3]; 8],
-    #[serde(default = "default_element_topology_sample_element_edges")]
-    pub element_topology_sample_element_edges: [[u32; 3]; 4],
-    #[serde(default = "default_element_topology_sample_element_orientations")]
-    pub element_topology_sample_element_orientations: [[i8; 3]; 4],
-    #[serde(default = "default_element_topology_sample_element_areas_m2")]
-    pub element_topology_sample_element_areas_m2: [f64; 4],
-    #[serde(default = "default_element_topology_node_coordinates_m")]
-    pub element_topology_node_coordinates_m: Vec<[f64; 3]>,
-    #[serde(default = "default_element_topology_edge_nodes")]
-    pub element_topology_edge_nodes: Vec<[u32; 2]>,
-    #[serde(default = "default_element_topology_element_edges")]
-    pub element_topology_element_edges: Vec<[u32; 3]>,
-    #[serde(default = "default_element_topology_element_orientations")]
-    pub element_topology_element_orientations: Vec<[i8; 3]>,
-    #[serde(default = "default_element_topology_element_areas_m2")]
-    pub element_topology_element_areas_m2: Vec<f64>,
-    pub calibration_profile_override: Option<FeaPrepCalibrationProfile>,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FeaThermoRegionTemperatureDelta {
     pub region_id: String,
@@ -529,19 +384,10 @@ pub struct FeaContactInterfaceContext {
     pub friction_coefficient: f64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FeaPrepCalibrationProfile {
-    Fast,
-    Balanced,
-    Conservative,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct LinearStaticSolveOptions {
     pub preconditioner_kind: SpdPreconditionerKind,
     pub algebra_backend_kind: LinearAlgebraBackendKind,
-    pub prep_context: Option<FeaPrepContext>,
     pub solver_mesh_artifact_path: Option<String>,
     pub solver_mesh: Option<SolverMeshArtifact>,
     pub require_solver_mesh_for_solid: bool,
@@ -554,7 +400,6 @@ impl Default for LinearStaticSolveOptions {
         Self {
             preconditioner_kind: SpdPreconditionerKind::Jacobi,
             algebra_backend_kind: LinearAlgebraBackendKind::CpuReference,
-            prep_context: None,
             solver_mesh_artifact_path: None,
             solver_mesh: None,
             require_solver_mesh_for_solid: true,
@@ -567,7 +412,6 @@ impl Default for LinearStaticSolveOptions {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModalSolveOptions {
     pub mode_count: usize,
-    pub prep_context: Option<FeaPrepContext>,
     pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
     pub electro_thermal_context: Option<FeaElectroThermalContext>,
 }
@@ -576,7 +420,6 @@ impl Default for ModalSolveOptions {
     fn default() -> Self {
         Self {
             mode_count: 3,
-            prep_context: None,
             thermo_mechanical_context: None,
             electro_thermal_context: None,
         }
@@ -659,7 +502,6 @@ pub struct FeaElectromagneticRunResult {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ElectromagneticSolveOptions {
-    pub prep_context: Option<FeaPrepContext>,
     pub residual_target: f64,
     pub harmonic_tolerance: f64,
     pub harmonic_max_iterations: usize,
@@ -668,7 +510,6 @@ pub struct ElectromagneticSolveOptions {
 impl Default for ElectromagneticSolveOptions {
     fn default() -> Self {
         Self {
-            prep_context: None,
             residual_target: 1.0e-6,
             harmonic_tolerance: 1.0e-7,
             harmonic_max_iterations: 96,
@@ -681,7 +522,6 @@ pub struct ThermalSolveOptions {
     pub step_count: usize,
     pub time_step_s: f64,
     pub residual_target: f64,
-    pub prep_context: Option<FeaPrepContext>,
     pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
 }
 
@@ -691,7 +531,6 @@ impl Default for ThermalSolveOptions {
             step_count: 10,
             time_step_s: 1.0e-2,
             residual_target: 1.0e-4,
-            prep_context: None,
             thermo_mechanical_context: None,
         }
     }

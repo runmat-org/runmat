@@ -89,47 +89,9 @@ Semantic CAD regions are evidence from the imported exchange file. If a CAD file
 
 Mesh-only formats often have weaker region metadata and may need a workflow-specific annotation step before they are useful for boundary conditions.
 
-## Prepare Geometry
+## Meshing Geometry
 
-Use `geometry.prep_for_analysis/v1` when you need deterministic analysis-prep data before solving. Prep returns a `prep_artifact_id` and a `MeshingPrepResult`.
-
-| Prep profile | Use |
-| --- | --- |
-| `surface_only` | Preserve surface-oriented data for surface workflows. |
-| `analysis_ready` | Create deterministic baseline prep for analysis runs. |
-| `adaptive_refine` | Create refinement-oriented quality and topology data. |
-
-Prep artifacts are useful when later steps must prove which geometry revision, mappings, and prep data were used.
-
-Prepared analysis artifacts carry both bounded compatibility samples and full element topology vectors. The full vectors include node coordinates, edge-node incidence, element-edge incidence/orientation, and element areas. Prep-aware EM, electro-thermal, CHT, and FSI paths use those vectors for edge or interface graph construction where available, and conformance gates assert that governed prepared fixtures are not satisfied by an implicit line or diagnostic-only topology fallback.
-
-## Prep Artifact Checks
-
-Prep-aware runs check that:
-
-- the artifact exists,
-- the schema is supported,
-- the artifact belongs to the same geometry id,
-- the artifact belongs to the same geometry revision,
-- the artifact is not stale when latest-revision enforcement is enabled,
-- inline prep context has enough data for the selected run.
-
-Typed FEA prep failures use `RM.FEA.RUN_PREP.*` codes.
-
-## Artifact Config
-
-Configure prep artifact storage through `[runtime.fea]`:
-
-```toml
-[runtime.fea]
-artifact_root = "artifacts"
-geometry_prep_max_artifacts = 500
-geometry_prep_max_artifacts_per_geometry = 20
-geometry_prep_max_age_seconds = 2592000
-geometry_prep_require_latest_revision = true
-```
-
-Use `geometry.prep_artifact_health/v1` to inspect retained artifact counts, ages, lifecycle counters, stale or mismatch rejections, and optional per-geometry entries.
+Analysis studies compose geometry loading, deterministic meshing, and solver execution. The meshing request selects the canonical solver artifact consumed by FEA, while persistent CAD entities preserve region and boundary provenance across the geometry-to-mesh boundary. See [Meshing](/docs/fea/meshing) for request controls, quality evidence, local and distributed execution, and runnable examples.
 
 ## Boundaries
 
@@ -137,6 +99,6 @@ Use `geometry.prep_artifact_health/v1` to inspect retained artifact counts, ages
 - OCCT-enabled CAD import provides face-level topology for STEP, IGES, and BREP, plus semantic regions for STEP and IGES when XCAF ownership metadata is present.
 - Builds without OCCT enabled can load STEP metadata but not face-level topology.
 - Mesh-only formats usually need additional region or boundary data from the workflow.
-- Prep artifacts improve reproducibility; they do not prove that a physics model is well posed.
+- A valid mesh does not by itself prove that a physics model is well posed.
 
 See [Current Status](/docs/fea/status) for current support by workflow stage.

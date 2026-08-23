@@ -6,7 +6,6 @@ Primary organization:
 
 - `scripts/fea/governance/`: readiness, ratchet, calibration, and external-reference gates.
 - `scripts/fea/reporting/`: FEA summaries and trend reports.
-- `scripts/fea/prep_calibration/`: prep calibration drift/recommendation/promotion flow.
 - `scripts/fea/thermo_artifacts/`: thermo artifact generation/validation/promotion flow.
 - `scripts/fea/reference_data/`: benchmark/reference baseline data files.
 - `scripts/metadata/`: metadata tooling assets.

@@ -390,11 +390,6 @@ fn graph_tuned_preconditioner(
     if dense_stiffness(&summary.operator).is_some() || csr_stiffness(&summary.operator).is_some() {
         return SpdPreconditionerKind::Jacobi;
     }
-    if let Some(graph) = summary.prep_graph_assembly.as_ref() {
-        if graph.recommend_ilu0 {
-            return SpdPreconditionerKind::Ilu0;
-        }
-    }
     requested
 }
 
@@ -404,29 +399,11 @@ fn graph_tuned_max_iters(summary: &AssemblySummary, base_max_iters: usize) -> us
             .max(summary.dof_count.saturating_mul(2))
             .max(256);
     }
-    if let Some(graph) = summary.prep_graph_assembly.as_ref() {
-        if graph.ordering_reduction_ratio > 0.15 {
-            return ((base_max_iters as f64) * 0.85).round() as usize;
-        }
-        if graph.connected_component_count > 8 {
-            return ((base_max_iters as f64) * 1.1).round() as usize;
-        }
-    }
     base_max_iters
 }
 
 fn graph_solver_traversal_order(summary: &AssemblySummary) -> Vec<usize> {
-    let mut order = (0..summary.dof_count).collect::<Vec<_>>();
-    if let Some(graph) = summary.prep_graph_assembly.as_ref() {
-        let seed = graph.ordering_fingerprint;
-        order.sort_by_key(|idx| {
-            let mut hash = seed ^ ((*idx as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
-            hash ^= hash >> 33;
-            hash = hash.wrapping_mul(0xff51afd7ed558ccd);
-            hash
-        });
-    }
-    order
+    (0..summary.dof_count).collect()
 }
 
 #[cfg(test)]
@@ -465,16 +442,6 @@ mod tests {
                 lame_lambda_pa: 1.0,
                 shear_modulus_pa: 1.0,
             },
-            prep_assembly: None,
-            prep_operator_topology: None,
-            prep_region_topology: None,
-            prep_element_assembly: None,
-            prep_element_connectivity: None,
-            prep_graph_assembly: None,
-            prep_recovery_edges: Vec::new(),
-            prep_calibration: None,
-            prep_acceptance: None,
-            prep_coordinates: None,
             thermo_mechanical: None,
             electro_thermal: None,
             operator: OperatorSystem {

@@ -52,10 +52,10 @@ def build_summary(report):
     )
     lines.append("")
     lines.append(
-        "| Fixture | Publishable | GPU ms | Speedup | Failed increments | Backtracks | Tangent rebuilds | Calibration profile | Acceptance score | Thermo enabled | Thermo modulus scale | Thermo spread ratio | Thermo heterogeneity | Thermo transient sev | Thermo nonlinear sev | Electro enabled | Electro joule scale | Electro spread ratio | Electro transient sev | Electro nonlinear sev | Plastic nonlinear sev | Contact nonlinear sev |"
+        "| Fixture | Publishable | GPU ms | Speedup | Failed increments | Backtracks | Tangent rebuilds | Thermo enabled | Thermo modulus scale | Thermo spread ratio | Thermo heterogeneity | Thermo transient sev | Thermo nonlinear sev | Electro enabled | Electro joule scale | Electro spread ratio | Electro transient sev | Electro nonlinear sev | Plastic nonlinear sev | Contact nonlinear sev |"
     )
     lines.append(
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |"
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |"
     )
 
     for fixture_id in NONLINEAR_FIXTURES:
@@ -80,7 +80,7 @@ def build_summary(report):
             tangent = tmap.get("nonlinear_tangent_rebuild_count", {}).get("observed")
 
         lines.append(
-            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
                 fixture_id,
                 record.get("publishable", "-"),
                 format_num(record.get("gpu_run_ms")),
@@ -88,8 +88,6 @@ def build_summary(report):
                 format_num(failed),
                 format_num(backtracks),
                 format_num(tangent),
-                record.get("prep_calibration_profile", "-"),
-                format_num(record.get("prep_acceptance_score")),
                 record.get("thermo_coupling_enabled", "-"),
                 format_num(record.get("thermo_effective_modulus_scale")),
                 format_num(record.get("thermo_constitutive_material_spread_ratio")),

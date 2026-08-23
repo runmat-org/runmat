@@ -69,7 +69,6 @@ pub fn run_linear_static_with_options(
     );
     let summary = try_assemble_linear_system(
         model,
-        options.prep_context.clone(),
         options.solver_mesh.clone(),
         options.thermo_mechanical_context,
         options.electro_thermal_context,
@@ -262,10 +261,9 @@ pub fn run_linear_static_with_options(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "basis={} active_stiffness_edge_count={} prep_recovery_edge_count={} constrained_edge_count={} recovery_element_count={} solver_mesh_node_count={} solver_mesh_element_count={} max_edge_displacement_jump={} max_edge_strain_norm={} mean_edge_stiffness_ratio={} mean_edge_length_m={} strain_component_coverage_ratio={} element_geometry_node_count={} element_geometry_edge_count={} element_geometry_coverage_ratio={}",
+            "basis={} active_stiffness_edge_count={} constrained_edge_count={} recovery_element_count={} solver_mesh_node_count={} solver_mesh_element_count={} max_edge_displacement_jump={} max_edge_strain_norm={} mean_edge_stiffness_ratio={} mean_edge_length_m={} strain_component_coverage_ratio={} element_geometry_node_count={} element_geometry_edge_count={} element_geometry_coverage_ratio={}",
             recovery_metrics.basis,
             recovery_metrics.active_stiffness_edge_count,
-            recovery_metrics.prep_recovery_edge_count,
             recovery_metrics.constrained_edge_count,
             recovery_metrics.recovery_element_count,
             recovery_metrics.solver_mesh_node_count,
@@ -291,11 +289,6 @@ pub fn run_linear_static_with_options(
         CommonRunDiagnosticInputs {
             model,
             summary: &summary,
-            prep_context: options.prep_context.clone(),
-            iteration_metric: solve_result.iterations as f64,
-            residual_metric: solve_result.residual_norm,
-            requested_preconditioner: options.preconditioner_kind.as_str(),
-            effective_preconditioner: &solve_result.preconditioner,
         },
     );
     diagnostics.extend(thermo_mechanical_diagnostics);
