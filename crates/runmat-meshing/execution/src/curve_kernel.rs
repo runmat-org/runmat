@@ -1,10 +1,6 @@
 use std::f64::consts::PI;
 
 use runmat_execution::Digest;
-use runmat_geometry_core::{
-    ExactCurveEvaluator, ExactPcurveEvaluator, ExactSurfaceEvaluator, GeometryContractError,
-    GeometryModel, PortableExactEvaluator,
-};
 use runmat_meshing_core::{
     MeshingChunkMediaType, MeshingChunkStream, MeshingDiagnosticEntry, MeshingDiagnosticValue,
     MeshingFailure, MeshingFailureCategory, MeshingOperation, MeshingRequest, MeshingStageKind,
@@ -15,60 +11,23 @@ use runmat_meshing_curve::{
     CurveResolutionPolicy, ResolvedCurveMetricField, SharedCurveDiscretizationOptions,
     SharedCurveError, SharedCurveErrorKind, SHARED_CURVE_BATCH_SCHEMA_VERSION,
 };
+use runmat_meshing_tetrahedron::cdt::DelaunayExactEvaluator;
 
 use crate::{
-    MeshingStageCheckpoint, MeshingStageInvocation, MeshingStageKernel,
-    PreparedExactGeometryObjects, PreparedMeshingInput, ValidatedMeshingStageOutput,
+    ExactMeshingEvaluatorProvider, MeshingStageCheckpoint, MeshingStageInvocation,
+    MeshingStageKernel, PortableMeshingEvaluatorProvider, PreparedExactGeometryObjects,
+    PreparedMeshingInput, ValidatedMeshingStageOutput,
 };
 
-pub trait ExactCurveGeometryEvaluation:
-    ExactCurveEvaluator + ExactPcurveEvaluator + ExactSurfaceEvaluator
-{
-}
-
-impl<T> ExactCurveGeometryEvaluation for T where
-    T: ExactCurveEvaluator + ExactPcurveEvaluator + ExactSurfaceEvaluator
-{
-}
-
-pub trait ExactCurveEvaluatorProvider: Send + Sync {
-    fn evaluator<'a>(
-        &self,
-        geometry: &'a PreparedExactGeometryObjects,
-    ) -> Result<Box<dyn ExactCurveGeometryEvaluation + 'a>, GeometryContractError>;
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub struct PortableCurveEvaluatorProvider;
-
-impl ExactCurveEvaluatorProvider for PortableCurveEvaluatorProvider {
-    fn evaluator<'a>(
-        &self,
-        geometry: &'a PreparedExactGeometryObjects,
-    ) -> Result<Box<dyn ExactCurveGeometryEvaluation + 'a>, GeometryContractError> {
-        let GeometryModel::ExactBRep { model } = &geometry.document.model else {
-            return Err(GeometryContractError::invalid(
-                "curve stage geometry",
-                "portable curve evaluation requires exact B-rep geometry",
-            ));
-        };
-        Ok(Box::new(PortableExactEvaluator::new(
-            &geometry.evaluators,
-            &geometry.topology,
-            model,
-        )?))
-    }
-}
-
 #[derive(Clone, Debug)]
-pub struct ExactCurveStageKernel<P = PortableCurveEvaluatorProvider> {
+pub struct ExactCurveStageKernel<P = PortableMeshingEvaluatorProvider> {
     evaluator_provider: P,
 }
 
-impl Default for ExactCurveStageKernel<PortableCurveEvaluatorProvider> {
+impl Default for ExactCurveStageKernel<PortableMeshingEvaluatorProvider> {
     fn default() -> Self {
         Self {
-            evaluator_provider: PortableCurveEvaluatorProvider,
+            evaluator_provider: PortableMeshingEvaluatorProvider,
         }
     }
 }
@@ -79,7 +38,7 @@ impl<P> ExactCurveStageKernel<P> {
     }
 }
 
-impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactCurveStageKernel<P> {
+impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactCurveStageKernel<P> {
     fn execute(
         &self,
         invocation: MeshingStageInvocation<'_, '_>,
@@ -264,7 +223,7 @@ pub(crate) fn shared_curve_failure_category(kind: SharedCurveErrorKind) -> Meshi
 
 pub(crate) fn resolved_curve_metric(
     geometry: &PreparedExactGeometryObjects,
-    evaluator: &dyn ExactCurveGeometryEvaluation,
+    evaluator: &dyn DelaunayExactEvaluator,
     control: &crate::MeshingGeometryEvaluationControl<'_>,
     request: &MeshingRequest,
 ) -> Result<ResolvedCurveMetricField, Box<MeshingFailure>> {

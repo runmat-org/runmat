@@ -176,7 +176,7 @@ impl MeshingStageKernel for AdmissionThenCooperativeSlowKernel {
         invocation: MeshingStageInvocation<'_, '_>,
     ) -> Result<ValidatedMeshingStageOutput, Box<MeshingFailure>> {
         if invocation.host.workload.stage == MeshingStageKind::CurveMesh {
-            return curve_pipeline::CurvePipelineKernel.execute(invocation);
+            return curve_pipeline::CurvePipelineKernel::default().execute(invocation);
         }
         if !invocation.inputs.is_empty() {
             return ExactInputKernel.execute(invocation);
@@ -231,7 +231,10 @@ fn main() {
             return;
         }
         if mode == "--curve-child" {
-            run_child(curve_pipeline::CurvePipelineKernel, Path::new(&root));
+            run_child(
+                curve_pipeline::CurvePipelineKernel::default(),
+                Path::new(&root),
+            );
             return;
         }
     }

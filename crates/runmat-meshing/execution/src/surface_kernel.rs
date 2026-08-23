@@ -15,20 +15,20 @@ pub(crate) mod error;
 use error::{invalid_input, map_surface_error, surface_failure};
 
 use crate::{
-    ExactCurveEvaluatorProvider, MeshingStageCheckpoint, MeshingStageInvocation,
-    MeshingStageKernel, PortableCurveEvaluatorProvider, PreparedExactGeometryObjects,
+    ExactMeshingEvaluatorProvider, MeshingStageCheckpoint, MeshingStageInvocation,
+    MeshingStageKernel, PortableMeshingEvaluatorProvider, PreparedExactGeometryObjects,
     PreparedMeshingInput, PreparedMeshingResultPublication, ValidatedMeshingStageOutput,
 };
 
 #[derive(Clone, Debug)]
-pub struct ExactSurfacePartitionKernel<P = PortableCurveEvaluatorProvider> {
+pub struct ExactSurfacePartitionKernel<P = PortableMeshingEvaluatorProvider> {
     evaluator_provider: P,
 }
 
-impl Default for ExactSurfacePartitionKernel<PortableCurveEvaluatorProvider> {
+impl Default for ExactSurfacePartitionKernel<PortableMeshingEvaluatorProvider> {
     fn default() -> Self {
         Self {
-            evaluator_provider: PortableCurveEvaluatorProvider,
+            evaluator_provider: PortableMeshingEvaluatorProvider,
         }
     }
 }
@@ -39,7 +39,7 @@ impl<P> ExactSurfacePartitionKernel<P> {
     }
 }
 
-impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactSurfacePartitionKernel<P> {
+impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSurfacePartitionKernel<P> {
     fn execute(
         &self,
         invocation: MeshingStageInvocation<'_, '_>,

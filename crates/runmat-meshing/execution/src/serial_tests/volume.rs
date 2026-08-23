@@ -36,7 +36,7 @@ fn production_dag_runner_executes_the_complete_serial_exact_pipeline() {
     let mut progress = Progress::default();
     let mut executor = crate::SerialExactMeshingExecutor {
         store: &mut fixture.store,
-        kernel: &crate::MeshingKernelDispatcher,
+        kernel: &crate::MeshingKernelDispatcher::default(),
         cancellation: &NeverCancelled,
         progress: &mut progress,
         chunk_policy: chunk_policy(1_000_000),
@@ -122,7 +122,7 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
     let completed = execute_serial_stage(
         &program,
         &mut fixture.store,
-        &crate::MeshingKernelDispatcher,
+        &crate::MeshingKernelDispatcher::default(),
         &NeverCancelled,
         &mut Progress::default(),
         chunk_policy(1_000_000),
@@ -208,7 +208,7 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
     let projection = execute_serial_stage(
         &projection_stage.program_request(revision()).unwrap(),
         &mut fixture.store,
-        &crate::MeshingKernelDispatcher,
+        &crate::MeshingKernelDispatcher::default(),
         &NeverCancelled,
         &mut Progress::default(),
         chunk_policy(1_000_000),
@@ -242,7 +242,7 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
     let validation = execute_serial_stage(
         &validation_stage.program_request(revision()).unwrap(),
         &mut fixture.store,
-        &crate::MeshingKernelDispatcher,
+        &crate::MeshingKernelDispatcher::default(),
         &NeverCancelled,
         &mut Progress::default(),
         chunk_policy(1_000_000),
@@ -269,7 +269,7 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
     let serialized = execute_serial_stage(
         &serialization_stage.program_request(revision()).unwrap(),
         &mut fixture.store,
-        &crate::MeshingKernelDispatcher,
+        &crate::MeshingKernelDispatcher::default(),
         &NeverCancelled,
         &mut Progress::default(),
         chunk_policy(1_000_000),
@@ -356,7 +356,7 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
     assert!(execute_serial_stage(
         &mismatched_publication.program_request(revision()).unwrap(),
         &mut fixture.store,
-        &crate::MeshingKernelDispatcher,
+        &crate::MeshingKernelDispatcher::default(),
         &NeverCancelled,
         &mut Progress::default(),
         chunk_policy(1_000_000),
@@ -385,7 +385,7 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
     let published = execute_serial_stage(
         &publication_stage.program_request(revision()).unwrap(),
         &mut fixture.store,
-        &crate::MeshingKernelDispatcher,
+        &crate::MeshingKernelDispatcher::default(),
         &NeverCancelled,
         &mut Progress::default(),
         chunk_policy(1_000_000),

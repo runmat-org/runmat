@@ -11,20 +11,20 @@ use runmat_meshing_curve::{
 
 use crate::curve_kernel::{curve_failure, curve_options, map_curve_error, resolved_curve_metric};
 use crate::{
-    ExactCurveEvaluatorProvider, MeshingStageCheckpoint, MeshingStageInvocation,
-    MeshingStageKernel, PortableCurveEvaluatorProvider, PreparedExactGeometryObjects,
+    ExactMeshingEvaluatorProvider, MeshingStageCheckpoint, MeshingStageInvocation,
+    MeshingStageKernel, PortableMeshingEvaluatorProvider, PreparedExactGeometryObjects,
     PreparedMeshingInput, PreparedMeshingResultPublication, ValidatedMeshingStageOutput,
 };
 
 #[derive(Clone, Debug)]
-pub struct ExactCurveJoinKernel<P = PortableCurveEvaluatorProvider> {
+pub struct ExactCurveJoinKernel<P = PortableMeshingEvaluatorProvider> {
     evaluator_provider: P,
 }
 
-impl Default for ExactCurveJoinKernel<PortableCurveEvaluatorProvider> {
+impl Default for ExactCurveJoinKernel<PortableMeshingEvaluatorProvider> {
     fn default() -> Self {
         Self {
-            evaluator_provider: PortableCurveEvaluatorProvider,
+            evaluator_provider: PortableMeshingEvaluatorProvider,
         }
     }
 }
@@ -35,7 +35,7 @@ impl<P> ExactCurveJoinKernel<P> {
     }
 }
 
-impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactCurveJoinKernel<P> {
+impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactCurveJoinKernel<P> {
     fn execute(
         &self,
         invocation: MeshingStageInvocation<'_, '_>,

@@ -2,18 +2,33 @@ use runmat_meshing_core::MeshingPartitionKind;
 
 use crate::{
     ExactCurveJoinKernel, ExactCurveRefinementKernel, ExactCurveStageKernel,
-    ExactSolverProjectionKernel, ExactSurfaceJoinKernel, ExactSurfacePartitionKernel,
-    ExactVolumeKernel, MeshingStageInvocation, MeshingStageKernel, SolverPublicationKernel,
-    SolverSerializationKernel, SolverValidationKernel, ValidatedMeshingStageOutput,
+    ExactMeshingEvaluatorProvider, ExactSolverProjectionKernel, ExactSurfaceJoinKernel,
+    ExactSurfacePartitionKernel, ExactVolumeKernel, MeshingStageInvocation, MeshingStageKernel,
+    PortableMeshingEvaluatorProvider, SolverPublicationKernel, SolverSerializationKernel,
+    SolverValidationKernel, ValidatedMeshingStageOutput,
 };
 
 /// Dispatches admitted meshing stage semantics without acquiring any scheduling responsibility.
 /// Execution hosts use this one production entry point while meshing remains the owner of stage
 /// and partition meaning.
-#[derive(Default)]
-pub struct MeshingKernelDispatcher;
+#[derive(Clone, Debug)]
+pub struct MeshingKernelDispatcher<P = PortableMeshingEvaluatorProvider> {
+    evaluator_provider: P,
+}
 
-impl MeshingStageKernel for MeshingKernelDispatcher {
+impl Default for MeshingKernelDispatcher<PortableMeshingEvaluatorProvider> {
+    fn default() -> Self {
+        Self::new(PortableMeshingEvaluatorProvider)
+    }
+}
+
+impl<P> MeshingKernelDispatcher<P> {
+    pub const fn new(evaluator_provider: P) -> Self {
+        Self { evaluator_provider }
+    }
+}
+
+impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for MeshingKernelDispatcher<P> {
     fn execute(
         &self,
         invocation: MeshingStageInvocation<'_, '_>,
@@ -25,15 +40,15 @@ impl MeshingStageKernel for MeshingKernelDispatcher {
             (
                 runmat_meshing_core::MeshingStageKind::CurveMesh,
                 MeshingPartitionKind::DeterministicJoin,
-            ) => ExactCurveJoinKernel::default().execute(invocation),
+            ) => ExactCurveJoinKernel::new(&self.evaluator_provider).execute(invocation),
             (
                 runmat_meshing_core::MeshingStageKind::CurveMesh,
                 MeshingPartitionKind::WholeStage,
-            ) => ExactCurveRefinementKernel::default().execute(invocation),
+            ) => ExactCurveRefinementKernel::new(&self.evaluator_provider).execute(invocation),
             (
                 runmat_meshing_core::MeshingStageKind::CurveMesh,
                 MeshingPartitionKind::CanonicalEntityBatch,
-            ) => ExactCurveStageKernel::default().execute(invocation),
+            ) => ExactCurveStageKernel::new(&self.evaluator_provider).execute(invocation),
             (
                 runmat_meshing_core::MeshingStageKind::SurfaceMesh,
                 MeshingPartitionKind::DeterministicJoin,
@@ -41,7 +56,7 @@ impl MeshingStageKernel for MeshingKernelDispatcher {
             (
                 runmat_meshing_core::MeshingStageKind::SurfaceMesh,
                 MeshingPartitionKind::CanonicalEntityBatch,
-            ) => ExactSurfacePartitionKernel::default().execute(invocation),
+            ) => ExactSurfacePartitionKernel::new(&self.evaluator_provider).execute(invocation),
             (
                 runmat_meshing_core::MeshingStageKind::Tetrahedralization,
                 MeshingPartitionKind::WholeStage,
@@ -49,7 +64,7 @@ impl MeshingStageKernel for MeshingKernelDispatcher {
             (
                 runmat_meshing_core::MeshingStageKind::OrderElevation,
                 MeshingPartitionKind::WholeStage,
-            ) => ExactSolverProjectionKernel::default().execute(invocation),
+            ) => ExactSolverProjectionKernel::new(&self.evaluator_provider).execute(invocation),
             (
                 runmat_meshing_core::MeshingStageKind::Validation,
                 MeshingPartitionKind::WholeStage,
