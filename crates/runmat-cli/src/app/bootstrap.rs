@@ -49,8 +49,11 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
 
     configure_gc_from_config(&config)?;
 
-    let compilation_only = matches!(cli.command, Some(Commands::Compile { .. }));
-    if !compilation_only {
+    let needs_runtime_initialization = !matches!(
+        cli.command,
+        Some(Commands::Compile { .. } | Commands::Mesh { .. })
+    );
+    if needs_runtime_initialization {
         let accel_options: AccelerateInitOptions = (&config.accelerate).into();
         runmat_accelerate::initialize_acceleration_provider_with(&accel_options);
 
@@ -60,9 +63,9 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
     }
 
     let wants_gui = match config.plotting.mode {
-        PlotMode::Gui => !compilation_only,
+        PlotMode::Gui => needs_runtime_initialization,
         PlotMode::Auto => {
-            !compilation_only && !config.plotting.force_headless && is_gui_available()
+            needs_runtime_initialization && !config.plotting.force_headless && is_gui_available()
         }
         PlotMode::Headless => false,
     };

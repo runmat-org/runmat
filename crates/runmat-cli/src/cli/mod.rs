@@ -26,5 +26,6 @@ pub use remote::{
 pub use root::{Cli, CliOverrideSources, Commands, ConfigCommand, ConfigFormat, GcCommand};
 pub use test::{TestArgs, TestCoverageFormatArg, TestIsolationArg, TestReportArg};
 pub use value_types::{
-    AotOptLevel, AotPolicy, CaptureFiguresMode, ColorMode, FigureSize, GcPreset, LogLevel, OptLevel,
+    AotOptLevel, AotPolicy, CaptureFiguresMode, ColorMode, FigureSize, GcPreset, LogLevel,
+    MeshElementOrderArg, OptLevel,
 };

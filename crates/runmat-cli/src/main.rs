@@ -29,6 +29,34 @@ async fn main() -> ExitCode {
                 }
             };
         }
+        Ok(Some(runmat_process_host::HiddenMode::MeshingWorker)) => {
+            let result = match std::env::var_os(
+                runmat_execution_runner_native::NATIVE_OBJECT_STORE_ROOT_ENV,
+            ) {
+                Some(root) => {
+                    runmat_execution_runner_native::run_meshing_worker_stdio(
+                        std::sync::Arc::new(
+                            runmat_execution_runner_native::native_meshing_kernel_dispatcher(),
+                        ),
+                        std::path::Path::new(&root),
+                        runmat_execution_runner_native::NativeMeshingHostLimits::default(),
+                    )
+                    .await
+                }
+                None => Err(
+                    runmat_execution_runner_native::NativeExecutionError::Configuration(
+                        "meshing worker object-store root is missing".into(),
+                    ),
+                ),
+            };
+            return match result {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("runmat meshing worker failed: {error}");
+                    ExitCode::from(2)
+                }
+            };
+        }
         Ok(Some(runmat_process_host::HiddenMode::ExecutionDriver)) => {
             if std::env::var_os("RUNMAT_EXECUTION_DRIVER_LEASE_ID").is_some() {
                 return match runmat_execution_runner_native::run_remote_driver_from_env().await {
