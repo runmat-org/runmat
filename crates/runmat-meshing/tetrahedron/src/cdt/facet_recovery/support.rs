@@ -117,8 +117,20 @@ fn triangulate_boundary(
                 boundary[index],
                 boundary[(index + 1) % boundary.len()],
             ];
-            if orientation(recovery, triangle, projection, constraint_index, work)? == polygon_sign
+            if orientation(recovery, triangle, projection, constraint_index, work)? != polygon_sign
             {
+                continue;
+            }
+            let mut remaining = boundary.clone();
+            remaining.remove(index);
+            if polygon_has_area(
+                recovery,
+                &remaining,
+                projection,
+                polygon_sign,
+                constraint_index,
+                work,
+            )? {
                 ear = Some((index, triangle));
                 break;
             }
@@ -145,6 +157,33 @@ fn triangulate_boundary(
         node_identities: final_triangle,
     });
     Ok(triangles)
+}
+
+fn polygon_has_area(
+    recovery: &DelaunaySegmentRecovery,
+    boundary: &[StableDigest],
+    axes: [usize; 2],
+    polygon_sign: PredicateSign,
+    constraint_index: u32,
+    work: &mut FacetRecoveryWork<'_>,
+) -> Result<bool, DelaunayFacetRecoveryError> {
+    for index in 0..boundary.len() {
+        let sign = orientation(
+            recovery,
+            [
+                boundary[(index + boundary.len() - 1) % boundary.len()],
+                boundary[index],
+                boundary[(index + 1) % boundary.len()],
+            ],
+            axes,
+            constraint_index,
+            work,
+        )?;
+        if sign == polygon_sign {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn projection_axes(
