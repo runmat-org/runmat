@@ -10,12 +10,11 @@ use runmat_execution_runner_native::{
 };
 use runmat_geometry_io::ExactCadImportOptions;
 use runmat_meshing_core::{
-    CacheAdmissionDecision, CanonicalMeshingContract, ElementOrder, MeshingEvidence,
-    PlatformBuildIdentity, SolverMeshArtifact, StableDigest,
+    resolve_meshing_request, CacheAdmissionDecision, CanonicalMeshingContract, ElementOrder,
+    MeshingEvidence, MeshingRequestSettings, PlatformBuildIdentity, SolverMeshArtifact,
+    StableDigest,
 };
-use runmat_meshing_execution::{
-    resolve_meshing_request, MeshingRequestSettings, MeshingRunEvidenceContext,
-};
+use runmat_meshing_execution::MeshingRunEvidenceContext;
 
 use crate::cli::MeshElementOrderArg;
 use crate::presentation;

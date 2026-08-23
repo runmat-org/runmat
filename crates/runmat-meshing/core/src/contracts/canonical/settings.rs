@@ -1,14 +1,17 @@
 //! Product-facing resolution of concise meshing settings into the canonical request.
 
 use runmat_geometry_core::GeometryTolerancePolicy;
-use runmat_meshing_core::{
+use serde::{Deserialize, Serialize};
+
+use super::{
     AlgorithmVersionSet, CancellationPolicy, CurveQualityTargets, ElementOrder,
     MeshingContractError, MeshingQualityTargets, MeshingRequest, MeshingResourceBudget,
     MetricCombinationRule, MetricFieldRequest, MetricTensor3, SurfaceQualityTargets,
     VolumeQualityTargets, MESHING_REQUEST_SCHEMA_VERSION,
 };
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MeshingRequestSettings {
     pub element_order: ElementOrder,
     pub deterministic_seed: u64,
@@ -131,5 +134,15 @@ mod tests {
             ..MeshingRequestSettings::default()
         };
         assert!(resolve_meshing_request(tolerance(), settings).is_err());
+    }
+
+    #[test]
+    fn settings_contract_rejects_unknown_fields() {
+        let mut value = serde_json::to_value(MeshingRequestSettings::default()).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .insert("backend".into(), serde_json::Value::String("legacy".into()));
+        assert!(serde_json::from_value::<MeshingRequestSettings>(value).is_err());
     }
 }

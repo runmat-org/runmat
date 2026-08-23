@@ -24,7 +24,6 @@ mod host;
 mod object_support;
 mod objects;
 mod publication;
-mod request;
 mod response;
 mod serial;
 mod solver_projection_kernel;
@@ -105,7 +104,6 @@ pub use publication::{
     import_result_publication, prepare_result_publication, MeshingArtifactAccess,
     PreparedMeshingResultPublication,
 };
-pub use request::{resolve_meshing_request, MeshingRequestSettings};
 pub use response::{MeshingHostResponse, MESHING_HOST_RESPONSE_SCHEMA_VERSION};
 pub use serial::{
     execute_serial_stage, CompletedMeshingStage, MeshingSerialExecutionError,
