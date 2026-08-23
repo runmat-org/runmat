@@ -6,7 +6,6 @@ pub mod cad;
 pub mod canonical;
 pub mod curve;
 pub mod material;
-pub mod options;
 pub mod pipeline;
 pub mod plc;
 pub mod provenance;
@@ -32,12 +31,6 @@ pub use cad::{
 pub use canonical::*;
 pub use curve::{CurveMesh, CurveMeshElement, CurveMeshNode};
 pub use material::{DEFAULT_MATERIAL_REGION_ID, UNCLASSIFIED_MATERIAL_REGION_ID};
-pub use options::{
-    AdaptiveMeshingOptions, MeshElementOrder, MeshKindRequest, MeshProfile, MeshRefinementOptions,
-    MeshTargetSize, MeshValidationPolicyOptions, RefinementConvergenceOptions,
-    RefinementFocusLevel, RefinementFocusOptions, RefinementIndicatorMode,
-    RefinementIndicatorOverrides, RefinementStrategy, VolumeMeshingOptions,
-};
 pub use pipeline::{
     validate_meshing_stage_order, MeshingStageArtifacts, MeshingStageContractError,
 };

@@ -52,12 +52,6 @@ pub use contracts::canonical::{
     SOLVER_MESH_TRANSFER_SCHEMA_VERSION, SOLVER_MESH_VALIDATION_SCHEMA_VERSION,
     TETRAHEDRON_MIDSIDE_EDGE_CORNERS,
 };
-pub use contracts::options::{
-    AdaptiveMeshingOptions, MeshElementOrder, MeshKindRequest, MeshProfile, MeshRefinementOptions,
-    MeshTargetSize, MeshValidationPolicyOptions, RefinementConvergenceOptions,
-    RefinementFocusLevel, RefinementFocusOptions, RefinementIndicatorMode,
-    RefinementIndicatorOverrides, RefinementStrategy, VolumeMeshingOptions,
-};
 pub use contracts::provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind};
 pub use contracts::topology::{BoundaryElementKind, VolumeElementKind};
 pub use contracts::{
