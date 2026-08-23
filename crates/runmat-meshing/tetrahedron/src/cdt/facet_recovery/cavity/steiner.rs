@@ -15,13 +15,20 @@ use crate::{
     },
     cdt::{
         insertion::insert_delaunay_volume_node_with_barriers, DelaunayFacetRecoveryError,
-        DelaunayFacetRecoveryErrorKind, DelaunayRecoveredFacetTriangle, DelaunaySegmentRecovery,
-        DelaunayVolumeNode, DelaunayVolumeTopology,
+        DelaunayFacetRecoveryErrorKind, DelaunayFacetSteinerInsertion,
+        DelaunayRecoveredFacetTriangle, DelaunaySegmentRecovery, DelaunayVolumeNode,
+        DelaunayVolumeTopology,
     },
 };
 use runmat_meshing_core::StableDigest;
 
 const FACET_STEINER_IDENTITY_DOMAIN: &[u8] = b"runmat:cdt-facet-steiner-node:v1";
+
+#[derive(Clone, Debug, PartialEq)]
+pub(in crate::cdt::facet_recovery) struct FacetCavityRecovery {
+    pub(in crate::cdt::facet_recovery) topology: DelaunayVolumeTopology,
+    pub(in crate::cdt::facet_recovery) steiner_insertions: Vec<DelaunayFacetSteinerInsertion>,
+}
 
 /// Retries the same checked cavity mutation after each legal barrier-aware insertion. The
 /// `FacetRecoveryWork` counters are shared across all retries and facets, so failure is atomic and
@@ -32,9 +39,10 @@ pub(in crate::cdt::facet_recovery) fn try_recover_facet_with_cavity(
     protected_facets: &[DelaunayRecoveredFacetTriangle],
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
-) -> Result<Option<DelaunayVolumeTopology>, DelaunayFacetRecoveryError> {
+) -> Result<Option<FacetCavityRecovery>, DelaunayFacetRecoveryError> {
     let mut current = recovery.clone();
     let mut insertion_round = 0_u64;
+    let mut steiner_insertions = Vec::new();
     loop {
         match try_recover_facet_cavity_once(
             &current,
@@ -43,7 +51,12 @@ pub(in crate::cdt::facet_recovery) fn try_recover_facet_with_cavity(
             constraint_index,
             work,
         )? {
-            FacetCavityAttempt::Recovered(topology) => return Ok(Some(topology)),
+            FacetCavityAttempt::Recovered(topology) => {
+                return Ok(Some(FacetCavityRecovery {
+                    topology,
+                    steiner_insertions,
+                }));
+            }
             FacetCavityAttempt::Unavailable => return Ok(None),
             FacetCavityAttempt::NeedsSteiner(cavities) => {
                 let candidates = steiner_candidates(&current, &cavities, constraint_index, work)?;
@@ -58,8 +71,9 @@ pub(in crate::cdt::facet_recovery) fn try_recover_facet_with_cavity(
                 let mut inserted = None;
                 for (candidate_index, coordinates_m) in candidates.into_iter().enumerate() {
                     work.cavity_steiner_insertion_attempt(constraint_index)?;
+                    let candidate_rank = candidate_index as u64;
                     let node = DelaunayVolumeNode {
-                        identity: steiner_identity(facet, insertion_round, candidate_index as u64),
+                        identity: steiner_identity(facet, insertion_round, candidate_rank),
                         coordinates_m,
                     };
                     if let Some(existing) = current
@@ -123,14 +137,23 @@ pub(in crate::cdt::facet_recovery) fn try_recover_facet_with_cavity(
                     let mut candidate_recovery = current.clone();
                     candidate_recovery.topology = candidate;
                     if recovered_segments_exist(&candidate_recovery) {
-                        inserted = Some(candidate_recovery);
+                        inserted = Some((candidate_recovery, node.identity, candidate_rank));
                         break;
                     }
                 }
-                let Some(next) = inserted else {
+                let Some((next, node_identity, candidate_rank)) = inserted else {
                     return Ok(None);
                 };
                 work.cavity_steiner_node(constraint_index)?;
+                let mut support_node_identities = facet;
+                support_node_identities.sort_unstable();
+                steiner_insertions.push(DelaunayFacetSteinerInsertion {
+                    constraint_index,
+                    support_node_identities,
+                    insertion_round,
+                    candidate_rank,
+                    node_identity,
+                });
                 insertion_round += 1;
                 current = next;
             }
@@ -190,7 +213,7 @@ fn steiner_candidates(
     Ok(candidates)
 }
 
-fn steiner_identity(
+pub(in crate::cdt::facet_recovery) fn steiner_identity(
     facet: [StableDigest; 3],
     insertion_round: u64,
     candidate_index: u64,

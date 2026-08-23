@@ -14,6 +14,8 @@ use crate::cdt::{
 
 #[path = "tests/close_parallel.rs"]
 mod close_parallel;
+#[path = "tests/multi_steiner.rs"]
+mod multi_steiner;
 #[path = "tests/small_void.rs"]
 mod small_void;
 

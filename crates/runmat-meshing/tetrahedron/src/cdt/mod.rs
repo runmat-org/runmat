@@ -48,7 +48,7 @@ pub use constraints::{
 pub use facet_recovery::{
     recover_delaunay_facets, validate_delaunay_facet_recovery, DelaunayFacetRecovery,
     DelaunayFacetRecoveryError, DelaunayFacetRecoveryErrorKind, DelaunayFacetRecoveryOptions,
-    DelaunayRecoveredFacet, DelaunayRecoveredFacetTriangle,
+    DelaunayFacetSteinerInsertion, DelaunayRecoveredFacet, DelaunayRecoveredFacetTriangle,
 };
 pub use incidence::{
     assign_delaunay_volume_regions, DelaunayBoundaryFacet, DelaunayRegionIncidence,

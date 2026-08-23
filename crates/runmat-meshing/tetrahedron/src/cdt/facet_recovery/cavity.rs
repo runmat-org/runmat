@@ -35,7 +35,7 @@ mod steiner;
 use footprint::facet_footprint_crosses_face;
 use sides::side_cavities;
 use star::star_refill;
-pub(super) use steiner::try_recover_facet_with_cavity;
+pub(super) use steiner::{steiner_identity, try_recover_facet_with_cavity};
 
 pub(super) enum FacetCavityAttempt {
     Recovered(DelaunayVolumeTopology),

@@ -189,9 +189,10 @@ fn facet_cavity_retriangulates_both_exact_sides() {
     .unwrap()
     .expect("the bipyramid facet cavity should be recoverable");
 
-    assert_eq!(recovered.tetrahedra.len(), 2);
+    assert_eq!(recovered.topology.tetrahedra.len(), 2);
+    assert!(recovered.steiner_insertions.is_empty());
     let mut candidate = segments;
-    candidate.topology = recovered;
+    candidate.topology = recovered.topology;
     validate_delaunay_segment_recovery(
         &candidate,
         &constraints,
