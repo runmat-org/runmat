@@ -1,32 +1,34 @@
-//! Verified filesystem object storage shared by a native driver and its child hosts.
+//! Atomic verified content-addressed storage for native execution-artifact consumers.
 
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use runmat_execution::Digest;
-use runmat_execution_artifact::cache::{CacheExport, CacheImport};
-use runmat_execution_artifact::{ArtifactError, ArtifactResult, LogicalObject};
+
+use super::{CacheExport, CacheImport};
+use crate::{ArtifactError, ArtifactResult, LogicalObject};
 
 #[derive(Clone, Debug)]
-pub struct NativeObjectStore {
+pub struct FilesystemObjectStore {
     root: PathBuf,
     max_object_bytes: u64,
 }
 
-impl NativeObjectStore {
+impl FilesystemObjectStore {
     pub fn open(root: impl Into<PathBuf>, max_object_bytes: u64) -> ArtifactResult<Self> {
         let root = root.into();
         if !root.is_absolute() || max_object_bytes == 0 {
             return Err(ArtifactError::Invalid(
-                "native object store requires an absolute root and non-zero object bound".into(),
+                "filesystem object store requires an absolute root and non-zero object bound"
+                    .into(),
             ));
         }
         fs::create_dir_all(&root)?;
         restrict_directory(&root)?;
         if !root.is_dir() {
             return Err(ArtifactError::Invalid(
-                "native object store root is not a directory".into(),
+                "filesystem object store root is not a directory".into(),
             ));
         }
         Ok(Self {
@@ -49,30 +51,29 @@ impl NativeObjectStore {
     }
 
     fn read_required(&self, digest: Digest) -> ArtifactResult<Vec<u8>> {
-        let path = self.path(digest);
-        let file = OpenOptions::new().read(true).open(path)?;
+        let file = OpenOptions::new().read(true).open(self.path(digest))?;
         let length = file.metadata()?.len();
         if length > self.max_object_bytes {
             return Err(ArtifactError::Limit(
-                "native object exceeds its configured byte bound".into(),
+                "filesystem object exceeds its configured byte bound".into(),
             ));
         }
         let capacity = usize::try_from(length).map_err(|_| {
-            ArtifactError::Limit("native object length does not fit this host".into())
+            ArtifactError::Limit("filesystem object length does not fit this host".into())
         })?;
         let mut bytes = Vec::with_capacity(capacity);
         file.take(self.max_object_bytes.saturating_add(1))
             .read_to_end(&mut bytes)?;
         if bytes.len() as u64 != length || Digest::sha256(&bytes) != digest {
             return Err(ArtifactError::Identity(
-                "native object bytes do not match their content identity".into(),
+                "filesystem object bytes do not match their content identity".into(),
             ));
         }
         Ok(bytes)
     }
 }
 
-impl CacheImport for NativeObjectStore {
+impl CacheImport for FilesystemObjectStore {
     fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
         match self.read_required(digest) {
             Ok(bytes) => Ok(Some(bytes)),
@@ -84,12 +85,12 @@ impl CacheImport for NativeObjectStore {
     }
 }
 
-impl CacheExport for NativeObjectStore {
+impl CacheExport for FilesystemObjectStore {
     fn write_verified(&mut self, object: &LogicalObject) -> ArtifactResult<()> {
         object.validate()?;
         if object.bytes.len() as u64 > self.max_object_bytes {
             return Err(ArtifactError::Limit(
-                "native object exceeds its configured byte bound".into(),
+                "filesystem object exceeds its configured byte bound".into(),
             ));
         }
         let target = self.path(object.descriptor.digest);
@@ -110,10 +111,10 @@ impl CacheExport for NativeObjectStore {
     }
 }
 
-fn verify_existing(store: &NativeObjectStore, object: &LogicalObject) -> ArtifactResult<()> {
+fn verify_existing(store: &FilesystemObjectStore, object: &LogicalObject) -> ArtifactResult<()> {
     if store.read_required(object.descriptor.digest)? != object.bytes {
         return Err(ArtifactError::Identity(
-            "native object store identity collision".into(),
+            "filesystem object store identity collision".into(),
         ));
     }
     Ok(())
@@ -134,14 +135,14 @@ fn restrict_directory(_path: &Path) -> ArtifactResult<()> {
 
 #[cfg(test)]
 mod tests {
-    use runmat_execution_artifact::{LogicalObject, ObjectNamespace};
+    use crate::{LogicalObject, ObjectNamespace};
 
     use super::*;
 
     #[test]
     fn store_is_atomic_idempotent_bounded_and_rehashes_reads() {
         let directory = tempfile::tempdir().unwrap();
-        let mut store = NativeObjectStore::open(directory.path().join("objects"), 16).unwrap();
+        let mut store = FilesystemObjectStore::open(directory.path().join("objects"), 16).unwrap();
         let object = LogicalObject::new(
             ObjectNamespace::ResultValue,
             "test/object",

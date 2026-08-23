@@ -22,7 +22,7 @@ mod process;
 use crate::local_store::{prepare_session_root, ArtifactStore, CheckpointStore};
 use crate::protocol::StoredProgram;
 use crate::{
-    NativeExecutionConfig, NativeExecutionError, NativeExecutionResult, NativeObjectStore,
+    FilesystemObjectStore, NativeExecutionConfig, NativeExecutionError, NativeExecutionResult,
 };
 
 pub const NATIVE_OBJECT_STORE_ROOT_ENV: &str = "RUNMAT_EXECUTION_OBJECT_STORE_ROOT";
@@ -84,7 +84,7 @@ pub(crate) struct LocalDriver {
     pool_id: PoolId,
     driver: Mutex<Driver>,
     artifacts: ArtifactStore,
-    objects: NativeObjectStore,
+    objects: FilesystemObjectStore,
     checkpoints: CheckpointStore,
     completions: Mutex<HashMap<TaskId, Arc<TaskCompletion>>>,
 }
@@ -141,7 +141,7 @@ impl LocalDriver {
         prepare_session_root(&config.store_root)?;
         let artifacts = ArtifactStore::new(config.store_root.join("artifacts"))?;
         let objects =
-            NativeObjectStore::open(config.store_root.join("objects"), config.max_object_bytes)
+            FilesystemObjectStore::open(config.store_root.join("objects"), config.max_object_bytes)
                 .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
         let checkpoints = CheckpointStore::new(config.store_root.join("checkpoints"))?;
         let local = Arc::new(Self {
@@ -159,7 +159,7 @@ impl LocalDriver {
         Ok(local)
     }
 
-    pub(crate) fn object_store(&self) -> NativeObjectStore {
+    pub(crate) fn object_store(&self) -> FilesystemObjectStore {
         self.objects.clone()
     }
 
