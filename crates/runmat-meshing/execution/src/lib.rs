@@ -119,7 +119,7 @@ pub use stage_evidence_object::{
 pub use surface_join_kernel::ExactSurfaceJoinKernel;
 pub use surface_kernel::ExactSurfacePartitionKernel;
 pub use task::{
-    build_task_submission, MeshingExecutionContext, MeshingTaskEffectPolicy,
-    MESHING_EXECUTION_CALLABLE_OWNER,
+    build_task_submission, exact_meshing_worker_capabilities, MeshingExecutionContext,
+    MeshingTaskEffectPolicy, MESHING_EXECUTION_CALLABLE_OWNER,
 };
 pub use volume_kernel::ExactVolumeKernel;

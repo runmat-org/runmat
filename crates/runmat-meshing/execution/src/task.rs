@@ -269,6 +269,59 @@ fn map_capabilities(
     Ok(mapped)
 }
 
+/// Returns the complete generic worker capability inventory for an exact-meshing DAG.
+/// This is the single product-side authority for configuring a pool before any stage is submitted.
+pub fn exact_meshing_worker_capabilities(
+    document: &runmat_geometry_core::GeometryDocument,
+    request: &MeshingRequest,
+    capability_cohort: Option<&str>,
+) -> MeshingExecutionResult<BTreeSet<Capability>> {
+    document.validate()?;
+    request.validate()?;
+    let runmat_geometry_core::GeometryModel::ExactBRep { model } = &document.model else {
+        return Err(MeshingExecutionError::Invalid(
+            "exact meshing capabilities require an exact B-rep document".into(),
+        ));
+    };
+    let mut capabilities = BTreeSet::from([Capability::ProcessIsolation]);
+    capabilities.insert(Capability::Custom(format!(
+        "runmat.meshing.host:{}",
+        crate::MESHING_HOST_ABI
+    )));
+    capabilities.insert(Capability::Custom(format!(
+        "runmat.meshing.exact-cad:{}",
+        model.kernel_abi
+    )));
+    for version in [
+        &request.algorithms.geometry,
+        &request.algorithms.curve,
+        &request.algorithms.surface,
+        &request.algorithms.plc,
+        &request.algorithms.tetrahedron,
+        &request.algorithms.optimization,
+        &request.algorithms.validation,
+    ] {
+        capabilities.insert(Capability::Custom(format!(
+            "runmat.meshing.algorithm:{version}"
+        )));
+    }
+    capabilities.insert(Capability::Custom(format!(
+        "runmat.meshing.element-order:{}",
+        order_name(request.element_order)
+    )));
+    if let Some(cohort) = capability_cohort {
+        if cohort.is_empty() || cohort.len() > 256 || cohort.chars().any(char::is_control) {
+            return Err(MeshingExecutionError::Invalid(
+                "meshing capability cohort is invalid".into(),
+            ));
+        }
+        capabilities.insert(Capability::Custom(format!(
+            "runmat.meshing.cohort:{cohort}"
+        )));
+    }
+    Ok(capabilities)
+}
+
 fn map_retry(
     stage: MeshingStageKind,
     effect: MeshingTaskEffectPolicy,

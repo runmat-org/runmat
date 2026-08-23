@@ -20,9 +20,34 @@ use runmat_meshing_core::{
 };
 
 use crate::{
-    build_task_submission, MeshingArtifactAccess, MeshingExecutionContext, MeshingTaskEffectPolicy,
-    MESHING_STAGE_MANIFEST_MEDIA_TYPE,
+    build_task_submission, exact_meshing_worker_capabilities, MeshingArtifactAccess,
+    MeshingExecutionContext, MeshingTaskEffectPolicy, MESHING_STAGE_MANIFEST_MEDIA_TYPE,
 };
+
+#[test]
+fn exact_dag_worker_inventory_covers_every_stage_family() {
+    let (document, _, _) = runmat_geometry_fixtures::exact_tetrahedron();
+    let mut request = Fixture::new(MeshingStageKind::SurfaceMesh).request;
+    request.tolerance = document.tolerance;
+    let capabilities =
+        exact_meshing_worker_capabilities(&document, &request, Some("native-cohort-v1")).unwrap();
+    for capability in [
+        "runmat.meshing.host:host-v2",
+        "runmat.meshing.exact-cad:occt-v1",
+        "runmat.meshing.algorithm:geometry/v2",
+        "runmat.meshing.algorithm:curve/v2",
+        "runmat.meshing.algorithm:surface/v2",
+        "runmat.meshing.algorithm:plc/v2",
+        "runmat.meshing.algorithm:tetrahedron/v2",
+        "runmat.meshing.algorithm:optimization/v2",
+        "runmat.meshing.algorithm:validation/v2",
+        "runmat.meshing.element-order:tet10",
+        "runmat.meshing.cohort:native-cohort-v1",
+    ] {
+        assert!(capabilities.contains(&Capability::Custom(capability.into())));
+    }
+    assert!(capabilities.contains(&Capability::ProcessIsolation));
+}
 
 #[test]
 fn task_projection_binds_identity_inputs_resources_and_capabilities() {

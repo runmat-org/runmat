@@ -4,6 +4,8 @@ use std::path::PathBuf;
 
 use runmat_execution::{resource::Capability, ExecutionScopeId};
 
+use crate::{NativeExecutionError, NativeExecutionResult};
+
 #[derive(Clone, Debug)]
 pub struct NativeExecutionConfig {
     pub executable: PathBuf,
@@ -35,6 +37,23 @@ impl NativeExecutionConfig {
             store_root,
             worker_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
         })
+    }
+
+    pub fn enable_exact_meshing(
+        &mut self,
+        document: &runmat_geometry_core::GeometryDocument,
+        request: &runmat_meshing_core::MeshingRequest,
+        capability_cohort: Option<&str>,
+    ) -> NativeExecutionResult<()> {
+        self.worker_capabilities.extend(
+            runmat_meshing_execution::exact_meshing_worker_capabilities(
+                document,
+                request,
+                capability_cohort,
+            )
+            .map_err(|error| NativeExecutionError::Configuration(error.to_string()))?,
+        );
+        Ok(())
     }
 
     pub(crate) fn validate(&self) -> Result<(), String> {
