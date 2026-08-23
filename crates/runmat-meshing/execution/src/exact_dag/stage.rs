@@ -38,6 +38,9 @@ pub(super) fn capabilities_for_stage(
         MeshingStageKind::SurfaceMesh => &seed.resolved_request.algorithms.surface,
         MeshingStageKind::Tetrahedralization => &seed.resolved_request.algorithms.tetrahedron,
         MeshingStageKind::OrderElevation => &seed.resolved_request.algorithms.optimization,
+        MeshingStageKind::Validation | MeshingStageKind::Serialization => {
+            &seed.resolved_request.algorithms.validation
+        }
         _ => return Err(invalid("exact meshing DAG received an unsupported stage")),
     };
     let mut capabilities = seed

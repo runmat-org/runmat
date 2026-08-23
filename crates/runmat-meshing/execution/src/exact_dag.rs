@@ -313,6 +313,37 @@ impl ExactMeshingDagPlanner {
         )
     }
 
+    pub fn solver_validation(
+        &self,
+        projection_root: ValueRef,
+    ) -> MeshingExecutionResult<PlannedMeshingStage> {
+        self.build_stage_with_dependencies(
+            MeshingStageKind::Validation,
+            whole_partition(MeshingPartitionKind::WholeStage),
+            vec![(MeshingInputKind::StageArtifact, projection_root)],
+        )
+    }
+
+    pub fn solver_serialization(
+        &self,
+        projection_root: ValueRef,
+        validation_root: ValueRef,
+    ) -> MeshingExecutionResult<PlannedMeshingStage> {
+        if projection_root.logical_digest == validation_root.logical_digest {
+            return Err(invalid(
+                "solver serialization requires distinct projection and validation roots",
+            ));
+        }
+        self.build_stage_with_dependencies(
+            MeshingStageKind::Serialization,
+            whole_partition(MeshingPartitionKind::WholeStage),
+            vec![
+                (MeshingInputKind::StageArtifact, projection_root),
+                (MeshingInputKind::StageArtifact, validation_root),
+            ],
+        )
+    }
+
     fn build_surface_pass(
         &self,
         topology: &ExactBRepTopology,
@@ -413,6 +444,14 @@ impl ExactMeshingDagPlanner {
             .into_iter()
             .map(|(_, root)| root)
             .collect::<Vec<_>>();
+        let geometry_document = if inputs
+            .iter()
+            .any(|input| input.kind == MeshingInputKind::ExactGeometry)
+        {
+            self.seed.geometry_document.clone()
+        } else {
+            None
+        };
         let identity = MeshingStageIdentity {
             schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
             stage,
@@ -438,7 +477,7 @@ impl ExactMeshingDagPlanner {
             identity,
             self.seed.resolved_request.clone(),
             self.seed.artifact_access.clone(),
-            self.seed.geometry_document.clone(),
+            geometry_document,
         )?;
         validate_inputs(&host.workload, &input_roots, &host.artifact_access)?;
         Ok(PlannedMeshingStage { host, input_roots })

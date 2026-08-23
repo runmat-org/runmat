@@ -23,6 +23,7 @@ mod publication;
 mod response;
 mod serial;
 mod solver_projection_kernel;
+mod solver_terminal_kernel;
 mod surface_join_kernel;
 mod surface_kernel;
 mod task;
@@ -96,6 +97,7 @@ pub use serial::{
 pub use solver_projection_kernel::{
     ExactSolverEvaluatorProvider, ExactSolverProjectionKernel, PortableSolverEvaluatorProvider,
 };
+pub use solver_terminal_kernel::{SolverSerializationKernel, SolverValidationKernel};
 pub use surface_join_kernel::ExactSurfaceJoinKernel;
 pub use surface_kernel::ExactSurfacePartitionKernel;
 pub use task::{
