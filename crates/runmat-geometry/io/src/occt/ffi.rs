@@ -207,6 +207,7 @@ pub(crate) mod bridge {
     #[derive(Debug, Clone)]
     struct OcctExactFacePayload {
         occurrence_index: u64,
+        source_face_index: u64,
         shape_key: u64,
         identity_digest: Vec<u8>,
         reversed: bool,

@@ -105,6 +105,31 @@ fn exact_evaluator_reconstructs_from_the_transferable_closure() {
 }
 
 #[test]
+fn exact_import_maps_every_source_face_ordinal_to_authoritative_topology() {
+    let imported = import_exact_cad(
+        "box.brep",
+        BOX,
+        GeometryFormat::Brep,
+        &ExactCadImportOptions::default(),
+        &GeometryImportContext::new(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        imported.source_face_ids.len(),
+        imported.topology.faces.len()
+    );
+    for (ordinal, face_id) in &imported.source_face_ids {
+        assert!((*ordinal as usize) < imported.topology.faces.len());
+        assert!(imported
+            .topology
+            .faces
+            .iter()
+            .any(|face| face.id == *face_id));
+    }
+}
+
+#[test]
 fn step_assembly_preserves_shared_definitions_occurrences_and_body_evaluation() {
     let imported = import_exact_cad(
         "two_box_assembly.step",
@@ -130,6 +155,14 @@ fn step_assembly_preserves_shared_definitions_occurrences_and_body_evaluation() 
     assert_eq!(imported.topology.solids.len(), 2);
     assert_eq!(imported.topology.regions.len(), 2);
     assert_eq!(imported.topology.faces.len(), 12);
+    assert_eq!(
+        imported.source_face_ids.len(),
+        imported.topology.faces.len()
+    );
+    assert_eq!(
+        imported.source_face_ids.keys().copied().collect::<Vec<_>>(),
+        (0..imported.topology.faces.len() as u64).collect::<Vec<_>>()
+    );
     let body_assemblies = imported
         .topology
         .assemblies

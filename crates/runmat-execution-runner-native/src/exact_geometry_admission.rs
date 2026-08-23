@@ -29,6 +29,7 @@ pub enum ExactGeometryAdmissionError {
 
 pub struct PreparedExactGeometryAdmission {
     objects: PreparedExactGeometryObjects,
+    source_face_ids: std::collections::BTreeMap<u64, runmat_geometry_core::PersistentEntityId>,
 }
 
 impl PreparedExactGeometryAdmission {
@@ -38,6 +39,12 @@ impl PreparedExactGeometryAdmission {
 
     pub fn topology(&self) -> &runmat_geometry_core::ExactBRepTopology {
         &self.objects.topology
+    }
+
+    pub fn source_face_ids(
+        &self,
+    ) -> &std::collections::BTreeMap<u64, runmat_geometry_core::PersistentEntityId> {
+        &self.source_face_ids
     }
 }
 
@@ -66,7 +73,10 @@ pub fn prepare_exact_geometry_admission(
         imported.healing_report,
         limits,
     )?;
-    Ok(PreparedExactGeometryAdmission { objects })
+    Ok(PreparedExactGeometryAdmission {
+        objects,
+        source_face_ids: imported.source_face_ids,
+    })
 }
 
 /// Binds a prepared exact closure to one session authority and persists it atomically.

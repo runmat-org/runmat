@@ -43,6 +43,11 @@ pub struct NativeExactMeshingJob<'a> {
     pub execution: NativeMeshingExecutionPolicy,
 }
 
+pub struct NativeExactMeshingResult {
+    pub dag_result: ExactMeshingDagRunResult,
+    pub source_face_ids: BTreeMap<u64, runmat_geometry_core::PersistentEntityId>,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum NativeExactMeshingJobError {
     #[error(transparent)]
@@ -71,7 +76,7 @@ pub enum NativeExactMeshingJobError {
 pub fn mesh_exact_geometry(
     mut config: NativeExecutionConfig,
     mut job: NativeExactMeshingJob<'_>,
-) -> Result<ExactMeshingDagRunResult, NativeExactMeshingJobError> {
+) -> Result<NativeExactMeshingResult, NativeExactMeshingJobError> {
     let prepared_geometry = prepare_exact_geometry_admission(
         job.source_name,
         job.source_bytes,
@@ -87,6 +92,7 @@ pub fn mesh_exact_geometry(
     job.evidence.platform.exact_kernel_abi =
         prepared_geometry.document().source.kernel_version.clone();
     let domain_model = resolve_domain_model(prepared_geometry.topology(), &job.domain)?;
+    let source_face_ids = prepared_geometry.source_face_ids().clone();
     config.enable_exact_meshing(
         prepared_geometry.document(),
         &job.request,
@@ -108,7 +114,7 @@ pub fn mesh_exact_geometry(
         store.write_verified(object)?;
     }
     let mut executor = NativeExactMeshingExecutor::new(&session, job.execution)?;
-    execute_exact_meshing_dag(
+    let dag_result = execute_exact_meshing_dag(
         ExactMeshingDagRun {
             geometry: &geometry,
             domain_model: &domain,
@@ -122,8 +128,11 @@ pub fn mesh_exact_geometry(
             evidence: job.evidence,
         },
         &mut executor,
-    )
-    .map_err(NativeExactMeshingJobError::from)
+    )?;
+    Ok(NativeExactMeshingResult {
+        dag_result,
+        source_face_ids,
+    })
 }
 
 fn resolve_domain_model(
