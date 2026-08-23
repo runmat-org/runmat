@@ -17,12 +17,12 @@ use crate::{
     fixtures::{fixture_model, FixtureId},
     parity::{assert_vectors_within_tolerance, ParityTolerance},
     solve::{nonlinear::NonlinearSolveOptions, transient::TransientSolveOptions},
-    ComputeBackend, FeaContactInterfaceContext, FeaElectroThermalContext, FeaRunResult,
-    FeaThermoMechanicalContext, LinearStaticSolveOptions, ModalSolveOptions, ThermalSolveOptions,
-    FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD,
-    FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL, FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT,
-    FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
-    FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
+    ComputeBackend, ElectromagneticSolveOptions, FeaContactInterfaceContext,
+    FeaElectroThermalContext, FeaRunResult, FeaThermoMechanicalContext, LinearStaticSolveOptions,
+    ModalSolveOptions, ThermalSolveOptions, FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY,
+    FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL,
+    FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
+    FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
     FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE,
     FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS,
@@ -36,6 +36,7 @@ use crate::{
     FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY, FEA_FIELD_STRUCTURAL_STRESS,
     FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
+use runmat_analysis_core::{ElectromagneticDomain, MaterialElectricalModel};
 use runmat_meshing_core::{
     ElementOrder, PersistentEntityId, PersistentEntityKind, SolverMeshArtifact,
 };
@@ -158,6 +159,108 @@ fn canonical_cantilever_benchmark_runs() {
     assert!(host_field(&result, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY)[0] > 0.0);
     assert!(host_field(&result, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM)[0] <= 1.0e-6);
     assert!(host_field(&result, FEA_FIELD_STRUCTURAL_EQUATION_SCALE)[0] >= 1.0);
+}
+
+#[test]
+fn solid_physics_pipelines_assemble_from_the_canonical_solver_mesh() {
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mesh = single_tetrahedron_solver_mesh_for_model(&model);
+
+    let modal = crate::run_modal_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        ModalSolveOptions {
+            mode_count: 2,
+            solver_mesh: Some(mesh.clone()),
+            ..ModalSolveOptions::default()
+        },
+    )
+    .expect("modal solve should consume the canonical mesh");
+    assert_eq!(modal.mode_shapes[0].shape, vec![4, 3]);
+
+    let thermal = crate::run_thermal_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        ThermalSolveOptions {
+            step_count: 2,
+            solver_mesh: Some(mesh.clone()),
+            thermo_mechanical_context: Some(FeaThermoMechanicalContext {
+                enabled: true,
+                reference_temperature_k: 293.15,
+                applied_temperature_delta_k: 45.0,
+                thermal_expansion_coefficient: 1.2e-5,
+                field_source: None,
+                region_temperature_deltas: Vec::new(),
+                time_profile: Vec::new(),
+            }),
+            ..ThermalSolveOptions::default()
+        },
+    )
+    .expect("thermal solve should consume the canonical mesh");
+    assert_eq!(thermal.temperature_snapshots[0].shape, vec![4]);
+
+    let transient = crate::run_transient_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        TransientSolveOptions {
+            step_count: 2,
+            solver_mesh: Some(mesh.clone()),
+            ..TransientSolveOptions::default()
+        },
+    )
+    .expect("transient solve should consume the canonical mesh");
+    assert_eq!(transient.displacement_snapshots[0].shape, vec![4, 3]);
+
+    let nonlinear = crate::run_nonlinear_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        NonlinearSolveOptions {
+            increment_count: 2,
+            solver_mesh: Some(mesh.clone()),
+            ..NonlinearSolveOptions::default()
+        },
+    )
+    .expect("nonlinear solve should consume the canonical mesh");
+    assert_eq!(nonlinear.displacement_snapshots[0].shape, vec![4, 3]);
+
+    let mut electromagnetic_model = model.clone();
+    electromagnetic_model.electromagnetic = Some(ElectromagneticDomain {
+        enabled: true,
+        reference_frequency_hz: 60.0,
+        applied_current_a: 120.0,
+    });
+    for material in &mut electromagnetic_model.materials {
+        material.electrical = Some(MaterialElectricalModel::default());
+    }
+    let electromagnetic = crate::run_electromagnetic_with_options(
+        &electromagnetic_model,
+        ComputeBackend::Cpu,
+        ElectromagneticSolveOptions {
+            solver_mesh: Some(mesh),
+            ..ElectromagneticSolveOptions::default()
+        },
+    )
+    .expect("electromagnetic solve should consume the canonical mesh");
+    let topology_diagnostic = electromagnetic
+        .run
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "FEA_EM_MAXWELL_EDGE_TOPOLOGY")
+        .expect("electromagnetic solve should report its mesh topology");
+    assert!(
+        topology_diagnostic
+            .message
+            .contains("full_topology_edge_count=6"),
+        "{}",
+        topology_diagnostic.message
+    );
+    assert!(
+        topology_diagnostic
+            .message
+            .contains("full_topology_element_count=1"),
+        "{}",
+        topology_diagnostic.message
+    );
 }
 
 #[test]
@@ -1102,6 +1205,7 @@ fn modal_large_fixture_emits_orthogonality_and_separation_diagnostics() {
         ComputeBackend::Cpu,
         ModalSolveOptions {
             mode_count: 8,
+            solver_mesh: None,
             thermo_mechanical_context: None,
             electro_thermal_context: None,
         },

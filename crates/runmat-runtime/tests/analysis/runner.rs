@@ -670,6 +670,7 @@ fn electromagnetic_options_for_spec(spec: &FixtureSpec) -> AnalysisElectromagnet
         residual_target: 1.0e-6,
         harmonic_tolerance: 1.0e-7,
         harmonic_max_iterations: 96,
+        solver_mesh_artifact_path: None,
         sweep_enabled: !electromagnetic_sweep_frequency_hz_for_fixture(spec.id).is_empty(),
         sweep_frequency_hz: electromagnetic_sweep_frequency_hz_for_fixture(spec.id),
     }
@@ -2577,6 +2578,7 @@ fn run_fixture_cpu(spec: &FixtureSpec, model: &AnalysisModel) -> FixtureRunResul
             model,
             ComputeBackend::Cpu,
             AnalysisModalRunOptions {
+                solver_mesh_artifact_path: None,
                 mode_count: spec
                     .modal_mode_count
                     .unwrap_or(AnalysisModalRunOptions::default().mode_count),
@@ -2621,6 +2623,7 @@ fn run_fixture_cpu(spec: &FixtureSpec, model: &AnalysisModel) -> FixtureRunResul
                 max_linear_iters: 128,
                 tolerance: 1.0e-8,
                 residual_warn_threshold: 1.0e-4,
+                solver_mesh_artifact_path: None,
             },
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
@@ -2638,6 +2641,7 @@ fn run_fixture_cpu(spec: &FixtureSpec, model: &AnalysisModel) -> FixtureRunResul
                 max_linear_iters: 128,
                 tolerance: 1.0e-8,
                 residual_warn_threshold: 1.0e-4,
+                solver_mesh_artifact_path: None,
             },
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
@@ -2655,6 +2659,7 @@ fn run_fixture_cpu(spec: &FixtureSpec, model: &AnalysisModel) -> FixtureRunResul
                 max_linear_iters: 128,
                 tolerance: 1.0e-8,
                 residual_warn_threshold: 1.0e-4,
+                solver_mesh_artifact_path: None,
             },
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
@@ -2685,6 +2690,7 @@ fn run_fixture_gpu(spec: &FixtureSpec, model: &AnalysisModel, mode: GpuMode) -> 
             model,
             ComputeBackend::Gpu,
             AnalysisModalRunOptions {
+                solver_mesh_artifact_path: None,
                 mode_count: spec
                     .modal_mode_count
                     .unwrap_or(AnalysisModalRunOptions::default().mode_count),
@@ -2729,6 +2735,7 @@ fn run_fixture_gpu(spec: &FixtureSpec, model: &AnalysisModel, mode: GpuMode) -> 
                 max_linear_iters: 128,
                 tolerance: 1.0e-8,
                 residual_warn_threshold: 1.0e-4,
+                solver_mesh_artifact_path: None,
             },
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
@@ -2746,6 +2753,7 @@ fn run_fixture_gpu(spec: &FixtureSpec, model: &AnalysisModel, mode: GpuMode) -> 
                 max_linear_iters: 128,
                 tolerance: 1.0e-8,
                 residual_warn_threshold: 1.0e-4,
+                solver_mesh_artifact_path: None,
             },
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
@@ -2763,6 +2771,7 @@ fn run_fixture_gpu(spec: &FixtureSpec, model: &AnalysisModel, mode: GpuMode) -> 
                 max_linear_iters: 128,
                 tolerance: 1.0e-8,
                 residual_warn_threshold: 1.0e-4,
+                solver_mesh_artifact_path: None,
             },
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
@@ -4118,6 +4127,16 @@ pub(super) fn run_fixture(
 ) -> FixtureRunRecord {
     let mut model = (spec.model)();
     configure_model_for_fixture(spec.id, &mut model);
+    let fixture_store_root = filesystem_root.map(|root| root.join(spec.id));
+    let filesystem_root = fixture_store_root.as_ref();
+    if let Some(root) = filesystem_root {
+        runmat_runtime::analysis::storage::configure_artifact_store(
+            runmat_runtime::analysis::storage::AnalysisArtifactStoreConfig::Filesystem {
+                root: root.clone(),
+            },
+        )
+        .expect("configure isolated fixture artifact store");
+    }
     ensure_thermo_field_artifacts_for_fixture(spec.id, &model);
     let mut failures = Vec::new();
 

@@ -75,6 +75,7 @@ mod meshing;
 mod policy;
 mod promotion;
 mod solver_mesh_artifact;
+mod solver_mesh_flow_topology;
 pub mod storage;
 mod study_authoring;
 
@@ -1171,8 +1172,8 @@ pub fn analysis_run_study_op(
         match spec.run_kind {
             AnalysisRunKind::LinearStatic => {
                 let mut options = spec.linear_static_run_options.clone().unwrap_or_default();
-                attach_solver_mesh_artifact_to_run_options(
-                    &mut options,
+                attach_solver_mesh_artifact_path(
+                    &mut options.solver_mesh_artifact_path,
                     solver_mesh_artifact_path.as_deref(),
                 );
                 let initial_run = analysis_run_linear_static_with_options(
@@ -1184,7 +1185,11 @@ pub fn analysis_run_study_op(
                 Ok((initial_run, run_options_to_json(&options), None))
             }
             AnalysisRunKind::Modal => {
-                let options = spec.modal_run_options.clone().unwrap_or_default();
+                let mut options = spec.modal_run_options.clone().unwrap_or_default();
+                attach_solver_mesh_artifact_path(
+                    &mut options.solver_mesh_artifact_path,
+                    solver_mesh_artifact_path.as_deref(),
+                );
                 let run = analysis_run_modal_with_options_op(
                     &model,
                     spec.backend,
@@ -1204,7 +1209,11 @@ pub fn analysis_run_study_op(
                 Ok((run, run_options_to_json(&options), None))
             }
             AnalysisRunKind::Thermal => {
-                let options = spec.thermal_run_options.clone().unwrap_or_default();
+                let mut options = spec.thermal_run_options.clone().unwrap_or_default();
+                attach_solver_mesh_artifact_path(
+                    &mut options.solver_mesh_artifact_path,
+                    solver_mesh_artifact_path.as_deref(),
+                );
                 let run = analysis_run_thermal_with_options_op(
                     &model,
                     spec.backend,
@@ -1214,7 +1223,11 @@ pub fn analysis_run_study_op(
                 Ok((run, run_options_to_json(&options), None))
             }
             AnalysisRunKind::Transient => {
-                let options = spec.transient_run_options.clone().unwrap_or_default();
+                let mut options = spec.transient_run_options.clone().unwrap_or_default();
+                attach_solver_mesh_artifact_path(
+                    &mut options.solver_mesh_artifact_path,
+                    solver_mesh_artifact_path.as_deref(),
+                );
                 let run = analysis_run_transient_with_options_op(
                     &model,
                     spec.backend,
@@ -1224,7 +1237,11 @@ pub fn analysis_run_study_op(
                 Ok((run, run_options_to_json(&options), None))
             }
             AnalysisRunKind::Cfd => {
-                let options = spec.cfd_run_options.clone().unwrap_or_default();
+                let mut options = spec.cfd_run_options.clone().unwrap_or_default();
+                attach_solver_mesh_artifact_path(
+                    &mut options.solver_mesh_artifact_path,
+                    solver_mesh_artifact_path.as_deref(),
+                );
                 let run = analysis_run_cfd_with_options_op(
                     &model,
                     spec.backend,
@@ -1234,7 +1251,11 @@ pub fn analysis_run_study_op(
                 Ok((run, run_options_to_json(&options), None))
             }
             AnalysisRunKind::Cht => {
-                let options = spec.cht_run_options.clone().unwrap_or_default();
+                let mut options = spec.cht_run_options.clone().unwrap_or_default();
+                attach_solver_mesh_artifact_path(
+                    &mut options.solver_mesh_artifact_path,
+                    solver_mesh_artifact_path.as_deref(),
+                );
                 let run = analysis_run_cht_with_options_op(
                     &model,
                     spec.backend,
@@ -1244,7 +1265,11 @@ pub fn analysis_run_study_op(
                 Ok((run, run_options_to_json(&options), None))
             }
             AnalysisRunKind::Fsi => {
-                let options = spec.fsi_run_options.clone().unwrap_or_default();
+                let mut options = spec.fsi_run_options.clone().unwrap_or_default();
+                attach_solver_mesh_artifact_path(
+                    &mut options.solver_mesh_artifact_path,
+                    solver_mesh_artifact_path.as_deref(),
+                );
                 let run = analysis_run_fsi_with_options_op(
                     &model,
                     spec.backend,
@@ -1254,7 +1279,11 @@ pub fn analysis_run_study_op(
                 Ok((run, run_options_to_json(&options), None))
             }
             AnalysisRunKind::Nonlinear => {
-                let options = spec.nonlinear_run_options.clone().unwrap_or_default();
+                let mut options = spec.nonlinear_run_options.clone().unwrap_or_default();
+                attach_solver_mesh_artifact_path(
+                    &mut options.solver_mesh_artifact_path,
+                    solver_mesh_artifact_path.as_deref(),
+                );
                 let run = analysis_run_nonlinear_with_options_op(
                     &model,
                     spec.backend,
@@ -1264,7 +1293,11 @@ pub fn analysis_run_study_op(
                 Ok((run, run_options_to_json(&options), None))
             }
             AnalysisRunKind::Electromagnetic => {
-                let options = spec.electromagnetic_run_options.clone().unwrap_or_default();
+                let mut options = spec.electromagnetic_run_options.clone().unwrap_or_default();
+                attach_solver_mesh_artifact_path(
+                    &mut options.solver_mesh_artifact_path,
+                    solver_mesh_artifact_path.as_deref(),
+                );
                 let run = analysis_run_electromagnetic_with_options_op(
                     &model,
                     spec.backend,
@@ -1908,11 +1941,20 @@ pub fn analysis_run_modal_with_options_op(
         }
     }
 
+    let solver_mesh = resolve_solver_mesh_artifact(
+        model,
+        options.solver_mesh_artifact_path.as_deref(),
+        ANALYSIS_RUN_MODAL_OPERATION,
+        ANALYSIS_RUN_MODAL_OP_VERSION,
+        "RM.FEA.RUN_MODAL.SOLVER_MESH_INVALID",
+        &context,
+    )?;
     let modal_run = run_modal_with_options(
         model,
         backend,
         ModalSolveOptions {
             mode_count: options.mode_count,
+            solver_mesh: solver_mesh.clone(),
             thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
             electro_thermal_context: to_fea_electro_thermal_context(electro_options),
         },
@@ -2053,7 +2095,7 @@ pub fn analysis_run_modal_with_options_op(
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
         run,
-        render_topology: None,
+        render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: Some(ModalResultsData {
             modal_payload_version: "modal_results/v1".to_string(),
             eigenvalues_hz: modal_run.eigenvalues_hz,
@@ -3433,8 +3475,44 @@ struct CfdDomainTopology {
 }
 
 impl CfdDomainTopology {
-    fn from_model(model: &AnalysisModel) -> Self {
-        Self::implicit_channel(cfd_node_count_from_model(model))
+    fn from_model(model: &AnalysisModel, solver_mesh: Option<&SolverMeshArtifact>) -> Self {
+        solver_mesh
+            .map(Self::from_solver_mesh)
+            .unwrap_or_else(|| Self::implicit_channel(cfd_node_count_from_model(model)))
+    }
+
+    fn from_solver_mesh(mesh: &SolverMeshArtifact) -> Self {
+        let topology = solver_mesh_flow_topology::SolverMeshFlowTopology::derive(mesh);
+        let mut sample_element_edges = [[0_u32; 3]; 4];
+        for (target, source) in sample_element_edges
+            .iter_mut()
+            .zip(&topology.boundary_face_edges)
+        {
+            *target = *source;
+        }
+        Self {
+            basis: CfdDomainTopologyBasis::SolverMesh,
+            geometry_source: CfdDomainGeometrySource::SolverMesh,
+            node_count: topology.node_count,
+            control_volume_count: topology.control_volume_count,
+            control_volume_face_count: topology.face_count,
+            control_volume_internal_face_count: topology.internal_face_count,
+            control_volume_boundary_face_count: topology.boundary_face_count,
+            control_volume_connectivity_coverage_ratio: 1.0,
+            domain_length_m: topology.domain_length_m,
+            hydraulic_diameter_m: topology.hydraulic_diameter_m,
+            face_area_m2: topology.mean_boundary_face_area_m2,
+            dx_m: topology.dx_m,
+            active_dimension_count: topology.active_dimension_count,
+            element_geometry_node_count: topology.node_count,
+            element_geometry_edge_count: topology.edge_nodes.len(),
+            element_geometry_coverage_ratio: 1.0,
+            element_topology_sample_element_count: topology.boundary_face_edges.len().min(4),
+            element_topology_sample_edge_count: topology.edge_nodes.len().min(6),
+            element_topology_sample_element_edges: sample_element_edges,
+            element_topology_edge_nodes: topology.edge_nodes,
+            element_topology_element_edges: topology.boundary_face_edges,
+        }
     }
 
     fn implicit_channel(node_count: usize) -> Self {
@@ -3477,12 +3555,14 @@ impl CfdDomainTopology {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CfdDomainTopologyBasis {
     ImplicitChannel,
+    SolverMesh,
 }
 
 impl CfdDomainTopologyBasis {
     fn as_str(self) -> &'static str {
         match self {
             Self::ImplicitChannel => "implicit_channel",
+            Self::SolverMesh => "solver_mesh",
         }
     }
 }
@@ -3490,12 +3570,14 @@ impl CfdDomainTopologyBasis {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CfdDomainGeometrySource {
     ImplicitChannel,
+    SolverMesh,
 }
 
 impl CfdDomainGeometrySource {
     fn as_str(self) -> &'static str {
         match self {
             Self::ImplicitChannel => "implicit_channel",
+            Self::SolverMesh => "solver_mesh",
         }
     }
 }
@@ -4384,8 +4466,9 @@ fn solve_cfd_finite_volume_run(
     domain: &runmat_analysis_core::CfdDomain,
     backend: ComputeBackend,
     options: &AnalysisCfdRunOptions,
+    solver_mesh: Option<&SolverMeshArtifact>,
 ) -> FeaRunResult {
-    let topology = CfdDomainTopology::from_model(model);
+    let topology = CfdDomainTopology::from_model(model, solver_mesh);
     let node_count = topology.node_count;
     let step_count = options.step_count.max(1);
     let field_step = match domain.solve_family {
@@ -6020,8 +6103,17 @@ pub fn analysis_run_cfd_with_options_op(
         ));
     }
 
+    let solver_mesh = resolve_solver_mesh_artifact(
+        model,
+        options.solver_mesh_artifact_path.as_deref(),
+        ANALYSIS_RUN_CFD_OPERATION,
+        ANALYSIS_RUN_CFD_OP_VERSION,
+        "RM.FEA.RUN_CFD.SOLVER_MESH_INVALID",
+        &context,
+    )?;
     let solve_start = Instant::now();
-    let mut run = solve_cfd_finite_volume_run(model, cfd_domain, backend, &options);
+    let mut run =
+        solve_cfd_finite_volume_run(model, cfd_domain, backend, &options, solver_mesh.as_ref());
     let solve_ms = solve_start.elapsed().as_secs_f64() * 1000.0;
     run.diagnostics
         .push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
@@ -6040,7 +6132,7 @@ pub fn analysis_run_cfd_with_options_op(
         );
     }
 
-    let flow_topology = CfdDomainTopology::from_model(model);
+    let flow_topology = CfdDomainTopology::from_model(model, solver_mesh.as_ref());
     let flow_boundary_summary = CfdBoundarySummary::from_model(model, cfd_domain, 2);
     let flow_inlet_velocity = flow_boundary_summary.nominal_inlet_velocity_m_per_s;
     let reynolds_number = cfd_reynolds_number_for_velocity(cfd_domain, flow_inlet_velocity);
@@ -6166,7 +6258,7 @@ pub fn analysis_run_cfd_with_options_op(
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
         run,
-        render_topology: None,
+        render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: None,
         thermal_results: None,
         transient_results: None,
@@ -6514,6 +6606,14 @@ pub fn analysis_run_cht_with_options_op(
     let applied_temperature_delta_k = thermo_options.applied_temperature_delta_k;
 
     let solve_start = Instant::now();
+    let solver_mesh = resolve_solver_mesh_artifact(
+        model,
+        options.solver_mesh_artifact_path.as_deref(),
+        ANALYSIS_RUN_CHT_OPERATION,
+        ANALYSIS_RUN_CHT_OP_VERSION,
+        "RM.FEA.RUN_CHT.SOLVER_MESH_INVALID",
+        &context,
+    )?;
     let thermal_run = run_thermal_with_options(
         model,
         backend,
@@ -6521,6 +6621,7 @@ pub fn analysis_run_cht_with_options_op(
             step_count: options.step_count,
             time_step_s: options.time_step_s,
             residual_target: options.residual_warn_threshold,
+            solver_mesh: solver_mesh.clone(),
             thermo_mechanical_context: to_fea_thermo_mechanical_context(Some(
                 thermo_options.clone(),
             )),
@@ -6538,7 +6639,7 @@ pub fn analysis_run_cht_with_options_op(
         )
     })?;
 
-    let topology = CfdDomainTopology::from_model(model);
+    let topology = CfdDomainTopology::from_model(model, solver_mesh.as_ref());
     let node_count = topology.node_count;
     let field_step = match cfd_domain.solve_family {
         runmat_analysis_core::CfdSolveFamily::SteadyState => 0,
@@ -6814,7 +6915,7 @@ pub fn analysis_run_cht_with_options_op(
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
         run,
-        render_topology: None,
+        render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: None,
         thermal_results: Some(ThermalResultsData {
             thermal_payload_version: "thermal_results/v1".to_string(),
@@ -7119,8 +7220,16 @@ pub fn analysis_run_fsi_with_options_op(
         ));
     }
 
+    let solver_mesh = resolve_solver_mesh_artifact(
+        model,
+        options.solver_mesh_artifact_path.as_deref(),
+        ANALYSIS_RUN_FSI_OPERATION,
+        ANALYSIS_RUN_FSI_OP_VERSION,
+        "RM.FEA.RUN_FSI.SOLVER_MESH_INVALID",
+        &context,
+    )?;
     let solve_start = Instant::now();
-    let topology = CfdDomainTopology::from_model(model);
+    let topology = CfdDomainTopology::from_model(model, solver_mesh.as_ref());
     let node_count = topology.node_count;
     let field_step = match cfd_domain.solve_family {
         runmat_analysis_core::CfdSolveFamily::SteadyState => 0,
@@ -7399,7 +7508,7 @@ pub fn analysis_run_fsi_with_options_op(
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
         run,
-        render_topology: None,
+        render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: None,
         thermal_results: None,
         transient_results: None,
@@ -7510,6 +7619,14 @@ pub fn analysis_run_thermal_with_options_op(
         ));
     }
 
+    let solver_mesh = resolve_solver_mesh_artifact(
+        model,
+        options.solver_mesh_artifact_path.as_deref(),
+        ANALYSIS_RUN_THERMAL_OPERATION,
+        ANALYSIS_RUN_THERMAL_OP_VERSION,
+        "RM.FEA.RUN_THERMAL.SOLVER_MESH_INVALID",
+        &context,
+    )?;
     let thermal_run = run_thermal_with_options(
         model,
         backend,
@@ -7517,6 +7634,7 @@ pub fn analysis_run_thermal_with_options_op(
             step_count: options.step_count,
             time_step_s: options.time_step_s,
             residual_target: options.residual_warn_threshold,
+            solver_mesh: solver_mesh.clone(),
             thermo_mechanical_context: to_fea_thermo_mechanical_context(Some(thermo_options)),
         },
     )
@@ -7616,7 +7734,7 @@ pub fn analysis_run_thermal_with_options_op(
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
         run,
-        render_topology: None,
+        render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: None,
         thermal_results: Some(ThermalResultsData {
             thermal_payload_version: "thermal_results/v1".to_string(),
@@ -7853,6 +7971,14 @@ pub fn analysis_run_transient_with_options_op(
         }
     }
 
+    let solver_mesh = resolve_solver_mesh_artifact(
+        model,
+        options.solver_mesh_artifact_path.as_deref(),
+        ANALYSIS_RUN_TRANSIENT_OPERATION,
+        ANALYSIS_RUN_TRANSIENT_OP_VERSION,
+        "RM.FEA.RUN_TRANSIENT.SOLVER_MESH_INVALID",
+        &context,
+    )?;
     let transient_run = run_transient_with_options(
         model,
         backend,
@@ -7873,6 +7999,7 @@ pub fn analysis_run_transient_with_options_op(
             adapt_nonconverged_shrink: options.adapt_nonconverged_shrink,
             dt_bucket_rel_tolerance: options.dt_bucket_rel_tolerance,
             progress_operation: ANALYSIS_RUN_TRANSIENT_OPERATION.to_string(),
+            solver_mesh: solver_mesh.clone(),
             thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
             electro_thermal_context: to_fea_electro_thermal_context(electro_options),
         },
@@ -8148,7 +8275,7 @@ pub fn analysis_run_transient_with_options_op(
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
         run,
-        render_topology: None,
+        render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: None,
         thermal_results: None,
         transient_results: Some(TransientResultsData {
@@ -8475,6 +8602,14 @@ pub fn analysis_run_nonlinear_with_options_op(
         }
     }
 
+    let solver_mesh = resolve_solver_mesh_artifact(
+        model,
+        options.solver_mesh_artifact_path.as_deref(),
+        ANALYSIS_RUN_NONLINEAR_OPERATION,
+        ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+        "RM.FEA.RUN_NONLINEAR.SOLVER_MESH_INVALID",
+        &context,
+    )?;
     let nonlinear_run = run_nonlinear_with_options(
         model,
         backend,
@@ -8488,6 +8623,7 @@ pub fn analysis_run_nonlinear_with_options_op(
             max_line_search_backtracks: options.max_line_search_backtracks,
             line_search_reduction: options.line_search_reduction,
             tangent_refresh_interval: options.tangent_refresh_interval,
+            solver_mesh: solver_mesh.clone(),
             thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
             electro_thermal_context: to_fea_electro_thermal_context(electro_options),
             plasticity_context: to_fea_plasticity_constitutive_context(plasticity_options),
@@ -8803,7 +8939,7 @@ pub fn analysis_run_nonlinear_with_options_op(
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
         run,
-        render_topology: None,
+        render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: None,
         thermal_results: None,
         transient_results: None,
@@ -8952,9 +9088,11 @@ pub fn analysis_run_linear_static_with_options(
         }
     };
     let solver_mesh = resolve_solver_mesh_artifact(
+        model,
         options.solver_mesh_artifact_path.as_deref(),
         ANALYSIS_RUN_OPERATION,
         ANALYSIS_RUN_OP_VERSION,
+        "RM.FEA.RUN_LINEAR_STATIC.SOLVER_MESH_INVALID",
         &context,
     )?;
     let run = run_linear_static_with_options(
@@ -9612,10 +9750,19 @@ pub fn analysis_run_electromagnetic_with_options_op(
             BTreeMap::new(),
         )
     })?;
+    let solver_mesh = resolve_solver_mesh_artifact(
+        model,
+        options.solver_mesh_artifact_path.as_deref(),
+        ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
+        ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+        "RM.FEA.RUN_ELECTROMAGNETIC.SOLVER_MESH_INVALID",
+        &context,
+    )?;
     let solve_options = ElectromagneticSolveOptions {
         residual_target: options.residual_target,
         harmonic_tolerance: options.harmonic_tolerance,
         harmonic_max_iterations: options.harmonic_max_iterations,
+        solver_mesh: solver_mesh.clone(),
     };
     let mut sweep_runs = Vec::with_capacity(sweep_frequency_hz.len());
     let mut sweep_peak_flux_density = Vec::with_capacity(sweep_frequency_hz.len());
@@ -10203,7 +10350,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
         run,
-        render_topology: None,
+        render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: None,
         thermal_results: None,
         transient_results: None,
@@ -12907,33 +13054,34 @@ fn run_options_to_json<T: Serialize>(options: &T) -> serde_json::Value {
     serde_json::to_value(options).unwrap_or(serde_json::Value::Null)
 }
 
-fn attach_solver_mesh_artifact_to_run_options(
-    options: &mut AnalysisRunOptions,
+fn attach_solver_mesh_artifact_path(
+    artifact_path: &mut Option<String>,
     solver_mesh_artifact_path: Option<&str>,
 ) {
-    if options.solver_mesh_artifact_path.is_none() {
-        options.solver_mesh_artifact_path = solver_mesh_artifact_path.map(str::to_string);
+    if artifact_path.is_none() {
+        *artifact_path = solver_mesh_artifact_path.map(str::to_string);
     }
 }
 
 fn resolve_solver_mesh_artifact(
+    model: &AnalysisModel,
     solver_mesh_artifact_path: Option<&str>,
     operation: &'static str,
     op_version: &'static str,
+    error_code: &'static str,
     context: &OperationContext,
 ) -> Result<Option<SolverMeshArtifact>, OperationErrorEnvelope> {
     let Some(path) = solver_mesh_artifact_path else {
         return Ok(None);
     };
-    solver_mesh_artifact::load_solver_mesh_artifact(std::path::Path::new(path))
-        .map(Some)
+    let mesh = solver_mesh_artifact::load_solver_mesh_artifact(std::path::Path::new(path))
         .map_err(|error| {
             operation_error(
                 operation,
                 op_version,
                 context,
                 OperationErrorSpec {
-                    error_code: "RM.FEA.RUN_LINEAR_STATIC.SOLVER_MESH_INVALID",
+                    error_code,
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -12941,7 +13089,35 @@ fn resolve_solver_mesh_artifact(
                 error.to_string(),
                 BTreeMap::from([("solver_mesh_artifact_path".to_owned(), path.to_owned())]),
             )
-        })
+        })?;
+    let model_revision = u64::from(model.geometry_revision);
+    if mesh.geometry.geometry_revision != model_revision {
+        return Err(operation_error(
+            operation,
+            op_version,
+            context,
+            OperationErrorSpec {
+                error_code,
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "solver mesh geometry revision does not match the analysis model; regenerate the mesh",
+            BTreeMap::from([
+                ("analysis_model_id".to_owned(), model.model_id.0.clone()),
+                (
+                    "model_geometry_revision".to_owned(),
+                    model_revision.to_string(),
+                ),
+                (
+                    "solver_mesh_geometry_revision".to_owned(),
+                    mesh.geometry.geometry_revision.to_string(),
+                ),
+                ("solver_mesh_artifact_path".to_owned(), path.to_owned()),
+            ]),
+        ));
+    }
+    Ok(Some(mesh))
 }
 
 fn study_evidence_root() -> PathBuf {
