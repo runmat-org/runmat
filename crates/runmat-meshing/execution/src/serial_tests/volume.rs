@@ -1,6 +1,94 @@
 use super::*;
 
 #[test]
+fn production_dag_runner_executes_the_complete_serial_exact_pipeline() {
+    let mut fixture = Fixture::with_exact_tetrahedron_curve_partition_order(ElementOrder::Tet10);
+    let exact_root = root(&fixture.program.arguments[0]);
+    let exact = import_exact_geometry_input(
+        &fixture.store,
+        fixture.host.geometry_document.clone().unwrap(),
+        &exact_root,
+        fixture.host.artifact_access.clone(),
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let domain_objects = prepare_domain_model_objects(
+        runmat_meshing_core::MeshingDomainModel {
+            schema_version: MESHING_DOMAIN_MODEL_SCHEMA_VERSION,
+            region_materials: vec![RegionMaterialAssignment {
+                region_id: exact.geometry_objects().topology.regions[0].id.clone(),
+                material_id: "steel".into(),
+            }],
+            contact_ids: Vec::new(),
+        },
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let domain = prepare_domain_model_input(
+        domain_objects,
+        fixture.host.artifact_access.clone(),
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let request = fixture.host.resolved_request.clone();
+    let access = fixture.host.artifact_access.clone();
+    let cohort = fixture.host.stage_identity.capability_cohort.clone();
+    let mut progress = Progress::default();
+    let mut executor = crate::SerialExactMeshingExecutor {
+        store: &mut fixture.store,
+        kernel: &crate::MeshingKernelDispatcher,
+        cancellation: &NeverCancelled,
+        progress: &mut progress,
+        chunk_policy: chunk_policy(1_000_000),
+        inventory_limits: ObjectInventoryLimits::default(),
+    };
+    let result = crate::execute_exact_meshing_dag(
+        crate::ExactMeshingDagRun {
+            geometry: &exact,
+            domain_model: &domain,
+            request,
+            artifact_access: access,
+            capability_cohort: cohort,
+            program_revision: revision(),
+            preferred_edges_per_partition: 3,
+            preferred_faces_per_partition: 32,
+            inventory_limits: ObjectInventoryLimits::default(),
+            evidence: crate::MeshingRunEvidenceContext {
+                platform: runmat_meshing_core::PlatformBuildIdentity {
+                    capability_cohort: "serial-exact-test".into(),
+                    target_triple: "portable-test-host".into(),
+                    build_digest: StableDigest::from_bytes(
+                        *Digest::sha256(b"meshing-test-build").bytes(),
+                    ),
+                    exact_kernel_abi: Some("portable-exact-test".into()),
+                },
+                sizing: Vec::new(),
+                cache_admission: runmat_meshing_core::CacheAdmissionDecision::Admitted,
+            },
+        },
+        &mut executor,
+    )
+    .unwrap();
+
+    result.evidence.validate(&result.artifact).unwrap();
+    assert_eq!(result.artifact.topology.nodes.len(), 10);
+    assert_eq!(result.artifact.topology.volume_elements.len(), 1);
+    assert_eq!(
+        result.artifact.topology.volume_elements[0].material_id,
+        "steel"
+    );
+    assert_eq!(
+        result.evidence.stages.last().unwrap().stage,
+        MeshingStageKind::Serialization
+    );
+    assert!(result
+        .result_objects
+        .iter()
+        .any(|object| object.media_type == crate::STAGE_EVIDENCE_MEDIA_TYPE));
+    assert!(!progress.0.is_empty());
+}
+
+#[test]
 fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
     let fixture = Fixture::with_exact_tetrahedron_curve_partition_order(ElementOrder::Tet10);
     let (mut fixture, surface_host, exact_root, curve_stage, surface_partition, surface_stage) =

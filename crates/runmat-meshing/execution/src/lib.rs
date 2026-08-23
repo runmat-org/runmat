@@ -15,6 +15,7 @@ mod error;
 mod evidence;
 mod evidence_objects;
 mod exact_dag;
+mod exact_dag_run;
 mod faceted_geometry_objects;
 mod geometry_control;
 mod geometry_objects;
@@ -72,6 +73,11 @@ pub use evidence_objects::{
 };
 pub use exact_dag::{
     ExactCurvePassPlan, ExactMeshingDagPlanner, ExactSurfacePassPlan, PlannedMeshingStage,
+};
+pub use exact_dag_run::{
+    execute_exact_meshing_dag, ExactMeshingDagExecutor, ExactMeshingDagRun,
+    ExactMeshingDagRunError, ExactMeshingDagRunResult, MeshingRunEvidenceContext,
+    MeshingStageExecutionError, SerialExactMeshingExecutor,
 };
 pub use faceted_geometry_objects::{
     import_faceted_geometry_input, import_faceted_geometry_objects, prepare_faceted_geometry_input,
