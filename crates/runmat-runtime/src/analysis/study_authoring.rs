@@ -84,7 +84,6 @@ pub fn analysis_author_study_op(
     let create_model_intent = AnalysisCreateModelIntentSpec {
         model_id: model_id.clone(),
         profile: intent.profile,
-        prep_context: None,
     };
     let mut model = analysis_create_model_op(
         &intent.geometry,

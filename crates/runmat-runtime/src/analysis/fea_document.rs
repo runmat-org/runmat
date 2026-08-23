@@ -481,7 +481,6 @@ async fn resolve_study(
     let intent = AnalysisCreateModelIntentSpec {
         model_id: model_id.clone(),
         profile: study.model.profile,
-        prep_context: None,
     };
     let model = resolve_model(&study, &geometry, &intent)?;
     let run_kind = resolve_run_kind(study.model.profile, &study.run)?;
