@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use super::{validate_token, MeshingContractError};
 
 pub const MESHING_DOMAIN_MODEL_SCHEMA_VERSION: u16 = 1;
+pub const MESHING_DOMAIN_MODEL_MEDIA_TYPE: &str = "application/vnd.runmat.meshing-domain-model.v1";
 // The canonical REQUEST codec admits at most 100,000 aggregate collection items. Keep the two
 // top-level inventories below that ceiling so nested persistent identities remain bounded too.
 const MAX_REGION_MATERIALS: usize = 65_536;

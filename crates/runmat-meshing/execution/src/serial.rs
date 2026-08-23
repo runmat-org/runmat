@@ -1,6 +1,7 @@
 use crate::{
-    import_exact_geometry_input, import_faceted_geometry_input, import_result_publication,
-    prepare_result_publication, prepare_stage_objects, MeshingExecutionError, MeshingHostWorkload,
+    import_domain_model_input, import_exact_geometry_input, import_faceted_geometry_input,
+    import_result_publication, prepare_result_publication, prepare_stage_objects,
+    MeshingExecutionError, MeshingHostWorkload, PreparedDomainModelInput,
     PreparedExactGeometryInput, PreparedFacetedGeometryInput, PreparedMeshingResultPublication,
 };
 use runmat_execution::value::ValuePayload;
@@ -19,6 +20,7 @@ use runmat_meshing_core::{
 pub enum PreparedMeshingInput {
     ExactGeometry(Box<PreparedExactGeometryInput>),
     FacetedGeometry(Box<PreparedFacetedGeometryInput>),
+    DomainModel(Box<PreparedDomainModelInput>),
     StageArtifact(Box<PreparedMeshingResultPublication>),
 }
 
@@ -26,20 +28,27 @@ impl PreparedMeshingInput {
     pub const fn exact_geometry(&self) -> Option<&PreparedExactGeometryInput> {
         match self {
             Self::ExactGeometry(input) => Some(input),
-            Self::FacetedGeometry(_) | Self::StageArtifact(_) => None,
+            Self::FacetedGeometry(_) | Self::DomainModel(_) | Self::StageArtifact(_) => None,
         }
     }
 
     pub const fn faceted_geometry(&self) -> Option<&PreparedFacetedGeometryInput> {
         match self {
             Self::FacetedGeometry(input) => Some(input),
-            Self::ExactGeometry(_) | Self::StageArtifact(_) => None,
+            Self::ExactGeometry(_) | Self::DomainModel(_) | Self::StageArtifact(_) => None,
+        }
+    }
+
+    pub const fn domain_model(&self) -> Option<&PreparedDomainModelInput> {
+        match self {
+            Self::DomainModel(input) => Some(input),
+            Self::ExactGeometry(_) | Self::FacetedGeometry(_) | Self::StageArtifact(_) => None,
         }
     }
 
     pub const fn stage_artifact(&self) -> Option<&PreparedMeshingResultPublication> {
         match self {
-            Self::ExactGeometry(_) | Self::FacetedGeometry(_) => None,
+            Self::ExactGeometry(_) | Self::FacetedGeometry(_) | Self::DomainModel(_) => None,
             Self::StageArtifact(input) => Some(input),
         }
     }
@@ -48,6 +57,7 @@ impl PreparedMeshingInput {
         match self {
             Self::ExactGeometry(input) => &input.geometry_objects().objects,
             Self::FacetedGeometry(input) => &input.geometry_objects().objects,
+            Self::DomainModel(input) => &input.domain_model_objects().objects,
             Self::StageArtifact(input) => &input.stage_objects().objects,
         }
     }
@@ -172,6 +182,11 @@ where
             )
             .map(Box::new)
             .map(PreparedMeshingInput::FacetedGeometry),
+            MeshingInputKind::DomainModel => {
+                import_domain_model_input(store, root, host.artifact_access.clone(), limits)
+                    .map(Box::new)
+                    .map(PreparedMeshingInput::DomainModel)
+            }
             MeshingInputKind::StageArtifact => {
                 import_result_publication(store, root, host.artifact_access.clone(), limits)
                     .map(Box::new)

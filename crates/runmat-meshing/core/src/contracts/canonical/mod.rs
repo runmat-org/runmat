@@ -40,7 +40,8 @@ pub use chunk::{
 };
 pub use codec::{CanonicalMeshingContract, MeshingCanonicalLimits};
 pub use domain_model::{
-    MeshingDomainModel, RegionMaterialAssignment, MESHING_DOMAIN_MODEL_SCHEMA_VERSION,
+    MeshingDomainModel, RegionMaterialAssignment, MESHING_DOMAIN_MODEL_MEDIA_TYPE,
+    MESHING_DOMAIN_MODEL_SCHEMA_VERSION,
 };
 pub use error::MeshingContractError;
 pub use evidence::{

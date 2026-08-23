@@ -200,7 +200,9 @@ fn inputs(
                 curves = Some(input.as_ref());
             }
             PreparedMeshingInput::StageArtifact(input) => partitions.push(input.as_ref()),
-            PreparedMeshingInput::ExactGeometry(_) | PreparedMeshingInput::FacetedGeometry(_) => {
+            PreparedMeshingInput::ExactGeometry(_)
+            | PreparedMeshingInput::FacetedGeometry(_)
+            | PreparedMeshingInput::DomainModel(_) => {
                 return Err(invalid_input("surface join input kinds are invalid"));
             }
         }
