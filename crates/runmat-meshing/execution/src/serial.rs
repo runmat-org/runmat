@@ -1,8 +1,8 @@
 use crate::{
-    import_domain_model_input, import_exact_geometry_input, import_faceted_geometry_input,
-    import_result_publication, prepare_result_publication, prepare_stage_objects,
-    MeshingExecutionError, MeshingHostWorkload, PreparedDomainModelInput,
-    PreparedExactGeometryInput, PreparedFacetedGeometryInput, PreparedMeshingResultPublication,
+    import_domain_model_input, import_evidence_input, import_exact_geometry_input,
+    import_faceted_geometry_input, import_result_publication, prepare_result_publication,
+    prepare_stage_objects, MeshingExecutionError, MeshingHostWorkload,
+    PreparedMeshingResultPublication,
 };
 use runmat_execution::value::ValuePayload;
 use runmat_execution_artifact::cache::{CacheExport, CacheImport};
@@ -16,52 +16,9 @@ use runmat_meshing_core::{
     MeshingWorkloadResult, StableDigest, MESHING_IDENTITY_SCHEMA_VERSION,
 };
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum PreparedMeshingInput {
-    ExactGeometry(Box<PreparedExactGeometryInput>),
-    FacetedGeometry(Box<PreparedFacetedGeometryInput>),
-    DomainModel(Box<PreparedDomainModelInput>),
-    StageArtifact(Box<PreparedMeshingResultPublication>),
-}
+mod input;
 
-impl PreparedMeshingInput {
-    pub const fn exact_geometry(&self) -> Option<&PreparedExactGeometryInput> {
-        match self {
-            Self::ExactGeometry(input) => Some(input),
-            Self::FacetedGeometry(_) | Self::DomainModel(_) | Self::StageArtifact(_) => None,
-        }
-    }
-
-    pub const fn faceted_geometry(&self) -> Option<&PreparedFacetedGeometryInput> {
-        match self {
-            Self::FacetedGeometry(input) => Some(input),
-            Self::ExactGeometry(_) | Self::DomainModel(_) | Self::StageArtifact(_) => None,
-        }
-    }
-
-    pub const fn domain_model(&self) -> Option<&PreparedDomainModelInput> {
-        match self {
-            Self::DomainModel(input) => Some(input),
-            Self::ExactGeometry(_) | Self::FacetedGeometry(_) | Self::StageArtifact(_) => None,
-        }
-    }
-
-    pub const fn stage_artifact(&self) -> Option<&PreparedMeshingResultPublication> {
-        match self {
-            Self::ExactGeometry(_) | Self::FacetedGeometry(_) | Self::DomainModel(_) => None,
-            Self::StageArtifact(input) => Some(input),
-        }
-    }
-
-    fn objects(&self) -> &[runmat_execution_artifact::LogicalObject] {
-        match self {
-            Self::ExactGeometry(input) => &input.geometry_objects().objects,
-            Self::FacetedGeometry(input) => &input.geometry_objects().objects,
-            Self::DomainModel(input) => &input.domain_model_objects().objects,
-            Self::StageArtifact(input) => &input.stage_objects().objects,
-        }
-    }
-}
+pub use input::PreparedMeshingInput;
 
 use super::budget::{failure, MeshingProgressSink, MeshingStageCheckpoint, MeshingStageControl};
 
@@ -191,6 +148,11 @@ where
                 import_domain_model_input(store, root, host.artifact_access.clone(), limits)
                     .map(Box::new)
                     .map(PreparedMeshingInput::DomainModel)
+            }
+            MeshingInputKind::Evidence => {
+                import_evidence_input(store, root, host.artifact_access.clone(), limits)
+                    .map(Box::new)
+                    .map(PreparedMeshingInput::Evidence)
             }
             MeshingInputKind::StageArtifact => {
                 import_result_publication(store, root, host.artifact_access.clone(), limits)

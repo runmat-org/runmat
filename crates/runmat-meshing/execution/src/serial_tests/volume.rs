@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
     let fixture = Fixture::with_exact_tetrahedron_curve_partition_order(ElementOrder::Tet10);
-    let (mut fixture, surface_host, exact_root, _, _, surface_stage) =
+    let (mut fixture, surface_host, exact_root, curve_stage, surface_partition, surface_stage) =
         super::surface_restart::execute_surface_join_pipeline_from_fixture(
             &ExactSurfacePartitionKernel::default(),
             fixture,
@@ -202,4 +202,128 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
         validation_root.logical_digest.bytes()
     );
     assert_eq!(artifact.topology, solver_projection.topology);
+
+    let stage_evidence = vec![
+        curve_stage.stage_evidence().clone(),
+        surface_partition.stage_evidence().clone(),
+        surface_stage.stage_evidence().clone(),
+        completed.stage_evidence().clone(),
+        projection.stage_evidence().clone(),
+        validation.stage_evidence().clone(),
+        serialized.stage_evidence().clone(),
+    ];
+    let serial_wall_time_ms = stage_evidence
+        .iter()
+        .map(|stage| stage.elapsed_time_ms)
+        .sum();
+    let evidence = crate::assemble_meshing_evidence(
+        &artifact,
+        stage_evidence,
+        crate::MeshingEvidenceContext {
+            platform: runmat_meshing_core::PlatformBuildIdentity {
+                capability_cohort: "serial-exact-test".into(),
+                target_triple: "portable-test-host".into(),
+                build_digest: StableDigest::from_bytes(
+                    *Digest::sha256(b"meshing-test-build").bytes(),
+                ),
+                exact_kernel_abi: Some("portable-exact-test".into()),
+            },
+            sizing: Vec::new(),
+            cache_admission: runmat_meshing_core::CacheAdmissionDecision::Admitted,
+            wall_time_ms: serial_wall_time_ms,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        evidence.stages.last().unwrap().stage_result_digest.bytes(),
+        root(serialized.publication().root_output())
+            .logical_digest
+            .bytes()
+    );
+    let mut mismatched_evidence = evidence.clone();
+    mismatched_evidence
+        .stages
+        .last_mut()
+        .unwrap()
+        .stage_result_digest = StableDigest::from_bytes([91; 32]);
+    let mismatched_objects =
+        crate::prepare_evidence_objects(mismatched_evidence, ObjectInventoryLimits::default())
+            .unwrap();
+    let mismatched_input = crate::prepare_evidence_input(
+        mismatched_objects,
+        host.artifact_access.clone(),
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    for object in &mismatched_input.evidence_objects().objects {
+        fixture.store.write_verified(object).unwrap();
+    }
+    let serialization_root = root(serialized.publication().root_output());
+    let mismatched_publication = planner
+        .solver_publication(
+            serialization_root.clone(),
+            mismatched_input.root_input().clone(),
+        )
+        .unwrap();
+    assert!(execute_serial_stage(
+        &mismatched_publication.program_request(revision()).unwrap(),
+        &mut fixture.store,
+        &crate::MeshingKernelDispatcher,
+        &NeverCancelled,
+        &mut Progress::default(),
+        chunk_policy(1_000_000),
+        ObjectInventoryLimits::default(),
+    )
+    .is_err());
+
+    let evidence_objects =
+        crate::prepare_evidence_objects(evidence, ObjectInventoryLimits::default()).unwrap();
+    let evidence_input = crate::prepare_evidence_input(
+        evidence_objects,
+        host.artifact_access.clone(),
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    for object in &evidence_input.evidence_objects().objects {
+        fixture.store.write_verified(object).unwrap();
+    }
+    let publication_stage = planner
+        .solver_publication(serialization_root, evidence_input.root_input().clone())
+        .unwrap();
+    assert_eq!(
+        publication_stage.host().workload.stage,
+        MeshingStageKind::Publication
+    );
+    let published = execute_serial_stage(
+        &publication_stage.program_request(revision()).unwrap(),
+        &mut fixture.store,
+        &crate::MeshingKernelDispatcher,
+        &NeverCancelled,
+        &mut Progress::default(),
+        chunk_policy(1_000_000),
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let final_streams = published
+        .publication()
+        .stage_objects()
+        .decoded_streams()
+        .unwrap();
+    assert_eq!(final_streams.len(), 2);
+    assert_eq!(
+        final_streams[0].media_type,
+        MeshingChunkMediaType::AnalysisMeshArtifact
+    );
+    assert_eq!(
+        final_streams[1].media_type,
+        MeshingChunkMediaType::MeshingEvidence
+    );
+    let final_artifact =
+        runmat_meshing_core::SolverMeshArtifact::canonical_decode(&final_streams[0].records[0])
+            .unwrap();
+    let final_evidence =
+        runmat_meshing_core::MeshingEvidence::canonical_decode(&final_streams[1].records[0])
+            .unwrap();
+    final_evidence.validate(&final_artifact).unwrap();
+    assert_eq!(final_artifact, artifact);
 }

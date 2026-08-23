@@ -20,6 +20,7 @@ use crate::task::{validate_input, validate_inputs};
 use crate::{MeshingExecutionError, MeshingExecutionResult, MeshingHostWorkload};
 
 mod stage;
+mod terminal;
 
 use stage::{capabilities_for_stage, validate_seed_capabilities, whole_partition};
 
@@ -282,65 +283,6 @@ impl ExactMeshingDagPlanner {
             MeshingStageKind::Tetrahedralization,
             whole_partition(MeshingPartitionKind::WholeStage),
             vec![self.geometry_root.clone(), surface_root],
-        )
-    }
-
-    /// Plans the canonical Tet4/Tet10 solver projection from independently admitted terminal
-    /// geometry, surface, volume, and domain-model roots.
-    pub fn solver_projection(
-        &self,
-        surface_root: ValueRef,
-        volume_root: ValueRef,
-        domain_model_root: ValueRef,
-    ) -> MeshingExecutionResult<PlannedMeshingStage> {
-        if surface_root.logical_digest == volume_root.logical_digest
-            || [surface_root.logical_digest, volume_root.logical_digest]
-                .contains(&domain_model_root.logical_digest)
-        {
-            return Err(invalid(
-                "solver projection requires distinct surface, volume, and domain-model roots",
-            ));
-        }
-        self.build_stage_with_dependencies(
-            MeshingStageKind::OrderElevation,
-            whole_partition(MeshingPartitionKind::WholeStage),
-            vec![
-                (MeshingInputKind::ExactGeometry, self.geometry_root.clone()),
-                (MeshingInputKind::StageArtifact, surface_root),
-                (MeshingInputKind::StageArtifact, volume_root),
-                (MeshingInputKind::DomainModel, domain_model_root),
-            ],
-        )
-    }
-
-    pub fn solver_validation(
-        &self,
-        projection_root: ValueRef,
-    ) -> MeshingExecutionResult<PlannedMeshingStage> {
-        self.build_stage_with_dependencies(
-            MeshingStageKind::Validation,
-            whole_partition(MeshingPartitionKind::WholeStage),
-            vec![(MeshingInputKind::StageArtifact, projection_root)],
-        )
-    }
-
-    pub fn solver_serialization(
-        &self,
-        projection_root: ValueRef,
-        validation_root: ValueRef,
-    ) -> MeshingExecutionResult<PlannedMeshingStage> {
-        if projection_root.logical_digest == validation_root.logical_digest {
-            return Err(invalid(
-                "solver serialization requires distinct projection and validation roots",
-            ));
-        }
-        self.build_stage_with_dependencies(
-            MeshingStageKind::Serialization,
-            whole_partition(MeshingPartitionKind::WholeStage),
-            vec![
-                (MeshingInputKind::StageArtifact, projection_root),
-                (MeshingInputKind::StageArtifact, validation_root),
-            ],
         )
     }
 

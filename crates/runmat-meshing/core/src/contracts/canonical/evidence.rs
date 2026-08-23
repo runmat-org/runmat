@@ -283,10 +283,11 @@ impl MeshingEvidence {
         }
         if self.resources.generated_nodes != artifact.topology.nodes.len() as u64
             || self.resources.generated_elements != artifact.topology.volume_elements.len() as u64
+            || self.resources.artifact_bytes != artifact.canonical_encode()?.len() as u64
         {
             return Err(MeshingContractError::invalid(
                 "meshing resource usage",
-                "generated entity counts must match the validated artifact",
+                "generated entity counts and canonical bytes must match the validated artifact",
             ));
         }
         self.resources
@@ -344,11 +345,56 @@ impl MeshingEvidence {
                 ));
             }
         }
+        let expected_peak_memory = self
+            .stages
+            .iter()
+            .map(|stage| stage.peak_memory_bytes)
+            .max()
+            .unwrap_or(0);
+        let expected_peak_scratch = self
+            .stages
+            .iter()
+            .map(|stage| stage.peak_scratch_bytes)
+            .max()
+            .unwrap_or(0);
+        let expected_recursion = self
+            .stages
+            .iter()
+            .map(|stage| stage.maximum_recursion_depth)
+            .max()
+            .unwrap_or(0);
+        let expected_search_work = checked_stage_sum(&self.stages, |stage| stage.search_work)?;
+        let expected_iterations = checked_stage_sum(&self.stages, |stage| stage.iterations)?;
+        if self.resources.peak_memory_bytes != expected_peak_memory
+            || self.resources.peak_scratch_bytes != expected_peak_scratch
+            || self.resources.search_work != expected_search_work
+            || self.resources.maximum_recursion_depth != expected_recursion
+            || self.resources.iterations != expected_iterations
+        {
+            return Err(MeshingContractError::invalid(
+                "meshing resource usage",
+                "aggregate stage resources must equal their factual maxima and checked totals",
+            ));
+        }
         for sizing in &self.sizing {
             sizing.validate()?;
         }
         Ok(())
     }
+}
+
+fn checked_stage_sum(
+    stages: &[MeshingStageEvidence],
+    value: impl Fn(&MeshingStageEvidence) -> u64,
+) -> Result<u64, MeshingContractError> {
+    stages.iter().try_fold(0_u64, |total, stage| {
+        total.checked_add(value(stage)).ok_or_else(|| {
+            MeshingContractError::invalid(
+                "meshing resource usage",
+                "aggregate stage resource counter overflowed",
+            )
+        })
+    })
 }
 
 fn validate_map_keys<T>(

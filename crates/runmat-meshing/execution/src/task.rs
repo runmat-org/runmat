@@ -191,6 +191,12 @@ pub(crate) fn validate_input(
                 && root.media_type == MESHING_DOMAIN_MODEL_MEDIA_TYPE
                 && root.value_schema == DOMAIN_MODEL_VALUE_SCHEMA
         }
+        MeshingInputKind::Evidence => {
+            root.kind == ValueRefKind::DriverObject
+                && root.media_type
+                    == runmat_meshing_core::MeshingChunkMediaType::MeshingEvidence.media_type()
+                && root.value_schema == crate::evidence_objects::EVIDENCE_VALUE_SCHEMA
+        }
     };
     if root.logical_digest.bytes() != input.digest.bytes()
         || root.id != access.value_id(root.logical_digest)

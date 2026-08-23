@@ -263,10 +263,10 @@ pub(super) fn evidence(artifact: &SolverMeshArtifact) -> MeshingEvidence {
             peak_memory_bytes: 100,
             peak_scratch_bytes: 10,
             wall_time_ms: 14,
-            artifact_bytes: 1_000,
-            search_work: 30,
-            maximum_recursion_depth: 2,
-            iterations: 8,
+            artifact_bytes: artifact.canonical_encode().unwrap().len() as u64,
+            search_work: 13,
+            maximum_recursion_depth: 1,
+            iterations: 13,
         },
         cache_admission: CacheAdmissionDecision::Admitted,
     }
@@ -629,6 +629,13 @@ fn successful_evidence_requires_terminal_order_and_respects_hard_budgets() {
     );
 
     let mut invalid = evidence(&artifact);
+    invalid.resources.search_work += 1;
+    assert_eq!(
+        invalid.validate(&artifact).unwrap_err().field,
+        "meshing resource usage"
+    );
+
+    let mut invalid = evidence(&artifact);
     invalid.artifact_digest = digest(99);
     assert_eq!(
         invalid.validate(&artifact).unwrap_err().field,
@@ -651,6 +658,8 @@ fn successful_evidence_admits_canonically_ordered_partition_observations() {
     second_partition.partition.partition_index = 1;
     second_partition.stage_result_digest = digest(98);
     evidence.stages.insert(1, second_partition);
+    evidence.resources.search_work += 1;
+    evidence.resources.iterations += 1;
     evidence.validate(&artifact).unwrap();
 
     evidence.stages.swap(0, 1);

@@ -12,6 +12,8 @@ mod diagnostic;
 mod dispatcher;
 mod domain_model_objects;
 mod error;
+mod evidence;
+mod evidence_objects;
 mod exact_dag;
 mod faceted_geometry_objects;
 mod geometry_control;
@@ -62,6 +64,11 @@ pub use domain_model_objects::{
     PreparedDomainModelObjects,
 };
 pub use error::{MeshingExecutionError, MeshingExecutionResult};
+pub use evidence::{assemble_meshing_evidence, MeshingEvidenceContext};
+pub use evidence_objects::{
+    import_evidence_input, import_evidence_objects, prepare_evidence_input,
+    prepare_evidence_objects, EvidenceObjectRoot, PreparedEvidenceInput, PreparedEvidenceObjects,
+};
 pub use exact_dag::{
     ExactCurvePassPlan, ExactMeshingDagPlanner, ExactSurfacePassPlan, PlannedMeshingStage,
 };
@@ -97,7 +104,9 @@ pub use serial::{
 pub use solver_projection_kernel::{
     ExactSolverEvaluatorProvider, ExactSolverProjectionKernel, PortableSolverEvaluatorProvider,
 };
-pub use solver_terminal_kernel::{SolverSerializationKernel, SolverValidationKernel};
+pub use solver_terminal_kernel::{
+    SolverPublicationKernel, SolverSerializationKernel, SolverValidationKernel,
+};
 pub use surface_join_kernel::ExactSurfaceJoinKernel;
 pub use surface_kernel::ExactSurfacePartitionKernel;
 pub use task::{
