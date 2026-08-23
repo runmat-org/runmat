@@ -70,8 +70,8 @@ impl LocalSupervisor {
         }))
     }
 
-    pub fn object_store(&self) -> NativeExecutionResult<crate::NativeObjectStore> {
-        crate::NativeObjectStore::open(
+    pub fn object_store(&self) -> NativeExecutionResult<crate::FilesystemObjectStore> {
+        crate::FilesystemObjectStore::open(
             self.config.paths.root.join("objects"),
             self.config.max_object_bytes,
         )

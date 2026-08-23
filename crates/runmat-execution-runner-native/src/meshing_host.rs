@@ -16,7 +16,7 @@ use runmat_meshing_execution::{
 use runmat_process_host::ipc::{read_payload, write_payload, FrameLimits};
 
 use crate::protocol::{ProgramProgress, WorkerProcessMessage, NATIVE_WORKER_MESSAGE_SCHEMA_V1};
-use crate::{NativeExecutionError, NativeExecutionResult, NativeObjectStore};
+use crate::{FilesystemObjectStore, NativeExecutionError, NativeExecutionResult};
 
 const MESHING_PROGRESS_MEDIA_TYPE: &str = "application/vnd.runmat.meshing-progress+cbor";
 const MESHING_PROGRESS_VALUE_SCHEMA: &str = "runmat.meshing.progress.v2";
@@ -117,7 +117,7 @@ pub async fn run_meshing_worker_stdio(
     let payload = read_payload(&mut reader, frame_limits).await?;
     let request: ProgramExecutionRequest = serde_json::from_slice(&payload)
         .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-    let store = NativeObjectStore::open(object_store_root, limits.inventory.max_object_bytes)
+    let store = FilesystemObjectStore::open(object_store_root, limits.inventory.max_object_bytes)
         .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
     let (progress_sender, mut progress_receiver) =
         tokio::sync::mpsc::channel(PROGRESS_CHANNEL_CAPACITY);

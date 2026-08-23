@@ -69,14 +69,15 @@ pub async fn execute_program_batch(submission: ProgramBatchSubmission) -> Worker
         };
     };
     let limits = crate::NativeMeshingHostLimits::default();
-    let mut store = match crate::NativeObjectStore::open(root, limits.inventory.max_object_bytes) {
-        Ok(store) => store,
-        Err(error) => {
-            return WorkerResponse::Failure {
-                message: error.to_string(),
+    let mut store =
+        match crate::FilesystemObjectStore::open(root, limits.inventory.max_object_bytes) {
+            Ok(store) => store,
+            Err(error) => {
+                return WorkerResponse::Failure {
+                    message: error.to_string(),
+                }
             }
-        }
-    };
+        };
     crate::execute_meshing_program_request(
         &request,
         &mut store,

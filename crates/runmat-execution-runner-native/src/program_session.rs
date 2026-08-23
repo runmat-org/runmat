@@ -10,7 +10,7 @@ use runmat_execution_runner::{AttemptSuccess, TaskSubmission};
 use crate::config::fresh_scope_id;
 use crate::driver::{LocalDriver, TaskCompletion};
 use crate::{
-    NativeExecutionConfig, NativeExecutionError, NativeExecutionResult, NativeObjectStore,
+    FilesystemObjectStore, NativeExecutionConfig, NativeExecutionError, NativeExecutionResult,
     ProgramProgress,
 };
 
@@ -38,7 +38,7 @@ impl NativeProgramSession {
         self.driver.pool_id()
     }
 
-    pub fn object_store(&self) -> NativeObjectStore {
+    pub fn object_store(&self) -> FilesystemObjectStore {
         self.driver.object_store()
     }
 

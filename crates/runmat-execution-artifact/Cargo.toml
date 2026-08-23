@@ -22,6 +22,7 @@ zeroize = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 hpke = { workspace = true, features = ["getrandom"] }
+tempfile = "3.12"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
@@ -29,5 +30,4 @@ hpke = { workspace = true }
 
 [dev-dependencies]
 hex = "0.4"
-tempfile = "3.12"
 runmat-types = { workspace = true }
