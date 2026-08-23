@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use runmat_analysis_core::{EvidenceConfidence, LoadKind, MaterialAssignment};
-use runmat_meshing_core::VolumeMeshingOptions;
+use runmat_meshing_core::MeshingRequestSettings;
 
 use crate::operations::{
     operation_error, OperationContext, OperationEnvelope, OperationErrorEnvelope,
@@ -192,7 +192,7 @@ pub fn analysis_author_study_op(
         model: Some(model),
         run_kind: intent.run_kind,
         backend: intent.backend,
-        mesh_options: Some(VolumeMeshingOptions::default()),
+        meshing_settings: Some(MeshingRequestSettings::default()),
         outputs: Vec::new(),
         solver_mesh_artifact_path: intent.solver_mesh_artifact_path.clone(),
         meshing_evidence_artifact_path: intent.meshing_evidence_artifact_path.clone(),

@@ -3,7 +3,7 @@ use runmat_analysis_fea::diagnostics::FeaDiagnostic;
 use runmat_analysis_fea::{ComputeBackend, FeaProgressEvent, FeaRunResult};
 use runmat_geometry_core::GeometryAsset;
 use runmat_meshing::RegionMeshMapping;
-use runmat_meshing_core::VolumeMeshingOptions;
+use runmat_meshing_core::MeshingRequestSettings;
 use runmat_meshing_evidence::{MeshAuthoringNestedTetrahedronShellSummary, MeshAuthoringSummary};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -2342,7 +2342,7 @@ pub struct AnalysisStudySpec {
     pub run_kind: AnalysisRunKind,
     pub backend: ComputeBackend,
     #[serde(default)]
-    pub mesh_options: Option<VolumeMeshingOptions>,
+    pub meshing_settings: Option<MeshingRequestSettings>,
     #[serde(default)]
     pub outputs: Vec<AnalysisOutputRequest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
