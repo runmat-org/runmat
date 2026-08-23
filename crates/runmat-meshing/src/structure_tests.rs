@@ -77,7 +77,7 @@ fn meshing_crate_layout_keeps_stage_implementations_out_of_core() {
         );
     }
 
-    for root_orchestration_path in [
+    for removed_legacy_path in [
         "src/solid/mod.rs",
         "src/solid/artifact/mod.rs",
         "src/solid/artifact/backend_counts.rs",
@@ -87,10 +87,13 @@ fn meshing_crate_layout_keeps_stage_implementations_out_of_core() {
         "src/solid/artifact/backend_recovery.rs",
         "src/solid/artifact/backend_summary.rs",
         "src/solid/tetrahedron_stage.rs",
+        "tetrahedron/src/generate/mod.rs",
+        "tetrahedron/src/recover/mod.rs",
+        "tetrahedron/src/optimize/mod.rs",
     ] {
         assert!(
-            crate_root.join(root_orchestration_path).is_file(),
-            "missing focused root orchestration module: {root_orchestration_path}"
+            !crate_root.join(removed_legacy_path).exists(),
+            "retired meshing pipeline still exists: {removed_legacy_path}"
         );
     }
 
