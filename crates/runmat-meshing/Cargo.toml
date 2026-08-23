@@ -11,11 +11,4 @@ repository = "https://github.com/runmat-org/runmat"
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 runmat-geometry-core = { workspace = true }
-runmat-meshing-cad = { workspace = true }
 runmat-meshing-core = { workspace = true }
-runmat-meshing-curve = { workspace = true }
-runmat-meshing-opt = { workspace = true }
-runmat-meshing-plc = { workspace = true }
-runmat-meshing-size = { workspace = true }
-runmat-meshing-surface = { workspace = true }
-runmat-meshing-tetrahedron = { workspace = true }

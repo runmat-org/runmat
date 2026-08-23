@@ -39,7 +39,6 @@ fn collect_active_source_files(root: &Path, files: &mut Vec<std::path::PathBuf>)
 fn meshing_crate_layout_keeps_stage_implementations_out_of_core() {
     let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
     for stage_crate in [
-        "cad",
         "size",
         "curve",
         "surface",
@@ -71,7 +70,6 @@ fn meshing_crate_layout_keeps_stage_implementations_out_of_core() {
     let core_manifest = read_source(&crate_root.join("core").join("Cargo.toml"));
     let core_lib = read_source(&crate_root.join("core").join("src").join("lib.rs"));
     for implementation_crate in [
-        "runmat-meshing-cad",
         "runmat-meshing-curve",
         "runmat-meshing-surface",
         "runmat-meshing-plc",
@@ -91,7 +89,6 @@ fn meshing_crate_layout_keeps_stage_implementations_out_of_core() {
         "evidence depends on implementation crate instead of core contract exports: {implementation_crate}"
     );
     for facade_export in [
-        "pub use runmat_meshing_cad as cad",
         "pub use runmat_meshing_size as size",
         "pub mod source_topology",
         "pub use cad::",
@@ -105,6 +102,15 @@ fn meshing_crate_layout_keeps_stage_implementations_out_of_core() {
     }
 
     for removed_legacy_path in [
+        "cad/Cargo.toml",
+        "cad/src/lib.rs",
+        "curve/src/contract.rs",
+        "curve/src/discretize/mod.rs",
+        "curve/src/validate/mod.rs",
+        "surface/src/contract.rs",
+        "surface/src/param_tri/mod.rs",
+        "surface/src/recovery/mod.rs",
+        "surface/src/validate/mod.rs",
         "src/solid/mod.rs",
         "src/solid/artifact/mod.rs",
         "src/solid/artifact/backend_counts.rs",
@@ -130,6 +136,40 @@ fn meshing_crate_layout_keeps_stage_implementations_out_of_core() {
             "stage contract adapter still lives in root orchestration: {stale_root_adapter}"
         );
     }
+}
+
+#[test]
+fn tessellation_derived_cad_authority_is_absent() {
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("meshing crate should be nested beneath the workspace root");
+    let mut files = Vec::new();
+    collect_active_source_files(&workspace_root.join("crates"), &mut files);
+
+    let retired_fragments = [
+        ["extract", "_source_topology"].concat(),
+        ["build", "_cad_topology"].concat(),
+        ["triangulate", "_face_points"].concat(),
+        ["discretize", "_cad_topology_curves"].concat(),
+        ["discretize", "_cad_topology_surfaces"].concat(),
+        ["runmat", "_meshing_cad"].concat(),
+    ];
+
+    let mut violations = Vec::new();
+    for path in files {
+        let source = read_source(&path);
+        for retired in &retired_fragments {
+            if source.contains(retired) {
+                violations.push(format!("{} contains {retired}", path.display()));
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "tessellation-derived CAD authority remains:\n{}",
+        violations.join("\n")
+    );
 }
 
 #[test]

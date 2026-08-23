@@ -2,20 +2,7 @@
 
 pub const CRATE_PURPOSE: &str = "CAD edge discretization and curve mesh validation";
 
-pub mod contract;
-pub mod discretize;
 mod shared;
-pub mod validate;
-
-pub use contract::build_curve_mesh_contract;
-pub use discretize::{
-    discretize_cad_topology_curves_with_sizing,
-    discretize_cad_topology_curves_with_sizing_and_provider, discretize_topology_curves,
-    discretize_topology_curves_with_sizing, CadCurveDiscretization, CadCurveEdgeProvenance,
-    CadCurveEvaluationRequest, CadCurveEvaluatorProvider, CurveDiscretization,
-    CurveDiscretizationError, CurveDiscretizationOptions, CurveElement, CurveNode,
-    NoopCadCurveEvaluatorProvider,
-};
 pub use shared::{
     apply_shared_curve_splits, canonicalize_shared_curve_splits, curve_partition_descriptors,
     decode_shared_curve_batch, decode_shared_curve_mesh, derive_curve_geometry_metric,
@@ -28,8 +15,4 @@ pub use shared::{
     SharedCurveEvaluationContext, SharedCurveFaceUse, SharedCurveGeometryValidationReport,
     SharedCurveMesh, SharedCurveNode, SharedCurveSegmentSplit, UniformCurveMetric,
     SHARED_CURVE_BATCH_SCHEMA_VERSION, SHARED_CURVE_MESH_SCHEMA_VERSION,
-};
-pub use validate::{
-    validate_curve_discretization, CurveValidationError, CurveValidationOptions,
-    CurveValidationReport,
 };
