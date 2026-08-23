@@ -68,8 +68,9 @@ pub use segment_recovery::{
     DelaunaySegmentRecoveryErrorKind, DelaunaySegmentRecoveryOptions,
 };
 pub use solver_topology::{
-    build_delaunay_solver_topology, DelaunaySolverTopologyError, DelaunaySolverTopologyErrorKind,
-    DelaunaySolverTopologyInput, DelaunaySolverTopologyOptions,
+    build_delaunay_solver_topology, DelaunayExactEvaluation, DelaunayExactEvaluator,
+    DelaunaySolverTopologyError, DelaunaySolverTopologyErrorKind, DelaunaySolverTopologyInput,
+    DelaunaySolverTopologyOptions,
 };
 pub use topology::{
     build_delaunay_volume_topology, DelaunayTopologyError, DelaunayTopologyErrorKind,

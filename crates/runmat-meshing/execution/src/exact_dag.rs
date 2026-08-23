@@ -9,16 +9,19 @@ use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::ProgramExecutionRequest;
 use runmat_geometry_core::ExactBRepTopology;
 use runmat_meshing_core::{
-    CanonicalMeshingContract, MeshingCapabilityRequirement, MeshingInputKind, MeshingInputRef,
-    MeshingPartitionDescriptor, MeshingPartitionKind, MeshingStageIdentity, MeshingStageKind,
-    MeshingWorkloadRequest, StableDigest, MESHING_IDENTITY_SCHEMA_VERSION,
-    MESHING_WORKLOAD_SCHEMA_VERSION,
+    CanonicalMeshingContract, MeshingInputKind, MeshingInputRef, MeshingPartitionDescriptor,
+    MeshingPartitionKind, MeshingStageIdentity, MeshingStageKind, MeshingWorkloadRequest,
+    StableDigest, MESHING_IDENTITY_SCHEMA_VERSION, MESHING_WORKLOAD_SCHEMA_VERSION,
 };
 use runmat_meshing_curve::curve_partition_descriptors;
 use runmat_meshing_surface::{face_partition_descriptors, MAX_EXACT_FACE_PARTITIONS};
 
 use crate::task::{validate_input, validate_inputs};
 use crate::{MeshingExecutionError, MeshingExecutionResult, MeshingHostWorkload};
+
+mod stage;
+
+use stage::{capabilities_for_stage, validate_seed_capabilities, whole_partition};
 
 /// One meshing-owned stage with roots ordered exactly like its canonical prerequisites.
 #[derive(Clone, Debug, PartialEq)]
@@ -282,6 +285,34 @@ impl ExactMeshingDagPlanner {
         )
     }
 
+    /// Plans the canonical Tet4/Tet10 solver projection from independently admitted terminal
+    /// geometry, surface, volume, and domain-model roots.
+    pub fn solver_projection(
+        &self,
+        surface_root: ValueRef,
+        volume_root: ValueRef,
+        domain_model_root: ValueRef,
+    ) -> MeshingExecutionResult<PlannedMeshingStage> {
+        if surface_root.logical_digest == volume_root.logical_digest
+            || [surface_root.logical_digest, volume_root.logical_digest]
+                .contains(&domain_model_root.logical_digest)
+        {
+            return Err(invalid(
+                "solver projection requires distinct surface, volume, and domain-model roots",
+            ));
+        }
+        self.build_stage_with_dependencies(
+            MeshingStageKind::OrderElevation,
+            whole_partition(MeshingPartitionKind::WholeStage),
+            vec![
+                (MeshingInputKind::ExactGeometry, self.geometry_root.clone()),
+                (MeshingInputKind::StageArtifact, surface_root),
+                (MeshingInputKind::StageArtifact, volume_root),
+                (MeshingInputKind::DomainModel, domain_model_root),
+            ],
+        )
+    }
+
     fn build_surface_pass(
         &self,
         topology: &ExactBRepTopology,
@@ -341,7 +372,7 @@ impl ExactMeshingDagPlanner {
         partition: MeshingPartitionDescriptor,
         roots: Vec<ValueRef>,
     ) -> MeshingExecutionResult<PlannedMeshingStage> {
-        let mut dependencies = roots
+        let dependencies = roots
             .into_iter()
             .map(|root| {
                 let kind = if root.logical_digest.bytes() == self.context.geometry_digest.bytes() {
@@ -349,6 +380,21 @@ impl ExactMeshingDagPlanner {
                 } else {
                     MeshingInputKind::StageArtifact
                 };
+                (kind, root)
+            })
+            .collect::<Vec<_>>();
+        self.build_stage_with_dependencies(stage, partition, dependencies)
+    }
+
+    fn build_stage_with_dependencies(
+        &self,
+        stage: MeshingStageKind,
+        partition: MeshingPartitionDescriptor,
+        dependencies: Vec<(MeshingInputKind, ValueRef)>,
+    ) -> MeshingExecutionResult<PlannedMeshingStage> {
+        let mut dependencies = dependencies
+            .into_iter()
+            .map(|(kind, root)| {
                 (
                     MeshingInputRef {
                         kind,
@@ -396,66 +442,6 @@ impl ExactMeshingDagPlanner {
         )?;
         validate_inputs(&host.workload, &input_roots, &host.artifact_access)?;
         Ok(PlannedMeshingStage { host, input_roots })
-    }
-}
-
-fn validate_seed_capabilities(seed: &MeshingHostWorkload) -> MeshingExecutionResult<()> {
-    let mut host = 0;
-    let mut exact = 0;
-    let mut algorithm = 0;
-    let mut order = 0;
-    let mut cohort = 0;
-    for capability in &seed.workload.required_capabilities {
-        match capability {
-            MeshingCapabilityRequirement::HostWorkload { .. } => host += 1,
-            MeshingCapabilityRequirement::ExactCadKernel { .. } => exact += 1,
-            MeshingCapabilityRequirement::MeshingAlgorithm { .. } => algorithm += 1,
-            MeshingCapabilityRequirement::ElementOrder { .. } => order += 1,
-            MeshingCapabilityRequirement::DeterministicPlatformCohort { .. } => cohort += 1,
-        }
-    }
-    let expected_cohort = usize::from(seed.stage_identity.capability_cohort.is_some());
-    if (host, exact, algorithm, order, cohort) != (1, 1, 1, 1, expected_cohort) {
-        return Err(invalid(
-            "exact meshing DAG seed capabilities are incomplete or ambiguous",
-        ));
-    }
-    Ok(())
-}
-
-fn capabilities_for_stage(
-    seed: &MeshingHostWorkload,
-    stage: MeshingStageKind,
-) -> MeshingExecutionResult<Vec<MeshingCapabilityRequirement>> {
-    let version = match stage {
-        MeshingStageKind::CurveMesh => &seed.resolved_request.algorithms.curve,
-        MeshingStageKind::SurfaceMesh => &seed.resolved_request.algorithms.surface,
-        MeshingStageKind::Tetrahedralization => &seed.resolved_request.algorithms.tetrahedron,
-        _ => return Err(invalid("exact meshing DAG received an unsupported stage")),
-    };
-    let mut capabilities = seed
-        .workload
-        .required_capabilities
-        .iter()
-        .map(|capability| match capability {
-            MeshingCapabilityRequirement::MeshingAlgorithm { .. } => {
-                MeshingCapabilityRequirement::MeshingAlgorithm {
-                    version: version.clone(),
-                }
-            }
-            capability => capability.clone(),
-        })
-        .collect::<Vec<_>>();
-    capabilities.sort();
-    Ok(capabilities)
-}
-
-fn whole_partition(kind: MeshingPartitionKind) -> MeshingPartitionDescriptor {
-    MeshingPartitionDescriptor {
-        kind,
-        partition_index: 0,
-        partition_count: 1,
-        entity_range: None,
     }
 }
 

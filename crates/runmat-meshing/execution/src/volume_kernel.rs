@@ -134,7 +134,7 @@ fn inputs(
     }
 }
 
-fn surface_record(
+pub(crate) fn surface_record(
     geometry: &PreparedExactGeometryObjects,
     publication: &PreparedMeshingResultPublication,
 ) -> Result<Vec<u8>, Box<MeshingFailure>> {
