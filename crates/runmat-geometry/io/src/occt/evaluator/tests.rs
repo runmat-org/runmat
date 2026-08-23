@@ -55,6 +55,56 @@ impl GeometryEvaluationControl for Unlimited {
 }
 
 #[test]
+fn exact_evaluator_reconstructs_from_the_transferable_closure() {
+    let imported = import_exact_cad(
+        "box.brep",
+        BOX,
+        GeometryFormat::Brep,
+        &ExactCadImportOptions::default(),
+        &GeometryImportContext::new(),
+    )
+    .unwrap();
+    let direct = OcctExactEvaluator::new(&imported).unwrap();
+    let reconstructed = OcctExactEvaluator::from_closure(
+        &imported.representation,
+        imported.meters_per_source_unit,
+        &imported.topology,
+        &imported.evaluators,
+    )
+    .unwrap();
+    let curve_id = &imported.topology.edges[0].curve_evaluator_id;
+    let range = direct.parameter_range(curve_id).unwrap();
+    assert_eq!(
+        direct.point(curve_id, range.start, &Unlimited).unwrap(),
+        reconstructed
+            .point(curve_id, range.start, &Unlimited)
+            .unwrap()
+    );
+
+    let mut poisoned_representation = imported.representation.clone();
+    poisoned_representation[0] ^= 1;
+    assert_eq!(
+        OcctExactEvaluator::from_closure(
+            &poisoned_representation,
+            imported.meters_per_source_unit,
+            &imported.topology,
+            &imported.evaluators,
+        )
+        .err()
+        .unwrap()
+        .kind,
+        GeometryEvaluationErrorKind::InconsistentGeometry
+    );
+    assert!(OcctExactEvaluator::from_closure(
+        &imported.representation,
+        0.0,
+        &imported.topology,
+        &imported.evaluators,
+    )
+    .is_err());
+}
+
+#[test]
 fn step_assembly_preserves_shared_definitions_occurrences_and_body_evaluation() {
     let imported = import_exact_cad(
         "two_box_assembly.step",
