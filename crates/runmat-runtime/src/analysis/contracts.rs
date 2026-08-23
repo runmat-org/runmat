@@ -2,7 +2,6 @@ use runmat_analysis_core::{AnalysisField, AnalysisFieldValues, AnalysisModel};
 use runmat_analysis_fea::diagnostics::FeaDiagnostic;
 use runmat_analysis_fea::{ComputeBackend, FeaProgressEvent, FeaRunResult};
 use runmat_geometry_core::GeometryAsset;
-use runmat_meshing::RegionMeshMapping;
 use runmat_meshing_core::MeshingRequestSettings;
 use runmat_meshing_evidence::MeshAuthoringSummary;
 use serde::{Deserialize, Serialize};
@@ -82,18 +81,10 @@ pub struct AnalysisValidateResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AnalysisCreateModelIntentSpec {
     pub model_id: String,
     pub profile: AnalysisCreateModelProfile,
-    #[serde(default)]
-    pub prep_context: Option<AnalysisCreateModelPrepContext>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AnalysisCreateModelPrepContext {
-    pub source_geometry_id: String,
-    pub source_geometry_revision: u32,
-    pub region_mappings: Vec<RegionMeshMapping>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2500,8 +2491,6 @@ pub struct AnalysisStudyRunData {
     pub electromagnetic_run_options: Option<AnalysisElectromagneticRunOptions>,
     #[serde(default)]
     pub run_options: serde_json::Value,
-    #[serde(default)]
-    pub prep_artifact_id: Option<String>,
     #[serde(default)]
     pub solver_mesh_artifact_path: Option<String>,
     #[serde(default)]

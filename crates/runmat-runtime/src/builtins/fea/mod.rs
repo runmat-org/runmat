@@ -1597,11 +1597,7 @@ fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     let spec = AnalysisStudySpec {
         study_id,
         geometry,
-        create_model_intent: AnalysisCreateModelIntentSpec {
-            model_id,
-            profile,
-            prep_context: None,
-        },
+        create_model_intent: AnalysisCreateModelIntentSpec { model_id, profile },
         model,
         run_kind,
         backend: options.backend.unwrap_or(ComputeBackend::Cpu),
@@ -2833,7 +2829,6 @@ fn build_model_from_parts(
             AnalysisCreateModelIntentSpec {
                 model_id: model_id.clone(),
                 profile,
-                prep_context: None,
             },
             OperationContext::new(None, None),
         )

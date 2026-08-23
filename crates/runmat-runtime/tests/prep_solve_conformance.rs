@@ -33,7 +33,6 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
         AnalysisCreateModelIntentSpec {
             model_id: "prep_solve_model".to_string(),
             profile: AnalysisCreateModelProfile::NonlinearStructural,
-            prep_context: None,
         },
         OperationContext::new(Some("trace-prep-solve-create".to_string()), None),
     )

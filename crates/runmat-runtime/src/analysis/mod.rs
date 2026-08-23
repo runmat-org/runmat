@@ -158,40 +158,40 @@ fn install_fea_solver_context() -> runmat_analysis_fea::FeaProgressContextGuard 
 
 pub use contracts::{
     analysis_runtime_physics_profile_catalog, AnalysisAcousticRunOptions, AnalysisCfdRunOptions,
-    AnalysisChtRunOptions, AnalysisCreateModelIntentSpec, AnalysisCreateModelPrepContext,
-    AnalysisCreateModelProfile, AnalysisDiagnosticsArtifactPayload, AnalysisDocumentCheckResult,
-    AnalysisDocumentKind, AnalysisDocumentRunResult, AnalysisElectromagneticRunOptions,
-    AnalysisFieldDescriptor, AnalysisFieldDescriptorsArtifactPayload, AnalysisFieldKind,
-    AnalysisFieldLocation, AnalysisFieldPageResult, AnalysisFieldPagingDescriptor,
-    AnalysisFieldRequestOptions, AnalysisFieldStorage, AnalysisFieldStorageRef,
-    AnalysisFsiRunOptions, AnalysisModalRunOptions, AnalysisNonlinearRunOptions,
-    AnalysisObjectArtifactMetadata, AnalysisRenderMesh, AnalysisRenderRegion,
-    AnalysisRenderTopology, AnalysisRenderTopologySource, AnalysisRenderTriangleRange,
-    AnalysisResultsCompareData, AnalysisResultsCompareQuery, AnalysisResultsData,
-    AnalysisResultsQuery, AnalysisResultsSummary, AnalysisRunDatasetFieldPagingPolicy,
-    AnalysisRunDatasetPayload, AnalysisRunDatasetStudyRef, AnalysisRunKind, AnalysisRunOptions,
-    AnalysisRunPrepContext, AnalysisRunResult, AnalysisRuntimeCapabilities,
-    AnalysisRuntimePhysicsProfileCatalogEntry, AnalysisRuntimePhysicsProfileDefaultOutput,
-    AnalysisStudyAuthoringData, AnalysisStudyAuthoringEvidence, AnalysisStudyAuthoringIntent,
-    AnalysisStudyDiagramObservation, AnalysisStudyIssue, AnalysisStudyPlanData,
-    AnalysisStudyRunData, AnalysisStudySpec, AnalysisStudySweepData,
-    AnalysisStudySweepFailureEntry, AnalysisStudySweepPlanData, AnalysisStudySweepPlanEntry,
-    AnalysisStudySweepRunEntry, AnalysisStudySweepSpec, AnalysisStudySweepValidateData,
-    AnalysisStudySweepValidateEntry, AnalysisStudyValidateResult, AnalysisThermalRunOptions,
-    AnalysisTransientRunOptions, AnalysisTrendKindSummary, AnalysisTrendsData, AnalysisTrendsQuery,
-    AnalysisValidateResult, ContactInterfaceOptions, ElectroRegionConductivityScale,
-    ElectroThermalCouplingOptions, ElectroTimeProfilePoint, ElectromagneticResultsData,
-    ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData, NonlinearMethod,
-    NonlinearResultsData, PlasticityConstitutiveOptions, PrecisionMode, PreconditionerMode,
-    PrepCalibrationProfile, QualityGate, QualityPolicy, QualityReason, QualityReasonCode,
-    RunProvenance, RunStatus, ThermalResultsData, ThermoFieldInterpolationMode, ThermoFieldSource,
-    ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
-    TransientIntegrationMethod, TransientResultsData, ANALYSIS_ARTIFACT_MANIFEST_KIND,
-    ANALYSIS_DATASET_ARTIFACT_KIND, ANALYSIS_DIAGNOSTICS_ARTIFACT_KIND,
-    ANALYSIS_DIAGNOSTICS_SCHEMA_VERSION, ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT,
-    ANALYSIS_FIELD_DEFAULT_PAGE_SIZE, ANALYSIS_FIELD_DESCRIPTORS_ARTIFACT_KIND,
-    ANALYSIS_FIELD_DESCRIPTORS_SCHEMA_VERSION, ANALYSIS_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION,
-    ANALYSIS_RUN_DATASET_KIND, ANALYSIS_RUN_DATASET_SCHEMA_VERSION,
+    AnalysisChtRunOptions, AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile,
+    AnalysisDiagnosticsArtifactPayload, AnalysisDocumentCheckResult, AnalysisDocumentKind,
+    AnalysisDocumentRunResult, AnalysisElectromagneticRunOptions, AnalysisFieldDescriptor,
+    AnalysisFieldDescriptorsArtifactPayload, AnalysisFieldKind, AnalysisFieldLocation,
+    AnalysisFieldPageResult, AnalysisFieldPagingDescriptor, AnalysisFieldRequestOptions,
+    AnalysisFieldStorage, AnalysisFieldStorageRef, AnalysisFsiRunOptions, AnalysisModalRunOptions,
+    AnalysisNonlinearRunOptions, AnalysisObjectArtifactMetadata, AnalysisRenderMesh,
+    AnalysisRenderRegion, AnalysisRenderTopology, AnalysisRenderTopologySource,
+    AnalysisRenderTriangleRange, AnalysisResultsCompareData, AnalysisResultsCompareQuery,
+    AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary,
+    AnalysisRunDatasetFieldPagingPolicy, AnalysisRunDatasetPayload, AnalysisRunDatasetStudyRef,
+    AnalysisRunKind, AnalysisRunOptions, AnalysisRunPrepContext, AnalysisRunResult,
+    AnalysisRuntimeCapabilities, AnalysisRuntimePhysicsProfileCatalogEntry,
+    AnalysisRuntimePhysicsProfileDefaultOutput, AnalysisStudyAuthoringData,
+    AnalysisStudyAuthoringEvidence, AnalysisStudyAuthoringIntent, AnalysisStudyDiagramObservation,
+    AnalysisStudyIssue, AnalysisStudyPlanData, AnalysisStudyRunData, AnalysisStudySpec,
+    AnalysisStudySweepData, AnalysisStudySweepFailureEntry, AnalysisStudySweepPlanData,
+    AnalysisStudySweepPlanEntry, AnalysisStudySweepRunEntry, AnalysisStudySweepSpec,
+    AnalysisStudySweepValidateData, AnalysisStudySweepValidateEntry, AnalysisStudyValidateResult,
+    AnalysisThermalRunOptions, AnalysisTransientRunOptions, AnalysisTrendKindSummary,
+    AnalysisTrendsData, AnalysisTrendsQuery, AnalysisValidateResult, ContactInterfaceOptions,
+    ElectroRegionConductivityScale, ElectroThermalCouplingOptions, ElectroTimeProfilePoint,
+    ElectromagneticResultsData, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData,
+    NonlinearMethod, NonlinearResultsData, PlasticityConstitutiveOptions, PrecisionMode,
+    PreconditionerMode, PrepCalibrationProfile, QualityGate, QualityPolicy, QualityReason,
+    QualityReasonCode, RunProvenance, RunStatus, ThermalResultsData, ThermoFieldInterpolationMode,
+    ThermoFieldSource, ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta,
+    ThermoTimeProfilePoint, TransientIntegrationMethod, TransientResultsData,
+    ANALYSIS_ARTIFACT_MANIFEST_KIND, ANALYSIS_DATASET_ARTIFACT_KIND,
+    ANALYSIS_DIAGNOSTICS_ARTIFACT_KIND, ANALYSIS_DIAGNOSTICS_SCHEMA_VERSION,
+    ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT, ANALYSIS_FIELD_DEFAULT_PAGE_SIZE,
+    ANALYSIS_FIELD_DESCRIPTORS_ARTIFACT_KIND, ANALYSIS_FIELD_DESCRIPTORS_SCHEMA_VERSION,
+    ANALYSIS_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION, ANALYSIS_RUN_DATASET_KIND,
+    ANALYSIS_RUN_DATASET_SCHEMA_VERSION,
 };
 pub use fea_document::{
     is_fea_file_path, load_fea_document_from_path_async, parse_and_resolve_fea_document,
@@ -467,116 +467,7 @@ pub fn analysis_create_model_op(
         ));
     }
 
-    let prep_mapped_region_ids = if let Some(prep) = intent.prep_context.as_ref() {
-        if prep.source_geometry_id != geometry.geometry_id
-            || prep.source_geometry_revision != geometry.revision
-        {
-            return Err(operation_error(
-                ANALYSIS_CREATE_MODEL_OPERATION,
-                ANALYSIS_CREATE_MODEL_OP_VERSION,
-                &context,
-                OperationErrorSpec {
-                    error_code: "RM.FEA.CREATE_MODEL.PREP_MISMATCH",
-                    error_type: OperationErrorType::Input,
-                    retryable: false,
-                    severity: OperationErrorSeverity::Error,
-                },
-                "FEA model prep context does not match geometry id/revision",
-                BTreeMap::from([
-                    ("geometry_id".to_string(), geometry.geometry_id.clone()),
-                    (
-                        "geometry_revision".to_string(),
-                        geometry.revision.to_string(),
-                    ),
-                    (
-                        "prep_geometry_id".to_string(),
-                        prep.source_geometry_id.clone(),
-                    ),
-                    (
-                        "prep_geometry_revision".to_string(),
-                        prep.source_geometry_revision.to_string(),
-                    ),
-                ]),
-            ));
-        }
-
-        let mesh_id_set = geometry
-            .meshes
-            .iter()
-            .map(|mesh| mesh.mesh_id.as_str())
-            .collect::<HashSet<_>>();
-        let region_id_set = geometry
-            .regions
-            .iter()
-            .map(|region| region.region_id.as_str())
-            .collect::<HashSet<_>>();
-        for mapping in &prep.region_mappings {
-            if !region_id_set.is_empty() && !region_id_set.contains(mapping.region_id.as_str()) {
-                return Err(operation_error(
-                    ANALYSIS_CREATE_MODEL_OPERATION,
-                    ANALYSIS_CREATE_MODEL_OP_VERSION,
-                    &context,
-                    OperationErrorSpec {
-                        error_code: "RM.FEA.CREATE_MODEL.PREP_REGION_NOT_FOUND",
-                        error_type: OperationErrorType::Validation,
-                        retryable: false,
-                        severity: OperationErrorSeverity::Error,
-                    },
-                    format!(
-                        "prep context region '{}' is not present in geometry regions",
-                        mapping.region_id
-                    ),
-                    BTreeMap::from([("region_id".to_string(), mapping.region_id.clone())]),
-                ));
-            }
-            if mapping.source_mesh_ids.is_empty() || mapping.prepared_mesh_ids.is_empty() {
-                return Err(operation_error(
-                    ANALYSIS_CREATE_MODEL_OPERATION,
-                    ANALYSIS_CREATE_MODEL_OP_VERSION,
-                    &context,
-                    OperationErrorSpec {
-                        error_code: "RM.FEA.CREATE_MODEL.PREP_INVALID_MAPPING",
-                        error_type: OperationErrorType::Input,
-                        retryable: false,
-                        severity: OperationErrorSeverity::Error,
-                    },
-                    "prep context mapping requires non-empty source/prepared mesh ids",
-                    BTreeMap::from([("region_id".to_string(), mapping.region_id.clone())]),
-                ));
-            }
-            for source_mesh_id in &mapping.source_mesh_ids {
-                if !mesh_id_set.contains(source_mesh_id.as_str()) {
-                    return Err(operation_error(
-                        ANALYSIS_CREATE_MODEL_OPERATION,
-                        ANALYSIS_CREATE_MODEL_OP_VERSION,
-                        &context,
-                        OperationErrorSpec {
-                            error_code: "RM.FEA.CREATE_MODEL.PREP_MESH_NOT_FOUND",
-                            error_type: OperationErrorType::Validation,
-                            retryable: false,
-                            severity: OperationErrorSeverity::Error,
-                        },
-                        format!(
-                            "prep context source mesh '{}' is not present in geometry",
-                            source_mesh_id
-                        ),
-                        BTreeMap::from([("source_mesh_id".to_string(), source_mesh_id.clone())]),
-                    ));
-                }
-            }
-        }
-
-        Some(
-            prep.region_mappings
-                .iter()
-                .map(|mapping| mapping.region_id.clone())
-                .collect::<HashSet<_>>(),
-        )
-    } else {
-        None
-    };
-
-    let fixed_region_id = select_fixed_region_id(geometry, prep_mapped_region_ids.as_ref())
+    let fixed_region_id = select_fixed_region_id(geometry, None)
         .or_else(|| {
             geometry
                 .regions
@@ -584,7 +475,7 @@ pub fn analysis_create_model_op(
                 .map(|region| region.region_id.clone())
         })
         .unwrap_or_else(|| "region_default".to_string());
-    let load_region_id = select_load_region_id(geometry, prep_mapped_region_ids.as_ref())
+    let load_region_id = select_load_region_id(geometry, None)
         .or_else(|| {
             geometry
                 .regions
@@ -608,11 +499,7 @@ pub fn analysis_create_model_op(
             material.electrical = Some(runmat_analysis_core::MaterialElectricalModel::default());
         }
     }
-    let inferred_assignments = infer_material_assignments(
-        geometry,
-        &inferred_materials,
-        prep_mapped_region_ids.as_ref(),
-    );
+    let inferred_assignments = infer_material_assignments(geometry, &inferred_materials, None);
 
     let (default_bc, default_load, default_steps) = match intent.profile {
         AnalysisCreateModelProfile::LinearStaticStructural => (
@@ -1247,25 +1134,15 @@ pub fn analysis_run_study_op(
     let run_operation = run_operation_for_kind(spec.run_kind).to_string();
     let run_op_version = run_operation_version_for_kind(spec.run_kind).to_string();
     let operation_sequence = study_operation_sequence(spec, &run_op_version);
-    let study_prep = crate::geometry::geometry_prep_for_analysis_op(
-        &spec.geometry,
-        crate::geometry::GeometryPrepForAnalysisSpec::default(),
-        context.clone(),
-    )?
-    .data;
-    let study_prep_artifact_id = study_prep.prep_artifact_id.clone();
-    let mut create_model_intent = spec.create_model_intent.clone();
-    create_model_intent.prep_context = Some(AnalysisCreateModelPrepContext {
-        source_geometry_id: spec.geometry.geometry_id.clone(),
-        source_geometry_revision: spec.geometry.revision,
-        region_mappings: study_prep.prep.region_mappings.clone(),
-    });
-
     let mut model = match &spec.model {
         Some(model) => model.clone(),
         None => {
-            analysis_create_model_op(&spec.geometry, create_model_intent.clone(), context.clone())?
-                .data
+            analysis_create_model_op(
+                &spec.geometry,
+                spec.create_model_intent.clone(),
+                context.clone(),
+            )?
+            .data
         }
     };
     let study_mesh = meshing::resolve_study_mesh(spec, &model).map_err(|message| {
@@ -1292,124 +1169,113 @@ pub fn analysis_run_study_op(
         context.clone(),
     )?;
     meshing::apply_boundary_region_ids(&mut model, &study_mesh.boundary_region_ids);
-    let (run_envelope, resolved_run_options, resolved_electromagnetic_run_options) = match spec
-        .run_kind
-    {
-        AnalysisRunKind::LinearStatic => {
-            let mut options = spec.linear_static_run_options.clone().unwrap_or_default();
-            attach_prep_artifact_to_run_options(&mut options, &study_prep_artifact_id);
-            attach_solver_mesh_artifact_to_run_options(
-                &mut options,
-                solver_mesh_artifact_path.as_deref(),
-            );
-            let initial_run = analysis_run_linear_static_with_options(
-                &model,
-                spec.backend,
-                options.clone(),
-                context.clone(),
-            )?;
-            Ok((initial_run, run_options_to_json(&options), None))
-        }
-        AnalysisRunKind::Modal => {
-            let mut options = spec.modal_run_options.clone().unwrap_or_default();
-            attach_prep_artifact_to_modal_options(&mut options, &study_prep_artifact_id);
-            let run = analysis_run_modal_with_options_op(
-                &model,
-                spec.backend,
-                options.clone(),
-                context.clone(),
-            )?;
-            Ok((run, run_options_to_json(&options), None))
-        }
-        AnalysisRunKind::Acoustic => {
-            let mut options = spec.acoustic_run_options.clone().unwrap_or_default();
-            attach_prep_artifact_to_acoustic_options(&mut options, &study_prep_artifact_id);
-            let run = analysis_run_acoustic_with_options_op(
-                &model,
-                spec.backend,
-                options.clone(),
-                context.clone(),
-            )?;
-            Ok((run, run_options_to_json(&options), None))
-        }
-        AnalysisRunKind::Thermal => {
-            let mut options = spec.thermal_run_options.clone().unwrap_or_default();
-            attach_prep_artifact_to_thermal_options(&mut options, &study_prep_artifact_id);
-            let run = analysis_run_thermal_with_options_op(
-                &model,
-                spec.backend,
-                options.clone(),
-                context.clone(),
-            )?;
-            Ok((run, run_options_to_json(&options), None))
-        }
-        AnalysisRunKind::Transient => {
-            let mut options = spec.transient_run_options.clone().unwrap_or_default();
-            attach_prep_artifact_to_transient_options(&mut options, &study_prep_artifact_id);
-            let run = analysis_run_transient_with_options_op(
-                &model,
-                spec.backend,
-                options.clone(),
-                context.clone(),
-            )?;
-            Ok((run, run_options_to_json(&options), None))
-        }
-        AnalysisRunKind::Cfd => {
-            let mut options = spec.cfd_run_options.clone().unwrap_or_default();
-            attach_prep_artifact_to_cfd_options(&mut options, &study_prep_artifact_id);
-            let run = analysis_run_cfd_with_options_op(
-                &model,
-                spec.backend,
-                options.clone(),
-                context.clone(),
-            )?;
-            Ok((run, run_options_to_json(&options), None))
-        }
-        AnalysisRunKind::Cht => {
-            let mut options = spec.cht_run_options.clone().unwrap_or_default();
-            attach_prep_artifact_to_cht_options(&mut options, &study_prep_artifact_id);
-            let run = analysis_run_cht_with_options_op(
-                &model,
-                spec.backend,
-                options.clone(),
-                context.clone(),
-            )?;
-            Ok((run, run_options_to_json(&options), None))
-        }
-        AnalysisRunKind::Fsi => {
-            let mut options = spec.fsi_run_options.clone().unwrap_or_default();
-            attach_prep_artifact_to_fsi_options(&mut options, &study_prep_artifact_id);
-            let run = analysis_run_fsi_with_options_op(
-                &model,
-                spec.backend,
-                options.clone(),
-                context.clone(),
-            )?;
-            Ok((run, run_options_to_json(&options), None))
-        }
-        AnalysisRunKind::Nonlinear => {
-            let mut options = spec.nonlinear_run_options.clone().unwrap_or_default();
-            attach_prep_artifact_to_nonlinear_options(&mut options, &study_prep_artifact_id);
-            let run = analysis_run_nonlinear_with_options_op(
-                &model,
-                spec.backend,
-                options.clone(),
-                context.clone(),
-            )?;
-            Ok((run, run_options_to_json(&options), None))
-        }
-        AnalysisRunKind::Electromagnetic => {
-            let mut options = spec.electromagnetic_run_options.clone().unwrap_or_default();
-            attach_prep_artifact_to_electromagnetic_options(&mut options, &study_prep_artifact_id);
-            let run = analysis_run_electromagnetic_with_options_op(
-                &model,
-                spec.backend,
-                options.clone(),
-                context.clone(),
-            )?;
-            Ok((run, run_options_to_json(&options), Some(options)))
-        }
-    }?;
+    let (run_envelope, resolved_run_options, resolved_electromagnetic_run_options) =
+        match spec.run_kind {
+            AnalysisRunKind::LinearStatic => {
+                let mut options = spec.linear_static_run_options.clone().unwrap_or_default();
+                attach_solver_mesh_artifact_to_run_options(
+                    &mut options,
+                    solver_mesh_artifact_path.as_deref(),
+                );
+                let initial_run = analysis_run_linear_static_with_options(
+                    &model,
+                    spec.backend,
+                    options.clone(),
+                    context.clone(),
+                )?;
+                Ok((initial_run, run_options_to_json(&options), None))
+            }
+            AnalysisRunKind::Modal => {
+                let options = spec.modal_run_options.clone().unwrap_or_default();
+                let run = analysis_run_modal_with_options_op(
+                    &model,
+                    spec.backend,
+                    options.clone(),
+                    context.clone(),
+                )?;
+                Ok((run, run_options_to_json(&options), None))
+            }
+            AnalysisRunKind::Acoustic => {
+                let options = spec.acoustic_run_options.clone().unwrap_or_default();
+                let run = analysis_run_acoustic_with_options_op(
+                    &model,
+                    spec.backend,
+                    options.clone(),
+                    context.clone(),
+                )?;
+                Ok((run, run_options_to_json(&options), None))
+            }
+            AnalysisRunKind::Thermal => {
+                let options = spec.thermal_run_options.clone().unwrap_or_default();
+                let run = analysis_run_thermal_with_options_op(
+                    &model,
+                    spec.backend,
+                    options.clone(),
+                    context.clone(),
+                )?;
+                Ok((run, run_options_to_json(&options), None))
+            }
+            AnalysisRunKind::Transient => {
+                let options = spec.transient_run_options.clone().unwrap_or_default();
+                let run = analysis_run_transient_with_options_op(
+                    &model,
+                    spec.backend,
+                    options.clone(),
+                    context.clone(),
+                )?;
+                Ok((run, run_options_to_json(&options), None))
+            }
+            AnalysisRunKind::Cfd => {
+                let options = spec.cfd_run_options.clone().unwrap_or_default();
+                let run = analysis_run_cfd_with_options_op(
+                    &model,
+                    spec.backend,
+                    options.clone(),
+                    context.clone(),
+                )?;
+                Ok((run, run_options_to_json(&options), None))
+            }
+            AnalysisRunKind::Cht => {
+                let options = spec.cht_run_options.clone().unwrap_or_default();
+                let run = analysis_run_cht_with_options_op(
+                    &model,
+                    spec.backend,
+                    options.clone(),
+                    context.clone(),
+                )?;
+                Ok((run, run_options_to_json(&options), None))
+            }
+            AnalysisRunKind::Fsi => {
+                let options = spec.fsi_run_options.clone().unwrap_or_default();
+                let run = analysis_run_fsi_with_options_op(
+                    &model,
+                    spec.backend,
+                    options.clone(),
+                    context.clone(),
+                )?;
+                Ok((run, run_options_to_json(&options), None))
+            }
+            AnalysisRunKind::Nonlinear => {
+                let options = spec.nonlinear_run_options.clone().unwrap_or_default();
+                let run = analysis_run_nonlinear_with_options_op(
+                    &model,
+                    spec.backend,
+                    options.clone(),
+                    context.clone(),
+                )?;
+                Ok((run, run_options_to_json(&options), None))
+            }
+            AnalysisRunKind::Electromagnetic => {
+                let options = spec.electromagnetic_run_options.clone().unwrap_or_default();
+                let run = analysis_run_electromagnetic_with_options_op(
+                    &model,
+                    spec.backend,
+                    options.clone(),
+                    context.clone(),
+                )?;
+                Ok((run, run_options_to_json(&options), Some(options)))
+            }
+        }?;
     let evidence_artifact_path = persist_study_evidence(
         &study_fingerprint,
         "run",
@@ -1420,7 +1286,6 @@ pub fn analysis_run_study_op(
             "model_profile": spec.create_model_intent.profile,
             "run_kind": spec.run_kind,
             "backend": spec.backend,
-            "prep_artifact_id": study_prep_artifact_id.clone(),
             "solver_mesh_artifact_path": solver_mesh_artifact_path.clone(),
             "meshing_evidence_artifact_path": meshing_evidence_artifact_path.clone(),
             "run_options": resolved_run_options.clone(),
@@ -1468,7 +1333,6 @@ pub fn analysis_run_study_op(
             run_kind: spec.run_kind,
             backend: spec.backend,
             electromagnetic_run_options: resolved_electromagnetic_run_options,
-            prep_artifact_id: Some(study_prep_artifact_id),
             solver_mesh_artifact_path,
             meshing_evidence_artifact_path,
             run_options: resolved_run_options,
@@ -13356,99 +13220,12 @@ fn run_options_to_json<T: Serialize>(options: &T) -> serde_json::Value {
     serde_json::to_value(options).unwrap_or(serde_json::Value::Null)
 }
 
-fn attach_prep_artifact_to_run_options(options: &mut AnalysisRunOptions, prep_artifact_id: &str) {
-    if options.prep_artifact_id.is_none() {
-        options.prep_artifact_id = Some(prep_artifact_id.to_string());
-    }
-}
-
 fn attach_solver_mesh_artifact_to_run_options(
     options: &mut AnalysisRunOptions,
     solver_mesh_artifact_path: Option<&str>,
 ) {
     if options.solver_mesh_artifact_path.is_none() {
         options.solver_mesh_artifact_path = solver_mesh_artifact_path.map(str::to_string);
-    }
-}
-
-fn attach_prep_artifact_to_modal_options(
-    options: &mut AnalysisModalRunOptions,
-    prep_artifact_id: &str,
-) {
-    if options.prep_artifact_id.is_none() {
-        options.prep_artifact_id = Some(prep_artifact_id.to_string());
-    }
-}
-
-fn attach_prep_artifact_to_acoustic_options(
-    options: &mut AnalysisAcousticRunOptions,
-    prep_artifact_id: &str,
-) {
-    if options.prep_artifact_id.is_none() {
-        options.prep_artifact_id = Some(prep_artifact_id.to_string());
-    }
-}
-
-fn attach_prep_artifact_to_thermal_options(
-    options: &mut AnalysisThermalRunOptions,
-    prep_artifact_id: &str,
-) {
-    if options.prep_artifact_id.is_none() {
-        options.prep_artifact_id = Some(prep_artifact_id.to_string());
-    }
-}
-
-fn attach_prep_artifact_to_transient_options(
-    options: &mut AnalysisTransientRunOptions,
-    prep_artifact_id: &str,
-) {
-    if options.prep_artifact_id.is_none() {
-        options.prep_artifact_id = Some(prep_artifact_id.to_string());
-    }
-}
-
-fn attach_prep_artifact_to_cfd_options(
-    options: &mut AnalysisCfdRunOptions,
-    prep_artifact_id: &str,
-) {
-    if options.prep_artifact_id.is_none() {
-        options.prep_artifact_id = Some(prep_artifact_id.to_string());
-    }
-}
-
-fn attach_prep_artifact_to_cht_options(
-    options: &mut AnalysisChtRunOptions,
-    prep_artifact_id: &str,
-) {
-    if options.prep_artifact_id.is_none() {
-        options.prep_artifact_id = Some(prep_artifact_id.to_string());
-    }
-}
-
-fn attach_prep_artifact_to_fsi_options(
-    options: &mut AnalysisFsiRunOptions,
-    prep_artifact_id: &str,
-) {
-    if options.prep_artifact_id.is_none() {
-        options.prep_artifact_id = Some(prep_artifact_id.to_string());
-    }
-}
-
-fn attach_prep_artifact_to_nonlinear_options(
-    options: &mut AnalysisNonlinearRunOptions,
-    prep_artifact_id: &str,
-) {
-    if options.prep_artifact_id.is_none() {
-        options.prep_artifact_id = Some(prep_artifact_id.to_string());
-    }
-}
-
-fn attach_prep_artifact_to_electromagnetic_options(
-    options: &mut AnalysisElectromagneticRunOptions,
-    prep_artifact_id: &str,
-) {
-    if options.prep_artifact_id.is_none() {
-        options.prep_artifact_id = Some(prep_artifact_id.to_string());
     }
 }
 

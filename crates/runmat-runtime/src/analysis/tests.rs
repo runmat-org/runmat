@@ -725,7 +725,6 @@ fn sample_linear_static_study_spec() -> AnalysisStudySpec {
         create_model_intent: AnalysisCreateModelIntentSpec {
             model_id: "study_model_linear_static_001".to_string(),
             profile: AnalysisCreateModelProfile::LinearStaticStructural,
-            prep_context: None,
         },
         model: None,
         run_kind: AnalysisRunKind::LinearStatic,
@@ -754,7 +753,6 @@ fn sample_electromagnetic_study_spec() -> AnalysisStudySpec {
         create_model_intent: AnalysisCreateModelIntentSpec {
             model_id: "study_model_electromagnetic_001".to_string(),
             profile: AnalysisCreateModelProfile::ElectromagneticStatic,
-            prep_context: None,
         },
         model: None,
         run_kind: AnalysisRunKind::Electromagnetic,
@@ -1293,7 +1291,6 @@ fn analysis_create_model_returns_v1_envelope() {
         AnalysisCreateModelIntentSpec {
             model_id: "model_from_geo".to_string(),
             profile: AnalysisCreateModelProfile::LinearStaticStructural,
-            prep_context: None,
         },
         OperationContext::new(Some("trace-create-1".to_string()), None),
     )
@@ -1382,7 +1379,6 @@ fn analysis_create_model_maps_invalid_intent_error() {
         AnalysisCreateModelIntentSpec {
             model_id: "   ".to_string(),
             profile: AnalysisCreateModelProfile::LinearStaticStructural,
-            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -1394,6 +1390,18 @@ fn analysis_create_model_maps_invalid_intent_error() {
 }
 
 #[test]
+fn analysis_create_model_intent_rejects_retired_prep_context() {
+    let error = serde_json::from_value::<AnalysisCreateModelIntentSpec>(serde_json::json!({
+        "model_id": "retired_prep_model",
+        "profile": "linear_static_structural",
+        "prep_context": {}
+    }))
+    .expect_err("retired prep context must not be silently accepted");
+
+    assert!(error.to_string().contains("unknown field"));
+}
+
+#[test]
 fn analysis_create_model_supports_nonlinear_profile_template() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
@@ -1402,7 +1410,6 @@ fn analysis_create_model_supports_nonlinear_profile_template() {
         AnalysisCreateModelIntentSpec {
             model_id: "nonlinear_model".to_string(),
             profile: AnalysisCreateModelProfile::NonlinearStructural,
-            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -1417,71 +1424,6 @@ fn analysis_create_model_supports_nonlinear_profile_template() {
 }
 
 #[test]
-fn analysis_create_model_accepts_prep_context_and_validates_model() {
-    let _guard = analysis_test_guard();
-    let _prep_guard = crate::geometry::prep_artifact_test_guard();
-    let geometry = sample_step_like_geometry_asset();
-    let prep = crate::geometry::geometry_prep_for_analysis_op(
-        &geometry,
-        crate::geometry::GeometryPrepForAnalysisSpec::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("prep for analysis should succeed");
-
-    let created = analysis_create_model_op(
-        &geometry,
-        AnalysisCreateModelIntentSpec {
-            model_id: "prep_model".to_string(),
-            profile: AnalysisCreateModelProfile::LinearStaticStructural,
-            prep_context: Some(AnalysisCreateModelPrepContext {
-                source_geometry_id: prep.data.prep.provenance.source_geometry_id.clone(),
-                source_geometry_revision: prep.data.prep.provenance.source_geometry_revision,
-                region_mappings: prep.data.prep.region_mappings.clone(),
-            }),
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("create model with prep context should succeed");
-
-    analysis_validate(
-        &created.data,
-        geometry.units,
-        &ReferenceFrame::Global,
-        OperationContext::new(None, None),
-    )
-    .expect("prep-aware created model should validate");
-    assert_eq!(created.data.boundary_conditions[0].region_id, "region_root");
-    assert_eq!(created.data.loads[0].region_id, "region_tip");
-    assert!(created
-        .data
-        .material_assignments
-        .iter()
-        .all(|assignment| assignment.confidence
-            == runmat_analysis_core::EvidenceConfidence::Verified));
-}
-
-#[test]
-fn analysis_create_model_rejects_mismatched_prep_context() {
-    let _guard = analysis_test_guard();
-    let geometry = sample_step_like_geometry_asset();
-    let error = analysis_create_model_op(
-        &geometry,
-        AnalysisCreateModelIntentSpec {
-            model_id: "bad_prep_model".to_string(),
-            profile: AnalysisCreateModelProfile::LinearStaticStructural,
-            prep_context: Some(AnalysisCreateModelPrepContext {
-                source_geometry_id: "geo:other".to_string(),
-                source_geometry_revision: geometry.revision,
-                region_mappings: Vec::new(),
-            }),
-        },
-        OperationContext::new(None, None),
-    )
-    .expect_err("mismatched prep context should fail");
-    assert_eq!(error.error_code, "RM.FEA.CREATE_MODEL.PREP_MISMATCH");
-}
-
-#[test]
 fn analysis_create_model_supports_transient_profile_template() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
@@ -1490,7 +1432,6 @@ fn analysis_create_model_supports_transient_profile_template() {
         AnalysisCreateModelIntentSpec {
             model_id: "transient_model".to_string(),
             profile: AnalysisCreateModelProfile::TransientStructural,
-            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -1513,7 +1454,6 @@ fn analysis_create_model_supports_modal_profile_template() {
         AnalysisCreateModelIntentSpec {
             model_id: "modal_model".to_string(),
             profile: AnalysisCreateModelProfile::ModalStructural,
-            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -1533,7 +1473,6 @@ fn analysis_create_model_supports_acoustic_harmonic_profile_template() {
         AnalysisCreateModelIntentSpec {
             model_id: "acoustic_harmonic_model".to_string(),
             profile: AnalysisCreateModelProfile::AcousticHarmonic,
-            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -1556,7 +1495,6 @@ fn analysis_create_model_supports_electromagnetic_profile_template() {
         AnalysisCreateModelIntentSpec {
             model_id: "electromagnetic_profile_model".to_string(),
             profile: AnalysisCreateModelProfile::ElectromagneticStatic,
-            prep_context: None,
         },
         OperationContext::new(Some("trace-create-em-profile".to_string()), None),
     )
@@ -1585,7 +1523,6 @@ fn analysis_create_model_supports_electro_thermal_profile_template() {
         AnalysisCreateModelIntentSpec {
             model_id: "electro_thermal_profile_model".to_string(),
             profile: AnalysisCreateModelProfile::ElectroThermalCoupled,
-            prep_context: None,
         },
         OperationContext::new(
             Some("trace-create-electro-thermal-profile".to_string()),
@@ -1628,7 +1565,6 @@ fn analysis_create_model_supports_cfd_steady_profile_template() {
         AnalysisCreateModelIntentSpec {
             model_id: "cfd_steady_model".to_string(),
             profile: AnalysisCreateModelProfile::CfdSteadyState,
-            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -1653,7 +1589,6 @@ fn analysis_create_model_supports_cfd_transient_profile_template() {
         AnalysisCreateModelIntentSpec {
             model_id: "cfd_transient_model".to_string(),
             profile: AnalysisCreateModelProfile::CfdTransient,
-            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -1680,7 +1615,6 @@ fn analysis_create_model_supports_cht_coupled_profile_template() {
         AnalysisCreateModelIntentSpec {
             model_id: "cht_coupled_model".to_string(),
             profile: AnalysisCreateModelProfile::ChtCoupled,
-            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -1723,7 +1657,6 @@ fn analysis_create_model_supports_fsi_coupled_profile_template() {
         AnalysisCreateModelIntentSpec {
             model_id: "fsi_coupled_model".to_string(),
             profile: AnalysisCreateModelProfile::FsiCoupled,
-            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -2045,15 +1978,7 @@ fn analysis_run_study_executes_linear_static_path() {
     );
     assert!(envelope.data.study_fingerprint.starts_with("sha256:"));
     assert!(envelope.data.run_id.starts_with("run_"));
-    let prep_artifact_id = envelope
-        .data
-        .prep_artifact_id
-        .as_ref()
-        .expect("study run should persist generated prep artifact id");
-    assert_eq!(
-        envelope.data.run_options["prep_artifact_id"].as_str(),
-        Some(prep_artifact_id.as_str())
-    );
+    assert!(envelope.data.run_options["prep_artifact_id"].is_null());
     assert!(envelope.data.evidence_artifact_path.ends_with("run.json"));
 
     let persisted = storage::load_run_result(&envelope.data.run_id)
@@ -2634,10 +2559,7 @@ fn analysis_run_study_honors_electromagnetic_run_options() {
         resolved_options.harmonic_max_iterations,
         requested_options.harmonic_max_iterations
     );
-    assert_eq!(
-        resolved_options.prep_artifact_id.as_deref(),
-        envelope.data.prep_artifact_id.as_deref()
-    );
+    assert!(resolved_options.prep_artifact_id.is_none());
     assert_eq!(envelope.data.run_operation, "fea.run_electromagnetic");
     assert_eq!(envelope.data.run_op_version, "fea.run_electromagnetic/v1");
 
@@ -2678,10 +2600,7 @@ fn analysis_run_study_emits_default_electromagnetic_options_when_unspecified() {
         .expect("electromagnetic study run should succeed");
 
     assert_eq!(envelope.data.run_kind, AnalysisRunKind::Electromagnetic);
-    let expected_options = AnalysisElectromagneticRunOptions {
-        prep_artifact_id: envelope.data.prep_artifact_id.clone(),
-        ..Default::default()
-    };
+    let expected_options = AnalysisElectromagneticRunOptions::default();
     assert_eq!(
         envelope.data.electromagnetic_run_options,
         Some(expected_options)
@@ -2898,7 +2817,6 @@ fn analysis_create_model_infers_materials_and_assignments_from_geometry_evidence
         AnalysisCreateModelIntentSpec {
             model_id: "model_from_step_like".to_string(),
             profile: AnalysisCreateModelProfile::LinearStaticStructural,
-            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -4093,7 +4011,6 @@ fn analysis_trends_classifies_acoustic_runs_separately() {
         AnalysisCreateModelIntentSpec {
             model_id: "acoustic_trend_model".to_string(),
             profile: AnalysisCreateModelProfile::AcousticHarmonic,
-            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -4929,7 +4846,6 @@ fn analysis_artifacts_record_family_specific_op_versions_for_coupled_runs() {
         AnalysisCreateModelIntentSpec {
             model_id: "acoustic_op_version_model".to_string(),
             profile: AnalysisCreateModelProfile::AcousticHarmonic,
-            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -5431,7 +5347,6 @@ fn analysis_run_acoustic_rejects_models_without_acoustic_source() {
         AnalysisCreateModelIntentSpec {
             model_id: "acoustic_model_missing_source".to_string(),
             profile: AnalysisCreateModelProfile::AcousticHarmonic,
-            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -5469,7 +5384,6 @@ fn analysis_run_acoustic_rejects_moment_loads() {
         AnalysisCreateModelIntentSpec {
             model_id: "acoustic_model_with_moment".to_string(),
             profile: AnalysisCreateModelProfile::AcousticHarmonic,
-            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -5499,7 +5413,6 @@ fn analysis_run_acoustic_rejects_models_without_acoustic_boundary() {
         AnalysisCreateModelIntentSpec {
             model_id: "acoustic_model_missing_boundary".to_string(),
             profile: AnalysisCreateModelProfile::AcousticHarmonic,
-            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -7079,7 +6992,6 @@ fn analysis_run_nonlinear_rejects_stale_prep_artifact_when_newer_revision_exists
         AnalysisCreateModelIntentSpec {
             model_id: "stale_prep_model".to_string(),
             profile: AnalysisCreateModelProfile::NonlinearStructural,
-            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -9031,7 +8943,6 @@ fn analysis_run_modal_returns_native_modal_result() {
         AnalysisCreateModelIntentSpec {
             model_id: "modal_model_run".to_string(),
             profile: AnalysisCreateModelProfile::ModalStructural,
-            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -9127,7 +9038,6 @@ fn analysis_run_acoustic_returns_acoustic_fields_and_diagnostics() {
         AnalysisCreateModelIntentSpec {
             model_id: "acoustic_model_run".to_string(),
             profile: AnalysisCreateModelProfile::AcousticHarmonic,
-            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -9252,7 +9162,6 @@ fn analysis_run_modal_with_options_controls_requested_mode_count() {
         AnalysisCreateModelIntentSpec {
             model_id: "modal_model_run_opts".to_string(),
             profile: AnalysisCreateModelProfile::ModalStructural,
-            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -9294,7 +9203,6 @@ fn analysis_results_include_modal_payload_for_modal_runs() {
         AnalysisCreateModelIntentSpec {
             model_id: "modal_model_results".to_string(),
             profile: AnalysisCreateModelProfile::ModalStructural,
-            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -9347,7 +9255,6 @@ fn analysis_results_query_can_exclude_modal_payload() {
         AnalysisCreateModelIntentSpec {
             model_id: "modal_model_results_filter".to_string(),
             profile: AnalysisCreateModelProfile::ModalStructural,
-            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -9390,7 +9297,6 @@ fn analysis_results_query_rejects_unknown_modal_mode_index() {
         AnalysisCreateModelIntentSpec {
             model_id: "modal_model_results_index".to_string(),
             profile: AnalysisCreateModelProfile::ModalStructural,
-            prep_context: None,
         },
         OperationContext::new(None, None),
     )
