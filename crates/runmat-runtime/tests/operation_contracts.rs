@@ -162,7 +162,7 @@ fn contract_study_spec(
         model,
         run_kind,
         backend: ComputeBackend::Cpu,
-        mesh_options: None,
+        meshing_settings: None,
         outputs: Vec::new(),
         solver_mesh_artifact_path: None,
         meshing_evidence_artifact_path: None,

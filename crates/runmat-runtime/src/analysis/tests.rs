@@ -764,7 +764,7 @@ fn sample_linear_static_study_spec() -> AnalysisStudySpec {
         model: None,
         run_kind: AnalysisRunKind::LinearStatic,
         backend: ComputeBackend::Cpu,
-        mesh_options: Some(runmat_meshing_core::VolumeMeshingOptions::default()),
+        meshing_settings: Some(runmat_meshing_core::MeshingRequestSettings::default()),
         outputs: Vec::new(),
         solver_mesh_artifact_path: None,
         meshing_evidence_artifact_path: None,
@@ -793,7 +793,7 @@ fn sample_electromagnetic_study_spec() -> AnalysisStudySpec {
         model: None,
         run_kind: AnalysisRunKind::Electromagnetic,
         backend: ComputeBackend::Cpu,
-        mesh_options: None,
+        meshing_settings: None,
         outputs: Vec::new(),
         solver_mesh_artifact_path: None,
         meshing_evidence_artifact_path: None,
@@ -885,21 +885,13 @@ outputs:
     assert_eq!(spec.outputs[0].location.as_deref(), Some("nodes"));
     assert_eq!(spec.outputs[0].kind.as_deref(), Some("vector"));
     assert!(spec.model.is_none());
-    let mesh_options = spec
-        .mesh_options
+    let meshing_settings = spec
+        .meshing_settings
         .as_ref()
-        .expect("linear static structural studies should default to solid analysis mesh options");
+        .expect("linear static structural studies should default canonical meshing settings");
     assert_eq!(
-        mesh_options.kind,
-        runmat_meshing_core::MeshKindRequest::Solid
-    );
-    assert_eq!(
-        mesh_options.element,
-        runmat_meshing_core::VolumeElementKind::Tetrahedron4
-    );
-    assert_eq!(
-        mesh_options.profile,
-        runmat_meshing_core::MeshProfile::AnalysisReady
+        meshing_settings.element_order,
+        runmat_meshing_core::ElementOrder::Tet4
     );
 
     let options = spec
