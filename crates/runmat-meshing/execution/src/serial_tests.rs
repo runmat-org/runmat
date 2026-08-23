@@ -186,6 +186,22 @@ fn serial_stage_imports_executes_and_externalizes_a_validated_closure() {
     )
     .unwrap();
 
+    let success = completed.attempt_success();
+    assert_eq!(
+        success.result_objects.len(),
+        completed.publication().result_objects().len() + 1
+    );
+    assert_eq!(
+        crate::import_stage_evidence_observation(
+            &fixture.store,
+            &fixture.host,
+            &success.result_objects,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap(),
+        *completed.stage_evidence()
+    );
+
     completed
         .workload_result()
         .validate_against(&fixture.host.workload)
@@ -222,6 +238,73 @@ fn serial_stage_imports_executes_and_externalizes_a_validated_closure() {
         .0
         .windows(2)
         .all(|pair| pair[1].validate_after(&pair[0]).is_ok()));
+}
+
+#[test]
+fn externalized_stage_evidence_rejects_missing_and_poisoned_objects() {
+    let mut fixture = Fixture::new();
+    let completed = execute_serial_stage(
+        &fixture.program,
+        &mut fixture.store,
+        &SurfaceKernel,
+        &NeverCancelled,
+        &mut Progress::default(),
+        chunk_policy(1024),
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let mut success = completed.attempt_success();
+    success
+        .result_objects
+        .retain(|reference| reference.media_type != crate::STAGE_EVIDENCE_MEDIA_TYPE);
+    assert!(crate::import_stage_evidence_observation(
+        &fixture.store,
+        &fixture.host,
+        &success.result_objects,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap_err()
+    .to_string()
+    .contains("exactly one"));
+
+    let success = completed.attempt_success();
+    let evidence = success
+        .result_objects
+        .iter()
+        .find(|reference| reference.media_type == crate::STAGE_EVIDENCE_MEDIA_TYPE)
+        .unwrap();
+    fixture
+        .store
+        .objects
+        .insert(evidence.logical_digest, b"poisoned".to_vec());
+    assert!(crate::import_stage_evidence_observation(
+        &fixture.store,
+        &fixture.host,
+        &success.result_objects,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap_err()
+    .to_string()
+    .contains("wrong digest"));
+
+    let stage_object_count = completed.publication().result_objects().len();
+    let mut bounded = Fixture::new();
+    let limits = ObjectInventoryLimits {
+        max_objects: stage_object_count,
+        ..ObjectInventoryLimits::default()
+    };
+    assert!(execute_serial_stage(
+        &bounded.program,
+        &mut bounded.store,
+        &SurfaceKernel,
+        &NeverCancelled,
+        &mut Progress::default(),
+        chunk_policy(1024),
+        limits,
+    )
+    .unwrap_err()
+    .to_string()
+    .contains("count or uniqueness"));
 }
 
 #[test]
