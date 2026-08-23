@@ -8,9 +8,9 @@ use super::{
     build_delaunay_constraints, build_delaunay_volume_point_set, build_delaunay_volume_provenance,
     carve_delaunay_volume, evaluate_delaunay_volume_quality, recover_delaunay_facets,
     recover_delaunay_segments, refine_delaunay_volume, DelaunayCarvingOptions,
-    DelaunayConstraintOptions, DelaunayPointSetOptions, DelaunayVolumeProvenance,
-    DelaunayVolumeProvenanceOptions, DelaunayVolumeQuality, DelaunayVolumeQualityOptions,
-    DelaunayVolumeRefinementInput, DelaunayVolumeRefinementMutation,
+    DelaunayConstraintOptions, DelaunayFacetSteinerInsertion, DelaunayPointSetOptions,
+    DelaunayVolumeProvenance, DelaunayVolumeProvenanceOptions, DelaunayVolumeQuality,
+    DelaunayVolumeQualityOptions, DelaunayVolumeRefinementInput, DelaunayVolumeRefinementMutation,
     DelaunayVolumeRefinementOptions, DelaunayVolumeTopology,
 };
 
@@ -57,6 +57,7 @@ pub struct DelaunayVolumeMesh {
     pub topology: DelaunayVolumeTopology,
     pub provenance: DelaunayVolumeProvenance,
     pub quality: DelaunayVolumeQuality,
+    pub facet_recovery_insertions: Vec<DelaunayFacetSteinerInsertion>,
     pub mutations: Vec<DelaunayVolumeRefinementMutation>,
 }
 
@@ -172,6 +173,7 @@ pub fn construct_delaunay_volume_mesh(
         topology: refinement.topology,
         provenance,
         quality: refinement.quality,
+        facet_recovery_insertions: facets.steiner_insertions,
         mutations: refinement.mutations,
     };
     validate_delaunay_volume_mesh(

@@ -47,6 +47,13 @@ pub fn validate_delaunay_volume_mesh(
         cancellation,
     )
     .map_err(facet_error)?;
+    if result.facet_recovery_insertions != facets.steiner_insertions {
+        return Err(super::error(
+            super::DelaunayVolumeMeshStage::FacetRecovery,
+            super::DelaunayVolumeMeshErrorKind::InvalidTopology,
+            "final volume facet-recovery mutation lineage differs from canonical replay",
+        ));
+    }
     let carving = carve_delaunay_volume(&facets, &constraints, options.carving, cancellation)
         .map_err(carving_error)?;
     let expected_provenance = build_delaunay_volume_provenance(

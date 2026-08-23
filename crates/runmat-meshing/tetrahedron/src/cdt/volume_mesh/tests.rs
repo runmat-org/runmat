@@ -1,4 +1,4 @@
-use runmat_meshing_core::{MeshingCancellationSignal, NeverCancelled};
+use runmat_meshing_core::{MeshingCancellationSignal, NeverCancelled, StableDigest};
 use runmat_meshing_size::metric::{MetricCombinationRule, MetricFieldRequest, MetricTensor3};
 
 use super::*;
@@ -50,6 +50,7 @@ fn exact_surface_constructs_one_validated_general_volume_mesh() {
     assert_eq!(result.provenance.nodes.len(), 4);
     assert_eq!(result.provenance.segments.len(), 6);
     assert_eq!(result.provenance.facets.len(), 4);
+    assert!(result.facet_recovery_insertions.is_empty());
     assert!(result.mutations.is_empty());
     validate_delaunay_volume_mesh(
         &topology,
@@ -210,6 +211,37 @@ fn final_validation_rejects_lineage_tampering() {
         .unwrap_err()
         .stage,
         DelaunayVolumeMeshStage::Provenance
+    );
+
+    let mut result = construct_delaunay_volume_mesh(
+        &topology,
+        &surface,
+        &metric_request(),
+        options,
+        &NeverCancelled,
+    )
+    .unwrap();
+    result
+        .facet_recovery_insertions
+        .push(DelaunayFacetSteinerInsertion {
+            constraint_index: 0,
+            support_node_identities: [StableDigest::from_bytes([1; 32]); 3],
+            insertion_round: 0,
+            candidate_rank: 0,
+            node_identity: StableDigest::from_bytes([2; 32]),
+        });
+    assert_eq!(
+        validate_delaunay_volume_mesh(
+            &topology,
+            &surface,
+            &metric_request(),
+            &result,
+            options,
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .stage,
+        DelaunayVolumeMeshStage::FacetRecovery
     );
 }
 

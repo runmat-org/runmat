@@ -7,10 +7,10 @@ use serde::{Deserialize, Serialize};
 
 use super::{validate_delaunay_volume_mesh, DelaunayVolumeMesh, DelaunayVolumeMeshOptions};
 
-pub const DELAUNAY_VOLUME_MESH_SCHEMA_VERSION: u16 = 1;
+pub const DELAUNAY_VOLUME_MESH_SCHEMA_VERSION: u16 = 2;
 
-const CODEC_PREFIX: &[u8] = b"runmat-meshing-delaunay-volume-canonical-cbor/v1\0";
-const CONTRACT_DOMAIN: &str = "delaunay-volume-mesh/v1";
+const CODEC_PREFIX: &[u8] = b"runmat-meshing-delaunay-volume-canonical-cbor/v2\0";
+const CONTRACT_DOMAIN: &str = "delaunay-volume-mesh/v2";
 const CONTRACT_LIMITS: CanonicalLimits =
     CanonicalLimits::new(1024 * 1024 * 1024, 50_000_000, 1024 * 1024, 64);
 

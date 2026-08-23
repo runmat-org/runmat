@@ -1,4 +1,5 @@
 use runmat_meshing_core::{MeshingCancellationSignal, StableDigest};
+use serde::{Deserialize, Serialize};
 
 use super::{
     DelaunayConstraints, DelaunaySegmentRecovery, DelaunaySegmentRecoveryError,
@@ -72,7 +73,8 @@ pub struct DelaunayRecoveredFacet {
     pub triangles: Vec<DelaunayRecoveredFacetTriangle>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunayFacetSteinerInsertion {
     pub constraint_index: u32,
     pub support_node_identities: [StableDigest; 3],
