@@ -51,6 +51,7 @@ pub struct CompletedMeshingStage {
     workload_result: MeshingWorkloadResult,
     publication: PreparedMeshingResultPublication,
     stage_evidence: runmat_meshing_core::MeshingStageEvidence,
+    stage_evidence_reference: runmat_execution::value::ValueRef,
 }
 
 impl CompletedMeshingStage {
@@ -66,8 +67,16 @@ impl CompletedMeshingStage {
         &self.stage_evidence
     }
 
+    pub const fn stage_evidence_reference(&self) -> &runmat_execution::value::ValueRef {
+        &self.stage_evidence_reference
+    }
+
     pub fn attempt_success(&self) -> runmat_execution_runner::AttemptSuccess {
-        self.publication.attempt_success()
+        let mut success = self.publication.attempt_success();
+        success
+            .result_objects
+            .push(self.stage_evidence_reference.clone());
+        success
     }
 }
 
@@ -224,11 +233,6 @@ where
     let publication =
         prepare_result_publication(stage_objects, host.artifact_access.clone(), limits)
             .map_err(|error| map_artifact_limit(&host, error))?;
-    for object in &publication.stage_objects().objects {
-        store
-            .write_verified(object)
-            .map_err(MeshingExecutionError::from)?;
-    }
     let manifest_digest =
         StableDigest::from_bytes(*publication.stage_objects().root.digest.bytes());
     let workload_result = MeshingWorkloadResult::Validated {
@@ -237,10 +241,29 @@ where
     workload_result.validate_against(&host.workload)?;
     let stage_evidence = control.stage_evidence(host.workload.partition.clone(), manifest_digest);
     stage_evidence.validate()?;
+    let prepared_evidence = crate::stage_evidence_object::prepare_stage_evidence_observation(
+        &host,
+        stage_evidence.clone(),
+        limits,
+    )?;
+    crate::stage_evidence_object::validate_complete_result_inventory(
+        &publication.stage_objects().objects,
+        &prepared_evidence.object,
+        limits,
+    )?;
+    for object in &publication.stage_objects().objects {
+        store
+            .write_verified(object)
+            .map_err(MeshingExecutionError::from)?;
+    }
+    store
+        .write_verified(&prepared_evidence.object)
+        .map_err(MeshingExecutionError::from)?;
     Ok(CompletedMeshingStage {
         workload_result,
         publication,
         stage_evidence,
+        stage_evidence_reference: prepared_evidence.reference,
     })
 }
 

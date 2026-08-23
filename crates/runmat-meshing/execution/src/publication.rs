@@ -168,6 +168,15 @@ fn object_reference(
     } else {
         CHUNK_SCHEMA
     };
+    result_object_reference(object, access, value_schema)
+}
+
+pub(crate) fn result_object_reference(
+    object: &LogicalObject,
+    access: &MeshingArtifactAccess,
+    value_schema: &str,
+) -> MeshingExecutionResult<ValueRef> {
+    object.validate()?;
     let reference = ValueRef {
         schema_version: VALUE_PAYLOAD_SCHEMA_V1,
         id: access.value_id(object.descriptor.digest),

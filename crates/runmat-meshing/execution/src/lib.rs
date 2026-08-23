@@ -26,6 +26,7 @@ mod response;
 mod serial;
 mod solver_projection_kernel;
 mod solver_terminal_kernel;
+mod stage_evidence_object;
 mod surface_join_kernel;
 mod surface_kernel;
 mod task;
@@ -106,6 +107,9 @@ pub use solver_projection_kernel::{
 };
 pub use solver_terminal_kernel::{
     SolverPublicationKernel, SolverSerializationKernel, SolverValidationKernel,
+};
+pub use stage_evidence_object::{
+    import_stage_evidence_observation, STAGE_EVIDENCE_MEDIA_TYPE, STAGE_EVIDENCE_VALUE_SCHEMA,
 };
 pub use surface_join_kernel::ExactSurfaceJoinKernel;
 pub use surface_kernel::ExactSurfacePartitionKernel;

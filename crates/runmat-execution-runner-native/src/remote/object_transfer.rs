@@ -13,7 +13,8 @@ use crate::{NativeExecutionError, NativeExecutionResult};
 
 pub(super) const MAX_REMOTE_OBJECT_BYTES: u64 = 64 * 1024 * 1024;
 pub(super) const MAX_REMOTE_OBJECT_CHUNK_BYTES: usize = 256 * 1024;
-pub(super) const MAX_REMOTE_OBJECTS: usize = 65_538;
+pub(super) const MAX_REMOTE_OBJECTS: usize =
+    runmat_execution_artifact::MAX_PROGRAM_EXECUTION_RESULT_OBJECTS;
 pub(super) const MAX_REMOTE_OBJECT_TOTAL_BYTES: u64 = 256 * 1024 * 1024;
 
 struct PartialObject {

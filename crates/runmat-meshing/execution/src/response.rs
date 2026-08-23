@@ -10,12 +10,12 @@ use runmat_meshing_core::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    stage_evidence_object::{validate_stage_evidence_inventory, validate_stage_evidence_result},
     CompletedMeshingStage, MeshingArtifactAccess, MeshingExecutionError, MeshingExecutionResult,
     MeshingHostWorkload, MeshingSerialExecutionError, MESHING_STAGE_MANIFEST_MEDIA_TYPE,
 };
 
 pub const MESHING_HOST_RESPONSE_SCHEMA_VERSION: u16 = 3;
-const MAX_RESULT_OBJECTS: usize = 65_538;
 const STAGE_MANIFEST_SCHEMA: &str = "runmat.meshing.stage-manifest.v2";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -87,7 +87,7 @@ impl MeshingHostResponse {
                 stage_manifest_digest,
                 stage_evidence,
                 root,
-                result_objects: _,
+                result_objects,
                 ..
             } => {
                 MeshingWorkloadResult::Validated {
@@ -95,6 +95,7 @@ impl MeshingHostResponse {
                 }
                 .validate_against(&host.workload)?;
                 stage_evidence.validate()?;
+                validate_stage_evidence_inventory(host, stage_evidence, result_objects)?;
                 if stage_evidence.stage != host.workload.stage
                     || stage_evidence.partition != host.workload.partition
                     || stage_evidence.stage_result_digest != *stage_manifest_digest
@@ -169,7 +170,8 @@ impl MeshingHostResponse {
                     || root.media_type != MESHING_STAGE_MANIFEST_MEDIA_TYPE
                     || root.value_schema != STAGE_MANIFEST_SCHEMA
                     || result_objects.is_empty()
-                    || result_objects.len() > MAX_RESULT_OBJECTS
+                    || result_objects.len()
+                        > runmat_execution_artifact::MAX_PROGRAM_EXECUTION_RESULT_OBJECTS
                 {
                     return Err(MeshingExecutionError::Invalid(
                         "validated meshing host response has an invalid root or inventory".into(),
@@ -180,6 +182,7 @@ impl MeshingHostResponse {
                     encryption_context: root.encryption_context,
                 };
                 access.validate()?;
+                validate_stage_evidence_result(&access, stage_evidence, result_objects)?;
                 let mut value_ids = BTreeSet::new();
                 let mut logical_digests = BTreeSet::new();
                 let mut contains_root = false;

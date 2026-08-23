@@ -295,9 +295,24 @@ async fn parent() {
         panic!("native meshing child returned a non-object root")
     };
     let store = session.object_store();
-    let imported =
-        import_result_publication(&store, root, host.artifact_access, limits().inventory).unwrap();
-    assert_eq!(imported.result_objects(), result_objects);
+    let imported = import_result_publication(
+        &store,
+        root,
+        host.artifact_access.clone(),
+        limits().inventory,
+    )
+    .unwrap();
+    assert!(imported
+        .result_objects()
+        .iter()
+        .all(|reference| result_objects.contains(reference)));
+    runmat_meshing_execution::import_stage_evidence_observation(
+        &store,
+        &host,
+        &result_objects,
+        limits().inventory,
+    )
+    .unwrap();
 
     let mut progress = NoopMeshingProgress;
     let mut local_store = store.clone();
@@ -496,7 +511,17 @@ async fn remote_conformance() {
             limits().inventory,
         )
         .unwrap();
-        assert_eq!(imported.result_objects(), success.result_objects);
+        assert!(imported
+            .result_objects()
+            .iter()
+            .all(|reference| success.result_objects.contains(reference)));
+        runmat_meshing_execution::import_stage_evidence_observation(
+            &remote_store,
+            &host,
+            &success.result_objects,
+            limits().inventory,
+        )
+        .unwrap();
 
         for (object, reference) in exact
             .input

@@ -8,7 +8,7 @@ use crate::{ArtifactError, ArtifactResult};
 
 pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_V1: u16 = 1;
 pub const MAX_PROGRAM_EXECUTION_ARGUMENTS: usize = 4096;
-pub const MAX_PROGRAM_EXECUTION_RESULT_OBJECTS: usize = 65_538;
+pub const MAX_PROGRAM_EXECUTION_RESULT_OBJECTS: usize = 65_539;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

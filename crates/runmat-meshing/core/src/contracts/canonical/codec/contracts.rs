@@ -4,11 +4,11 @@ use super::{encode_contract, CanonicalMeshingContract, MeshingCanonicalLimits};
 use crate::contracts::canonical::{
     AlgorithmVersionSet, GeometryTolerancePolicy, MeshingContractError, MeshingDomainModel,
     MeshingEvidence, MeshingFailure, MeshingJoinIdentity, MeshingPartitionDescriptor,
-    MeshingPartitionIdentity, MeshingProgress, MeshingRequest, MeshingStageIdentity,
-    MeshingStageManifest, MeshingStageResultIdentity, MeshingValidationIdentity,
-    MeshingWorkloadRequest, MeshingWorkloadResult, MetricFieldRequest, SolverMeshAdaptationLineage,
-    SolverMeshArtifact, SolverMeshProjection, SolverMeshTransferMap, SolverMeshValidation,
-    StableDigest,
+    MeshingPartitionIdentity, MeshingProgress, MeshingRequest, MeshingStageEvidence,
+    MeshingStageIdentity, MeshingStageManifest, MeshingStageResultIdentity,
+    MeshingValidationIdentity, MeshingWorkloadRequest, MeshingWorkloadResult, MetricFieldRequest,
+    SolverMeshAdaptationLineage, SolverMeshArtifact, SolverMeshProjection, SolverMeshTransferMap,
+    SolverMeshValidation, StableDigest,
 };
 
 macro_rules! canonical_contract {
@@ -137,6 +137,12 @@ canonical_contract!(
     "analysis.mesh.progress/v2",
     MeshingCanonicalLimits::IDENTITY,
     MeshingProgress::validate
+);
+canonical_contract!(
+    MeshingStageEvidence,
+    "analysis.mesh.stage-evidence/v2",
+    MeshingCanonicalLimits::MANIFEST,
+    MeshingStageEvidence::validate
 );
 
 impl CanonicalMeshingContract for MeshingWorkloadResult {
