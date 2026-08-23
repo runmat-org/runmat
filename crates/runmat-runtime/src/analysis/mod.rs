@@ -14824,11 +14824,6 @@ fn initial_boundary_focus_sizing_field(
     {
         return None;
     }
-    if runmat_meshing_core::select_volume_backend(options).selected
-        != runmat_meshing_core::MeshBackendKind::Solid
-    {
-        return None;
-    }
     let defaults = if matches!(options.refinement.strategy, RefinementStrategy::Uniform) {
         Vec::new()
     } else {

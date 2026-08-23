@@ -4,8 +4,8 @@ use runmat_meshing_cad::{
     CadEvaluationModel,
 };
 use runmat_meshing_core::{
-    quality::predicate::Point3, AnalysisMeshArtifact, MeshBackendKind, MeshSizingField,
-    TopologyEntityId, VolumeMeshingOptions,
+    quality::predicate::Point3, AnalysisMeshArtifact, MeshSizingField, TopologyEntityId,
+    VolumeMeshingOptions,
 };
 use runmat_meshing_curve::{
     build_curve_mesh_contract, discretize_cad_topology_curves_with_sizing_and_provider,
@@ -22,7 +22,6 @@ use runmat_meshing_tetrahedron::{
         TetrahedronBoundarySmoothingProjection, TetrahedronBoundarySmoothingProjector,
     },
     recover::recover_tetrahedron_mesh_from_plc,
-    structured_grid,
 };
 
 mod artifact;
@@ -45,19 +44,7 @@ pub fn generate_analysis_mesh(
     geometry: &GeometryAsset,
     options: VolumeMeshingOptions,
 ) -> Result<AnalysisMeshArtifact, SolidMeshingError> {
-    match options.backend {
-        MeshBackendKind::Auto | MeshBackendKind::Solid => generate_solid_analysis_mesh(
-            geometry,
-            &VolumeMeshingOptions {
-                backend: MeshBackendKind::Solid,
-                ..options
-            },
-        ),
-        MeshBackendKind::StructuredGridTetrahedron => {
-            structured_grid::generate_analysis_mesh(geometry, options)
-                .map_err(SolidMeshingError::StructuredGrid)
-        }
-    }
+    generate_solid_analysis_mesh(geometry, &options)
 }
 
 pub fn generate_analysis_mesh_with_sizing(
@@ -65,20 +52,7 @@ pub fn generate_analysis_mesh_with_sizing(
     options: VolumeMeshingOptions,
     sizing: &MeshSizingField,
 ) -> Result<AnalysisMeshArtifact, SolidMeshingError> {
-    match options.backend {
-        MeshBackendKind::Auto | MeshBackendKind::Solid => generate_solid_analysis_mesh_with_sizing(
-            geometry,
-            &VolumeMeshingOptions {
-                backend: MeshBackendKind::Solid,
-                ..options
-            },
-            sizing,
-        ),
-        MeshBackendKind::StructuredGridTetrahedron => {
-            structured_grid::generate_analysis_mesh_with_sizing(geometry, options, sizing)
-                .map_err(SolidMeshingError::StructuredGrid)
-        }
-    }
+    generate_solid_analysis_mesh_with_sizing(geometry, &options, sizing)
 }
 
 pub fn generate_solid_analysis_mesh(

@@ -17,10 +17,9 @@ use runmat_meshing_core::fixtures::{
 };
 use runmat_meshing_core::{
     validate_analysis_mesh, validate_analysis_mesh_with_options, AnalysisFieldTopologyLocation,
-    AnalysisMeshValidationOptions, MeshBackendKind, MeshSizingField, MeshTargetSize,
-    QualityThresholds, SizingSample, SourceEntityKind, VolumeMeshingOptions,
-    ANALYSIS_MESH_BOUNDARY_FACE_TOPOLOGY_ID, ANALYSIS_MESH_FIELD_TOPOLOGY_ID,
-    TETRAHEDRON4_FIELD_ELEMENT_KIND, TRI3_FIELD_ELEMENT_KIND,
+    AnalysisMeshValidationOptions, MeshSizingField, MeshTargetSize, QualityThresholds,
+    SizingSample, SourceEntityKind, VolumeMeshingOptions, ANALYSIS_MESH_BOUNDARY_FACE_TOPOLOGY_ID,
+    ANALYSIS_MESH_FIELD_TOPOLOGY_ID, TETRAHEDRON4_FIELD_ELEMENT_KIND, TRI3_FIELD_ELEMENT_KIND,
 };
 
 use crate::visualization::{
@@ -29,9 +28,9 @@ use crate::visualization::{
 };
 
 #[test]
-fn auto_backend_recovers_plc_constraints_for_cube() {
+fn solid_pipeline_recovers_plc_constraints_for_cube() {
     let mesh = generate_analysis_mesh(&cube_geometry(), VolumeMeshingOptions::default())
-        .expect("auto backend should run the root solid pipeline");
+        .expect("solid pipeline should generate the mesh");
 
     assert_eq!(mesh.backend.backend, "solid");
     assert_eq!(mesh.backend.algorithm, "plc_tetrahedron/v1");
@@ -292,7 +291,7 @@ fn solid_curve_evaluator_provider_filters_geometry_curve_samples() {
 }
 
 #[test]
-fn auto_backend_preserves_recovered_material_regions_for_split_cube() {
+fn solid_pipeline_preserves_recovered_material_regions_for_split_cube() {
     let mesh = generate_analysis_mesh(
         &split_material_cube_geometry(),
         VolumeMeshingOptions::default(),
@@ -328,7 +327,7 @@ fn auto_backend_preserves_recovered_material_regions_for_split_cube() {
 }
 
 #[test]
-fn auto_backend_generates_thin_arm_solid() {
+fn solid_pipeline_generates_thin_arm_solid() {
     let mesh = generate_analysis_mesh(&thin_arm_geometry(), VolumeMeshingOptions::default())
         .expect("thin arm should run through the root solid pipeline");
 
@@ -627,7 +626,7 @@ fn explicit_sizing_generates_solve_ready_convex_octahedron_mesh() {
 }
 
 #[test]
-fn auto_backend_generates_faceted_cylinder_solid() {
+fn solid_pipeline_generates_faceted_cylinder_solid() {
     let mesh = generate_analysis_mesh(
         &faceted_cylinder_geometry(),
         VolumeMeshingOptions::default(),
@@ -653,7 +652,7 @@ fn auto_backend_generates_faceted_cylinder_solid() {
 }
 
 #[test]
-fn auto_backend_generates_nested_tetrahedron_shell_solid() {
+fn solid_pipeline_generates_nested_tetrahedron_shell_solid() {
     let mesh = generate_analysis_mesh(
         &nested_tetrahedron_shell_geometry(),
         VolumeMeshingOptions {
@@ -709,7 +708,7 @@ fn auto_backend_generates_nested_tetrahedron_shell_solid() {
 }
 
 #[test]
-fn auto_backend_generates_star_shaped_dented_corner_solid() {
+fn solid_pipeline_generates_star_shaped_dented_corner_solid() {
     let mesh = generate_analysis_mesh(
         &dented_corner_box_geometry(),
         VolumeMeshingOptions::default(),
@@ -760,7 +759,7 @@ fn auto_backend_generates_star_shaped_dented_corner_solid() {
 }
 
 #[test]
-fn auto_backend_generates_through_hole_solid() {
+fn solid_pipeline_generates_through_hole_solid() {
     let geometry = through_hole_plate_geometry();
     let mesh = generate_analysis_mesh(&geometry, VolumeMeshingOptions::default())
         .expect("through-hole plate solid should run through the root solid pipeline");
@@ -828,7 +827,7 @@ fn through_hole_solid_remains_holed_polyhedron_with_generated_sizing() {
 }
 
 #[test]
-fn auto_backend_generates_close_parallel_wall_slot_solid() {
+fn solid_pipeline_generates_close_parallel_wall_slot_solid() {
     let geometry = close_parallel_wall_slot_geometry();
     let mesh = generate_analysis_mesh(&geometry, VolumeMeshingOptions::default())
         .expect("close-wall through-slot solid should run through the root solid pipeline");
@@ -872,7 +871,7 @@ fn auto_backend_generates_close_parallel_wall_slot_solid() {
 }
 
 #[test]
-fn auto_backend_preserves_recovered_material_regions_for_through_hole_solid() {
+fn solid_pipeline_preserves_recovered_material_regions_for_through_hole_solid() {
     let geometry = split_material_through_hole_plate_geometry();
     let mesh = generate_analysis_mesh(&geometry, VolumeMeshingOptions::default())
         .expect("split-region through-hole solid should recover material ownership");
@@ -915,7 +914,7 @@ fn auto_backend_preserves_recovered_material_regions_for_through_hole_solid() {
 }
 
 #[test]
-fn auto_backend_generates_split_material_close_parallel_wall_slot_solid() {
+fn solid_pipeline_generates_split_material_close_parallel_wall_slot_solid() {
     let geometry = split_material_close_parallel_wall_slot_geometry();
     let mesh = generate_analysis_mesh(&geometry, VolumeMeshingOptions::default())
         .expect("split-material close-wall slot should run through the root solid pipeline");
@@ -1066,7 +1065,7 @@ fn expected_boundary_face_vector(
 }
 
 #[test]
-fn auto_backend_preserves_recovered_material_regions_for_dented_corner_solid() {
+fn solid_pipeline_preserves_recovered_material_regions_for_dented_corner_solid() {
     let mesh = generate_analysis_mesh(
         &split_material_dented_corner_box_geometry(),
         VolumeMeshingOptions::default(),
@@ -1106,21 +1105,7 @@ fn auto_backend_preserves_recovered_material_regions_for_dented_corner_solid() {
 }
 
 #[test]
-fn explicit_structured_grid_tetrahedron_backend_runs_structured_stage() {
-    let mesh = generate_analysis_mesh(
-        &cube_geometry(),
-        VolumeMeshingOptions {
-            backend: MeshBackendKind::StructuredGridTetrahedron,
-            ..VolumeMeshingOptions::default()
-        },
-    )
-    .expect("explicit structured-grid Tetrahedron backend should run explicitly");
-
-    assert_eq!(mesh.backend.backend, "structured_grid_tetrahedron");
-}
-
-#[test]
-fn auto_backend_rejects_open_shell_before_volume_meshing() {
+fn solid_pipeline_rejects_open_shell_before_volume_meshing() {
     let err = generate_analysis_mesh(&open_shell_cube_geometry(), VolumeMeshingOptions::default())
         .expect_err("open shell should fail before volume meshing");
 
@@ -1131,7 +1116,7 @@ fn auto_backend_rejects_open_shell_before_volume_meshing() {
 }
 
 #[test]
-fn auto_backend_rejects_nonmanifold_edge_before_volume_meshing() {
+fn solid_pipeline_rejects_nonmanifold_edge_before_volume_meshing() {
     let err = generate_analysis_mesh(
         &nonmanifold_edge_cube_geometry(),
         VolumeMeshingOptions::default(),

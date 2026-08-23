@@ -1,5 +1,5 @@
 use runmat_meshing_core::{
-    MeshBackendKind, MeshKindRequest, MeshTargetSize, VolumeElementKind, VolumeMeshingOptions,
+    MeshKindRequest, MeshTargetSize, VolumeElementKind, VolumeMeshingOptions,
 };
 
 use super::SolidMeshingError;
@@ -7,12 +7,6 @@ use super::SolidMeshingError;
 pub(super) fn validate_solid_options(
     options: &VolumeMeshingOptions,
 ) -> Result<(), SolidMeshingError> {
-    if !matches!(
-        options.backend,
-        MeshBackendKind::Solid | MeshBackendKind::Auto
-    ) {
-        return Err(SolidMeshingError::UnsupportedBackend(options.backend));
-    }
     if !matches!(options.kind, MeshKindRequest::Solid) {
         return Err(SolidMeshingError::UnsupportedMeshKind(options.kind));
     }

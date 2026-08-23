@@ -1,15 +1,14 @@
 use runmat_meshing_cad::{CadEvaluationError, CadTopologyError, SourceTopologyError};
-use runmat_meshing_core::{MeshBackendKind, MeshKindRequest, VolumeElementKind};
+use runmat_meshing_core::{MeshKindRequest, VolumeElementKind};
 use runmat_meshing_curve::{CurveDiscretizationError, CurveValidationError};
 use runmat_meshing_plc::{build::PlcBuildError, validate::PlcValidationError};
 use runmat_meshing_surface::{SurfaceDiscretizationError, SurfaceValidationError};
 use runmat_meshing_tetrahedron::{
-    generate::TetrahedronGenerationError, recover::TetrahedronRecoveryError, structured_grid,
+    generate::TetrahedronGenerationError, recover::TetrahedronRecoveryError,
 };
 
 #[derive(Debug)]
 pub enum SolidMeshingError {
-    UnsupportedBackend(MeshBackendKind),
     UnsupportedMeshKind(MeshKindRequest),
     UnsupportedElementKind(VolumeElementKind),
     InvalidElementBudget,
@@ -25,15 +24,11 @@ pub enum SolidMeshingError {
     ProtectedBoundaryValidation(PlcValidationError),
     Tetrahedron(TetrahedronGenerationError),
     TetrahedronRecovery(TetrahedronRecoveryError),
-    StructuredGrid(structured_grid::MeshingError),
 }
 
 impl std::fmt::Display for SolidMeshingError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::UnsupportedBackend(backend) => {
-                write!(formatter, "unsupported solid meshing backend: {backend:?}")
-            }
             Self::UnsupportedMeshKind(kind) => {
                 write!(formatter, "unsupported analysis mesh kind: {kind:?}")
             }
@@ -61,12 +56,6 @@ impl std::fmt::Display for SolidMeshingError {
             Self::Tetrahedron(err) => write!(formatter, "Tetrahedron generation failed: {err}"),
             Self::TetrahedronRecovery(err) => {
                 write!(formatter, "Tetrahedron recovery queue failed: {err}")
-            }
-            Self::StructuredGrid(err) => {
-                write!(
-                    formatter,
-                    "structured-grid Tetrahedron meshing failed: {err}"
-                )
             }
         }
     }

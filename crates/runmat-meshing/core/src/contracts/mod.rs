@@ -1,7 +1,6 @@
 pub const MESHING_CONTRACT_SCHEMA_VERSION: &str = "meshing-contracts/v1";
 
 pub mod artifact;
-pub mod backend;
 pub mod boundary;
 pub mod cad;
 pub mod canonical;
@@ -25,7 +24,6 @@ pub use artifact::{
     ANALYSIS_MESH_BOUNDARY_EDGE_TOPOLOGY_ID, ANALYSIS_MESH_BOUNDARY_FACE_TOPOLOGY_ID,
     ANALYSIS_MESH_FIELD_TOPOLOGY_ID, TETRAHEDRON4_FIELD_ELEMENT_KIND, TRI3_FIELD_ELEMENT_KIND,
 };
-pub use backend::{select_volume_backend, MeshBackendKind, MeshBackendSelection};
 pub use boundary::{BoundaryMeshInput, BoundaryMeshTriangle};
 pub use cad::{
     CadEdgeContract, CadEvaluatorCapabilities, CadFaceContract, CadModel, CadShellContract,

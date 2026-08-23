@@ -13,7 +13,6 @@ pub use contracts::artifact::{
     ANALYSIS_MESH_BOUNDARY_EDGE_TOPOLOGY_ID, ANALYSIS_MESH_BOUNDARY_FACE_TOPOLOGY_ID,
     ANALYSIS_MESH_FIELD_TOPOLOGY_ID, TETRAHEDRON4_FIELD_ELEMENT_KIND, TRI3_FIELD_ELEMENT_KIND,
 };
-pub use contracts::backend::{select_volume_backend, MeshBackendKind, MeshBackendSelection};
 pub use contracts::boundary::{BoundaryMeshInput, BoundaryMeshTriangle};
 pub use contracts::canonical::{
     build_chunked_stage_payload, build_closed_stage_manifest, decode_stage_manifest_streams,

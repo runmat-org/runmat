@@ -91,7 +91,7 @@ fn canonical_request_round_trips_and_rejects_unknown_fields() {
     assert_eq!(decoded, request);
 
     let mut value = serde_json::to_value(&request).unwrap();
-    value["backend"] = serde_json::json!("structured_grid_tetrahedron");
+    value["backend"] = serde_json::json!("removed");
     assert!(serde_json::from_value::<MeshingRequest>(value).is_err());
 }
 
