@@ -6,6 +6,7 @@ use crate::{ProcessHostError, ProcessHostResult};
 pub enum HiddenMode {
     TestWorker,
     ExecutionWorker,
+    MeshingWorker,
     ExecutionDriver,
     LocalSupervisor,
 }
@@ -15,6 +16,7 @@ impl HiddenMode {
         match self {
             Self::TestWorker => "--__runmat-test-worker",
             Self::ExecutionWorker => "--__runmat-execution-worker",
+            Self::MeshingWorker => "--__runmat-meshing-worker",
             Self::ExecutionDriver => "--__runmat-execution-driver",
             Self::LocalSupervisor => "--__runmat-local-supervisor",
         }
@@ -55,6 +57,7 @@ impl HiddenModeRegistry {
         [
             HiddenMode::TestWorker,
             HiddenMode::ExecutionWorker,
+            HiddenMode::MeshingWorker,
             HiddenMode::ExecutionDriver,
             HiddenMode::LocalSupervisor,
         ]

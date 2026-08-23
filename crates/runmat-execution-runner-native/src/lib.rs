@@ -22,10 +22,13 @@ mod worker;
 pub use config::NativeExecutionConfig;
 pub use driver::NATIVE_OBJECT_STORE_ROOT_ENV;
 pub use error::{NativeExecutionError, NativeExecutionResult};
-pub use exact_geometry_admission::{admit_exact_geometry, ExactGeometryAdmissionError};
+pub use exact_geometry_admission::{
+    admit_prepared_exact_geometry, prepare_exact_geometry_admission, ExactGeometryAdmissionError,
+    PreparedExactGeometryAdmission,
+};
 pub use exact_meshing_executor::{NativeExactMeshingExecutor, NativeMeshingExecutionPolicy};
 pub use exact_meshing_job::{
-    mesh_exact_geometry, NativeExactMeshingJob, NativeExactMeshingJobError,
+    mesh_exact_geometry, NativeExactMeshingJob, NativeExactMeshingJobError, NativeMeshingDomain,
 };
 pub use meshing_evaluator::{native_meshing_kernel_dispatcher, NativeMeshingEvaluatorProvider};
 pub use meshing_host::{

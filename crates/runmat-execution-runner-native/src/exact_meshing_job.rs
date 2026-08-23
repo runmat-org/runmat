@@ -1,10 +1,15 @@
 //! One-call native composition of exact geometry admission and the canonical meshing DAG.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::cache::CacheExport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_geometry_io::{ExactCadImportOptions, GeometryImportContext};
-use runmat_meshing_core::{MeshingDomainModel, MeshingRequest};
+use runmat_meshing_core::{
+    MeshingDomainModel, MeshingRequest, RegionMaterialAssignment,
+    MESHING_DOMAIN_MODEL_SCHEMA_VERSION,
+};
 use runmat_meshing_execution::{
     execute_exact_meshing_dag, prepare_domain_model_input, prepare_domain_model_objects,
     ExactMeshingDagRun, ExactMeshingDagRunError, ExactMeshingDagRunResult, MeshingArtifactAccess,
@@ -12,16 +17,23 @@ use runmat_meshing_execution::{
 };
 
 use crate::{
-    admit_exact_geometry, ExactGeometryAdmissionError, NativeExactMeshingExecutor,
+    admit_prepared_exact_geometry, prepare_exact_geometry_admission, ExactGeometryAdmissionError,
+    NativeExactMeshingExecutor, NativeExecutionConfig, NativeExecutionError,
     NativeMeshingExecutionPolicy, NativeProgramSession,
 };
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NativeMeshingDomain {
+    pub default_material_id: Option<String>,
+    pub region_materials: BTreeMap<String, String>,
+}
 
 pub struct NativeExactMeshingJob<'a> {
     pub source_name: &'a str,
     pub source_bytes: &'a [u8],
     pub import_options: ExactCadImportOptions,
     pub request: MeshingRequest,
-    pub domain_model: MeshingDomainModel,
+    pub domain: NativeMeshingDomain,
     pub program_revision: ProgramRevision,
     pub capability_cohort: Option<String>,
     pub preferred_edges_per_partition: u32,
@@ -37,12 +49,16 @@ pub enum NativeExactMeshingJobError {
     Admission(#[from] ExactGeometryAdmissionError),
     #[error("meshing request tolerance differs from exact geometry import policy")]
     ToleranceMismatch,
+    #[error("native meshing domain is invalid: {0}")]
+    InvalidDomain(String),
     #[error("domain-model artifact preparation failed: {0}")]
     DomainModel(#[from] runmat_meshing_execution::MeshingExecutionError),
     #[error("domain-model object persistence failed: {0}")]
     Store(#[from] runmat_execution_artifact::ArtifactError),
     #[error("native meshing executor configuration failed: {0}")]
     Executor(#[from] runmat_meshing_execution::MeshingStageExecutionError),
+    #[error("native execution session failed: {0}")]
+    Session(#[from] NativeExecutionError),
     #[error(transparent)]
     Run(#[from] ExactMeshingDagRunError),
 }
@@ -53,32 +69,45 @@ pub enum NativeExactMeshingJobError {
 /// user-managed artifact credentials. The returned artifact identity remains independent of that
 /// physical authority.
 pub fn mesh_exact_geometry(
-    session: &NativeProgramSession,
+    mut config: NativeExecutionConfig,
     mut job: NativeExactMeshingJob<'_>,
 ) -> Result<ExactMeshingDagRunResult, NativeExactMeshingJobError> {
-    let access = session_artifact_access(session);
-    let geometry = admit_exact_geometry(
-        session,
+    let prepared_geometry = prepare_exact_geometry_admission(
         job.source_name,
         job.source_bytes,
         &job.import_options,
         &GeometryImportContext::new(),
-        access.clone(),
         job.inventory_limits,
     )?;
-    let admitted_tolerance = geometry.geometry_objects().document.tolerance;
+    let admitted_tolerance = prepared_geometry.document().tolerance;
     if !same_requested_tolerance(&job.request.tolerance, &admitted_tolerance) {
         return Err(NativeExactMeshingJobError::ToleranceMismatch);
     }
     job.request.tolerance = admitted_tolerance;
+    job.evidence.platform.exact_kernel_abi =
+        prepared_geometry.document().source.kernel_version.clone();
+    let domain_model = resolve_domain_model(prepared_geometry.topology(), &job.domain)?;
+    config.enable_exact_meshing(
+        prepared_geometry.document(),
+        &job.request,
+        job.capability_cohort.as_deref(),
+    )?;
+    let session = NativeProgramSession::new(config)?;
+    let access = session_artifact_access(&session);
+    let geometry = admit_prepared_exact_geometry(
+        &session,
+        prepared_geometry,
+        access.clone(),
+        job.inventory_limits,
+    )?;
 
-    let domain_objects = prepare_domain_model_objects(job.domain_model, job.inventory_limits)?;
+    let domain_objects = prepare_domain_model_objects(domain_model, job.inventory_limits)?;
     let domain = prepare_domain_model_input(domain_objects, access.clone(), job.inventory_limits)?;
     let mut store = session.object_store();
     for object in &domain.domain_model_objects().objects {
         store.write_verified(object)?;
     }
-    let mut executor = NativeExactMeshingExecutor::new(session, job.execution)?;
+    let mut executor = NativeExactMeshingExecutor::new(&session, job.execution)?;
     execute_exact_meshing_dag(
         ExactMeshingDagRun {
             geometry: &geometry,
@@ -95,6 +124,53 @@ pub fn mesh_exact_geometry(
         &mut executor,
     )
     .map_err(NativeExactMeshingJobError::from)
+}
+
+fn resolve_domain_model(
+    topology: &runmat_geometry_core::ExactBRepTopology,
+    domain: &NativeMeshingDomain,
+) -> Result<MeshingDomainModel, NativeExactMeshingJobError> {
+    let mut matched = BTreeSet::new();
+    let mut region_materials = Vec::with_capacity(topology.regions.len());
+    for region in &topology.regions {
+        let source_id = &region.id.source_topology_id;
+        let material_id = if let Some(material_id) = domain.region_materials.get(source_id) {
+            matched.insert(source_id.clone());
+            material_id.clone()
+        } else {
+            domain.default_material_id.clone().ok_or_else(|| {
+                NativeExactMeshingJobError::InvalidDomain(format!(
+                    "exact region {source_id:?} has no material assignment"
+                ))
+            })?
+        };
+        region_materials.push(RegionMaterialAssignment {
+            region_id: region.id.clone(),
+            material_id,
+        });
+    }
+    if let Some(unknown) = domain
+        .region_materials
+        .keys()
+        .find(|source_id| !matched.contains(*source_id))
+    {
+        return Err(NativeExactMeshingJobError::InvalidDomain(format!(
+            "material assignment names unknown exact region {unknown:?}"
+        )));
+    }
+    let model = MeshingDomainModel {
+        schema_version: MESHING_DOMAIN_MODEL_SCHEMA_VERSION,
+        region_materials,
+        contact_ids: topology
+            .contacts
+            .iter()
+            .map(|contact| contact.id.clone())
+            .collect(),
+    };
+    model
+        .validate_against_exact_topology(topology)
+        .map_err(|error| NativeExactMeshingJobError::InvalidDomain(error.to_string()))?;
+    Ok(model)
 }
 
 fn session_artifact_access(session: &NativeProgramSession) -> MeshingArtifactAccess {
@@ -125,6 +201,8 @@ mod tests {
     use runmat_geometry_core::GeometryTolerancePolicy;
 
     use super::same_requested_tolerance;
+    #[cfg(feature = "occt-native")]
+    use super::{resolve_domain_model, NativeMeshingDomain};
 
     #[test]
     fn source_tolerance_is_resolved_by_import_but_user_policy_must_match() {
@@ -140,5 +218,54 @@ mod tests {
         assert!(same_requested_tolerance(&requested, &admitted));
         admitted.requested_deviation_m = 2.0e-4;
         assert!(!same_requested_tolerance(&requested, &admitted));
+    }
+
+    #[cfg(feature = "occt-native")]
+    #[test]
+    fn uniform_material_intent_resolves_after_exact_import() {
+        let imported = runmat_geometry_io::import_exact_cad(
+            "box.brep",
+            include_bytes!("../../runmat-geometry/io/tests/fixtures/box.brep"),
+            runmat_geometry_io::GeometryFormat::Brep,
+            &runmat_geometry_io::ExactCadImportOptions::default(),
+            &runmat_geometry_io::GeometryImportContext::new(),
+        )
+        .unwrap();
+        let model = resolve_domain_model(
+            &imported.topology,
+            &NativeMeshingDomain {
+                default_material_id: Some("steel".into()),
+                region_materials: Default::default(),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            model.region_materials.len(),
+            imported.topology.regions.len()
+        );
+        assert!(model
+            .region_materials
+            .iter()
+            .all(|assignment| assignment.material_id == "steel"));
+    }
+
+    #[cfg(feature = "occt-native")]
+    #[test]
+    fn material_intent_rejects_missing_and_unknown_regions() {
+        let imported = runmat_geometry_io::import_exact_cad(
+            "box.brep",
+            include_bytes!("../../runmat-geometry/io/tests/fixtures/box.brep"),
+            runmat_geometry_io::GeometryFormat::Brep,
+            &runmat_geometry_io::ExactCadImportOptions::default(),
+            &runmat_geometry_io::GeometryImportContext::new(),
+        )
+        .unwrap();
+        assert!(resolve_domain_model(&imported.topology, &NativeMeshingDomain::default()).is_err());
+
+        let domain = NativeMeshingDomain {
+            default_material_id: Some("steel".into()),
+            region_materials: [("not-a-region".into(), "copper".into())].into(),
+        };
+        assert!(resolve_domain_model(&imported.topology, &domain).is_err());
     }
 }

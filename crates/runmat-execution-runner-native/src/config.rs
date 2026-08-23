@@ -45,6 +45,9 @@ impl NativeExecutionConfig {
         request: &runmat_meshing_core::MeshingRequest,
         capability_cohort: Option<&str>,
     ) -> NativeExecutionResult<()> {
+        self.worker_arguments = vec![runmat_process_host::HiddenMode::MeshingWorker
+            .marker()
+            .to_string()];
         self.worker_capabilities.extend(
             runmat_meshing_execution::exact_meshing_worker_capabilities(
                 document,

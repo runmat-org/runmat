@@ -3,7 +3,8 @@ use runmat_config::runtime::RunMatRuntimeConfig;
 
 use crate::cli::{Cli, Commands};
 use crate::commands::{
-    accel, batch, benchmark, check, compile, config, gc, job, package, repl, script, test, version,
+    accel, batch, benchmark, check, compile, config, gc, job, mesh, package, repl, script, test,
+    version,
 };
 use crate::remote;
 
@@ -56,6 +57,31 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeCon
             )
             .await
         }
+        Commands::Mesh {
+            source,
+            output,
+            evidence,
+            target_size,
+            deviation,
+            element_order,
+            material,
+            max_elements,
+            seed,
+            force,
+            json,
+        } => mesh::execute(mesh::MeshCommand {
+            source,
+            output,
+            evidence,
+            target_size_m: target_size,
+            maximum_deviation_m: deviation,
+            element_order,
+            material,
+            maximum_elements: max_elements,
+            deterministic_seed: seed,
+            force,
+            json,
+        }),
         Commands::Compile {
             file,
             output,

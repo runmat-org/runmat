@@ -8,7 +8,8 @@ use uuid::Uuid;
 use crate::cli::parse::{parse_bool_env, parse_figure_size, parse_log_level_env};
 use crate::cli::remote::{FsCommand, OrgCommand, ProjectCommand, RemoteCommand};
 use crate::cli::value_types::{
-    AotOptLevel, AotPolicy, CaptureFiguresMode, FigureSize, GcPreset, LogLevel, OptLevel,
+    AotOptLevel, AotPolicy, CaptureFiguresMode, FigureSize, GcPreset, LogLevel,
+    MeshElementOrderArg, OptLevel,
 };
 use crate::cli::ColorMode;
 use crate::cli::TestArgs;
@@ -238,6 +239,41 @@ pub enum Commands {
         /// Arguments to pass to script
         #[arg(last = true)]
         args: Vec<String>,
+    },
+    /// Generate a validated solver mesh and factual meshing evidence from exact CAD
+    Mesh {
+        /// STEP, IGES, or B-rep source geometry
+        source: PathBuf,
+        /// Canonical solver-mesh output path
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Canonical meshing-evidence output path
+        #[arg(long)]
+        evidence: Option<PathBuf>,
+        /// Global target edge length in meters
+        #[arg(long, default_value_t = 0.01)]
+        target_size: f64,
+        /// Maximum curve and surface chordal deviation in meters
+        #[arg(long, default_value_t = 0.0001)]
+        deviation: f64,
+        /// Tetrahedral element order
+        #[arg(long, value_enum, default_value = "tet4")]
+        element_order: MeshElementOrderArg,
+        /// Material assigned to every exact solid region
+        #[arg(long, default_value = "material")]
+        material: String,
+        /// Hard maximum generated element count
+        #[arg(long, default_value_t = 10_000_000)]
+        max_elements: u64,
+        /// Deterministic meshing seed
+        #[arg(long, default_value_t = 0)]
+        seed: u64,
+        /// Replace existing output files atomically
+        #[arg(long)]
+        force: bool,
+        /// Emit a machine-readable result summary
+        #[arg(long)]
+        json: bool,
     },
     /// Compile a MATLAB program into a standalone native executable
     Compile {

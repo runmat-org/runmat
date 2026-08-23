@@ -8,7 +8,7 @@ use runmat_geometry_io::{
 };
 use runmat_meshing_execution::{
     prepare_exact_geometry_input, prepare_exact_geometry_objects, MeshingArtifactAccess,
-    PreparedExactGeometryInput,
+    PreparedExactGeometryInput, PreparedExactGeometryObjects,
 };
 
 use crate::NativeProgramSession;
@@ -27,17 +27,28 @@ pub enum ExactGeometryAdmissionError {
     Store(#[from] runmat_execution_artifact::ArtifactError),
 }
 
-/// Imports exact CAD, writes its canonical object closure into `session`, and returns the bounded
-/// execution input references. No source bytes or physical paths enter the geometry identity.
-pub fn admit_exact_geometry(
-    session: &NativeProgramSession,
+pub struct PreparedExactGeometryAdmission {
+    objects: PreparedExactGeometryObjects,
+}
+
+impl PreparedExactGeometryAdmission {
+    pub fn document(&self) -> &runmat_geometry_core::GeometryDocument {
+        &self.objects.document
+    }
+
+    pub fn topology(&self) -> &runmat_geometry_core::ExactBRepTopology {
+        &self.objects.topology
+    }
+}
+
+/// Imports and validates exact CAD without selecting an execution session or artifact authority.
+pub fn prepare_exact_geometry_admission(
     source_name: &str,
     bytes: &[u8],
     options: &ExactCadImportOptions,
     import_context: &GeometryImportContext,
-    artifact_access: MeshingArtifactAccess,
     limits: ObjectInventoryLimits,
-) -> Result<PreparedExactGeometryInput, ExactGeometryAdmissionError> {
+) -> Result<PreparedExactGeometryAdmission, ExactGeometryAdmissionError> {
     let format = detect_geometry_format(source_name, bytes);
     if !matches!(
         format,
@@ -47,7 +58,7 @@ pub fn admit_exact_geometry(
     }
     let imported = import_exact_cad(source_name, bytes, format, options, import_context)?;
     let document = imported.geometry_document()?;
-    let geometry = prepare_exact_geometry_objects(
+    let objects = prepare_exact_geometry_objects(
         document,
         imported.topology,
         imported.evaluators,
@@ -55,11 +66,21 @@ pub fn admit_exact_geometry(
         imported.healing_report,
         limits,
     )?;
+    Ok(PreparedExactGeometryAdmission { objects })
+}
+
+/// Binds a prepared exact closure to one session authority and persists it atomically.
+pub fn admit_prepared_exact_geometry(
+    session: &NativeProgramSession,
+    prepared: PreparedExactGeometryAdmission,
+    artifact_access: MeshingArtifactAccess,
+    limits: ObjectInventoryLimits,
+) -> Result<PreparedExactGeometryInput, ExactGeometryAdmissionError> {
     let mut store = session.object_store();
-    for object in &geometry.objects {
+    for object in &prepared.objects.objects {
         store.write_verified(object)?;
     }
-    prepare_exact_geometry_input(geometry, artifact_access, limits)
+    prepare_exact_geometry_input(prepared.objects, artifact_access, limits)
         .map_err(ExactGeometryAdmissionError::from)
 }
 
@@ -98,17 +119,11 @@ mod tests {
 
     #[test]
     fn non_cad_input_is_rejected_before_artifact_publication() {
-        let (_directory, session) = session();
-        let result = admit_exact_geometry(
-            &session,
+        let result = prepare_exact_geometry_admission(
             "surface.stl",
             b"solid surface\nendsolid surface\n",
             &ExactCadImportOptions::default(),
             &GeometryImportContext::new(),
-            MeshingArtifactAccess {
-                authorization_scope: "exact-admission-test".into(),
-                encryption_context: Digest::sha256(b"exact-admission-test"),
-            },
             ObjectInventoryLimits::default(),
         );
         assert!(matches!(
@@ -126,16 +141,15 @@ mod tests {
             encryption_context: Digest::sha256(b"exact-admission-test"),
         };
         let limits = ObjectInventoryLimits::default();
-        let admitted = admit_exact_geometry(
-            &session,
+        let prepared = prepare_exact_geometry_admission(
             "box.brep",
             BOX,
             &ExactCadImportOptions::default(),
             &GeometryImportContext::new(),
-            access,
             limits,
         )
         .unwrap();
+        let admitted = admit_prepared_exact_geometry(&session, prepared, access, limits).unwrap();
         let geometry = admitted.geometry_objects();
         let root = geometry.root_reference();
         let document = geometry.document.clone();

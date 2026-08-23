@@ -57,6 +57,10 @@ runmat-native-codegen = { workspace = true, features = ["compiler"] }
 runmat-execution = { workspace = true }
 runmat-execution-artifact = { workspace = true }
 runmat-execution-runner-native = { workspace = true }
+runmat-geometry-core = { workspace = true }
+runmat-geometry-io = { workspace = true }
+runmat-meshing-core = { workspace = true }
+runmat-meshing-execution = { workspace = true }
 runmat-process-host = { workspace = true }
 runmat-parser = { version = "=0.6.2", path = "../runmat-parser" }
 runmat-hir = { version = "=0.6.2", path = "../runmat-hir" }
