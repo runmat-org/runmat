@@ -18,6 +18,7 @@ use crate::task::validate_inputs;
 use crate::{MeshingArtifactAccess, MeshingExecutionError, MeshingExecutionResult};
 
 pub const MESHING_HOST_WORKLOAD_SCHEMA_VERSION: u16 = 2;
+pub const MESHING_HOST_ABI: &str = "host-v2";
 pub const MESHING_HOST_EXECUTION_MODE: &str = "meshing";
 pub const MESHING_HOST_TARGET_PROFILE: &str = "portable-meshing-host-v2";
 const HOST_ENTRYPOINT: &str = "meshing_workload";

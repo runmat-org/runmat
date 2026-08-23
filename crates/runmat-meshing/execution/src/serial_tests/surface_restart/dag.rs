@@ -14,9 +14,23 @@ fn exact_meshing_dag_plans_initial_curve_batches_and_an_order_independent_join()
     .unwrap();
     let planner =
         crate::ExactMeshingDagPlanner::from_exact_host(&fixture.host, exact_root.clone()).unwrap();
+    let product_planner = crate::ExactMeshingDagPlanner::new(
+        &exact,
+        fixture.host.resolved_request.clone(),
+        fixture.host.artifact_access.clone(),
+        fixture.host.stage_identity.capability_cohort.clone(),
+    )
+    .unwrap();
     let pass = planner
         .initial_curve_pass(&exact.geometry_objects().topology, 3)
         .unwrap();
+    assert_eq!(
+        product_planner
+            .initial_curve_pass(&exact.geometry_objects().topology, 3)
+            .unwrap()
+            .partitions(),
+        pass.partitions()
+    );
     assert_eq!(pass.partitions().len(), 2);
     for (index, stage) in pass.partitions().iter().enumerate() {
         assert_eq!(
@@ -56,6 +70,44 @@ fn exact_meshing_dag_plans_initial_curve_batches_and_an_order_independent_join()
         MeshingPartitionKind::DeterministicJoin
     );
     assert!(planner.curve_join(&pass, Vec::new()).is_err());
+}
+
+#[test]
+fn exact_meshing_dag_product_boundary_rejects_mismatched_authority_and_tolerance() {
+    let fixture = Fixture::with_exact_tetrahedron_curve_partition();
+    let exact_root = root(&fixture.program.arguments[0]);
+    let exact = import_exact_geometry_input(
+        &fixture.store,
+        fixture.host.geometry_document.clone().unwrap(),
+        &exact_root,
+        fixture.host.artifact_access.clone(),
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+
+    let mut wrong_access = fixture.host.artifact_access.clone();
+    wrong_access.authorization_scope.push_str("-other");
+    assert!(crate::ExactMeshingDagPlanner::new(
+        &exact,
+        fixture.host.resolved_request.clone(),
+        wrong_access,
+        fixture.host.stage_identity.capability_cohort.clone(),
+    )
+    .unwrap_err()
+    .to_string()
+    .contains("artifact authority"));
+
+    let mut wrong_tolerance = fixture.host.resolved_request.clone();
+    wrong_tolerance.tolerance.absolute_floor_m *= 2.0;
+    assert!(crate::ExactMeshingDagPlanner::new(
+        &exact,
+        wrong_tolerance,
+        fixture.host.artifact_access.clone(),
+        fixture.host.stage_identity.capability_cohort.clone(),
+    )
+    .unwrap_err()
+    .to_string()
+    .contains("tolerance differs"));
 }
 
 #[test]
