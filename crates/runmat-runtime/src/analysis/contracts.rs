@@ -694,6 +694,7 @@ pub struct QualityReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AnalysisRunOptions {
     pub deterministic_mode: bool,
     pub precision_mode: PrecisionMode,
@@ -704,7 +705,7 @@ pub struct AnalysisRunOptions {
     #[serde(default)]
     pub prep_artifact_id: Option<String>,
     #[serde(default)]
-    pub analysis_mesh_artifact_path: Option<String>,
+    pub solver_mesh_artifact_path: Option<String>,
     #[serde(default)]
     pub prep_calibration_profile: Option<PrepCalibrationProfile>,
 }
@@ -756,7 +757,7 @@ impl Default for AnalysisRunOptions {
             quality_policy: QualityPolicy::Balanced,
             prep_context: None,
             prep_artifact_id: None,
-            analysis_mesh_artifact_path: None,
+            solver_mesh_artifact_path: None,
             prep_calibration_profile: None,
         }
     }
@@ -2331,6 +2332,7 @@ pub struct AnalysisOutputRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AnalysisStudySpec {
     pub study_id: String,
     pub geometry: GeometryAsset,
@@ -2344,9 +2346,9 @@ pub struct AnalysisStudySpec {
     #[serde(default)]
     pub outputs: Vec<AnalysisOutputRequest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub analysis_mesh_artifact_path: Option<String>,
+    pub solver_mesh_artifact_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub analysis_mesh_evidence_artifact_path: Option<String>,
+    pub meshing_evidence_artifact_path: Option<String>,
     #[serde(default)]
     pub linear_static_run_options: Option<AnalysisRunOptions>,
     #[serde(default)]
@@ -2400,9 +2402,9 @@ pub struct AnalysisStudyAuthoringIntent {
     pub run_kind: AnalysisRunKind,
     pub backend: ComputeBackend,
     #[serde(default)]
-    pub analysis_mesh_artifact_path: Option<String>,
+    pub solver_mesh_artifact_path: Option<String>,
     #[serde(default)]
-    pub analysis_mesh_evidence_artifact_path: Option<String>,
+    pub meshing_evidence_artifact_path: Option<String>,
     #[serde(default)]
     pub material_region_id: Option<String>,
     #[serde(default)]
@@ -2462,9 +2464,9 @@ pub struct AnalysisStudyAuthoringEvidence {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diagram_confidence: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub analysis_mesh_artifact_path: Option<String>,
+    pub solver_mesh_artifact_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub analysis_mesh_evidence_artifact_path: Option<String>,
+    pub meshing_evidence_artifact_path: Option<String>,
     pub material_region_source: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub boundary_condition_region_source: Option<String>,
@@ -2518,13 +2520,9 @@ pub struct AnalysisStudyRunData {
     #[serde(default)]
     pub prep_artifact_id: Option<String>,
     #[serde(default)]
-    pub analysis_mesh_artifact_path: Option<String>,
+    pub solver_mesh_artifact_path: Option<String>,
     #[serde(default)]
-    pub analysis_mesh_evidence_artifact_path: Option<String>,
-    #[serde(default)]
-    pub refined_analysis_mesh_artifact_path: Option<String>,
-    #[serde(default)]
-    pub refined_analysis_mesh_evidence_artifact_path: Option<String>,
+    pub meshing_evidence_artifact_path: Option<String>,
     pub study_fingerprint: String,
     pub operation_sequence: Vec<String>,
     pub run_operation: String,

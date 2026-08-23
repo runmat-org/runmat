@@ -766,8 +766,8 @@ fn sample_linear_static_study_spec() -> AnalysisStudySpec {
         backend: ComputeBackend::Cpu,
         mesh_options: Some(runmat_meshing_core::VolumeMeshingOptions::default()),
         outputs: Vec::new(),
-        analysis_mesh_artifact_path: None,
-        analysis_mesh_evidence_artifact_path: None,
+        solver_mesh_artifact_path: None,
+        meshing_evidence_artifact_path: None,
         linear_static_run_options: None,
         modal_run_options: None,
         acoustic_run_options: None,
@@ -795,8 +795,8 @@ fn sample_electromagnetic_study_spec() -> AnalysisStudySpec {
         backend: ComputeBackend::Cpu,
         mesh_options: None,
         outputs: Vec::new(),
-        analysis_mesh_artifact_path: None,
-        analysis_mesh_evidence_artifact_path: None,
+        solver_mesh_artifact_path: None,
+        meshing_evidence_artifact_path: None,
         linear_static_run_options: None,
         modal_run_options: None,
         acoustic_run_options: None,
@@ -808,6 +808,31 @@ fn sample_electromagnetic_study_spec() -> AnalysisStudySpec {
         nonlinear_run_options: None,
         electromagnetic_run_options: None,
     }
+}
+
+#[test]
+fn runtime_contracts_reject_retired_mesh_artifact_field_names() {
+    let mut study = serde_json::to_value(sample_linear_static_study_spec())
+        .expect("study contract should serialize");
+    study
+        .as_object_mut()
+        .expect("study should serialize as an object")
+        .insert(
+            "analysis_mesh_artifact_path".to_owned(),
+            serde_json::Value::String("retired.json".to_owned()),
+        );
+    assert!(serde_json::from_value::<AnalysisStudySpec>(study).is_err());
+
+    let mut options =
+        serde_json::to_value(AnalysisRunOptions::default()).expect("run options should serialize");
+    options
+        .as_object_mut()
+        .expect("run options should serialize as an object")
+        .insert(
+            "analysis_mesh_artifact_path".to_owned(),
+            serde_json::Value::String("retired.json".to_owned()),
+        );
+    assert!(serde_json::from_value::<AnalysisRunOptions>(options).is_err());
 }
 
 #[test]
@@ -2034,7 +2059,7 @@ fn analysis_run_study_executes_linear_static_path() {
     let mut spec = sample_linear_static_study_spec();
     let (solver_mesh_root, solver_mesh_path) =
         write_ready_minimal_analysis_mesh_artifact("run-study-solver-mesh");
-    spec.analysis_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
+    spec.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
 
     let envelope = analysis_run_study_op(&spec, OperationContext::new(None, None))
         .expect("study run should succeed");
@@ -2086,13 +2111,13 @@ fn analysis_run_study_executes_linear_static_path() {
     assert_eq!(persisted.result_quality, envelope.data.result_quality);
     assert_eq!(persisted.quality_reasons, envelope.data.quality_reasons);
     assert_eq!(persisted.provenance, envelope.data.provenance);
-    let analysis_mesh_artifact_path = envelope
+    let solver_mesh_artifact_path = envelope
         .data
-        .analysis_mesh_artifact_path
+        .solver_mesh_artifact_path
         .as_ref()
         .expect("study run should preserve the canonical solver mesh artifact");
     let solver_mesh = runmat_meshing_core::SolverMeshArtifact::canonical_decode(
-        &fs::read(analysis_mesh_artifact_path).expect("read canonical solver mesh artifact"),
+        &fs::read(solver_mesh_artifact_path).expect("read canonical solver mesh artifact"),
     )
     .expect("decode canonical solver mesh artifact");
     let solver_node_count = solver_mesh.topology.nodes.len();
@@ -2152,14 +2177,14 @@ fn analysis_run_study_preserves_requested_canonical_solver_mesh_artifact() {
     spec.model = Some(model);
     let (solver_mesh_root, solver_mesh_path) =
         write_ready_minimal_analysis_mesh_artifact("requested-canonical-solver-mesh");
-    spec.analysis_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
+    spec.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
 
     let envelope = analysis_run_study_op(&spec, OperationContext::new(None, None))
         .expect("study run should succeed");
 
     let artifact_path = envelope
         .data
-        .analysis_mesh_artifact_path
+        .solver_mesh_artifact_path
         .as_ref()
         .expect("study run should preserve solver mesh artifact path");
     assert_eq!(artifact_path, &solver_mesh_path.display().to_string());
@@ -2205,8 +2230,8 @@ fn analysis_author_study_uses_mesh_authoring_summary_regions() {
             profile: AnalysisCreateModelProfile::LinearStaticStructural,
             run_kind: AnalysisRunKind::LinearStatic,
             backend: ComputeBackend::Cpu,
-            analysis_mesh_artifact_path: None,
-            analysis_mesh_evidence_artifact_path: None,
+            solver_mesh_artifact_path: None,
+            meshing_evidence_artifact_path: None,
             material_region_id: None,
             boundary_condition_region_id: None,
             driving_condition_region_id: None,
@@ -2377,8 +2402,8 @@ fn analysis_author_study_preserves_non_structural_profile_defaults() {
             profile: AnalysisCreateModelProfile::ElectromagneticStatic,
             run_kind: AnalysisRunKind::Electromagnetic,
             backend: ComputeBackend::Cpu,
-            analysis_mesh_artifact_path: None,
-            analysis_mesh_evidence_artifact_path: None,
+            solver_mesh_artifact_path: None,
+            meshing_evidence_artifact_path: None,
             material_region_id: Some("solid".to_string()),
             boundary_condition_region_id: Some("ground".to_string()),
             driving_condition_region_id: Some("coil".to_string()),
@@ -2460,8 +2485,8 @@ fn analysis_author_study_records_modal_driver_without_structural_force_evidence(
             profile: AnalysisCreateModelProfile::ModalStructural,
             run_kind: AnalysisRunKind::Modal,
             backend: ComputeBackend::Cpu,
-            analysis_mesh_artifact_path: None,
-            analysis_mesh_evidence_artifact_path: None,
+            solver_mesh_artifact_path: None,
+            meshing_evidence_artifact_path: None,
             material_region_id: Some("solid".to_string()),
             boundary_condition_region_id: Some("root".to_string()),
             driving_condition_region_id: Some("tip".to_string()),
@@ -2554,8 +2579,8 @@ fn analysis_author_study_persists_nested_shell_generation_evidence() {
             profile: AnalysisCreateModelProfile::LinearStaticStructural,
             run_kind: AnalysisRunKind::LinearStatic,
             backend: ComputeBackend::Cpu,
-            analysis_mesh_artifact_path: None,
-            analysis_mesh_evidence_artifact_path: None,
+            solver_mesh_artifact_path: None,
+            meshing_evidence_artifact_path: None,
             material_region_id: Some("body".to_string()),
             boundary_condition_region_id: Some("root".to_string()),
             driving_condition_region_id: Some("tip".to_string()),
@@ -2661,8 +2686,8 @@ fn analysis_author_study_uses_diagram_observation_when_regions_are_not_requested
             profile: AnalysisCreateModelProfile::LinearStaticStructural,
             run_kind: AnalysisRunKind::LinearStatic,
             backend: ComputeBackend::Cpu,
-            analysis_mesh_artifact_path: None,
-            analysis_mesh_evidence_artifact_path: None,
+            solver_mesh_artifact_path: None,
+            meshing_evidence_artifact_path: None,
             material_region_id: None,
             boundary_condition_region_id: None,
             driving_condition_region_id: None,
@@ -2774,8 +2799,8 @@ fn analysis_author_study_rejects_not_solve_ready_mesh_summary() {
             profile: AnalysisCreateModelProfile::LinearStaticStructural,
             run_kind: AnalysisRunKind::LinearStatic,
             backend: ComputeBackend::Cpu,
-            analysis_mesh_artifact_path: None,
-            analysis_mesh_evidence_artifact_path: None,
+            solver_mesh_artifact_path: None,
+            meshing_evidence_artifact_path: None,
             material_region_id: None,
             boundary_condition_region_id: None,
             driving_condition_region_id: None,
@@ -2909,7 +2934,7 @@ fn analysis_run_study_sweep_executes_multiple_studies() {
     let mut linear = sample_linear_static_study_spec();
     let (solver_mesh_root, solver_mesh_path) =
         write_ready_minimal_analysis_mesh_artifact("run-study-sweep-solver-mesh");
-    linear.analysis_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
+    linear.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
     let electromagnetic = sample_electromagnetic_study_spec();
     let sweep_spec = AnalysisStudySweepSpec {
         sweep_id: "study_sweep_001".to_string(),
@@ -2992,7 +3017,7 @@ fn analysis_run_study_sweep_can_continue_on_study_failure() {
     let mut valid = sample_linear_static_study_spec();
     let (solver_mesh_root, solver_mesh_path) =
         write_ready_minimal_analysis_mesh_artifact("run-study-sweep-continue-solver-mesh");
-    valid.analysis_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
+    valid.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
     let spec = AnalysisStudySweepSpec {
         sweep_id: "study_sweep_continue".to_string(),
         studies: vec![valid, invalid],
@@ -3195,7 +3220,7 @@ fn analysis_run_linear_static_returns_typed_envelope() {
             quality_policy: QualityPolicy::Balanced,
             prep_context: Some(sample_analysis_run_prep_context()),
             prep_artifact_id: Some(prep_artifact_id),
-            analysis_mesh_artifact_path: None,
+            solver_mesh_artifact_path: None,
             prep_calibration_profile: None,
         },
         context,
@@ -3255,7 +3280,7 @@ fn analysis_run_linear_static_with_thermo_mechanical_coupling_reports_fields() {
             quality_policy: QualityPolicy::Balanced,
             prep_context: None,
             prep_artifact_id: None,
-            analysis_mesh_artifact_path: Some(mesh_path.display().to_string()),
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
             prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-linear-thermo-fields".to_string()), None),
@@ -5265,7 +5290,7 @@ fn requested_preconditioner_fallback_is_recorded() {
             quality_policy: QualityPolicy::Balanced,
             prep_context: None,
             prep_artifact_id: None,
-            analysis_mesh_artifact_path: Some(mesh_path.display().to_string()),
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
             prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-preconditioner-fallback".to_string()), None),
@@ -5297,7 +5322,7 @@ fn ilu_preconditioner_fallback_is_recorded_when_solver_uses_jacobi() {
             quality_policy: QualityPolicy::Balanced,
             prep_context: None,
             prep_artifact_id: None,
-            analysis_mesh_artifact_path: Some(mesh_path.display().to_string()),
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
             prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-preconditioner-ilu".to_string()), None),
@@ -5334,7 +5359,7 @@ fn quality_policy_exploratory_allows_publishable_warn_path() {
             quality_policy: QualityPolicy::Exploratory,
             prep_context: None,
             prep_artifact_id: None,
-            analysis_mesh_artifact_path: None,
+            solver_mesh_artifact_path: None,
             prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-quality-policy-exploratory".to_string()), None),
@@ -5395,7 +5420,7 @@ fn quality_policy_balanced_allows_publishable_with_quality_reasons() {
             quality_policy: QualityPolicy::Balanced,
             prep_context: None,
             prep_artifact_id: None,
-            analysis_mesh_artifact_path: None,
+            solver_mesh_artifact_path: None,
             prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-quality-policy-balanced".to_string()), None),
@@ -5453,7 +5478,7 @@ fn quality_policy_strict_rejects_publishable_with_quality_reasons() {
             quality_policy: QualityPolicy::Strict,
             prep_context: None,
             prep_artifact_id: None,
-            analysis_mesh_artifact_path: None,
+            solver_mesh_artifact_path: None,
             prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-quality-policy-strict".to_string()), None),
@@ -5480,7 +5505,7 @@ fn direct_solid_run_without_solver_mesh_fails_closed() {
             quality_policy: QualityPolicy::Balanced,
             prep_context: None,
             prep_artifact_id: None,
-            analysis_mesh_artifact_path: None,
+            solver_mesh_artifact_path: None,
             prep_calibration_profile: None,
         },
         OperationContext::new(

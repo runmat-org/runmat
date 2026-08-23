@@ -41,8 +41,8 @@ pub(super) fn create_author_study_object_from_args(args: Vec<Value>) -> BuiltinR
     let mut boundary_condition_region_id = None::<String>;
     let mut driving_condition_region_id = None::<String>;
     let mut structural_force_n = None::<[f64; 3]>;
-    let mut analysis_mesh_artifact_path = None::<String>;
-    let mut analysis_mesh_evidence_artifact_path = None::<String>;
+    let mut solver_mesh_artifact_path = None::<String>;
+    let mut meshing_evidence_artifact_path = None::<String>;
     let mut diagram_observation = None::<AnalysisStudyDiagramObservation>;
 
     for pair in args[3..].chunks(2) {
@@ -89,11 +89,11 @@ pub(super) fn create_author_study_object_from_args(args: Vec<Value>) -> BuiltinR
                 )?);
             }
             "analysismeshartifactpath" | "meshartifactpath" => {
-                analysis_mesh_artifact_path =
+                solver_mesh_artifact_path =
                     Some(scalar_string(&pair[1], AUTHOR_STUDY_NAME, &ERROR_INPUT)?);
             }
             "analysismeshevidenceartifactpath" | "meshevidenceartifactpath" => {
-                analysis_mesh_evidence_artifact_path =
+                meshing_evidence_artifact_path =
                     Some(scalar_string(&pair[1], AUTHOR_STUDY_NAME, &ERROR_INPUT)?);
             }
             "diagramobservation" | "diagramevidence" | "diagram" => {
@@ -141,8 +141,8 @@ pub(super) fn create_author_study_object_from_args(args: Vec<Value>) -> BuiltinR
             profile,
             run_kind,
             backend,
-            analysis_mesh_artifact_path,
-            analysis_mesh_evidence_artifact_path,
+            solver_mesh_artifact_path,
+            meshing_evidence_artifact_path,
             material_region_id,
             boundary_condition_region_id,
             driving_condition_region_id,
@@ -551,7 +551,7 @@ mod tests {
             summary,
             Value::String("Profile".to_string()),
             Value::String("linear_static_structural".to_string()),
-            Value::String("AnalysisMeshArtifactPath".to_string()),
+            Value::String("SolverMeshArtifactPath".to_string()),
             Value::String(mesh_path.clone()),
             Value::String("StructuralForceN".to_string()),
             Value::Tensor(
@@ -571,7 +571,7 @@ mod tests {
         let decoded_study: crate::analysis::AnalysisStudySpec =
             serde_json::from_str(study_payload).expect("authored study should decode");
         assert_eq!(
-            decoded_study.analysis_mesh_artifact_path.as_deref(),
+            decoded_study.solver_mesh_artifact_path.as_deref(),
             Some(mesh_path.as_str())
         );
 
@@ -591,7 +591,7 @@ mod tests {
         assert!(run_data.publishable);
         assert_eq!(run_data.quality_reasons.len(), 0);
         assert_eq!(
-            run_data.analysis_mesh_artifact_path.as_deref(),
+            run_data.solver_mesh_artifact_path.as_deref(),
             Some(mesh_path.as_str())
         );
     }
@@ -639,7 +639,7 @@ mod tests {
             summary,
             Value::String("Profile".to_string()),
             Value::String("linear_static_structural".to_string()),
-            Value::String("AnalysisMeshArtifactPath".to_string()),
+            Value::String("SolverMeshArtifactPath".to_string()),
             Value::String(mesh_path.clone()),
         ])
         .expect("minimal authoring inputs should produce a runnable generic study");
@@ -666,7 +666,7 @@ mod tests {
         };
         assert_eq!([fx, fy, fz], [0.0, -1000.0, 0.0]);
         assert_eq!(
-            decoded_study.analysis_mesh_artifact_path.as_deref(),
+            decoded_study.solver_mesh_artifact_path.as_deref(),
             Some(mesh_path.as_str())
         );
 
@@ -686,7 +686,7 @@ mod tests {
         assert!(run_data.publishable);
         assert_eq!(run_data.quality_reasons.len(), 0);
         assert_eq!(
-            run_data.analysis_mesh_artifact_path.as_deref(),
+            run_data.solver_mesh_artifact_path.as_deref(),
             Some(mesh_path.as_str())
         );
     }

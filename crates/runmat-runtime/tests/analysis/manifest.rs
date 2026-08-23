@@ -2358,7 +2358,7 @@ pub(super) fn default_options() -> AnalysisRunOptions {
         quality_policy: QualityPolicy::Balanced,
         prep_context: None,
         prep_artifact_id: None,
-        analysis_mesh_artifact_path: None,
+        solver_mesh_artifact_path: None,
         prep_calibration_profile: None,
     }
 }
