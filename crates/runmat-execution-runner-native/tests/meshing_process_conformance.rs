@@ -26,20 +26,21 @@ use runmat_meshing_core::{
     MeshingProgress, MeshingQualityTargets, MeshingRequest, MeshingResourceBudget,
     MeshingStageIdentity, MeshingStageKind, MeshingWorkloadRequest, MetricCombinationRule,
     MetricFieldRequest, MetricTensor3, NeverCancelled, StableDigest, SurfaceQualityTargets,
-    VolumeQualityTargets, MESHING_IDENTITY_SCHEMA_VERSION, MESHING_REQUEST_SCHEMA_VERSION,
-    MESHING_WORKLOAD_SCHEMA_VERSION,
+    VolumeQualityTargets, MESHING_DOMAIN_MODEL_SCHEMA_VERSION, MESHING_IDENTITY_SCHEMA_VERSION,
+    MESHING_REQUEST_SCHEMA_VERSION, MESHING_WORKLOAD_SCHEMA_VERSION,
 };
 use runmat_meshing_execution::{
-    build_task_submission, import_result_publication, prepare_exact_geometry_input,
-    prepare_exact_geometry_objects, prepare_faceted_geometry_input,
-    prepare_faceted_geometry_objects, MeshingArtifactAccess, MeshingExecutionContext,
-    MeshingHostWorkload, MeshingStageCheckpoint, MeshingStageInvocation, MeshingStageKernel,
-    MeshingTaskEffectPolicy, NoopMeshingProgress, PreparedExactGeometryInput,
+    build_task_submission, import_result_publication, prepare_domain_model_input,
+    prepare_domain_model_objects, prepare_exact_geometry_input, prepare_exact_geometry_objects,
+    prepare_faceted_geometry_input, prepare_faceted_geometry_objects, MeshingArtifactAccess,
+    MeshingExecutionContext, MeshingHostWorkload, MeshingStageCheckpoint, MeshingStageInvocation,
+    MeshingStageKernel, MeshingTaskEffectPolicy, NoopMeshingProgress, PreparedExactGeometryInput,
     ValidatedMeshingStageOutput,
 };
 
 use runmat_execution_runner_native::{
-    execute_meshing_program_request, run_meshing_worker_stdio, run_remote_meshing_worker_quic,
+    execute_meshing_program_request, native_meshing_kernel_dispatcher, run_meshing_worker_stdio,
+    run_remote_meshing_worker_quic, NativeExactMeshingExecutor, NativeMeshingExecutionPolicy,
     NativeMeshingHostLimits, NativeProgramSession, QuicRemoteWorkerChannel, RemotePoolDriver,
     RemoteWorkerChannel, RemoteWorkerChannelConfig, NATIVE_OBJECT_STORE_ROOT_ENV,
 };
@@ -237,6 +238,10 @@ fn main() {
             );
             return;
         }
+        if mode == "--exact-dag-child" {
+            run_child(native_meshing_kernel_dispatcher(), Path::new(&root));
+            return;
+        }
     }
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -346,6 +351,7 @@ async fn parent() {
     assert!(matches!(rejected, ProgramExecutionResponse::Failure { .. }));
 
     exact_input::native_conformance().await;
+    exact_input::native_dag_conformance();
     faceted_input::native_conformance().await;
     curve_pipeline::native_conformance().await;
     curve_pipeline::durable_conformance().await;
@@ -819,6 +825,10 @@ fn worker_capabilities() -> BTreeSet<Capability> {
         Capability::Custom("runmat.meshing.algorithm:geometry/v2".into()),
         Capability::Custom("runmat.meshing.algorithm:curve/v2".into()),
         Capability::Custom("runmat.meshing.algorithm:surface/v2".into()),
+        Capability::Custom("runmat.meshing.algorithm:plc/v2".into()),
+        Capability::Custom("runmat.meshing.algorithm:tetrahedron/v2".into()),
+        Capability::Custom("runmat.meshing.algorithm:optimization/v2".into()),
+        Capability::Custom("runmat.meshing.algorithm:validation/v2".into()),
         Capability::Custom("runmat.meshing.element-order:tet4".into()),
         Capability::Custom("runmat.meshing.cohort:native-cohort-v1".into()),
     ])

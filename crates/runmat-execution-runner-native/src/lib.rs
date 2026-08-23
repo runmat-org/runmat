@@ -5,6 +5,7 @@ mod driver;
 mod durable;
 mod error;
 mod exact_geometry_admission;
+mod exact_meshing_executor;
 mod local_store;
 mod materialized_project;
 mod meshing_evaluator;
@@ -21,6 +22,7 @@ pub use config::NativeExecutionConfig;
 pub use driver::NATIVE_OBJECT_STORE_ROOT_ENV;
 pub use error::{NativeExecutionError, NativeExecutionResult};
 pub use exact_geometry_admission::{admit_exact_geometry, ExactGeometryAdmissionError};
+pub use exact_meshing_executor::{NativeExactMeshingExecutor, NativeMeshingExecutionPolicy};
 pub use meshing_evaluator::{native_meshing_kernel_dispatcher, NativeMeshingEvaluatorProvider};
 pub use meshing_host::{
     execute_meshing_program_request, run_meshing_worker_stdio, NativeMeshingHostLimits,
