@@ -15,6 +15,7 @@ pub(super) struct FacetRecoveryWork<'a> {
     cavity_apex_attempts: u64,
     cavity_steiner_nodes: u64,
     cavity_steiner_insertion_attempts: u64,
+    last_rejection: Option<String>,
 }
 
 impl<'a> FacetRecoveryWork<'a> {
@@ -32,7 +33,20 @@ impl<'a> FacetRecoveryWork<'a> {
             cavity_apex_attempts: 0,
             cavity_steiner_nodes: 0,
             cavity_steiner_insertion_attempts: 0,
+            last_rejection: None,
         }
+    }
+
+    pub(super) fn clear_rejection(&mut self) {
+        self.last_rejection = None;
+    }
+
+    pub(super) fn reject(&mut self, reason: impl Into<String>) {
+        self.last_rejection = Some(reason.into());
+    }
+
+    pub(super) fn last_rejection(&self) -> Option<&str> {
+        self.last_rejection.as_deref()
     }
 
     pub(super) fn search_step(

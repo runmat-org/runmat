@@ -1,8 +1,6 @@
 use std::collections::BTreeSet;
 
-use runmat_meshing_core::{
-    predicate::incircle2d_symbolic, MeshingCancellationSignal, PredicateSign,
-};
+use runmat_meshing_core::{predicate::incircle2d, MeshingCancellationSignal, PredicateSign};
 
 use crate::{
     validate_exact_face_delaunay, ExactFaceBoundary, ExactFaceDelaunay, ExactFaceDelaunayError,
@@ -130,7 +128,8 @@ fn restore_delaunay(
             .map(|index| {
                 super::super::triangulation::predicate_point(pslg.vertices[index as usize], index)
             });
-            if incircle2d_symbolic(query).map_err(|e| control.predicate_error(e))?
+            if incircle2d(query.map(|point| point.coordinates))
+                .map_err(|e| control.predicate_error(e))?
                 != PredicateSign::Positive
             {
                 continue;

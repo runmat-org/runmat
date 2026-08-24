@@ -90,7 +90,7 @@ pub fn build_delaunay_volume_point_set(
     for (index, node) in nodes.iter().copied().enumerate() {
         topology =
             insert_delaunay_volume_node_mutation(topology, node, working_options, cancellation)
-                .map_err(insertion_error)?;
+                .map_err(|failure| insertion_error_at_node(failure, index, node))?;
         if cfg!(debug_assertions)
             || (index as u64 + 1).is_multiple_of(options.validation_check_interval)
         {
@@ -339,6 +339,23 @@ fn insertion_error(error_value: DelaunayInsertionError) -> DelaunayPointSetError
         | DelaunayInsertionErrorKind::InvalidTopology => DelaunayPointSetErrorKind::InvalidTopology,
     };
     error(kind, error_value.to_string())
+}
+
+fn insertion_error_at_node(
+    error_value: DelaunayInsertionError,
+    index: usize,
+    node: DelaunayVolumeNode,
+) -> DelaunayPointSetError {
+    let mut mapped = insertion_error(error_value);
+    mapped.reason = format!(
+        "{} while inserting canonical node {index} ({:?}, [{}, {}, {}])",
+        mapped.reason,
+        node.identity,
+        node.coordinates_m[0],
+        node.coordinates_m[1],
+        node.coordinates_m[2]
+    );
+    mapped
 }
 
 fn topology_error(error_value: DelaunayTopologyError) -> DelaunayPointSetError {

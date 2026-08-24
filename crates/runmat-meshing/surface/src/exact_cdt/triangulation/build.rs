@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_meshing_core::{
-    predicate::{incircle2d_symbolic, orient2d_symbolic},
+    predicate::{incircle2d, orient2d_symbolic},
     MeshingCancellationSignal, PlanarPredicatePoint, PredicateSign, StableDigest,
 };
 
@@ -58,15 +58,19 @@ pub(crate) fn triangulate_validated_face_pslg(
         let mut bad = BTreeSet::new();
         for (triangle_index, triangle) in triangles.iter().enumerate() {
             budget.consume(1)?;
-            if incircle2d_symbolic([
-                point(&points, triangle[0]),
-                point(&points, triangle[1]),
-                point(&points, triangle[2]),
-                point(&points, point_index),
-            ])
-            .map_err(|error| predicate_error(pslg, error))?
-                == PredicateSign::Positive
-            {
+            if matches!(
+                incircle2d(
+                    [
+                        point(&points, triangle[0]),
+                        point(&points, triangle[1]),
+                        point(&points, triangle[2]),
+                        point(&points, point_index),
+                    ]
+                    .map(|point| point.coordinates)
+                )
+                .map_err(|error| predicate_error(pslg, error))?,
+                PredicateSign::Positive | PredicateSign::Zero
+            ) {
                 bad.insert(triangle_index);
             }
         }

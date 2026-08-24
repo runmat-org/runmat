@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, VecDeque};
 
 use runmat_meshing_core::{
-    quality::predicate::{insphere3d_symbolic, orient3d, PredicateSign, SpatialPredicatePoint},
+    quality::predicate::{insphere3d, orient3d, PredicateSign},
     StableDigest,
 };
 
@@ -113,16 +113,18 @@ fn in_circumsphere(
     work: &mut InsertionWork<'_>,
 ) -> Result<bool, DelaunayInsertionError> {
     work.predicate()?;
-    let points = vertices.map(|vertex| predicate_point(topology.nodes[vertex as usize]));
-    let query = predicate_point(node);
-    insphere3d_symbolic([points[0], points[1], points[2], points[3], query])
-        .map(|sign| sign == PredicateSign::Positive)
-        .map_err(predicate_error)
-}
-
-fn predicate_point(node: DelaunayVolumeNode) -> SpatialPredicatePoint {
-    SpatialPredicatePoint {
-        identity: node.identity,
-        coordinates: node.coordinates_m,
-    }
+    let points = vertices.map(|vertex| topology.nodes[vertex as usize].coordinates_m);
+    insphere3d([
+        points[0],
+        points[1],
+        points[2],
+        points[3],
+        node.coordinates_m,
+    ])
+    // The canonical insertion order supplies deterministic tie resolution.
+    // Taking the closed circumsphere keeps the cavity coherent when several
+    // tetrahedra are exactly cospherical; independently breaking each zero
+    // predicate can otherwise produce a non-manifold cavity boundary.
+    .map(|sign| matches!(sign, PredicateSign::Positive | PredicateSign::Zero))
+    .map_err(predicate_error)
 }

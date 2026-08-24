@@ -166,6 +166,7 @@ pub(in crate::cdt::facet_recovery) fn try_recover_facet_with_cavity(
                             }));
                         }
                     }
+                    work.reject("no jointly valid Steiner pair refilled both cavity halves");
                     return Ok(None);
                 }
                 let Some((next, node_identity, candidate_rank)) = insert_first_candidate(
@@ -178,6 +179,7 @@ pub(in crate::cdt::facet_recovery) fn try_recover_facet_with_cavity(
                     work,
                 )?
                 else {
+                    work.reject("no valid Steiner candidate refilled the cavity");
                     return Ok(None);
                 };
                 work.cavity_steiner_node(constraint_index)?;

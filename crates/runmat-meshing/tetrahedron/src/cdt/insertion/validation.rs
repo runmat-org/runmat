@@ -9,6 +9,7 @@ use super::{
     DelaunayVolumeNode, DelaunayVolumeTopology, InsertionWork,
 };
 use crate::cdt::topology::build_delaunay_volume_topology_with_regions;
+use crate::reconnect::two_to_three_geometry_is_admissible;
 
 pub fn validate_delaunay_volume_topology(
     topology: &DelaunayVolumeTopology,
@@ -125,11 +126,29 @@ fn validate_topology(
                 tetrahedron.vertex_indices,
                 topology.nodes[opposite as usize],
                 &mut work,
-            )? {
+            )? && two_to_three_geometry_is_admissible(
+                tetrahedron.vertex_indices,
+                neighbor.vertex_indices,
+                |node| topology.nodes[node as usize].coordinates_m,
+            )
+            .map_err(predicate_error)?
+            {
+                let mut face_indices = [0_u32; 3];
+                let mut cursor = 0;
+                for vertex in tetrahedron.vertex_indices {
+                    if neighbor.vertex_indices.contains(&vertex) {
+                        face_indices[cursor] = vertex;
+                        cursor += 1;
+                    }
+                }
+                face_indices.sort_unstable();
                 return Err(error(
                     DelaunayInsertionErrorKind::InvalidTopology,
                     format!(
-                        "tetrahedron {tetrahedron_index} has neighbor {neighbor_index} strictly inside its circumsphere"
+                        "tetrahedron {tetrahedron_index} has neighbor {neighbor_index} across face \
+                         {face_indices:?} strictly inside its circumsphere; tetrahedra are {:?} \
+                         and {:?}",
+                        tetrahedron.vertex_indices, neighbor.vertex_indices
                     ),
                 ));
             }

@@ -157,6 +157,7 @@ pub(super) fn construct_delaunay_facet_recovery(
     for constraint_index in 0..constraints.facets.len() {
         let support = facet_support(&working, constraints, constraint_index as u32, &mut work)?;
         for triangle in &support {
+            work.clear_rejection();
             if !face_exists(
                 &working.topology,
                 triangle.node_identities,
@@ -181,15 +182,27 @@ pub(super) fn construct_delaunay_facet_recovery(
                     steiner_insertions.extend_from_slice(&updated.steiner_insertions);
                     updated.topology
                 } else {
+                    let detail = work.last_rejection().unwrap_or(
+                        "neither the protected flip nor cavity recovery admitted a candidate",
+                    );
+                    let coordinates = triangle.node_identities.map(|identity| {
+                        node_index(&working.topology, identity)
+                            .map(|index| working.topology.nodes[index].coordinates_m)
+                    });
                     return Err(error(
                         DelaunayFacetRecoveryErrorKind::UnsatisfiableConstraint,
                         Some(constraint_index as u32),
-                        "facet support is absent and no legal protected flip or edge-star cavity recovers it",
+                        format!(
+                            "facet support {:?} at {coordinates:?} is absent and recovery rejected every candidate: {detail}",
+                            triangle.node_identities,
+                        ),
                     ));
                 };
                 working.topology = updated;
             }
-            protected_triangles.push(*triangle);
+            if !protected_triangles.contains(triangle) {
+                protected_triangles.push(*triangle);
+            }
         }
         facets.push(DelaunayRecoveredFacet {
             constraint_index: constraint_index as u32,

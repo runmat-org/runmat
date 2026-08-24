@@ -10,8 +10,9 @@ use super::{
     DelaunaySegmentRecovery, DelaunayVolumeTopology, FacetRecoveryWork,
 };
 use crate::cdt::{
-    topology::build_delaunay_volume_topology_with_regions, validate_delaunay_volume_topology,
-    DelaunayInsertionErrorKind, DelaunayTopologyErrorKind,
+    insertion::validate_constrained_delaunay_volume_topology,
+    topology::build_delaunay_volume_topology_with_regions, DelaunayInsertionErrorKind,
+    DelaunayTopologyErrorKind,
 };
 
 pub(super) fn try_recover_facet_with_edge_flip(
@@ -124,8 +125,22 @@ pub(super) fn try_recover_facet_with_edge_flip(
                 _ => continue,
             },
         };
-        match validate_delaunay_volume_topology(
+        let mut protected_faces = protected_facets
+            .iter()
+            .map(|protected| {
+                let mut identities = protected.node_identities;
+                identities.sort_unstable();
+                identities
+            })
+            .collect::<Vec<_>>();
+        let mut recovered_face = facet;
+        recovered_face.sort_unstable();
+        protected_faces.push(recovered_face);
+        protected_faces.sort_unstable();
+        protected_faces.dedup();
+        match validate_constrained_delaunay_volume_topology(
             &candidate,
+            &protected_faces,
             work.options.segment_recovery.insertion,
             work.cancellation,
         ) {

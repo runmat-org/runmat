@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use runmat_meshing_core::{
-    predicate::{incircle2d_symbolic, orient2d},
+    predicate::{incircle2d, orient2d},
     MeshingCancellationSignal, PredicateSign,
 };
 
@@ -177,13 +177,14 @@ pub(crate) fn validate_face_constrained_topology(
         .map(|index| {
             super::super::triangulation::predicate_point(pslg.vertices[index as usize], index)
         });
-        if incircle2d_symbolic(query).map_err(|error| predicate_error(pslg, error))?
+        if incircle2d(query.map(|point| point.coordinates))
+            .map_err(|error| predicate_error(pslg, error))?
             == PredicateSign::Positive
         {
             return Err(invalid(
                 pslg,
                 ExactFaceDelaunayErrorKind::InvalidTopology,
-                format!("unprotected edge {edge:?} is not symbolically Delaunay"),
+                format!("unprotected edge {edge:?} is not Delaunay"),
             ));
         }
     }

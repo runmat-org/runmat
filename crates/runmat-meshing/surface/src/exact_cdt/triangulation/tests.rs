@@ -10,7 +10,7 @@ use runmat_meshing_curve::{
 use super::*;
 
 #[test]
-fn exact_circle_has_one_deterministic_strict_delaunay_topology() {
+fn exact_circle_has_one_deterministic_cocircular_topology() {
     let (boundary, pslg) = fixture();
     let options = ExactFaceDelaunayOptions::default();
     let first = triangulate_exact_face_pslg(&pslg, &boundary, &NeverCancelled, options).unwrap();

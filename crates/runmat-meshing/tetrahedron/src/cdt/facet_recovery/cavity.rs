@@ -63,6 +63,7 @@ pub(super) fn try_recover_facet_cavity_once(
     let mut removed =
         facet_intersection_seed(&recovery.topology, facet_nodes, constraint_index, work)?;
     if removed.is_empty() {
+        work.reject("no tetrahedron face crosses the missing facet footprint");
         return Ok(FacetCavityAttempt::Unavailable);
     }
     expand_crossing_boundary(
@@ -83,6 +84,7 @@ pub(super) fn try_recover_facet_cavity_once(
         constraint_index,
     )?
     else {
+        work.reject("the intersected tetrahedra do not form two positive-volume cavity halves");
         return Ok(FacetCavityAttempt::Unavailable);
     };
     let cavity_nodes = removed
@@ -167,7 +169,10 @@ pub(super) fn try_recover_facet_cavity_once(
                     failure.to_string(),
                 ));
             }
-            _ => return Ok(FacetCavityAttempt::Unavailable),
+            _ => {
+                work.reject(format!("candidate cavity topology was invalid: {failure}"));
+                return Ok(FacetCavityAttempt::Unavailable);
+            }
         },
     };
     let mut protected = protected_facets
@@ -199,7 +204,12 @@ pub(super) fn try_recover_facet_cavity_once(
                     failure.to_string(),
                 ));
             }
-            _ => return Ok(FacetCavityAttempt::Unavailable),
+            _ => {
+                work.reject(format!(
+                    "candidate cavity was not constrained-Delaunay: {failure}"
+                ));
+                return Ok(FacetCavityAttempt::Unavailable);
+            }
         },
     }
     let mut candidate_recovery = recovery.clone();
@@ -207,6 +217,7 @@ pub(super) fn try_recover_facet_cavity_once(
     if recovered_segments_exist(&candidate_recovery) {
         Ok(FacetCavityAttempt::Recovered(candidate))
     } else {
+        work.reject("candidate cavity removed a previously recovered segment");
         Ok(FacetCavityAttempt::Unavailable)
     }
 }
@@ -262,10 +273,12 @@ pub(in crate::cdt::facet_recovery) fn refill_side(
             constraint_index,
             "cancelled".to_owned(),
         )),
-        Err(failure) => Err(invalid_topology(
-            constraint_index,
-            format!("facet cavity refill failed: {failure:?}"),
-        )),
+        Err(failure) => {
+            work.reject(format!(
+                "facet cavity refill rejected its candidate: {failure:?}"
+            ));
+            Ok(None)
+        }
     }
 }
 

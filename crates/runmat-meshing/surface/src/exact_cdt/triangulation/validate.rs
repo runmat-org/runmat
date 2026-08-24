@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_meshing_core::{
-    predicate::{incircle2d_symbolic, orient2d},
+    predicate::{incircle2d, orient2d},
     MeshingCancellationSignal, PredicateSign,
 };
 
@@ -132,13 +132,14 @@ pub(crate) fn validate_face_delaunay_topology(
         let opposite = uses[1].1;
         let query = [first[0], first[1], first[2], opposite]
             .map(|index| predicate_point(pslg.vertices[index as usize], index));
-        if incircle2d_symbolic(query).map_err(|error| invalid_predicate(pslg, error))?
+        if incircle2d(query.map(|point| point.coordinates))
+            .map_err(|error| invalid_predicate(pslg, error))?
             == PredicateSign::Positive
         {
             return Err(invalid(
                 pslg,
                 ExactFaceDelaunayErrorKind::InvalidTopology,
-                format!("interior edge {edge:?} is not symbolically Delaunay"),
+                format!("interior edge {edge:?} is not Delaunay"),
             ));
         }
     }

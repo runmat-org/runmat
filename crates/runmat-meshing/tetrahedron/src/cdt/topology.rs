@@ -193,7 +193,7 @@ pub(super) fn build_delaunay_volume_topology_with_regions(
             region_id,
         })
         .collect::<Vec<_>>();
-    for uses in face_uses.values() {
+    for (face, uses) in &face_uses {
         match uses.as_slice() {
             [_] => {}
             [(left, left_opposite), (right, right_opposite)] => {
@@ -203,7 +203,9 @@ pub(super) fn build_delaunay_volume_topology_with_regions(
             _ => {
                 return Err(error(
                     DelaunayTopologyErrorKind::NonManifoldFace,
-                    "more than two tetrahedra share one face",
+                    format!(
+                        "more than two tetrahedra share face {face:?}; incident uses: {uses:?}"
+                    ),
                 ));
             }
         }

@@ -34,6 +34,35 @@ fn two_to_three_face_flip_preserves_local_boundary_faces() {
 }
 
 #[test]
+fn two_to_three_geometry_requires_a_strictly_convex_bipyramid() {
+    let left = [0, 1, 2, 3];
+    let right = [0, 2, 1, 4];
+    let convex = [
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [1.0 / 3.0, 1.0 / 3.0, 1.0],
+        [1.0 / 3.0, 1.0 / 3.0, -1.0],
+    ];
+    assert!(
+        two_to_three_geometry_is_admissible(left, right, |node| convex[node as usize])
+            .expect("finite points must admit exact predicates")
+    );
+
+    let boundary_apex = [
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.5, 0.0, 1.0],
+        [0.25, -1.0, 0.0],
+        [0.75, 1.0, 0.0],
+    ];
+    assert!(
+        !two_to_three_geometry_is_admissible(left, right, |node| boundary_apex[node as usize])
+            .expect("finite points must admit exact predicates")
+    );
+}
+
+#[test]
 fn local_flip_quality_accepts_well_shaped_created_tetrahedra() {
     let left = LocalTetrahedron {
         tetrahedron_id: 4,

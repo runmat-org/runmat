@@ -14,7 +14,7 @@ pub use quality::{
 };
 
 mod topology;
-pub use topology::local_tetrahedron_boundary_faces;
+pub use topology::{local_tetrahedron_boundary_faces, two_to_three_geometry_is_admissible};
 use topology::{
     opposite_node, ring_edges_form_cycle, shared_face, sorted_edge, sorted_face,
     sorted_removed_tetrahedron_ids,

@@ -230,6 +230,22 @@ impl MeshingFailure {
         validate_diagnostics("achieved diagnostics", &self.achieved_values)?;
         validate_token("meshing failure remediation", &self.remediation, 8192)
     }
+
+    /// Returns the most specific textual diagnostic recorded by the failing stage.
+    ///
+    /// Stage adapters retain the originating kernel error in `achieved_values` so
+    /// callers can inspect failures without depending on an implementation-specific
+    /// error type. Prefer the last text entry: diagnostics are sorted by name and
+    /// adapters conventionally place their stage failure detail there.
+    pub fn detail(&self) -> Option<&str> {
+        self.achieved_values
+            .iter()
+            .rev()
+            .find_map(|entry| match &entry.value {
+                MeshingDiagnosticValue::Text(value) if !value.is_empty() => Some(value.as_str()),
+                _ => None,
+            })
+    }
 }
 
 impl MeshingOperation {
@@ -276,10 +292,65 @@ impl std::fmt::Display for MeshingFailure {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             formatter,
-            "{:?} during {:?}/{:?}: {}",
-            self.category, self.stage, self.operation, self.remediation
-        )
+            "{:?} during {:?}/{:?}",
+            self.category, self.stage, self.operation
+        )?;
+        if let Some(detail) = self.detail() {
+            write!(formatter, ": {detail}")?;
+        }
+        write!(formatter, "; remediation: {}", self.remediation)
     }
 }
 
 impl std::error::Error for MeshingFailure {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_includes_retained_kernel_detail() {
+        let failure = MeshingFailure {
+            schema_version: MESHING_FAILURE_SCHEMA_VERSION,
+            category: MeshingFailureCategory::InvalidGeometry,
+            stage: MeshingStageKind::CurveMesh,
+            operation: MeshingOperation::DiscretizeCurve,
+            entity_ids: Vec::new(),
+            witnesses: Vec::new(),
+            request_values: Vec::new(),
+            achieved_values: vec![MeshingDiagnosticEntry {
+                name: "curve_failure".into(),
+                value: MeshingDiagnosticValue::Text("edge evaluation failed".into()),
+                unit: None,
+            }],
+            remediation: "repair the exact boundary".into(),
+        };
+
+        assert_eq!(
+            failure.to_string(),
+            "InvalidGeometry during CurveMesh/DiscretizeCurve: edge evaluation failed; \
+             remediation: repair the exact boundary"
+        );
+    }
+
+    #[test]
+    fn display_remains_useful_without_text_diagnostics() {
+        let failure = MeshingFailure {
+            schema_version: MESHING_FAILURE_SCHEMA_VERSION,
+            category: MeshingFailureCategory::ElementBudgetExceeded,
+            stage: MeshingStageKind::Tetrahedralization,
+            operation: MeshingOperation::Tetrahedralize,
+            entity_ids: Vec::new(),
+            witnesses: Vec::new(),
+            request_values: Vec::new(),
+            achieved_values: Vec::new(),
+            remediation: "raise the element budget".into(),
+        };
+
+        assert_eq!(
+            failure.to_string(),
+            "ElementBudgetExceeded during Tetrahedralization/Tetrahedralize; \
+             remediation: raise the element budget"
+        );
+    }
+}
