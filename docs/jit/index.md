@@ -36,4 +36,4 @@ Native versions and profiles are bounded. RunMat limits tracked sites, profiles,
 
 Host-native JIT compilation is supported on the native x86-64 and AArch64 backends used by RunMat's supported operating systems. WebAssembly cannot allocate host-native executable memory, so browser sessions execute the same portable program semantics through the web executor and VM. Portable Native IR remains verifiable and reusable by web tooling without embedding Cranelift machine code in the browser.
 
-For the internal stages and ownership boundaries, see [JIT Compilation Pipeline](/docs/runtime/jit/pipeline). For session results and workspace publication, see [Execution Requests](/docs/runtime/session/execution-requests).
+For the internal stages and ownership boundaries, see [JIT Compilation Pipeline](/docs/runtime/jit/pipeline). For host-linked executables built from the shared native compiler pipeline, see [Native Compilation](/docs/runtime/compiler/native-compilation). For session results and workspace publication, see [Execution Requests](/docs/runtime/session/execution-requests).
