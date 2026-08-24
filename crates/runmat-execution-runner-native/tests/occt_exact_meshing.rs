@@ -25,8 +25,20 @@ use runmat_meshing_execution::{
 
 const BOX: &[u8] = include_bytes!("../../runmat-geometry/io/tests/fixtures/box.brep");
 
+#[path = "occt_exact_meshing/differential.rs"]
+mod differential;
+
 #[test]
 fn occt_box_executes_the_complete_serial_exact_dag() {
+    let (_, result) = execute_box();
+    result.evidence.validate(&result.artifact).unwrap();
+    assert!(!result.artifact.topology.volume_elements.is_empty());
+}
+
+fn execute_box() -> (
+    runmat_geometry_core::ExactBRepTopology,
+    runmat_meshing_execution::ExactMeshingDagRunResult,
+) {
     let imported = import_exact_cad(
         "box.brep",
         BOX,
@@ -35,6 +47,7 @@ fn occt_box_executes_the_complete_serial_exact_dag() {
         &GeometryImportContext::new(),
     )
     .unwrap();
+    let topology = imported.topology.clone();
     let region_id = imported.topology.regions[0].id.clone();
     let document = imported.geometry_document().unwrap();
     let limits = ObjectInventoryLimits::default();
@@ -114,8 +127,7 @@ fn occt_box_executes_the_complete_serial_exact_dag() {
         &mut executor,
     )
     .unwrap();
-    result.evidence.validate(&result.artifact).unwrap();
-    assert!(!result.artifact.topology.volume_elements.is_empty());
+    (topology, result)
 }
 
 fn request(tolerance: runmat_geometry_core::GeometryTolerancePolicy) -> MeshingRequest {

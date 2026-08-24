@@ -221,6 +221,9 @@ jobs:
       - name: Validate difficult-geometry meshing conformance
         run: python3 scripts/meshing/validate_conformance.py
 
+      - name: Validate independent-mesher differential evidence
+        run: python3 scripts/meshing/validate_differential.py
+
       - name: Test meshing governance
         run: python3 -m unittest discover -s scripts/meshing/tests -p 'test_*.py'
 

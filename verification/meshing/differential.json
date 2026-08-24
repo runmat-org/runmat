@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "catalog_revision": 1,
+  "revision_explanation": "Initial independently implemented OCCT surface and six-tetrahedron volume reference for the exact box regression fixture.",
+  "required_comparisons": [
+    "topology",
+    "recovered_constraints",
+    "geometry_deviation",
+    "element_distributions",
+    "solver_outputs"
+  ],
+  "cases": [
+    {
+      "id": "exact-box-independent-meshers",
+      "fixture": "crates/runmat-geometry/io/tests/fixtures/box.brep",
+      "fixture_sha256": "79ad22b1cc652f2307a1d8f9c3ec5644fa2f86de1d9700820d234ee1199e6d34",
+      "reference_meshers": [
+        {
+          "name": "Open CASCADE BRepMesh_IncrementalMesh",
+          "implementation": "bundled OCCT 7.8 native faceted import path",
+          "trusted": true,
+          "independent_of_runmat_generator": true
+        },
+        {
+          "name": "Analytic six-tetrahedron box decomposition",
+          "implementation": "verification-only body-diagonal decomposition with independent vector calculus",
+          "trusted": true,
+          "independent_of_runmat_generator": true
+        }
+      ],
+      "comparisons": {
+        "topology": "both surface meshes are watertight with edge incidence two and bounds [0,0,0]..[1,2,3] meters",
+        "recovered_constraints": "all 12 exact edges and all 6 exact faces occur in canonical solver-boundary provenance",
+        "geometry_deviation": "both boundary vertex sets lie on an exact box plane within 1e-10 meters and integrate to area 22",
+        "element_distributions": "OCCT has 12 surface triangles, RunMat has 16, and their median triangle-area ratio remains in [0.25,4]",
+        "solver_outputs": "RunMat and the independent six-tetrahedron mesh both produce volume 6 and linear-gradient energy 84"
+      },
+      "mismatches": [
+        {
+          "metric": "surface_triangle_count",
+          "runmat": "16",
+          "reference": "12",
+          "disposition": "accepted",
+          "explanation": "RunMat constructively preserves the constrained surface/volume interface and introduces four additional boundary triangles. The meshes still agree on watertight topology, exact bounds, area, volume, deviation, and the governed element-area distribution. Equality of triangulation count is not a geometric invariant."
+        }
+      ],
+      "test": {
+        "source": "crates/runmat-execution-runner-native/tests/occt_exact_meshing/differential.rs",
+        "name": "runmat_and_independent_meshers_agree_on_box_invariants"
+      }
+    }
+  ]
+}
