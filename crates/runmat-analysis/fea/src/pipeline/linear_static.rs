@@ -148,6 +148,7 @@ pub fn run_linear_static_with_options(
         &[1.0],
         &[solve_result.residual_norm],
         summary.dof_count,
+        options.solver_mesh.as_ref(),
     );
     let electro_thermal_diagnostics = electro_thermal_fields.diagnostics;
     fields.extend(electro_thermal_fields.static_fields);
