@@ -96,9 +96,12 @@ pub fn admit_prepared_exact_geometry(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "occt-native")]
     use std::collections::BTreeSet;
 
+    #[cfg(feature = "occt-native")]
     use runmat_execution::resource::Capability;
+    #[cfg(feature = "occt-native")]
     use runmat_execution::Digest;
     #[cfg(feature = "occt-native")]
     use runmat_execution_artifact::cache::CacheImport;
@@ -106,11 +109,13 @@ mod tests {
     use runmat_meshing_execution::import_exact_geometry_objects;
 
     use super::*;
+    #[cfg(feature = "occt-native")]
     use crate::NativeExecutionConfig;
 
     #[cfg(feature = "occt-native")]
     const BOX: &[u8] = include_bytes!("../../runmat-geometry/io/tests/fixtures/box.brep");
 
+    #[cfg(feature = "occt-native")]
     fn session() -> (tempfile::TempDir, NativeProgramSession) {
         let directory = tempfile::tempdir().unwrap();
         let session = NativeProgramSession::new(NativeExecutionConfig {
