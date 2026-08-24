@@ -299,8 +299,6 @@ jobs:
             }
 
   fea-conformance:
-    # Temporarily disabled; keep the job definition intact for future re-enablement.
-    if: ${{ false }}
     name: fea-conformance
     runs-on: ubuntu-latest-gpu
     env:

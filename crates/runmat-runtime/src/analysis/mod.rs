@@ -3467,9 +3467,6 @@ struct CfdDomainTopology {
     element_geometry_node_count: usize,
     element_geometry_edge_count: usize,
     element_geometry_coverage_ratio: f64,
-    element_topology_sample_element_count: usize,
-    element_topology_sample_edge_count: usize,
-    element_topology_sample_element_edges: [[u32; 3]; 4],
     element_topology_edge_nodes: Vec<[u32; 2]>,
     element_topology_element_edges: Vec<[u32; 3]>,
 }
@@ -3483,13 +3480,6 @@ impl CfdDomainTopology {
 
     fn from_solver_mesh(mesh: &SolverMeshArtifact) -> Self {
         let topology = solver_mesh_flow_topology::SolverMeshFlowTopology::derive(mesh);
-        let mut sample_element_edges = [[0_u32; 3]; 4];
-        for (target, source) in sample_element_edges
-            .iter_mut()
-            .zip(&topology.boundary_face_edges)
-        {
-            *target = *source;
-        }
         Self {
             basis: CfdDomainTopologyBasis::SolverMesh,
             geometry_source: CfdDomainGeometrySource::SolverMesh,
@@ -3507,9 +3497,6 @@ impl CfdDomainTopology {
             element_geometry_node_count: topology.node_count,
             element_geometry_edge_count: topology.edge_nodes.len(),
             element_geometry_coverage_ratio: 1.0,
-            element_topology_sample_element_count: topology.boundary_face_edges.len().min(4),
-            element_topology_sample_edge_count: topology.edge_nodes.len().min(6),
-            element_topology_sample_element_edges: sample_element_edges,
             element_topology_edge_nodes: topology.edge_nodes,
             element_topology_element_edges: topology.boundary_face_edges,
         }
@@ -3535,9 +3522,6 @@ impl CfdDomainTopology {
             element_geometry_node_count: 0,
             element_geometry_edge_count: 0,
             element_geometry_coverage_ratio: 0.0,
-            element_topology_sample_element_count: 0,
-            element_topology_sample_edge_count: 0,
-            element_topology_sample_element_edges: [[0; 3]; 4],
             element_topology_edge_nodes: Vec::new(),
             element_topology_element_edges: Vec::new(),
         }
@@ -4220,7 +4204,7 @@ fn cfd_assembly_diagnostic(
             runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "basis=finite_volume_velocity_pressure topology_basis={} topology_geometry_source={} control_volume_count={} control_volume_face_count={} control_volume_internal_face_count={} control_volume_boundary_face_count={} control_volume_connectivity_coverage_ratio={} hydraulic_diameter_m={} domain_length_m={} dx_m={} face_area_m2={} control_volume_volume_m3={} nominal_mass_flow_rate_kg_per_s={} courant_number={} active_dimension_count={} element_geometry_node_count={} element_geometry_edge_count={} element_geometry_coverage_ratio={} element_topology_sample_element_count={} element_topology_sample_edge_count={} pressure_drop_pa={} mass_balance_residual={}",
+            "basis=finite_volume_velocity_pressure topology_basis={} topology_geometry_source={} control_volume_count={} control_volume_face_count={} control_volume_internal_face_count={} control_volume_boundary_face_count={} control_volume_connectivity_coverage_ratio={} hydraulic_diameter_m={} domain_length_m={} dx_m={} face_area_m2={} control_volume_volume_m3={} nominal_mass_flow_rate_kg_per_s={} courant_number={} active_dimension_count={} element_geometry_node_count={} element_geometry_edge_count={} element_geometry_coverage_ratio={} pressure_drop_pa={} mass_balance_residual={}",
             topology.basis.as_str(),
             topology.geometry_source.as_str(),
             topology.control_volume_count,
@@ -4239,8 +4223,6 @@ fn cfd_assembly_diagnostic(
             topology.element_geometry_node_count,
             topology.element_geometry_edge_count,
             topology.element_geometry_coverage_ratio,
-            topology.element_topology_sample_element_count,
-            topology.element_topology_sample_edge_count,
             pressure_drop_pa,
             mass_balance_residual,
         ),
@@ -4349,100 +4331,63 @@ fn coupled_interface_graph_edge_target(
 fn coupled_interface_graph_edges_for_topology(
     topology: &CfdDomainTopology,
     interface_face_count: usize,
-) -> Vec<(usize, usize)> {
+) -> (Vec<(usize, usize)>, f64) {
     use std::collections::BTreeSet;
 
     let target = coupled_interface_graph_edge_target(topology, interface_face_count);
     if target == 0 {
-        return Vec::new();
+        return (
+            Vec::new(),
+            f64::from(topology.basis == CfdDomainTopologyBasis::SolverMesh),
+        );
     }
 
-    let mut seen = BTreeSet::<(usize, usize)>::new();
-    let mut edges = Vec::with_capacity(target);
-
-    let full_edge_count = topology
-        .element_topology_edge_nodes
-        .len()
-        .min(interface_face_count);
-    if full_edge_count > 0 {
-        for element_edges in &topology.element_topology_element_edges {
-            let local_edges = element_edges
-                .iter()
-                .map(|edge| *edge as usize)
-                .filter(|edge| *edge < full_edge_count)
-                .collect::<Vec<_>>();
-            if local_edges.len() < 2 {
-                continue;
-            }
-            let pair_count = if local_edges.len() == 2 {
-                1
-            } else {
-                local_edges.len()
-            };
-            for offset in 0..pair_count {
-                let next = if offset + 1 < local_edges.len() {
-                    offset + 1
-                } else {
-                    0
-                };
-                let left = local_edges[offset].min(local_edges[next]);
-                let right = local_edges[offset].max(local_edges[next]);
-                if left != right && seen.insert((left, right)) {
-                    edges.push((left, right));
-                    if edges.len() == target {
-                        return edges;
-                    }
-                }
-            }
-        }
+    let mut edges = mesh_boundary_face_adjacencies(topology, interface_face_count)
+        .into_iter()
+        .take(target)
+        .collect::<Vec<_>>();
+    let mut seen = edges.iter().copied().collect::<BTreeSet<_>>();
+    if edges.len() == target {
+        return (
+            edges,
+            f64::from(topology.basis == CfdDomainTopologyBasis::SolverMesh),
+        );
     }
 
-    let sample_edge_count = topology
-        .element_topology_sample_edge_count
-        .min(interface_face_count);
-    if edges.is_empty() {
-        for element_edges in topology
-            .element_topology_sample_element_edges
-            .iter()
-            .take(topology.element_topology_sample_element_count.min(4))
-        {
-            let local_edges = element_edges
-                .iter()
-                .map(|edge| *edge as usize)
-                .filter(|edge| *edge < sample_edge_count)
-                .collect::<Vec<_>>();
-            if local_edges.len() < 2 {
-                continue;
-            }
-            let pair_count = if local_edges.len() == 2 {
-                1
-            } else {
-                local_edges.len()
-            };
-            for offset in 0..pair_count {
-                let next = if offset + 1 < local_edges.len() {
-                    offset + 1
-                } else {
-                    0
-                };
-                let left = local_edges[offset].min(local_edges[next]);
-                let right = local_edges[offset].max(local_edges[next]);
-                if left != right && seen.insert((left, right)) {
-                    edges.push((left, right));
-                    if edges.len() == target {
-                        return edges;
-                    }
-                }
-            }
-        }
-    }
-
+    let mesh_edge_count = edges.len();
     for (left, right) in coupled_interface_graph_edges(interface_face_count, target) {
         let edge = (left.min(right), left.max(right));
         if seen.insert(edge) {
             edges.push(edge);
             if edges.len() == target {
                 break;
+            }
+        }
+    }
+    let mesh_backed_coverage_ratio = if topology.basis == CfdDomainTopologyBasis::SolverMesh {
+        mesh_edge_count as f64 / target as f64
+    } else {
+        0.0
+    };
+    (edges, mesh_backed_coverage_ratio.clamp(0.0, 1.0))
+}
+
+fn mesh_boundary_face_adjacencies(
+    topology: &CfdDomainTopology,
+    interface_face_count: usize,
+) -> Vec<(usize, usize)> {
+    let face_count = topology
+        .element_topology_element_edges
+        .len()
+        .min(interface_face_count);
+    let mut edges = Vec::new();
+    for left in 0..face_count {
+        for right in (left + 1)..face_count {
+            if topology.element_topology_element_edges[left]
+                .iter()
+                .any(|edge| topology.element_topology_element_edges[right].contains(edge))
+            {
+                edges.push((left, right));
             }
         }
     }
@@ -4854,14 +4799,13 @@ fn solve_cht_conjugate_interface(
     let axial_conductance = (0.05 * conductance).max(1.0e-12);
     let anchor_conductance = conductance;
     let base_interface_temperature = resample_scalar_profile(base_temperature, interface_count);
-    let thermal_network_edges =
+    let (thermal_network_edges, mesh_backed_interface_connectivity_ratio) =
         coupled_interface_graph_edges_for_topology(topology, interface_count);
     let interface_connectivity_coverage_ratio = coupled_interface_connectivity_coverage_ratio(
         topology,
         interface_count,
         thermal_network_edges.len(),
     );
-    let mesh_backed_interface_connectivity_ratio = 0.0;
     let mut operator = vec![vec![0.0; interface_count]; interface_count];
     for (row, diagonal) in operator.iter_mut().enumerate() {
         diagonal[row] = anchor_conductance;
@@ -5362,14 +5306,13 @@ fn solve_fsi_partitioned_interface(
     let traction_relaxation = 0.65_f64;
     let interface_stiffness_pa_per_m = 1.0 / compliance;
     let feedback_stiffness_pa_per_m = 0.25 * interface_stiffness_pa_per_m;
-    let structural_coupling_edges =
+    let (structural_coupling_edges, mesh_backed_interface_connectivity_ratio) =
         coupled_interface_graph_edges_for_topology(topology, interface_face_count);
     let interface_connectivity_coverage_ratio = coupled_interface_connectivity_coverage_ratio(
         topology,
         interface_face_count,
         structural_coupling_edges.len(),
     );
-    let mesh_backed_interface_connectivity_ratio = 0.0;
     let mut interface_pressure = vec![0.0; face_pressure.len()];
     let mut structural_traction = vec![0.0; face_pressure.len()];
     let mut structural_face_displacement = vec![0.0; face_pressure.len() * 3];
