@@ -282,15 +282,19 @@ async fn start_remote_worker(
     .unwrap();
     let authority = listener.local_addr().unwrap();
     let server = tokio::task::spawn_local(run_remote_meshing_worker_quic(
-        listener,
-        run_id.to_string(),
-        worker.clone(),
-        driver_fence,
-        session_id,
-        run_key.clone(),
-        FrameLimits::default(),
-        Arc::new(AdmissionKernel),
-        limits(),
+        RemoteMeshingWorkerQuicRequest {
+            worker: RemoteWorkerQuicRequest {
+                listener,
+                run_identity: run_id.to_string(),
+                worker: worker.clone(),
+                driver_fence,
+                session_id,
+                run_key: run_key.clone(),
+                limits: FrameLimits::default(),
+            },
+            kernel: Arc::new(AdmissionKernel),
+            meshing_limits: limits(),
+        },
     ));
     let channel = QuicRemoteWorkerChannel::connect(
         RemoteWorkerChannelConfig {

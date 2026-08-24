@@ -41,8 +41,9 @@ use runmat_meshing_execution::{
 use runmat_execution_runner_native::{
     execute_meshing_program_request, native_meshing_kernel_dispatcher, run_meshing_worker_stdio,
     run_remote_meshing_worker_quic, NativeExactMeshingExecutor, NativeMeshingExecutionPolicy,
-    NativeMeshingHostLimits, NativeProgramSession, QuicRemoteWorkerChannel, RemotePoolDriver,
-    RemoteWorkerChannel, RemoteWorkerChannelConfig, NATIVE_OBJECT_STORE_ROOT_ENV,
+    NativeMeshingHostLimits, NativeProgramSession, QuicRemoteWorkerChannel,
+    RemoteMeshingWorkerQuicRequest, RemotePoolDriver, RemoteWorkerChannel,
+    RemoteWorkerChannelConfig, RemoteWorkerQuicRequest, NATIVE_OBJECT_STORE_ROOT_ENV,
 };
 
 #[path = "meshing_process_conformance/curve_pipeline.rs"]
@@ -427,17 +428,19 @@ async fn remote_conformance() {
         runmat_execution_artifact::encryption::RunKeyMaterial::from_entropy([17; 32]).unwrap();
     let kernel = Arc::new(AdmissionThenCooperativeSlowKernel::default());
     let server_kernel = Arc::clone(&kernel);
-    let server = run_remote_meshing_worker_quic(
-        listener,
-        "remote-meshing-run",
-        worker.clone(),
-        31,
-        [19; 16],
-        run_key.clone(),
-        FrameLimits::default(),
-        server_kernel,
-        limits(),
-    );
+    let server = run_remote_meshing_worker_quic(RemoteMeshingWorkerQuicRequest {
+        worker: RemoteWorkerQuicRequest {
+            listener,
+            run_identity: "remote-meshing-run".into(),
+            worker: worker.clone(),
+            driver_fence: 31,
+            session_id: [19; 16],
+            run_key: run_key.clone(),
+            limits: FrameLimits::default(),
+        },
+        kernel: server_kernel,
+        meshing_limits: limits(),
+    });
     let client = async {
         let channel = QuicRemoteWorkerChannel::connect(
             RemoteWorkerChannelConfig {

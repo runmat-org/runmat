@@ -299,3 +299,78 @@ fn retired_synthetic_preparation_contracts_are_absent() {
         violations.join("\n")
     );
 }
+
+#[test]
+fn retired_public_meshing_contracts_are_absent() {
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("meshing crate should be nested beneath the workspace root");
+    let mut files = Vec::new();
+    for relative_root in [".github", "crates", "docs", "scripts"] {
+        collect_active_source_files(&workspace_root.join(relative_root), &mut files);
+    }
+
+    let retired_fragments = [
+        ["StructuredGrid", "Tetrahedron"].concat(),
+        ["structured_grid", "_tetrahedron"].concat(),
+        ["prepare_geometry", "_for_analysis"].concat(),
+        ["MeshingPrep", "Result"].concat(),
+        ["geometry.prep", "_for_analysis/v1"].concat(),
+        ["geometry-prep", "-for-analysis/v1"].concat(),
+        ["deterministic_topology", "_seed/v1"].concat(),
+    ];
+
+    let mut violations = Vec::new();
+    for path in files {
+        let source = read_source(&path);
+        for retired in &retired_fragments {
+            if source.contains(retired) {
+                violations.push(format!("{} contains {retired}", path.display()));
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "retired public meshing contracts remain:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
+fn meshing_owned_and_bridge_code_has_no_lint_suppressions() {
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("meshing crate should be nested beneath the workspace root");
+    let mut files = Vec::new();
+    for relative_root in [
+        "crates/runmat-meshing",
+        "crates/runmat-execution-runner-native",
+        "crates/runmat-runtime/src/analysis",
+        "crates/runmat-runtime/tests/analysis",
+    ] {
+        collect_active_source_files(&workspace_root.join(relative_root), &mut files);
+    }
+
+    let forbidden_fragments = [
+        ["#[", "allow("].concat(),
+        ["#[", "expect("].concat(),
+        ["#![", "allow("].concat(),
+        ["#![", "expect("].concat(),
+    ];
+    let mut violations = Vec::new();
+    for path in files {
+        let source = read_source(&path);
+        for forbidden in &forbidden_fragments {
+            if source.contains(forbidden) {
+                violations.push(format!("{} contains {forbidden}", path.display()));
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "lint suppressions are forbidden in meshing-owned and bridge code:\n{}",
+        violations.join("\n")
+    );
+}

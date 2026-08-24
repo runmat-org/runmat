@@ -10,68 +10,48 @@ use super::route::{QuicFrameRoute, RelayFrameRoute};
 use super::worker_server::{run_worker_loop, WorkerLoopContext};
 use crate::{NativeExecutionError, NativeExecutionResult};
 
-pub async fn run_remote_worker_quic(
-    listener: QuicOverlayListener,
-    run_identity: impl Into<String>,
-    worker: WorkerSpec,
-    driver_fence: u64,
-    session_id: [u8; 16],
-    run_key: RunKeyMaterial,
-    limits: FrameLimits,
-) -> NativeExecutionResult<()> {
-    run_remote_worker_quic_inner(
-        listener,
-        run_identity.into(),
-        worker,
-        driver_fence,
-        session_id,
-        run_key,
-        limits,
-        None,
-    )
-    .await
+pub struct RemoteWorkerQuicRequest {
+    pub listener: QuicOverlayListener,
+    pub run_identity: String,
+    pub worker: WorkerSpec,
+    pub driver_fence: u64,
+    pub session_id: [u8; 16],
+    pub run_key: RunKeyMaterial,
+    pub limits: FrameLimits,
 }
 
-#[allow(clippy::too_many_arguments)]
+pub async fn run_remote_worker_quic(request: RemoteWorkerQuicRequest) -> NativeExecutionResult<()> {
+    run_remote_worker_quic_inner(request, None).await
+}
+
+pub struct RemoteMeshingWorkerQuicRequest {
+    pub worker: RemoteWorkerQuicRequest,
+    pub kernel: Arc<dyn MeshingStageKernel>,
+    pub meshing_limits: crate::NativeMeshingHostLimits,
+}
+
 pub async fn run_remote_meshing_worker_quic(
-    listener: QuicOverlayListener,
-    run_identity: impl Into<String>,
-    worker: WorkerSpec,
-    driver_fence: u64,
-    session_id: [u8; 16],
-    run_key: RunKeyMaterial,
-    limits: FrameLimits,
-    kernel: Arc<dyn MeshingStageKernel>,
-    meshing_limits: crate::NativeMeshingHostLimits,
+    request: RemoteMeshingWorkerQuicRequest,
 ) -> NativeExecutionResult<()> {
-    meshing_limits.validate()?;
-    run_remote_worker_quic_inner(
-        listener,
-        run_identity.into(),
-        worker,
-        driver_fence,
-        session_id,
-        run_key,
-        limits,
-        Some(super::worker_execution::RemoteMeshingHost::new(
-            kernel,
-            meshing_limits,
-        )),
-    )
-    .await
+    request.meshing_limits.validate()?;
+    let meshing_host =
+        super::worker_execution::RemoteMeshingHost::new(request.kernel, request.meshing_limits);
+    run_remote_worker_quic_inner(request.worker, Some(meshing_host)).await
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn run_remote_worker_quic_inner(
-    listener: QuicOverlayListener,
-    run_identity: String,
-    worker: WorkerSpec,
-    driver_fence: u64,
-    session_id: [u8; 16],
-    run_key: RunKeyMaterial,
-    limits: FrameLimits,
+    request: RemoteWorkerQuicRequest,
     meshing_host: Option<super::worker_execution::RemoteMeshingHost>,
 ) -> NativeExecutionResult<()> {
+    let RemoteWorkerQuicRequest {
+        listener,
+        run_identity,
+        worker,
+        driver_fence,
+        session_id,
+        run_key,
+        limits,
+    } = request;
     let connection = Arc::new(listener.accept().await.map_err(protocol)?);
     tokio::task::LocalSet::new()
         .run_until(run_worker_loop(
