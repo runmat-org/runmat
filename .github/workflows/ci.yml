@@ -227,6 +227,9 @@ jobs:
       - name: Validate meshing budget and reliability coverage
         run: python3 scripts/meshing/validate_reliability.py
 
+      - name: Validate mandatory meshing release evidence
+        run: python3 scripts/meshing/validate_release_evidence.py
+
       - name: Test meshing governance
         run: python3 -m unittest discover -s scripts/meshing/tests -p 'test_*.py'
 
