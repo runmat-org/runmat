@@ -1,0 +1,30 @@
+schema_version = 1
+policy_revision = 1
+approved_at = "2026-08-23"
+approval_basis = "Measured native exact-box smoke distribution with process allocation instrumentation; limits retain headroom for shared CI hosts while rejecting order-of-magnitude regressions."
+workload_id = "native-exact-box"
+fixture = "crates/runmat-geometry/io/tests/fixtures/box.brep"
+fixture_sha256 = "79ad22b1cc652f2307a1d8f9c3ec5644fa2f86de1d9700820d234ee1199e6d34"
+expected_canonical_digest = "d8dd6fe93ac6f2e7a472356cef768255601b00bb341a2bb27cba0f03bd6e3b62"
+minimum_elements = 14
+maximum_report_age_hours = 24
+required_stages = ["curve_mesh", "surface_mesh", "tetrahedralization", "order_elevation", "validation", "serialization"]
+
+[profiles.smoke]
+minimum_samples = 3
+warmup_samples = 1
+
+[profiles.stable]
+minimum_samples = 15
+warmup_samples = 2
+
+[limits]
+wall_time_p50_ms = 5000
+wall_time_p95_ms = 10000
+wall_time_p99_ms = 15000
+peak_rss_p99_bytes = 1500000000
+allocation_count_p99 = 5000000
+allocated_bytes_p99 = 10000000000
+peak_live_bytes_p99 = 750000000
+minimum_element_throughput_per_second_p50 = 1.0
+maximum_wall_time_tail_ratio = 4.0
