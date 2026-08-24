@@ -150,6 +150,74 @@ pub(super) fn permutation_is_odd<const N: usize>(identities: [StableDigest; N]) 
 mod tests {
     use super::*;
 
+    fn exact_sign(value: i128) -> PredicateSign {
+        match value.cmp(&0) {
+            std::cmp::Ordering::Less => PredicateSign::Negative,
+            std::cmp::Ordering::Equal => PredicateSign::Zero,
+            std::cmp::Ordering::Greater => PredicateSign::Positive,
+        }
+    }
+
+    fn exact_orient2d(points: [[i64; 2]; 3]) -> PredicateSign {
+        let [[ax, ay], [bx, by], [cx, cy]] = points.map(|point| point.map(i128::from));
+        exact_sign((bx - ax) * (cy - ay) - (by - ay) * (cx - ax))
+    }
+
+    fn exact_incircle2d(points: [[i64; 2]; 4]) -> PredicateSign {
+        let [[ax, ay], [bx, by], [cx, cy], [dx, dy]] = points.map(|point| point.map(i128::from));
+        let (adx, ady) = (ax - dx, ay - dy);
+        let (bdx, bdy) = (bx - dx, by - dy);
+        let (cdx, cdy) = (cx - dx, cy - dy);
+        exact_sign(
+            (adx * adx + ady * ady) * (bdx * cdy - bdy * cdx)
+                - (bdx * bdx + bdy * bdy) * (adx * cdy - ady * cdx)
+                + (cdx * cdx + cdy * cdy) * (adx * bdy - ady * bdx),
+        )
+    }
+
+    fn next_coordinate(state: &mut u64) -> i64 {
+        *state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        ((*state >> 32) % 2_001) as i64 - 1_000
+    }
+
+    fn integer_points<const N: usize>(state: &mut u64) -> [[i64; 2]; N] {
+        std::array::from_fn(|_| [next_coordinate(state), next_coordinate(state)])
+    }
+
+    fn floating<const N: usize>(points: [[i64; 2]; N]) -> [[f64; 2]; N] {
+        points.map(|point| point.map(|coordinate| coordinate as f64))
+    }
+
+    #[test]
+    fn planar_predicates_match_exact_integer_oracles_and_transform_invariantly() {
+        let mut state = 0x8b8b_8b8b_1357_2468;
+        for _ in 0..10_000 {
+            let oriented = integer_points::<3>(&mut state);
+            let expected = exact_orient2d(oriented);
+            assert_eq!(orient2d(floating(oriented)).unwrap(), expected);
+            let translated = oriented.map(|[x, y]| [x + 4_096, y - 8_192]);
+            let scaled = translated.map(|[x, y]| [x * 16, y * 16]);
+            assert_eq!(orient2d(floating(scaled)).unwrap(), expected);
+
+            let circular = integer_points::<4>(&mut state);
+            let expected = exact_incircle2d(circular);
+            assert_eq!(incircle2d(floating(circular)).unwrap(), expected);
+            let translated = circular.map(|[x, y]| [x - 2_048, y + 1_024]);
+            let scaled = translated.map(|[x, y]| [x * 8, y * 8]);
+            assert_eq!(incircle2d(floating(scaled)).unwrap(), expected);
+        }
+
+        let collinear = [[-2, -2], [0, 0], [3, 3]];
+        assert_eq!(orient2d(floating(collinear)).unwrap(), PredicateSign::Zero);
+        let cocircular = [[1, 0], [0, 1], [-1, 0], [0, -1]];
+        assert_eq!(
+            incircle2d(floating(cocircular)).unwrap(),
+            PredicateSign::Zero
+        );
+    }
+
     #[test]
     fn adaptive_predicates_resolve_near_degenerate_inputs() {
         let epsilon = f64::EPSILON;
