@@ -34,7 +34,7 @@ pub use quic_channel::{QuicRemoteWorkerChannel, RemoteWorkerChannelConfig};
 pub use relay_channel::RelayRemoteWorkerChannel;
 pub use worker_entry::{
     run_remote_meshing_worker_quic, run_remote_worker_quic, run_remote_worker_relay,
-    RemoteWorkerRelayRequest,
+    RemoteMeshingWorkerQuicRequest, RemoteWorkerQuicRequest, RemoteWorkerRelayRequest,
 };
 pub use worker_env::run_remote_worker_from_env;
 

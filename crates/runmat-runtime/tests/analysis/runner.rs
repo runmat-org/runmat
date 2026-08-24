@@ -2853,17 +2853,28 @@ fn analysis_result_field_max_abs(run: &AnalysisRunResult, field_id: &str) -> Opt
         })
 }
 
-#[allow(clippy::too_many_arguments)]
-fn push_threshold_assertion(
-    fixture_id: &str,
-    assertions: &mut Vec<ThresholdAssertionRecord>,
-    failures: &mut Vec<String>,
-    name: &str,
-    source_diagnostic: &str,
+struct ThresholdAssertion<'a> {
+    fixture_id: &'a str,
+    name: &'a str,
+    source_diagnostic: &'a str,
     observed: Option<f64>,
     min_allowed: Option<f64>,
     max_allowed: Option<f64>,
+}
+
+fn record_threshold_assertion(
+    assertions: &mut Vec<ThresholdAssertionRecord>,
+    failures: &mut Vec<String>,
+    assertion: ThresholdAssertion<'_>,
 ) {
+    let ThresholdAssertion {
+        fixture_id,
+        name,
+        source_diagnostic,
+        observed,
+        min_allowed,
+        max_allowed,
+    } = assertion;
     let passed = observed
         .map(|value| {
             min_allowed.map(|min| value >= min).unwrap_or(true)
@@ -2886,6 +2897,32 @@ fn push_threshold_assertion(
     }
 }
 
+macro_rules! push_threshold_assertion {
+    (
+        $fixture_id:expr,
+        $assertions:expr,
+        $failures:expr,
+        $name:expr,
+        $source_diagnostic:expr,
+        $observed:expr,
+        $min_allowed:expr,
+        $max_allowed:expr $(,)?
+    ) => {
+        record_threshold_assertion(
+            $assertions,
+            $failures,
+            ThresholdAssertion {
+                fixture_id: $fixture_id,
+                name: $name,
+                source_diagnostic: $source_diagnostic,
+                observed: $observed,
+                min_allowed: $min_allowed,
+                max_allowed: $max_allowed,
+            },
+        )
+    };
+}
+
 fn push_plastic_state_threshold_assertions(
     fixture_id: &str,
     assertions: &mut Vec<ThresholdAssertionRecord>,
@@ -2896,7 +2933,7 @@ fn push_plastic_state_threshold_assertions(
     push_nonlinear_state_topology_threshold_assertions(
         fixture_id, assertions, failures, run, prefix,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -2906,7 +2943,7 @@ fn push_plastic_state_threshold_assertions(
         Some(1.0),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -2928,7 +2965,7 @@ fn push_contact_state_threshold_assertions(
     push_nonlinear_state_topology_threshold_assertions(
         fixture_id, assertions, failures, run, prefix,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -2938,7 +2975,7 @@ fn push_contact_state_threshold_assertions(
         Some(1.0),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -2948,7 +2985,7 @@ fn push_contact_state_threshold_assertions(
         Some(1.0e-12),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -2967,7 +3004,7 @@ fn push_nonlinear_state_topology_threshold_assertions(
     run: &AnalysisRunResult,
     prefix: &str,
 ) {
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -2977,7 +3014,7 @@ fn push_nonlinear_state_topology_threshold_assertions(
         Some(1.0),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3000,7 +3037,7 @@ fn push_plastic_known_answer_threshold_assertions(
     run: &AnalysisRunResult,
     prefix: &str,
 ) {
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3014,7 +3051,7 @@ fn push_plastic_known_answer_threshold_assertions(
         Some(1.0),
         Some(1.0),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3028,7 +3065,7 @@ fn push_plastic_known_answer_threshold_assertions(
         Some(1.0e-6),
         Some(1.0),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3042,7 +3079,7 @@ fn push_plastic_known_answer_threshold_assertions(
         Some(0.999_999),
         Some(1.000_001),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3065,7 +3102,7 @@ fn push_contact_known_answer_threshold_assertions(
     run: &AnalysisRunResult,
     prefix: &str,
 ) {
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3079,7 +3116,7 @@ fn push_contact_known_answer_threshold_assertions(
         Some(0.0),
         Some(1.0e-12),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3093,7 +3130,7 @@ fn push_contact_known_answer_threshold_assertions(
         Some(1.0),
         Some(1.0),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3103,7 +3140,7 @@ fn push_contact_known_answer_threshold_assertions(
         Some(0.0),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3117,7 +3154,7 @@ fn push_contact_known_answer_threshold_assertions(
         Some(0.0),
         Some(1.0e-12),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3131,7 +3168,7 @@ fn push_contact_known_answer_threshold_assertions(
         Some(0.0),
         Some(1.0e-12),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3145,7 +3182,7 @@ fn push_contact_known_answer_threshold_assertions(
         Some(1.0),
         Some(1.0),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3155,7 +3192,7 @@ fn push_contact_known_answer_threshold_assertions(
         Some(0.0),
         Some(0.0),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3177,7 +3214,7 @@ fn push_thermal_standalone_threshold_assertions(
     failures: &mut Vec<String>,
     run: &AnalysisRunResult,
 ) {
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3187,7 +3224,7 @@ fn push_thermal_standalone_threshold_assertions(
         Some(0.0),
         Some(7.0),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3197,7 +3234,7 @@ fn push_thermal_standalone_threshold_assertions(
         Some(290.0),
         Some(360.0),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3207,7 +3244,7 @@ fn push_thermal_standalone_threshold_assertions(
         Some(300.0),
         Some(370.0),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3221,7 +3258,7 @@ fn push_thermal_standalone_threshold_assertions(
         Some(0.0),
         Some(0.25),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3231,7 +3268,7 @@ fn push_thermal_standalone_threshold_assertions(
         Some(1.0),
         Some(1.5),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3245,7 +3282,7 @@ fn push_thermal_standalone_threshold_assertions(
         Some(1.0),
         Some(1.5),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3255,7 +3292,7 @@ fn push_thermal_standalone_threshold_assertions(
         Some(0.4),
         Some(1.4),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3265,7 +3302,7 @@ fn push_thermal_standalone_threshold_assertions(
         Some(0.9),
         Some(1.0),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3279,7 +3316,7 @@ fn push_thermal_standalone_threshold_assertions(
         Some(0.6),
         Some(1.2),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3293,7 +3330,7 @@ fn push_thermal_standalone_threshold_assertions(
         Some(1.0),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3307,7 +3344,7 @@ fn push_thermal_standalone_threshold_assertions(
         Some(2.0),
         Some(3.0),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3321,7 +3358,7 @@ fn push_thermal_standalone_threshold_assertions(
         Some(0.0),
         Some(0.35),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3335,7 +3372,7 @@ fn push_thermal_standalone_threshold_assertions(
         Some(0.95),
         Some(1.0),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3349,7 +3386,7 @@ fn push_thermal_standalone_threshold_assertions(
         Some(0.0),
         Some(0.45),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3363,7 +3400,7 @@ fn push_thermal_standalone_threshold_assertions(
         Some(1.0),
         Some(1.0),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3377,7 +3414,7 @@ fn push_thermal_standalone_threshold_assertions(
         Some(1.0),
         Some(1.0),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3391,7 +3428,7 @@ fn push_thermal_standalone_threshold_assertions(
         Some(1.0),
         Some(1.0),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3405,7 +3442,7 @@ fn push_thermal_standalone_threshold_assertions(
         Some(1.0),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3419,7 +3456,7 @@ fn push_thermal_standalone_threshold_assertions(
         Some(1.0),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3441,7 +3478,7 @@ fn push_em_reference_topology_threshold_assertions(
     failures: &mut Vec<String>,
     run: &AnalysisRunResult,
 ) {
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3451,7 +3488,7 @@ fn push_em_reference_topology_threshold_assertions(
         Some(1.0),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3461,7 +3498,7 @@ fn push_em_reference_topology_threshold_assertions(
         Some(1.0),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3471,7 +3508,7 @@ fn push_em_reference_topology_threshold_assertions(
         Some(1.0),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3485,7 +3522,7 @@ fn push_em_reference_topology_threshold_assertions(
         Some(3.0),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3499,7 +3536,7 @@ fn push_em_reference_topology_threshold_assertions(
         Some(1.0),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3513,7 +3550,7 @@ fn push_em_reference_topology_threshold_assertions(
         Some(1.0),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3527,7 +3564,7 @@ fn push_em_reference_topology_threshold_assertions(
         Some(3.0),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3537,7 +3574,7 @@ fn push_em_reference_topology_threshold_assertions(
         Some(1.0),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3560,7 +3597,7 @@ fn push_electro_thermal_source_coupling_threshold_assertions(
     run: &AnalysisRunResult,
     prefix: &str,
 ) {
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3574,7 +3611,7 @@ fn push_electro_thermal_source_coupling_threshold_assertions(
         Some(0.999_999),
         Some(1.000_001),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3588,7 +3625,7 @@ fn push_electro_thermal_source_coupling_threshold_assertions(
         Some(1.0),
         Some(1.0),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3602,7 +3639,7 @@ fn push_electro_thermal_source_coupling_threshold_assertions(
         Some(0.999_999),
         Some(1.0),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3624,7 +3661,7 @@ fn push_linear_structural_threshold_assertions(
     failures: &mut Vec<String>,
     run: &AnalysisRunResult,
 ) {
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3634,7 +3671,7 @@ fn push_linear_structural_threshold_assertions(
         Some(0.0),
         Some(1.0e-6),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3646,7 +3683,7 @@ fn push_linear_structural_threshold_assertions(
         Some(0.0),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3660,7 +3697,7 @@ fn push_linear_structural_threshold_assertions(
         Some(0.999_999),
         Some(1.000_001),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3674,7 +3711,7 @@ fn push_linear_structural_threshold_assertions(
         Some(0.0),
         Some(1.0e-8),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3688,7 +3725,7 @@ fn push_linear_structural_threshold_assertions(
         Some(1.0),
         Some(1.0),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3702,7 +3739,7 @@ fn push_linear_structural_threshold_assertions(
         Some(1.0),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3716,7 +3753,7 @@ fn push_linear_structural_threshold_assertions(
         Some(1.0),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3730,7 +3767,7 @@ fn push_linear_structural_threshold_assertions(
         Some(1.0e-12),
         Some(1.0e-2),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3740,7 +3777,7 @@ fn push_linear_structural_threshold_assertions(
         Some(1.0e5),
         Some(1.0e9),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3758,7 +3795,7 @@ fn push_structural_reference_kinematics_threshold_assertions(
     failures: &mut Vec<String>,
     run: &AnalysisRunResult,
 ) {
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3772,7 +3809,7 @@ fn push_structural_reference_kinematics_threshold_assertions(
         Some(0.0),
         Some(0.1),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3786,7 +3823,7 @@ fn push_structural_reference_kinematics_threshold_assertions(
         Some(0.5),
         Some(1.0),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3800,7 +3837,7 @@ fn push_structural_reference_kinematics_threshold_assertions(
         Some(1.0),
         Some(1.0),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3814,7 +3851,7 @@ fn push_structural_reference_kinematics_threshold_assertions(
         Some(0.0),
         Some(1.0e-7),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3828,7 +3865,7 @@ fn push_structural_reference_kinematics_threshold_assertions(
         Some(0.0),
         Some(1.0e-7),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3964,7 +4001,7 @@ fn push_structural_beam_moment_threshold_assertions(
             Some(1.0),
         ),
     ] {
-        push_threshold_assertion(
+        push_threshold_assertion!(
             fixture_id,
             assertions,
             failures,
@@ -4055,7 +4092,7 @@ fn push_structural_shell_moment_threshold_assertions(
             Some(1.0e-5),
         ),
     ] {
-        push_threshold_assertion(
+        push_threshold_assertion!(
             fixture_id,
             assertions,
             failures,
@@ -4085,7 +4122,7 @@ fn push_structural_shell_moment_threshold_assertions(
             FEA_FIELD_STRUCTURAL_SHELL_VON_MISES,
         ),
     ] {
-        push_threshold_assertion(
+        push_threshold_assertion!(
             fixture_id,
             assertions,
             failures,
@@ -4613,7 +4650,7 @@ pub(super) fn run_fixture(
                 .modal_results
                 .as_ref()
                 .and_then(|modal| modal.residual_norms.iter().copied().reduce(f64::max));
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4623,7 +4660,7 @@ pub(super) fn run_fixture(
                 None,
                 Some(1.0e-1),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4639,7 +4676,7 @@ pub(super) fn run_fixture(
                     .map(|count| count as f64),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4660,7 +4697,7 @@ pub(super) fn run_fixture(
                 "FEA_MODAL_ORTHOGONALITY",
                 "max_m_orthogonality_offdiag",
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4677,7 +4714,7 @@ pub(super) fn run_fixture(
                 "FEA_MODAL_SEPARATION",
                 "min_relative_frequency_separation",
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4689,7 +4726,7 @@ pub(super) fn run_fixture(
             );
         }
         if spec.id.starts_with("acoustic_harmonic_") {
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4703,7 +4740,7 @@ pub(super) fn run_fixture(
                 None,
                 Some(1.0e-3),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4717,7 +4754,7 @@ pub(super) fn run_fixture(
                 Some(50.0),
                 Some(20_000.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4731,7 +4768,7 @@ pub(super) fn run_fixture(
                 Some(1.0e-12),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4745,7 +4782,7 @@ pub(super) fn run_fixture(
                 Some(3.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4759,7 +4796,7 @@ pub(super) fn run_fixture(
                 Some(2.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4773,7 +4810,7 @@ pub(super) fn run_fixture(
                 Some(2.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4787,7 +4824,7 @@ pub(super) fn run_fixture(
                 Some(2.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4801,7 +4838,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 Some(1.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4815,7 +4852,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 Some(1.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4829,7 +4866,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4843,7 +4880,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4857,7 +4894,7 @@ pub(super) fn run_fixture(
                 Some(3.0),
                 Some(3.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4871,7 +4908,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 Some(1.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4885,7 +4922,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4899,7 +4936,7 @@ pub(super) fn run_fixture(
                 Some(1.0e-12),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4913,7 +4950,7 @@ pub(super) fn run_fixture(
                 None,
                 Some(1.0e-3),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4927,7 +4964,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(0.5),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4941,7 +4978,7 @@ pub(super) fn run_fixture(
                 Some(1.0e-12),
                 Some(1.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4955,7 +4992,7 @@ pub(super) fn run_fixture(
                 Some(1.0e-9),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4969,7 +5006,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5039,7 +5076,7 @@ pub(super) fn run_fixture(
                 "FEA_TRANSIENT_STABILITY",
                 "max_residual_norm",
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5056,7 +5093,7 @@ pub(super) fn run_fixture(
                 "FEA_TRANSIENT_ENERGY",
                 "max_energy_growth_ratio",
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5068,7 +5105,7 @@ pub(super) fn run_fixture(
             );
         }
         if spec.id.starts_with("transient_") {
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5082,7 +5119,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-12),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5096,7 +5133,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5110,7 +5147,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5124,7 +5161,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 Some(spec.max_transient_energy_growth_ratio.unwrap_or(10.0)),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5147,7 +5184,7 @@ pub(super) fn run_fixture(
             } else {
                 0.0
             };
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5157,7 +5194,7 @@ pub(super) fn run_fixture(
                 Some(1.20),
                 Some(1.25),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5167,7 +5204,7 @@ pub(super) fn run_fixture(
                 Some(1.0e-5),
                 Some(3.0e-5),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5177,7 +5214,7 @@ pub(super) fn run_fixture(
                 Some(4.0),
                 Some(6.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5187,7 +5224,7 @@ pub(super) fn run_fixture(
                 Some(0.04),
                 Some(0.08),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5197,7 +5234,7 @@ pub(super) fn run_fixture(
                 Some(2.0e5),
                 Some(5.0e5),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5207,7 +5244,7 @@ pub(super) fn run_fixture(
                 Some(expected_profile_point_count),
                 Some(expected_profile_point_count),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5221,7 +5258,7 @@ pub(super) fn run_fixture(
                 None,
                 Some(1.0e-4),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5235,7 +5272,7 @@ pub(super) fn run_fixture(
                 None,
                 Some(1.0e-4),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5249,7 +5286,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-8),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5259,7 +5296,7 @@ pub(super) fn run_fixture(
                 Some(0.1),
                 Some(10.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5273,7 +5310,7 @@ pub(super) fn run_fixture(
                 Some(2.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5287,7 +5324,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 Some(1.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5301,7 +5338,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 Some(1.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5315,7 +5352,7 @@ pub(super) fn run_fixture(
                 Some(2.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5329,7 +5366,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 Some(1.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5343,7 +5380,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 Some(1.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5357,7 +5394,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-4),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5371,7 +5408,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-4),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5385,7 +5422,7 @@ pub(super) fn run_fixture(
                 Some(0.999_999),
                 Some(1.000_001),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5399,7 +5436,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-8),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5413,7 +5450,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 Some(1.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5428,7 +5465,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
             );
             if spec.id.starts_with("cfd_transient_") {
-                push_threshold_assertion(
+                push_threshold_assertion!(
                     spec.id,
                     &mut threshold_assertions,
                     &mut failures,
@@ -5442,7 +5479,7 @@ pub(super) fn run_fixture(
                     Some(12.0),
                     Some(12.0),
                 );
-                push_threshold_assertion(
+                push_threshold_assertion!(
                     spec.id,
                     &mut threshold_assertions,
                     &mut failures,
@@ -5456,7 +5493,7 @@ pub(super) fn run_fixture(
                     Some(0.649_999),
                     Some(0.650_001),
                 );
-                push_threshold_assertion(
+                push_threshold_assertion!(
                     spec.id,
                     &mut threshold_assertions,
                     &mut failures,
@@ -5470,7 +5507,7 @@ pub(super) fn run_fixture(
                     Some(1.0),
                     Some(1.0),
                 );
-                push_threshold_assertion(
+                push_threshold_assertion!(
                     spec.id,
                     &mut threshold_assertions,
                     &mut failures,
@@ -5492,7 +5529,7 @@ pub(super) fn run_fixture(
             } else {
                 2.0
             };
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5502,7 +5539,7 @@ pub(super) fn run_fixture(
                 Some(1.20),
                 Some(1.25),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5512,7 +5549,7 @@ pub(super) fn run_fixture(
                 Some(1.0e-5),
                 Some(3.0e-5),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5522,7 +5559,7 @@ pub(super) fn run_fixture(
                 Some(4.0),
                 Some(6.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5532,7 +5569,7 @@ pub(super) fn run_fixture(
                 Some(0.04),
                 Some(0.08),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5542,7 +5579,7 @@ pub(super) fn run_fixture(
                 Some(2.0e5),
                 Some(5.0e5),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5552,7 +5589,7 @@ pub(super) fn run_fixture(
                 Some(expected_cht_profile_point_count),
                 Some(expected_cht_profile_point_count),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5566,7 +5603,7 @@ pub(super) fn run_fixture(
                 Some(60.0),
                 Some(60.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5576,7 +5613,7 @@ pub(super) fn run_fixture(
                 Some(12.0),
                 Some(12.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5586,7 +5623,7 @@ pub(super) fn run_fixture(
                 Some(1.0e-3),
                 Some(1.0e-3),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5600,7 +5637,7 @@ pub(super) fn run_fixture(
                 None,
                 Some(1.0e-4),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5614,7 +5651,7 @@ pub(super) fn run_fixture(
                 None,
                 Some(1.0e-4),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5628,7 +5665,7 @@ pub(super) fn run_fixture(
                 None,
                 Some(2.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5642,7 +5679,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5656,7 +5693,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(0.1),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5670,7 +5707,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5684,7 +5721,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5698,7 +5735,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5712,7 +5749,7 @@ pub(super) fn run_fixture(
                 Some(0.999),
                 Some(1.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5726,7 +5763,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(0.1),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5740,7 +5777,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5754,7 +5791,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5768,7 +5805,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5782,7 +5819,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 Some(64.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5796,7 +5833,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5810,7 +5847,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5824,7 +5861,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5846,7 +5883,7 @@ pub(super) fn run_fixture(
             } else {
                 0.0
             };
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5860,7 +5897,7 @@ pub(super) fn run_fixture(
                 Some(cht_mesh_backed_min),
                 Some(1.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5874,7 +5911,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5888,7 +5925,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5902,7 +5939,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5916,7 +5953,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5930,7 +5967,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5944,7 +5981,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5958,7 +5995,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5972,7 +6009,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5986,7 +6023,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 Some(1.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6000,7 +6037,7 @@ pub(super) fn run_fixture(
                 Some(0.999),
                 Some(1.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6014,7 +6051,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 Some(1.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6029,7 +6066,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
             );
             if spec.id == "cht_coupled_channel_slab_cpu" {
-                push_threshold_assertion(
+                push_threshold_assertion!(
                     spec.id,
                     &mut threshold_assertions,
                     &mut failures,
@@ -6051,7 +6088,7 @@ pub(super) fn run_fixture(
             } else {
                 2.0
             };
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6065,7 +6102,7 @@ pub(super) fn run_fixture(
                 None,
                 Some(1.0e-4),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6079,7 +6116,7 @@ pub(super) fn run_fixture(
                 None,
                 Some(1.0e-4),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6093,7 +6130,7 @@ pub(super) fn run_fixture(
                 None,
                 Some(1.0e-4),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6107,7 +6144,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6121,7 +6158,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6135,7 +6172,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-12),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6149,7 +6186,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 Some(128.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6163,7 +6200,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-8),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6177,7 +6214,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-8),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6191,7 +6228,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-8),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6205,7 +6242,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6219,7 +6256,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-8),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6233,7 +6270,7 @@ pub(super) fn run_fixture(
                 Some(1.0e-18),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6247,7 +6284,7 @@ pub(super) fn run_fixture(
                 Some(1.0e-18),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6261,7 +6298,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-8),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6275,7 +6312,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6297,7 +6334,7 @@ pub(super) fn run_fixture(
             } else {
                 0.0
             };
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6311,7 +6348,7 @@ pub(super) fn run_fixture(
                 Some(fsi_mesh_backed_min),
                 Some(1.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6325,7 +6362,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6339,7 +6376,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6353,7 +6390,7 @@ pub(super) fn run_fixture(
                 Some(1.0e6),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6367,7 +6404,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6381,7 +6418,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6395,7 +6432,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-12),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6409,7 +6446,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-8),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6423,7 +6460,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-8),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6437,7 +6474,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-8),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6451,7 +6488,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-8),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6465,7 +6502,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 Some(1.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6479,7 +6516,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-8),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6493,7 +6530,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 Some(1.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6503,7 +6540,7 @@ pub(super) fn run_fixture(
                 Some(1.20),
                 Some(1.25),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6513,7 +6550,7 @@ pub(super) fn run_fixture(
                 Some(1.0e-5),
                 Some(3.0e-5),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6523,7 +6560,7 @@ pub(super) fn run_fixture(
                 Some(3.5),
                 Some(4.5),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6533,7 +6570,7 @@ pub(super) fn run_fixture(
                 Some(0.04),
                 Some(0.08),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6543,7 +6580,7 @@ pub(super) fn run_fixture(
                 Some(2.0e5),
                 Some(3.0e5),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6553,7 +6590,7 @@ pub(super) fn run_fixture(
                 Some(expected_fsi_profile_point_count),
                 Some(expected_fsi_profile_point_count),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6563,7 +6600,7 @@ pub(super) fn run_fixture(
                 Some(12.0),
                 Some(12.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6573,7 +6610,7 @@ pub(super) fn run_fixture(
                 Some(1.0e-3),
                 Some(1.0e-3),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6587,7 +6624,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 Some(1.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6602,7 +6639,7 @@ pub(super) fn run_fixture(
                 Some(expected_fsi_profile_point_count),
             );
             if spec.id == "fsi_coupled_pipe_plate_cpu" {
-                push_threshold_assertion(
+                push_threshold_assertion!(
                     spec.id,
                     &mut threshold_assertions,
                     &mut failures,
@@ -6881,7 +6918,7 @@ pub(super) fn run_fixture(
                         }
                     }
                     if let Some(min_cache_hit_ratio) = spec.min_transient_cache_hit_ratio {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -6893,7 +6930,7 @@ pub(super) fn run_fixture(
                         );
                     }
                     if let Some(max_cache_misses) = spec.max_transient_cache_misses {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -6905,7 +6942,7 @@ pub(super) fn run_fixture(
                         );
                     }
                     if spec.id == "transient_long_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -6915,7 +6952,7 @@ pub(super) fn run_fixture(
                             Some(0.65),
                             None,
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -6925,7 +6962,7 @@ pub(super) fn run_fixture(
                             None,
                             Some(1.35),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -6935,7 +6972,7 @@ pub(super) fn run_fixture(
                             Some(0.8),
                             Some(1.2),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -6952,7 +6989,7 @@ pub(super) fn run_fixture(
                                 .unwrap_or(0.0)
                                 .max(0.0);
                         if requested_bucket_tol > 0.0 {
-                            push_threshold_assertion(
+                            push_threshold_assertion!(
                                 spec.id,
                                 &mut threshold_assertions,
                                 &mut failures,
@@ -6962,7 +6999,7 @@ pub(super) fn run_fixture(
                                 Some(requested_bucket_tol * 0.99),
                                 Some(requested_bucket_tol * 1.01 + 1.0e-12),
                             );
-                            push_threshold_assertion(
+                            push_threshold_assertion!(
                                 spec.id,
                                 &mut threshold_assertions,
                                 &mut failures,
@@ -6977,7 +7014,7 @@ pub(super) fn run_fixture(
                                 Some(1.0e-2),
                             );
                         }
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -6987,7 +7024,7 @@ pub(super) fn run_fixture(
                             None,
                             Some(3.5),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -6999,7 +7036,7 @@ pub(super) fn run_fixture(
                         );
                     }
                     if spec.id == "transient_shock_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7009,7 +7046,7 @@ pub(super) fn run_fixture(
                             None,
                             Some(4.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7021,7 +7058,7 @@ pub(super) fn run_fixture(
                         );
                     }
                     if spec.id == "thermo_mech_kickoff_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7035,7 +7072,7 @@ pub(super) fn run_fixture(
                             Some(5.0e-4),
                             Some(5.0e-2),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7049,7 +7086,7 @@ pub(super) fn run_fixture(
                             Some(0.5),
                             Some(2.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7063,7 +7100,7 @@ pub(super) fn run_fixture(
                             Some(0.85),
                             Some(1.2),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7077,7 +7114,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.3),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7091,7 +7128,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7105,7 +7142,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.2),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7119,7 +7156,7 @@ pub(super) fn run_fixture(
                             Some(0.6),
                             Some(1.1),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7133,7 +7170,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(1.0e-8),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7147,7 +7184,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             None,
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7161,7 +7198,7 @@ pub(super) fn run_fixture(
                             Some(0.9),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7175,7 +7212,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             None,
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7189,7 +7226,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(1.0e-8),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7204,7 +7241,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                         );
                     } else if spec.id == "thermo_gradient_benign_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7218,7 +7255,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.18),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7232,7 +7269,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.22),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7247,7 +7284,7 @@ pub(super) fn run_fixture(
                             Some(0.35),
                         );
                     } else if spec.id == "thermo_gradient_pathological_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7261,7 +7298,7 @@ pub(super) fn run_fixture(
                             Some(1.04),
                             Some(1.55),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7275,7 +7312,7 @@ pub(super) fn run_fixture(
                             Some(0.2),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7292,7 +7329,7 @@ pub(super) fn run_fixture(
                     } else if spec.id == "thermo_ramp_smooth_gpu_provider"
                         || spec.id == "thermo_ramp_smooth_field_artifact_gpu_provider"
                     {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7306,7 +7343,7 @@ pub(super) fn run_fixture(
                             Some(-0.1),
                             Some(0.1),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7320,7 +7357,7 @@ pub(super) fn run_fixture(
                             Some(0.85),
                             Some(1.1),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7334,7 +7371,7 @@ pub(super) fn run_fixture(
                             Some(0.2),
                             Some(0.4),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7348,7 +7385,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.25),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7362,7 +7399,7 @@ pub(super) fn run_fixture(
                             Some(0.35),
                             Some(0.7),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7376,7 +7413,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.02),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7393,7 +7430,7 @@ pub(super) fn run_fixture(
                     } else if spec.id == "thermo_shock_oscillatory_gpu_provider"
                         || spec.id == "thermo_shock_oscillatory_field_artifact_gpu_provider"
                     {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7407,7 +7444,7 @@ pub(super) fn run_fixture(
                             Some(-0.2),
                             Some(0.1),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7421,7 +7458,7 @@ pub(super) fn run_fixture(
                             Some(0.8),
                             Some(1.1),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7435,7 +7472,7 @@ pub(super) fn run_fixture(
                             Some(0.35),
                             Some(0.7),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7449,7 +7486,7 @@ pub(super) fn run_fixture(
                             Some(0.25),
                             Some(0.8),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7463,7 +7500,7 @@ pub(super) fn run_fixture(
                             Some(0.30),
                             Some(0.7),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7477,7 +7514,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.08),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7499,7 +7536,7 @@ pub(super) fn run_fixture(
                             &gpu_envelope.data,
                         );
                     } else if spec.id == "electro_thermal_joule_benign_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7513,7 +7550,7 @@ pub(super) fn run_fixture(
                             Some(9.8),
                             Some(10.2),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7527,7 +7564,7 @@ pub(super) fn run_fixture(
                             Some(1.03),
                             Some(1.12),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7541,7 +7578,7 @@ pub(super) fn run_fixture(
                             Some(0.98),
                             Some(1.02),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7555,7 +7592,7 @@ pub(super) fn run_fixture(
                             Some(0.08),
                             Some(0.25),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7569,7 +7606,7 @@ pub(super) fn run_fixture(
                             Some(0.82),
                             Some(0.95),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7583,7 +7620,7 @@ pub(super) fn run_fixture(
                             Some(2.0),
                             None,
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7597,7 +7634,7 @@ pub(super) fn run_fixture(
                             Some(2.0),
                             Some(2.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7611,7 +7648,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7625,7 +7662,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7639,7 +7676,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7653,7 +7690,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7667,7 +7704,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7681,7 +7718,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7695,7 +7732,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(1.0e-8),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7709,7 +7746,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(1.0e-8),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7723,7 +7760,7 @@ pub(super) fn run_fixture(
                             Some(35.9),
                             Some(36.1),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7737,7 +7774,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             None,
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7751,7 +7788,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7765,7 +7802,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(1.0e-8),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7779,7 +7816,7 @@ pub(super) fn run_fixture(
                             Some(0.999_999),
                             Some(1.000_001),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7793,7 +7830,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7815,7 +7852,7 @@ pub(super) fn run_fixture(
                             "electro_thermal_benign",
                         );
                     } else if spec.id == "electro_thermal_joule_pathological_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7829,7 +7866,7 @@ pub(super) fn run_fixture(
                             Some(9.8),
                             Some(10.2),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7843,7 +7880,7 @@ pub(super) fn run_fixture(
                             Some(2.8),
                             Some(3.6),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7857,7 +7894,7 @@ pub(super) fn run_fixture(
                             Some(0.9),
                             Some(1.2),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7871,7 +7908,7 @@ pub(super) fn run_fixture(
                             Some(0.35),
                             Some(0.8),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7885,7 +7922,7 @@ pub(super) fn run_fixture(
                             Some(0.85),
                             Some(1.1),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7899,7 +7936,7 @@ pub(super) fn run_fixture(
                             Some(2.0),
                             None,
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7913,7 +7950,7 @@ pub(super) fn run_fixture(
                             Some(2.0),
                             Some(2.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7927,7 +7964,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7941,7 +7978,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7955,7 +7992,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7969,7 +8006,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7983,7 +8020,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -7997,7 +8034,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8011,7 +8048,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(1.0e-8),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8025,7 +8062,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(1.0e-8),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8039,7 +8076,7 @@ pub(super) fn run_fixture(
                             Some(179.9),
                             Some(180.1),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8053,7 +8090,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             None,
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8067,7 +8104,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8081,7 +8118,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(1.0e-8),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8095,7 +8132,7 @@ pub(super) fn run_fixture(
                             Some(0.999_999),
                             Some(1.000_001),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8109,7 +8146,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8132,7 +8169,7 @@ pub(super) fn run_fixture(
                         );
                     }
                     if spec.id == "nonlinear_assembly_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8142,7 +8179,7 @@ pub(super) fn run_fixture(
                             Some(24.0),
                             Some(24.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8152,7 +8189,7 @@ pub(super) fn run_fixture(
                             Some(8.0),
                             Some(12.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8162,7 +8199,7 @@ pub(super) fn run_fixture(
                             Some(24.0),
                             Some(24.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8172,7 +8209,7 @@ pub(super) fn run_fixture(
                             None,
                             Some(0.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8182,7 +8219,7 @@ pub(super) fn run_fixture(
                             None,
                             Some(1.0e-4),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8194,7 +8231,7 @@ pub(super) fn run_fixture(
                         );
                     }
                     if spec.id == "nonlinear_assembly_stress_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8204,7 +8241,7 @@ pub(super) fn run_fixture(
                             Some(32.0),
                             Some(32.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8214,7 +8251,7 @@ pub(super) fn run_fixture(
                             Some(32.0),
                             Some(32.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8224,7 +8261,7 @@ pub(super) fn run_fixture(
                             None,
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8234,7 +8271,7 @@ pub(super) fn run_fixture(
                             None,
                             Some(1.0e-5),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8244,7 +8281,7 @@ pub(super) fn run_fixture(
                             None,
                             Some(1.0e-4),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8254,7 +8291,7 @@ pub(super) fn run_fixture(
                             Some(8.0),
                             Some(14.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8264,7 +8301,7 @@ pub(super) fn run_fixture(
                             Some(5.0),
                             Some(10.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8274,7 +8311,7 @@ pub(super) fn run_fixture(
                             None,
                             Some(3.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8286,7 +8323,7 @@ pub(super) fn run_fixture(
                         );
                     }
                     if spec.id == "nonlinear_softening_benchmark_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8296,7 +8333,7 @@ pub(super) fn run_fixture(
                             Some(40.0),
                             Some(40.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8306,7 +8343,7 @@ pub(super) fn run_fixture(
                             None,
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8316,7 +8353,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(2.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8326,7 +8363,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(4.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8338,7 +8375,7 @@ pub(super) fn run_fixture(
                         );
                     }
                     if spec.id == "nonlinear_load_path_mix_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8348,7 +8385,7 @@ pub(super) fn run_fixture(
                             Some(36.0),
                             Some(36.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8358,7 +8395,7 @@ pub(super) fn run_fixture(
                             Some(8.0),
                             Some(11.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8368,7 +8405,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(3.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8378,7 +8415,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(2.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8392,7 +8429,7 @@ pub(super) fn run_fixture(
                             Some(0.93),
                             Some(1.02),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8406,7 +8443,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.08),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8420,7 +8457,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.08),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8434,7 +8471,7 @@ pub(super) fn run_fixture(
                             Some(0.9),
                             Some(1.1),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8448,7 +8485,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.05),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8462,7 +8499,7 @@ pub(super) fn run_fixture(
                             Some(9.8),
                             Some(10.2),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8476,7 +8513,7 @@ pub(super) fn run_fixture(
                             Some(1.3),
                             Some(1.55),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8490,7 +8527,7 @@ pub(super) fn run_fixture(
                             Some(0.98),
                             Some(1.02),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8504,7 +8541,7 @@ pub(super) fn run_fixture(
                             Some(0.2),
                             Some(0.45),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8518,7 +8555,7 @@ pub(super) fn run_fixture(
                             Some(0.9),
                             Some(1.05),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8534,7 +8571,7 @@ pub(super) fn run_fixture(
                         );
                     }
                     if spec.id == "nonlinear_plasticity_benchmark_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8548,7 +8585,7 @@ pub(super) fn run_fixture(
                             Some(0.82),
                             Some(0.9),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8562,7 +8599,7 @@ pub(super) fn run_fixture(
                             Some(0.65),
                             Some(0.8),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8576,7 +8613,7 @@ pub(super) fn run_fixture(
                             Some(0.825),
                             Some(0.835),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8599,7 +8636,7 @@ pub(super) fn run_fixture(
                         );
                     }
                     if spec.id == "nonlinear_plastic_hardening_reference_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8613,7 +8650,7 @@ pub(super) fn run_fixture(
                             Some(0.18),
                             Some(0.28),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8627,7 +8664,7 @@ pub(super) fn run_fixture(
                             Some(0.15),
                             Some(0.25),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8641,7 +8678,7 @@ pub(super) fn run_fixture(
                             Some(0.825),
                             Some(0.835),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8671,7 +8708,7 @@ pub(super) fn run_fixture(
                         );
                     }
                     if spec.id == "nonlinear_plastic_hardening_reference_complex_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8685,7 +8722,7 @@ pub(super) fn run_fixture(
                             Some(0.33),
                             Some(0.43),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8699,7 +8736,7 @@ pub(super) fn run_fixture(
                             Some(0.27),
                             Some(0.36),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8713,7 +8750,7 @@ pub(super) fn run_fixture(
                             Some(0.825),
                             Some(0.835),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8743,7 +8780,7 @@ pub(super) fn run_fixture(
                         );
                     }
                     if spec.id == "nonlinear_contact_benchmark_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8757,7 +8794,7 @@ pub(super) fn run_fixture(
                             Some(0.92),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8771,7 +8808,7 @@ pub(super) fn run_fixture(
                             Some(0.72),
                             Some(0.9),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8785,7 +8822,7 @@ pub(super) fn run_fixture(
                             Some(0.845),
                             Some(0.865),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8808,7 +8845,7 @@ pub(super) fn run_fixture(
                         );
                     }
                     if spec.id == "nonlinear_contact_frictionless_reference_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8822,7 +8859,7 @@ pub(super) fn run_fixture(
                             Some(0.23),
                             Some(0.31),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8836,7 +8873,7 @@ pub(super) fn run_fixture(
                             Some(0.18),
                             Some(0.28),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8850,7 +8887,7 @@ pub(super) fn run_fixture(
                             Some(0.845),
                             Some(0.865),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8880,7 +8917,7 @@ pub(super) fn run_fixture(
                         );
                     }
                     if spec.id == "nonlinear_contact_frictionless_reference_complex_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8894,7 +8931,7 @@ pub(super) fn run_fixture(
                             Some(0.36),
                             Some(0.46),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8908,7 +8945,7 @@ pub(super) fn run_fixture(
                             Some(0.3),
                             Some(0.39),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8922,7 +8959,7 @@ pub(super) fn run_fixture(
                             Some(0.845),
                             Some(0.865),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8958,7 +8995,7 @@ pub(super) fn run_fixture(
                             &mut failures,
                             &gpu_envelope.data,
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8972,7 +9009,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8986,7 +9023,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9000,7 +9037,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9014,7 +9051,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9028,7 +9065,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9042,7 +9079,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             None,
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9058,7 +9095,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9072,7 +9109,7 @@ pub(super) fn run_fixture(
                             Some(0.2),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9086,7 +9123,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9100,7 +9137,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9114,7 +9151,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.25),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9128,7 +9165,7 @@ pub(super) fn run_fixture(
                             Some(1.5),
                             Some(1.0e9),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9144,7 +9181,7 @@ pub(super) fn run_fixture(
                         );
                     }
                     if spec.id == "electromagnetic_reference_homogeneous_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9158,7 +9195,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.05),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9172,7 +9209,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.15),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9186,7 +9223,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9200,7 +9237,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.05),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9214,7 +9251,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.1),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9228,7 +9265,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9242,7 +9279,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.05),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9256,7 +9293,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.1),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9270,7 +9307,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9284,7 +9321,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.08),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9298,7 +9335,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.1),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9312,7 +9349,7 @@ pub(super) fn run_fixture(
                             Some(0.99),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9326,7 +9363,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.05),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9340,7 +9377,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.05),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9354,7 +9391,7 @@ pub(super) fn run_fixture(
                             Some(0.99),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9368,7 +9405,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.05),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9382,7 +9419,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.1),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9396,7 +9433,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.1),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9410,7 +9447,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.02),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9424,7 +9461,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9438,7 +9475,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9452,7 +9489,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9466,7 +9503,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9480,7 +9517,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9494,7 +9531,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9508,7 +9545,7 @@ pub(super) fn run_fixture(
                             Some(0.5),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9522,7 +9559,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.35),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9536,7 +9573,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.40),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9550,7 +9587,7 @@ pub(super) fn run_fixture(
                             Some(0.12),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9564,7 +9601,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             None,
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9578,7 +9615,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             None,
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9592,7 +9629,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             None,
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9606,7 +9643,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             None,
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9620,7 +9657,7 @@ pub(super) fn run_fixture(
                             Some(3.0),
                             None,
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9634,7 +9671,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             None,
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9648,7 +9685,7 @@ pub(super) fn run_fixture(
                             Some(0.5),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9662,7 +9699,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             None,
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9676,7 +9713,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(1.0e-9),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9690,7 +9727,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.05),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9704,7 +9741,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.05),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9718,7 +9755,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(1.0e-9),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9732,7 +9769,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.35),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9748,7 +9785,7 @@ pub(super) fn run_fixture(
                         );
                     }
                     if spec.id == "electromagnetic_reference_heterogeneous_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9762,7 +9799,7 @@ pub(super) fn run_fixture(
                             Some(0.85),
                             Some(1.35),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9776,7 +9813,7 @@ pub(super) fn run_fixture(
                             Some(1.2),
                             Some(2.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9790,7 +9827,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9804,7 +9841,7 @@ pub(super) fn run_fixture(
                             Some(0.85),
                             Some(1.35),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9818,7 +9855,7 @@ pub(super) fn run_fixture(
                             Some(1.1),
                             Some(5.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9832,7 +9869,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9846,7 +9883,7 @@ pub(super) fn run_fixture(
                             Some(0.85),
                             Some(1.5),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9860,7 +9897,7 @@ pub(super) fn run_fixture(
                             Some(1.1),
                             Some(8.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9874,7 +9911,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9888,7 +9925,7 @@ pub(super) fn run_fixture(
                             Some(0.06),
                             Some(0.22),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9902,7 +9939,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(20.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9916,7 +9953,7 @@ pub(super) fn run_fixture(
                             Some(0.9),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9930,7 +9967,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.2),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9944,7 +9981,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.35),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9958,7 +9995,7 @@ pub(super) fn run_fixture(
                             Some(0.9),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9972,7 +10009,7 @@ pub(super) fn run_fixture(
                             Some(10.0),
                             Some(1.0e9),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9986,7 +10023,7 @@ pub(super) fn run_fixture(
                             Some(2.0),
                             Some(1.0e9),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10000,7 +10037,7 @@ pub(super) fn run_fixture(
                             Some(5.0),
                             Some(1.0e12),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10014,7 +10051,7 @@ pub(super) fn run_fixture(
                             Some(0.25),
                             Some(2.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10028,7 +10065,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(10.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10042,7 +10079,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10056,7 +10093,7 @@ pub(super) fn run_fixture(
                             Some(0.6),
                             Some(0.8),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10070,7 +10107,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10084,7 +10121,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10098,7 +10135,7 @@ pub(super) fn run_fixture(
                             Some(0.7),
                             Some(0.85),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10112,7 +10149,7 @@ pub(super) fn run_fixture(
                             Some(0.2),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10126,7 +10163,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.35),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10142,7 +10179,7 @@ pub(super) fn run_fixture(
                         );
                     }
                     if spec.id == "electromagnetic_reference_sparse_assignments_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10156,7 +10193,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10170,7 +10207,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10184,7 +10221,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10198,7 +10235,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10212,7 +10249,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10226,7 +10263,7 @@ pub(super) fn run_fixture(
                             Some(0.2),
                             Some(0.35),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10242,7 +10279,7 @@ pub(super) fn run_fixture(
                         );
                     }
                     if spec.id == "electromagnetic_reference_multiregion_assignments_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10256,7 +10293,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10270,7 +10307,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10284,7 +10321,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10298,7 +10335,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10312,7 +10349,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10326,7 +10363,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10342,7 +10379,7 @@ pub(super) fn run_fixture(
                         );
                     }
                     if spec.id == "electromagnetic_reference_overlap_interference_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10356,7 +10393,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10370,7 +10407,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10384,7 +10421,7 @@ pub(super) fn run_fixture(
                             Some(0.35),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10400,7 +10437,7 @@ pub(super) fn run_fixture(
                         );
                     }
                     if spec.id == "electromagnetic_reference_boundary_kernel_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10414,7 +10451,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10428,7 +10465,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.35),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10442,7 +10479,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10458,7 +10495,7 @@ pub(super) fn run_fixture(
                         );
                     }
                     if spec.id == "electromagnetic_reference_boundary_penalty_stress_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10472,7 +10509,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10486,7 +10523,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10500,7 +10537,7 @@ pub(super) fn run_fixture(
                             Some(0.75),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10514,7 +10551,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.95),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10532,7 +10569,7 @@ pub(super) fn run_fixture(
                     if spec.id
                         == "electromagnetic_reference_multi_region_phased_source_gpu_provider"
                     {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10546,7 +10583,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10560,7 +10597,7 @@ pub(super) fn run_fixture(
                             Some(0.2),
                             Some(0.95),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10574,7 +10611,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,

@@ -22,7 +22,7 @@ use runmat_execution_runner::{
 use runmat_execution_transport_native::frame::FrameLimits;
 use runmat_execution_transport_native::overlay::{PinnedQuicEndpoint, QuicOverlayListener};
 
-use super::{run_remote_worker_quic, QuicRemoteWorkerChannel};
+use super::{run_remote_worker_quic, QuicRemoteWorkerChannel, RemoteWorkerQuicRequest};
 use super::{RemoteAttempt, RemoteBundleReceipt, RemotePoolDriver, RemoteWorkerChannel};
 use crate::NativeExecutionResult;
 
@@ -578,15 +578,15 @@ async fn pinned_quic_worker_executes_only_the_installed_exact_bundle() {
     };
     let run_key =
         runmat_execution_artifact::encryption::RunKeyMaterial::from_entropy([5; 32]).unwrap();
-    let server = run_remote_worker_quic(
+    let server = run_remote_worker_quic(RemoteWorkerQuicRequest {
         listener,
-        "run-quic-worker",
-        worker.clone(),
-        9,
-        [7; 16],
-        run_key.clone(),
-        FrameLimits::default(),
-    );
+        run_identity: "run-quic-worker".into(),
+        worker: worker.clone(),
+        driver_fence: 9,
+        session_id: [7; 16],
+        run_key: run_key.clone(),
+        limits: FrameLimits::default(),
+    });
     let client = async {
         let channel = QuicRemoteWorkerChannel::connect(
             super::RemoteWorkerChannelConfig {
