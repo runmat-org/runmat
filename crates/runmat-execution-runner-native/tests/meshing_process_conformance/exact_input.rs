@@ -38,13 +38,34 @@ pub(super) async fn native_conformance() {
 }
 
 pub(super) fn native_dag_conformance() {
+    let serial_layout = execute_native_dag(1, 1, 1);
+    let parallel_layout = execute_native_dag(2, 3, 32);
+
+    assert_eq!(serial_layout.topology, parallel_layout.topology);
+    assert_eq!(
+        serial_layout.canonical_digest,
+        parallel_layout.canonical_digest
+    );
+}
+
+fn execute_native_dag(
+    max_workers: u32,
+    preferred_edges_per_partition: u32,
+    preferred_faces_per_partition: u32,
+) -> runmat_meshing_core::SolverMeshArtifact {
     let directory = tempfile::tempdir().unwrap();
     let mut config = config(directory.path(), "--exact-dag-child");
-    config.max_workers = 2;
+    config.max_workers = max_workers;
     let session = NativeProgramSession::new(config).unwrap();
     let access = MeshingArtifactAccess {
-        authorization_scope: "native-exact-dag-run".into(),
-        encryption_context: Digest::sha256(b"native-exact-dag-context"),
+        authorization_scope: format!("native-exact-dag-{max_workers}"),
+        encryption_context: Digest::sha256(
+            [
+                b"native-exact-dag-context".as_slice(),
+                &max_workers.to_be_bytes(),
+            ]
+            .concat(),
+        ),
     };
     let (document, topology, evaluators) = runmat_geometry_fixtures::exact_tetrahedron();
     let geometry_objects = prepare_exact_geometry_objects(
@@ -109,8 +130,8 @@ pub(super) fn native_dag_conformance() {
             artifact_access: access,
             capability_cohort: Some("native-cohort-v1".into()),
             program_revision: revision(),
-            preferred_edges_per_partition: 3,
-            preferred_faces_per_partition: 32,
+            preferred_edges_per_partition,
+            preferred_faces_per_partition,
             inventory_limits: limits().inventory,
             evidence: runmat_meshing_execution::MeshingRunEvidenceContext {
                 platform: runmat_meshing_core::PlatformBuildIdentity {
@@ -133,6 +154,7 @@ pub(super) fn native_dag_conformance() {
         "steel"
     );
     assert!(!executor.drain_progress().is_empty());
+    result.artifact
 }
 
 pub(super) fn fixture(revision: ProgramRevision, authorization_scope: &str) -> ExactFixture {
