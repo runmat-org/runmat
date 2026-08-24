@@ -395,6 +395,7 @@ pub(crate) mod bridge {
         fn import_cad_bytes(
             path: &str,
             bytes: &[u8],
+            materialized_path: &str,
             format: OcctCadFormat,
             options: OcctImportOptions,
         ) -> Result<OcctImportPayload>;
@@ -402,6 +403,7 @@ pub(crate) mod bridge {
         fn import_exact_cad_bytes(
             path: &str,
             bytes: &[u8],
+            materialized_path: &str,
             format: OcctCadFormat,
             options: OcctImportOptions,
         ) -> Result<OcctExactShapePayload>;
@@ -489,6 +491,7 @@ pub(crate) mod bridge {
         fn start_cad_preview_session(
             path: &str,
             bytes: &[u8],
+            materialized_path: &str,
             format: OcctCadFormat,
             options: OcctImportOptions,
         ) -> Result<OcctPreviewSessionStartPayload>;

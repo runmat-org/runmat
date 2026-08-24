@@ -25,16 +25,19 @@ struct OcctPreviewSessionStartPayload;
 
 OcctImportPayload import_cad_bytes(rust::Str path,
                                    rust::Slice<const std::uint8_t> bytes,
+                                   rust::Str materialized_path,
                                    OcctCadFormat format,
                                    OcctImportOptions options);
 OcctExactShapePayload import_exact_cad_bytes(
     rust::Str path,
     rust::Slice<const std::uint8_t> bytes,
+    rust::Str materialized_path,
     OcctCadFormat format,
     OcctImportOptions options);
 OcctPreviewSessionStartPayload start_cad_preview_session(
     rust::Str path,
     rust::Slice<const std::uint8_t> bytes,
+    rust::Str materialized_path,
     OcctCadFormat format,
     OcctImportOptions options);
 OcctPreviewSessionChunkPayload read_cad_preview_session_chunk(

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "corpus_revision": 1,
+  "corpus_revision": 2,
   "fixture_root": "crates/runmat-geometry/io/tests/fixtures",
   "entries": [
     {
@@ -194,6 +194,30 @@
       "features": ["assembly", "tiny-edge", "bounded-healing"],
       "expected": { "outcome": "success", "topology": "3 instances; 10 edges before healing and 8 after", "mass_properties": "instance body properties remain kernel-valid", "regions": 2, "mesh_error_bounds": "maximum healing displacement <= 1e-6 m" },
       "test": { "source": "crates/runmat-geometry/io/src/occt/evaluator/tests.rs", "name": "small_topology_repair_simplifies_short_edges_and_sliver_faces" }
+    },
+    {
+      "id": "nist-seeker-table-acis",
+      "path": "nist_seeker_table_acis.step",
+      "sha256": "ab41abfd28431702a81411dab19b8d52e1520895d7d9e8dd7e643b16474d3a27",
+      "tier": "medium",
+      "format": "step",
+      "supported_input": true,
+      "provenance": { "origin": "NIST Engineering Design Model Repository industrial model", "exporter": "ACIS STEP Husk / STEP Caselib", "exporter_version": "2002-04-12 ProSTEP Caselib export", "license": "NIST public-domain terms; see THIRD_PARTY.md" },
+      "features": ["industrial-model", "independent-exporter", "solid", "mass-properties"],
+      "expected": { "outcome": "success", "topology": "1 body, 1 solid, 1 shell, 6 faces, 12 edges, 8 vertices", "mass_properties": "volume=0.0110760072 m^3; area=2.2695054688 m^2; centroid=(0,0,-0.005) m", "regions": 1, "mesh_error_bounds": "resolved request bounds" },
+      "test": { "source": "crates/runmat-geometry/io/tests/external_cad_corpus.rs", "name": "public_industrial_step_imports_exact_topology_and_mass_properties" }
+    },
+    {
+      "id": "ansys-wireframe-iges",
+      "path": "ansys_sample.iges",
+      "sha256": "3533b019320070d2e67d365f1b9fc95d5af5eaa1a5aecefd25fd971b2f040745",
+      "tier": "small",
+      "format": "iges",
+      "supported_input": false,
+      "provenance": { "origin": "PyIGES upstream importer fixture", "exporter": "ANSYS", "exporter_version": "2020 R2 build 20.2", "license": "MIT; see THIRD_PARTY.md" },
+      "features": ["independent-exporter", "iges", "wireframe", "typed-admission-failure"],
+      "expected": { "outcome": "admission-rejection", "topology": "wireframe has no face, wire, edge, and vertex boundary closure required for solver meshing", "mass_properties": "not applicable after admission rejection", "regions": 0, "mesh_error_bounds": "not applicable after admission rejection" },
+      "test": { "source": "crates/runmat-geometry/io/tests/external_cad_corpus.rs", "name": "public_iges_wireframe_is_read_then_rejected_by_typed_admission" }
     }
   ]
 }
