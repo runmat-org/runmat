@@ -1,0 +1,144 @@
+{
+  "schema_version": 1,
+  "catalog_revision": 1,
+  "required_features": [
+    "analytic-primitives",
+    "freeform-nurbs",
+    "periodic-surfaces",
+    "seam-and-pole-cases",
+    "tiny-edges",
+    "sliver-faces",
+    "near-coincident-faces",
+    "deep-trim-nesting",
+    "arbitrary-cavities",
+    "thin-walls",
+    "thin-gaps",
+    "disconnected-bodies",
+    "large-assemblies",
+    "conformal-interfaces",
+    "nonconformal-contacts",
+    "mixed-material-regions"
+  ],
+  "cases": [
+    {
+      "id": "portable-exact-tetrahedron-dag",
+      "tier": "small",
+      "features": ["analytic-primitives"],
+      "supported_input": true,
+      "expected": { "outcome": "success", "topology": "complete exact curve, surface, volume, Tet10, validation, and publication DAG", "mass_properties": "exact source tetrahedron volume and centroid remain the geometry oracle", "regions": "one material region", "error_bounds": "resolved curve, surface, volume, and curved-Jacobian request bounds" },
+      "test": { "source": "crates/runmat-meshing/execution/src/serial_tests/volume.rs", "name": "production_dag_runner_executes_the_complete_serial_exact_pipeline" }
+    },
+    {
+      "id": "portable-freeform-nurbs",
+      "tier": "small",
+      "features": ["freeform-nurbs"],
+      "supported_input": true,
+      "expected": { "outcome": "success", "topology": "exact NURBS curve, pcurve, and surface inventory without sample-table fallback", "mass_properties": "not applicable to evaluator-only curve and surface admission", "regions": "fixture topology", "error_bounds": "exact evaluator admission bounds" },
+      "test": { "source": "crates/runmat-geometry/core/src/model/exact_evaluator/tests.rs", "name": "portable_nurbs_curves_pcurves_and_surfaces_are_admitted_without_samples" }
+    },
+    {
+      "id": "periodic-seam-chart",
+      "tier": "small",
+      "features": ["periodic-surfaces"],
+      "supported_input": true,
+      "expected": { "outcome": "success", "topology": "one canonical periodic chart with paired seam images", "mass_properties": "not applicable to a surface-chart case", "regions": "one trimmed face", "error_bounds": "chart seam identity and metric bounds" },
+      "test": { "source": "crates/runmat-meshing/surface/src/chart/tests.rs", "name": "periodic_seam_images_lift_into_one_canonical_chart" }
+    },
+    {
+      "id": "singular-spherical-chart",
+      "tier": "medium",
+      "features": ["seam-and-pole-cases"],
+      "supported_input": true,
+      "expected": { "outcome": "success", "topology": "regular projected chart over a spherical pole singularity", "mass_properties": "not applicable to a surface-chart case", "regions": "one sheet face", "error_bounds": "projected chart and exact-surface acceptance bounds" },
+      "test": { "source": "crates/runmat-meshing/surface/src/chart/tests.rs", "name": "singular_spherical_wedge_uses_a_canonical_regular_projection" }
+    },
+    {
+      "id": "bounded-small-topology-healing",
+      "tier": "medium",
+      "features": ["tiny-edges", "sliver-faces"],
+      "supported_input": true,
+      "expected": { "outcome": "success", "topology": "authorized short-edge and sliver-face simplification with revision lineage", "mass_properties": "healed model properties remain within the admitted repair tolerance", "regions": "source body regions preserved", "error_bounds": "maximum healing displacement is enforced" },
+      "test": { "source": "crates/runmat-geometry/io/src/occt/evaluator/tests.rs", "name": "small_topology_repair_simplifies_short_edges_and_sliver_faces" }
+    },
+    {
+      "id": "ambiguous-near-coincident-topology",
+      "tier": "medium",
+      "features": ["near-coincident-faces"],
+      "supported_input": false,
+      "expected": { "outcome": "typed-admission-rejection", "topology": "ambiguous persistent naming candidates are all reported", "mass_properties": "not produced for rejected input", "regions": "not admitted", "error_bounds": "ambiguity cannot be hidden by tolerance" },
+      "test": { "source": "crates/runmat-geometry/io/src/occt/evaluator/tests.rs", "name": "persistent_entity_names_reject_ambiguous_coincident_topology" }
+    },
+    {
+      "id": "many-trim-loops",
+      "tier": "medium",
+      "features": ["deep-trim-nesting"],
+      "supported_input": true,
+      "expected": { "outcome": "success", "topology": "five protected inner loops exercise a deep trim inventory and are constructively recovered and topologically carved", "mass_properties": "not applicable to a parametric face-domain case", "regions": "one trimmed face domain", "error_bounds": "zero missing segments and zero trim leakage" },
+      "test": { "source": "crates/runmat-meshing/surface/src/exact_cdt/domain/tests.rs", "name": "many_trim_inventory_loops_are_recovered_and_carved" }
+    },
+    {
+      "id": "small-nested-void",
+      "tier": "medium",
+      "features": ["arbitrary-cavities"],
+      "supported_input": true,
+      "expected": { "outcome": "success", "topology": "nested void preserved by recovered-facet-blocked carving", "mass_properties": "carved volume equals the outer volume less the nested void", "regions": "solid retained and void removed", "error_bounds": "independent carved-volume validation" },
+      "test": { "source": "crates/runmat-meshing/tetrahedron/src/cdt/carving/tests/small_void.rs", "name": "carving_preserves_a_small_nested_void" }
+    },
+    {
+      "id": "close-parallel-thin-wall",
+      "tier": "medium",
+      "features": ["thin-walls"],
+      "supported_input": true,
+      "expected": { "outcome": "success", "topology": "close parallel protected faces remain distinct", "mass_properties": "positive enclosed volume is independently validated", "regions": "thin enclosed volume retained", "error_bounds": "constraint and positive-volume validation" },
+      "test": { "source": "crates/runmat-meshing/tetrahedron/src/cdt/carving/tests/close_parallel.rs", "name": "carving_preserves_a_close_parallel_face_volume" }
+    },
+    {
+      "id": "bounded-sheet-gap-healing",
+      "tier": "medium",
+      "features": ["thin-gaps"],
+      "supported_input": true,
+      "expected": { "outcome": "success", "topology": "gap is sewn only under the authorized displacement policy", "mass_properties": "sheet case has no fabricated solid volume", "regions": "sheet ownership preserved", "error_bounds": "measured repair displacement does not exceed policy" },
+      "test": { "source": "crates/runmat-geometry/io/src/occt/evaluator/tests.rs", "name": "gap_repair_sews_sheet_boundaries_with_measured_lineage" }
+    },
+    {
+      "id": "disconnected-solid-body",
+      "tier": "small",
+      "features": ["disconnected-bodies"],
+      "supported_input": true,
+      "expected": { "outcome": "success", "topology": "two disconnected solids retain one explicit body ownership", "mass_properties": "aggregate exact volume and centroid equal the two source solids", "regions": "two physical regions", "error_bounds": "aggregate exact mass properties" },
+      "test": { "source": "crates/runmat-geometry/io/src/occt/evaluator/tests.rs", "name": "disconnected_solids_share_one_body_with_aggregate_mass_properties" }
+    },
+    {
+      "id": "large-canonical-assembly",
+      "tier": "medium",
+      "features": ["large-assemblies"],
+      "supported_input": true,
+      "expected": { "outcome": "success", "topology": "512 affine occurrences with unique canonical ownership paths", "mass_properties": "definition mass properties are reused under affine occurrence transforms", "regions": "definition-owned body region remains unambiguous", "error_bounds": "bounded exact topology admission" },
+      "test": { "source": "crates/runmat-geometry/core/src/model/exact_topology_tests.rs", "name": "large_assembly_validates_canonical_occurrence_ownership" }
+    },
+    {
+      "id": "conformal-region-interface",
+      "tier": "medium",
+      "features": ["conformal-interfaces"],
+      "supported_input": true,
+      "expected": { "outcome": "success", "topology": "one recovered facet carries two oriented region uses", "mass_properties": "each carved region has independently validated positive volume", "regions": "two conformal physical regions", "error_bounds": "facet-blocked carving and independent incidence validation" },
+      "test": { "source": "crates/runmat-meshing/tetrahedron/src/cdt/carving/tests.rs", "name": "carving_classifies_conformal_region_interfaces" }
+    },
+    {
+      "id": "nonconformal-contact-sides",
+      "tier": "medium",
+      "features": ["nonconformal-contacts"],
+      "supported_input": true,
+      "expected": { "outcome": "success", "topology": "independent primary and secondary faces retain typed contact roles", "mass_properties": "contact classification does not alter either source region's mass properties", "regions": "contact sides remain nonconformal", "error_bounds": "persistent exact-source pairing identity" },
+      "test": { "source": "crates/runmat-meshing/tetrahedron/src/cdt/solver_topology/tests.rs", "name": "exact_interface_and_contact_classification_preserve_typed_sides" }
+    },
+    {
+      "id": "mixed-material-domain",
+      "tier": "small",
+      "features": ["mixed-material-regions"],
+      "supported_input": true,
+      "expected": { "outcome": "success", "topology": "every canonical region identity has exactly one material assignment", "mass_properties": "material assignment is metadata and does not alter exact source mass properties", "regions": "two distinct canonical region identities", "error_bounds": "material mapping is canonical and artifact-identity bound" },
+      "test": { "source": "crates/runmat-meshing/core/src/contracts/canonical/domain_model.rs", "name": "mixed_material_regions_are_complete_canonical_and_identity_bound" }
+    }
+  ]
+}
