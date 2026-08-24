@@ -7,19 +7,15 @@ use crate::MeshingExecutionResult;
 
 impl ExactMeshingDagPlanner {
     /// Plans the canonical Tet4/Tet10 solver projection from independently admitted terminal
-    /// geometry, surface, volume, and domain-model roots.
+    /// geometry, surface, and volume roots.
     pub fn solver_projection(
         &self,
         surface_root: ValueRef,
         volume_root: ValueRef,
-        domain_model_root: ValueRef,
     ) -> MeshingExecutionResult<PlannedMeshingStage> {
-        if surface_root.logical_digest == volume_root.logical_digest
-            || [surface_root.logical_digest, volume_root.logical_digest]
-                .contains(&domain_model_root.logical_digest)
-        {
+        if surface_root.logical_digest == volume_root.logical_digest {
             return Err(invalid(
-                "solver projection requires distinct surface, volume, and domain-model roots",
+                "solver projection requires distinct surface and volume roots",
             ));
         }
         self.build_stage_with_dependencies(
@@ -29,7 +25,6 @@ impl ExactMeshingDagPlanner {
                 (MeshingInputKind::ExactGeometry, self.geometry_root.clone()),
                 (MeshingInputKind::StageArtifact, surface_root),
                 (MeshingInputKind::StageArtifact, volume_root),
-                (MeshingInputKind::DomainModel, domain_model_root),
             ],
         )
     }

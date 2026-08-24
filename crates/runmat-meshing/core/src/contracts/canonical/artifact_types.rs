@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{ElementOrder, GeometryRevisionRef, MeshingRequest, PersistentEntityId, StableDigest};
 
-pub const ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION: u16 = 7;
+pub const ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION: u16 = 8;
 /// Tet10 midside-node order after the four corners: 01, 12, 20, 03, 13, 23.
 pub const TETRAHEDRON_MIDSIDE_EDGE_CORNERS: [[usize; 2]; 6] =
     [[0, 1], [1, 2], [2, 0], [0, 3], [1, 3], [2, 3]];
@@ -43,7 +43,7 @@ impl BoundaryTriangleOrder {
 #[serde(rename_all = "snake_case")]
 pub enum BoundaryFaceRole {
     Exterior,
-    MaterialInterface,
+    ConformalInterface,
     ContactPrimary,
     ContactSecondary,
 }
@@ -80,7 +80,6 @@ pub struct SolverVolumeElement {
     pub order: ElementOrder,
     pub node_ids: Vec<u64>,
     pub region_id: PersistentEntityId,
-    pub material_id: String,
     pub provenance: Vec<PersistentEntityId>,
 }
 
@@ -119,13 +118,12 @@ pub struct MeshNeighbor {
 #[serde(deny_unknown_fields)]
 pub struct MeshRegion {
     pub region_id: PersistentEntityId,
-    pub material_id: String,
     pub element_ids: Vec<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MaterialInterface {
+pub struct ConformalInterface {
     /// The authoritative exact face shared by both conformal regions.
     pub source_face_id: PersistentEntityId,
     pub side_a_region_id: PersistentEntityId,
@@ -167,7 +165,7 @@ pub struct SolverMeshTopology {
     pub boundary_faces: Vec<SolverBoundaryFace>,
     pub boundary_edges: Vec<SolverBoundaryEdge>,
     pub regions: Vec<MeshRegion>,
-    pub material_interfaces: Vec<MaterialInterface>,
+    pub conformal_interfaces: Vec<ConformalInterface>,
     pub contacts: Vec<ContactPair>,
     pub field_topologies: Vec<FieldTopologyMap>,
 }

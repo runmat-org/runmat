@@ -473,8 +473,6 @@ mod tests {
                 });
             mesh.topology.boundary_faces[face_index].provenance.sort();
         }
-        mesh.topology.volume_elements[0].material_id = "mat_default_steel".to_owned();
-        mesh.topology.regions[0].material_id = "mat_default_steel".to_owned();
         mesh.canonical_digest = StableDigest::ZERO;
         mesh.seal_canonical_digest()
             .expect("canonical authoring mesh should seal");

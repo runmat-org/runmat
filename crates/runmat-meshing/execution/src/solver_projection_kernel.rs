@@ -19,9 +19,8 @@ use runmat_meshing_tetrahedron::cdt::{
 use crate::volume_kernel::volume_options;
 use crate::{
     ExactMeshingEvaluatorProvider, MeshingStageCheckpoint, MeshingStageInvocation,
-    MeshingStageKernel, PortableMeshingEvaluatorProvider, PreparedDomainModelInput,
-    PreparedExactGeometryObjects, PreparedMeshingInput, PreparedMeshingResultPublication,
-    ValidatedMeshingStageOutput,
+    MeshingStageKernel, PortableMeshingEvaluatorProvider, PreparedExactGeometryObjects,
+    PreparedMeshingInput, PreparedMeshingResultPublication, ValidatedMeshingStageOutput,
 };
 
 #[derive(Clone, Debug)]
@@ -84,7 +83,6 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
                 volume_mesh: &volume,
                 volume_options: volume_options(&invocation.host.resolved_request),
                 request: &invocation.host.resolved_request,
-                domain_model: &sources.domain_model.domain_model_objects().model,
                 exact_evaluation: Some(DelaunayExactEvaluation {
                     evaluator: evaluator.as_ref(),
                     control: &control,
@@ -151,7 +149,6 @@ struct SolverProjectionSources<'a> {
     geometry: &'a PreparedExactGeometryObjects,
     surface: &'a PreparedMeshingResultPublication,
     volume: &'a PreparedMeshingResultPublication,
-    domain_model: &'a PreparedDomainModelInput,
 }
 
 impl<'a> SolverProjectionSources<'a> {
@@ -159,14 +156,10 @@ impl<'a> SolverProjectionSources<'a> {
         let mut geometry = None;
         let mut surface = None;
         let mut volume = None;
-        let mut domain_model = None;
         for input in inputs {
             match input {
                 PreparedMeshingInput::ExactGeometry(input) if geometry.is_none() => {
                     geometry = Some(input.geometry_objects());
-                }
-                PreparedMeshingInput::DomainModel(input) if domain_model.is_none() => {
-                    domain_model = Some(input.as_ref());
                 }
                 PreparedMeshingInput::StageArtifact(input)
                     if input.stage_objects().result_identity.stage
@@ -189,7 +182,6 @@ impl<'a> SolverProjectionSources<'a> {
             geometry: geometry.ok_or_else(invalid_inputs)?,
             surface: surface.ok_or_else(invalid_inputs)?,
             volume: volume.ok_or_else(invalid_inputs)?,
-            domain_model: domain_model.ok_or_else(invalid_inputs)?,
         })
         .and_then(Self::validate_source_closure)
     }
@@ -289,10 +281,7 @@ fn map_solver_error(error: DelaunaySolverTopologyError) -> Box<MeshingFailure> {
         DelaunaySolverTopologyErrorKind::InvalidOptions => {
             MeshingFailureCategory::InternalInvariantViolation
         }
-        DelaunaySolverTopologyErrorKind::InvalidGeometry
-        | DelaunaySolverTopologyErrorKind::InvalidDomainModel => {
-            MeshingFailureCategory::InvalidGeometry
-        }
+        DelaunaySolverTopologyErrorKind::InvalidGeometry => MeshingFailureCategory::InvalidGeometry,
         DelaunaySolverTopologyErrorKind::InvalidMesh => {
             MeshingFailureCategory::QualityTargetUnreachable
         }
@@ -321,7 +310,7 @@ fn resource_category(reason: &str) -> MeshingFailureCategory {
 fn invalid_inputs() -> Box<MeshingFailure> {
     failure(
         MeshingFailureCategory::InvalidGeometry,
-        "solver projection requires one exact geometry, final surface, final volume, and domain model",
+        "solver projection requires one exact geometry, final surface, and final volume",
     )
 }
 

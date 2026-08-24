@@ -10,7 +10,6 @@ mod curve_kernel;
 mod curve_refinement_kernel;
 mod diagnostic;
 mod dispatcher;
-mod domain_model_objects;
 mod error;
 mod evaluator_provider;
 mod evidence;
@@ -35,8 +34,6 @@ mod task;
 mod volume_kernel;
 
 #[cfg(test)]
-mod domain_model_object_tests;
-#[cfg(test)]
 mod faceted_geometry_object_tests;
 #[cfg(test)]
 mod geometry_object_tests;
@@ -58,11 +55,6 @@ pub use curve_join_kernel::ExactCurveJoinKernel;
 pub use curve_kernel::ExactCurveStageKernel;
 pub use curve_refinement_kernel::ExactCurveRefinementKernel;
 pub use dispatcher::MeshingKernelDispatcher;
-pub use domain_model_objects::{
-    import_domain_model_input, import_domain_model_objects, prepare_domain_model_input,
-    prepare_domain_model_objects, DomainModelObjectRoot, PreparedDomainModelInput,
-    PreparedDomainModelObjects,
-};
 pub use error::{MeshingExecutionError, MeshingExecutionResult};
 pub use evaluator_provider::{
     ExactMeshingEvaluatorProvider, ExactMeshingGeometryEvaluation, PortableMeshingEvaluatorProvider,

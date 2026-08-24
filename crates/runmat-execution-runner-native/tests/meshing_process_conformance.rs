@@ -26,15 +26,15 @@ use runmat_meshing_core::{
     MeshingProgress, MeshingQualityTargets, MeshingRequest, MeshingResourceBudget,
     MeshingStageIdentity, MeshingStageKind, MeshingWorkloadRequest, MetricCombinationRule,
     MetricFieldRequest, MetricTensor3, NeverCancelled, StableDigest, SurfaceQualityTargets,
-    VolumeQualityTargets, MESHING_DOMAIN_MODEL_SCHEMA_VERSION, MESHING_IDENTITY_SCHEMA_VERSION,
-    MESHING_REQUEST_SCHEMA_VERSION, MESHING_WORKLOAD_SCHEMA_VERSION,
+    VolumeQualityTargets, MESHING_IDENTITY_SCHEMA_VERSION, MESHING_REQUEST_SCHEMA_VERSION,
+    MESHING_WORKLOAD_SCHEMA_VERSION,
 };
 use runmat_meshing_execution::{
-    build_task_submission, import_result_publication, prepare_domain_model_input,
-    prepare_domain_model_objects, prepare_exact_geometry_input, prepare_exact_geometry_objects,
-    prepare_faceted_geometry_input, prepare_faceted_geometry_objects, MeshingArtifactAccess,
-    MeshingExecutionContext, MeshingHostWorkload, MeshingStageCheckpoint, MeshingStageInvocation,
-    MeshingStageKernel, MeshingTaskEffectPolicy, NoopMeshingProgress, PreparedExactGeometryInput,
+    build_task_submission, import_result_publication, prepare_exact_geometry_input,
+    prepare_exact_geometry_objects, prepare_faceted_geometry_input,
+    prepare_faceted_geometry_objects, MeshingArtifactAccess, MeshingExecutionContext,
+    MeshingHostWorkload, MeshingStageCheckpoint, MeshingStageInvocation, MeshingStageKernel,
+    MeshingTaskEffectPolicy, NoopMeshingProgress, PreparedExactGeometryInput,
     ValidatedMeshingStageOutput,
 };
 

@@ -12,24 +12,6 @@ fn production_dag_runner_executes_the_complete_serial_exact_pipeline() {
         ObjectInventoryLimits::default(),
     )
     .unwrap();
-    let domain_objects = prepare_domain_model_objects(
-        runmat_meshing_core::MeshingDomainModel {
-            schema_version: MESHING_DOMAIN_MODEL_SCHEMA_VERSION,
-            region_materials: vec![RegionMaterialAssignment {
-                region_id: exact.geometry_objects().topology.regions[0].id.clone(),
-                material_id: "steel".into(),
-            }],
-            contact_ids: Vec::new(),
-        },
-        ObjectInventoryLimits::default(),
-    )
-    .unwrap();
-    let domain = prepare_domain_model_input(
-        domain_objects,
-        fixture.host.artifact_access.clone(),
-        ObjectInventoryLimits::default(),
-    )
-    .unwrap();
     let request = fixture.host.resolved_request.clone();
     let access = fixture.host.artifact_access.clone();
     let cohort = fixture.host.stage_identity.capability_cohort.clone();
@@ -45,7 +27,6 @@ fn production_dag_runner_executes_the_complete_serial_exact_pipeline() {
     let result = crate::execute_exact_meshing_dag(
         crate::ExactMeshingDagRun {
             geometry: &exact,
-            domain_model: &domain,
             request,
             artifact_access: access,
             capability_cohort: cohort,
@@ -73,10 +54,6 @@ fn production_dag_runner_executes_the_complete_serial_exact_pipeline() {
     result.evidence.validate(&result.artifact).unwrap();
     assert_eq!(result.artifact.topology.nodes.len(), 10);
     assert_eq!(result.artifact.topology.volume_elements.len(), 1);
-    assert_eq!(
-        result.artifact.topology.volume_elements[0].material_id,
-        "steel"
-    );
     assert_eq!(
         result.evidence.stages.last().unwrap().stage,
         MeshingStageKind::Serialization
@@ -174,37 +151,15 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
     assert_eq!(mesh.topology.incidence.regions.len(), 1);
     assert_eq!(mesh.provenance.facets.len(), 4);
 
-    let domain_objects = prepare_domain_model_objects(
-        runmat_meshing_core::MeshingDomainModel {
-            schema_version: MESHING_DOMAIN_MODEL_SCHEMA_VERSION,
-            region_materials: vec![RegionMaterialAssignment {
-                region_id: exact.geometry_objects().topology.regions[0].id.clone(),
-                material_id: "steel".into(),
-            }],
-            contact_ids: Vec::new(),
-        },
-        ObjectInventoryLimits::default(),
-    )
-    .unwrap();
-    let domain_input = prepare_domain_model_input(
-        domain_objects,
-        host.artifact_access.clone(),
-        ObjectInventoryLimits::default(),
-    )
-    .unwrap();
-    for object in &domain_input.domain_model_objects().objects {
-        fixture.store.write_verified(object).unwrap();
-    }
-    let domain_root = domain_input.root_input().clone();
     let volume_root = root(completed.publication().root_output());
     let projection_stage = planner
-        .solver_projection(surface_root, volume_root, domain_root)
+        .solver_projection(surface_root, volume_root)
         .unwrap();
     assert_eq!(
         projection_stage.host().workload.stage,
         MeshingStageKind::OrderElevation
     );
-    assert_eq!(projection_stage.host().workload.inputs.len(), 4);
+    assert_eq!(projection_stage.host().workload.inputs.len(), 3);
     let projection = execute_serial_stage(
         &projection_stage.program_request(revision()).unwrap(),
         &mut fixture.store,
@@ -232,10 +187,6 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
     solver_projection.validate().unwrap();
     assert_eq!(solver_projection.topology.nodes.len(), 10);
     assert_eq!(solver_projection.topology.volume_elements.len(), 1);
-    assert_eq!(
-        solver_projection.topology.volume_elements[0].material_id,
-        "steel"
-    );
 
     let projection_root = root(projection.publication().root_output());
     let validation_stage = planner.solver_validation(projection_root.clone()).unwrap();

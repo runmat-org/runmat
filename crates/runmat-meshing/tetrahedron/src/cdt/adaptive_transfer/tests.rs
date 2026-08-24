@@ -156,7 +156,6 @@ fn artifact(topology: &DelaunayVolumeTopology) -> SolverMeshArtifact {
                 .map(|vertex| vertex as u64 + 1)
                 .into(),
             region_id: region.clone(),
-            material_id: "steel".into(),
             provenance: vec![region.clone()],
         })
         .collect::<Vec<_>>();
@@ -196,10 +195,9 @@ fn artifact(topology: &DelaunayVolumeTopology) -> SolverMeshArtifact {
             boundary_edges: Vec::new(),
             regions: vec![MeshRegion {
                 region_id: region,
-                material_id: "steel".into(),
                 element_ids: element_ids.clone(),
             }],
-            material_interfaces: Vec::new(),
+            conformal_interfaces: Vec::new(),
             contacts: Vec::new(),
             field_topologies: vec![
                 FieldTopologyMap {

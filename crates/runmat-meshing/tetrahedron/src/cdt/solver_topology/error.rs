@@ -5,7 +5,6 @@ pub enum DelaunaySolverTopologyErrorKind {
     InvalidOptions,
     InvalidGeometry,
     InvalidMesh,
-    InvalidDomainModel,
     ResourceLimit,
     Cancelled,
 }

@@ -14,10 +14,7 @@ use runmat_meshing_core::{
     SizingResolutionEvidence, SolverMeshArtifact,
 };
 
-use crate::{
-    ExactMeshingDagPlanner, MeshingArtifactAccess, PreparedDomainModelInput,
-    PreparedExactGeometryInput,
-};
+use crate::{ExactMeshingDagPlanner, MeshingArtifactAccess, PreparedExactGeometryInput};
 
 use stage::{admit_stage_success, execute_planned_stage};
 pub use stage::{ExactMeshingDagExecutor, MeshingStageExecutionError, SerialExactMeshingExecutor};
@@ -31,7 +28,6 @@ pub struct MeshingRunEvidenceContext {
 
 pub struct ExactMeshingDagRun<'a> {
     pub geometry: &'a PreparedExactGeometryInput,
-    pub domain_model: &'a PreparedDomainModelInput,
     pub request: MeshingRequest,
     pub artifact_access: MeshingArtifactAccess,
     pub capability_cohort: Option<String>,
@@ -136,19 +132,6 @@ fn validate_run(run: &ExactMeshingDagRun<'_>) -> Result<(), ExactMeshingDagRunEr
             "edge and face partition sizes must be nonzero".into(),
         ));
     }
-    if run.domain_model.root_input().authorization_scope != run.artifact_access.authorization_scope
-        || run.domain_model.root_input().encryption_context
-            != run.artifact_access.encryption_context
-        || run.domain_model.root_input().id
-            != run
-                .artifact_access
-                .value_id(run.domain_model.root_input().logical_digest)
-    {
-        return Err(crate::MeshingExecutionError::Identity(
-            "domain model root is outside the meshing artifact authority",
-        )
-        .into());
-    }
     Ok(())
 }
 
@@ -156,13 +139,7 @@ fn register_inputs<E: CacheExport>(
     run: &ExactMeshingDagRun<'_>,
     executor: &mut E,
 ) -> Result<(), ExactMeshingDagRunError> {
-    for object in run
-        .geometry
-        .geometry_objects()
-        .objects
-        .iter()
-        .chain(&run.domain_model.domain_model_objects().objects)
-    {
+    for object in &run.geometry.geometry_objects().objects {
         executor
             .write_verified(object)
             .map_err(crate::MeshingExecutionError::from)?;

@@ -1,8 +1,7 @@
 use runmat_meshing_core::{
     AlgorithmVersionSet, CancellationPolicy, CurveQualityTargets, ElementOrder,
-    GeometryTolerancePolicy, MeshingCancellationSignal, MeshingDomainModel, MeshingQualityTargets,
-    MeshingRequest, MeshingResourceBudget, NeverCancelled, RegionMaterialAssignment,
-    SurfaceQualityTargets, VolumeQualityTargets, MESHING_DOMAIN_MODEL_SCHEMA_VERSION,
+    GeometryTolerancePolicy, MeshingCancellationSignal, MeshingQualityTargets, MeshingRequest,
+    MeshingResourceBudget, NeverCancelled, SurfaceQualityTargets, VolumeQualityTargets,
     MESHING_REQUEST_SCHEMA_VERSION,
 };
 use runmat_meshing_size::metric::{MetricCombinationRule, MetricFieldRequest, MetricTensor3};
@@ -85,25 +84,6 @@ fn volume_options() -> DelaunayVolumeMeshOptions {
     }
 }
 
-fn domain_model(topology: &runmat_geometry_core::ExactBRepTopology) -> MeshingDomainModel {
-    MeshingDomainModel {
-        schema_version: MESHING_DOMAIN_MODEL_SCHEMA_VERSION,
-        region_materials: topology
-            .regions
-            .iter()
-            .map(|region| RegionMaterialAssignment {
-                region_id: region.id.clone(),
-                material_id: "steel".into(),
-            })
-            .collect(),
-        contact_ids: topology
-            .contacts
-            .iter()
-            .map(|contact| contact.id.clone())
-            .collect(),
-    }
-}
-
 #[test]
 fn validated_tet4_projects_to_one_canonical_solver_topology() {
     let (exact_topology, exact_surface) = crate::cdt::constraints::tests::tetrahedron();
@@ -117,14 +97,12 @@ fn validated_tet4_projects_to_one_canonical_solver_topology() {
         &NeverCancelled,
     )
     .unwrap();
-    let domain_model = domain_model(&exact_topology);
     let input = || DelaunaySolverTopologyInput {
         exact_topology: &exact_topology,
         exact_surface: &exact_surface,
         volume_mesh: &volume_mesh,
         volume_options,
         request: &request,
-        domain_model: &domain_model,
         exact_evaluation: None,
     };
     let result = build_delaunay_solver_topology(
@@ -146,7 +124,7 @@ fn validated_tet4_projects_to_one_canonical_solver_topology() {
     assert_eq!(result.boundary_faces.len(), 4);
     assert_eq!(result.boundary_edges.len(), 6);
     assert_eq!(result.regions.len(), 1);
-    assert!(result.material_interfaces.is_empty());
+    assert!(result.conformal_interfaces.is_empty());
     assert!(result.contacts.is_empty());
     assert!(result.nodes.iter().all(|node| !node.provenance.is_empty()));
     assert!(result.nodes.iter().all(|node| {
@@ -219,7 +197,6 @@ fn projection_retains_chart_aware_exact_surface_parameters() {
         &NeverCancelled,
     )
     .unwrap();
-    let domain_model = domain_model(&exact_topology);
     let result = build_delaunay_solver_topology(
         DelaunaySolverTopologyInput {
             exact_topology: &exact_topology,
@@ -227,7 +204,6 @@ fn projection_retains_chart_aware_exact_surface_parameters() {
             volume_mesh: &volume_mesh,
             volume_options,
             request: &request,
-            domain_model: &domain_model,
             exact_evaluation: None,
         },
         DelaunaySolverTopologyOptions::default(),
@@ -274,7 +250,6 @@ fn projection_retains_chart_aware_exact_surface_parameters() {
                 volume_mesh: &volume_mesh,
                 volume_options,
                 request: &request,
-                domain_model: &domain_model,
                 exact_evaluation: None,
             },
             DelaunaySolverTopologyOptions::default(),
@@ -299,14 +274,12 @@ fn deterministic_tet10_elevation_shares_exact_boundary_midpoints() {
         &NeverCancelled,
     )
     .unwrap();
-    let domain_model = domain_model(&exact_topology);
     let input = || DelaunaySolverTopologyInput {
         exact_topology: &exact_topology,
         exact_surface: &exact_surface,
         volume_mesh: &volume_mesh,
         volume_options,
         request: &request,
-        domain_model: &domain_model,
         exact_evaluation: Some(DelaunayExactEvaluation {
             evaluator: &super::test_evaluator::EVALUATOR,
             control: &super::test_evaluator::CONTROL,
@@ -390,14 +363,12 @@ fn curved_tet10_nodes_optimize_deterministically_with_hard_round_and_candidate_l
         &NeverCancelled,
     )
     .unwrap();
-    let domain_model = domain_model(&exact_topology);
     let input = || DelaunaySolverTopologyInput {
         exact_topology: &exact_topology,
         exact_surface: &exact_surface,
         volume_mesh: &volume_mesh,
         volume_options,
         request: &request,
-        domain_model: &domain_model,
         exact_evaluation: Some(DelaunayExactEvaluation {
             evaluator: &super::test_evaluator::WARPED_EVALUATOR,
             control: &super::test_evaluator::CONTROL,
@@ -496,7 +467,7 @@ fn exact_interface_and_contact_classification_preserve_typed_sides() {
         .unwrap();
     assert_eq!(
         interface.role,
-        runmat_meshing_core::BoundaryFaceRole::MaterialInterface
+        runmat_meshing_core::BoundaryFaceRole::ConformalInterface
     );
     assert_eq!(interface.outward_region_id, region_a);
 
@@ -534,7 +505,7 @@ fn exact_interface_and_contact_classification_preserve_typed_sides() {
 }
 
 #[test]
-fn projection_rejects_unsupported_order_domain_model_and_resource_limit() {
+fn projection_rejects_unsupported_order_and_resource_limit() {
     let (exact_topology, exact_surface) = crate::cdt::constraints::tests::tetrahedron();
     let linear_request = request(ElementOrder::Tet4);
     let volume_options = volume_options();
@@ -546,40 +517,13 @@ fn projection_rejects_unsupported_order_domain_model_and_resource_limit() {
         &NeverCancelled,
     )
     .unwrap();
-    let empty_domain_model = MeshingDomainModel {
-        schema_version: MESHING_DOMAIN_MODEL_SCHEMA_VERSION,
-        region_materials: Vec::new(),
-        contact_ids: Vec::new(),
-    };
-    let no_materials = DelaunaySolverTopologyInput {
-        exact_topology: &exact_topology,
-        exact_surface: &exact_surface,
-        volume_mesh: &volume_mesh,
-        volume_options,
-        request: &linear_request,
-        domain_model: &empty_domain_model,
-        exact_evaluation: None,
-    };
-    assert_eq!(
-        build_delaunay_solver_topology(
-            no_materials,
-            DelaunaySolverTopologyOptions::default(),
-            &NeverCancelled,
-        )
-        .unwrap_err()
-        .kind,
-        DelaunaySolverTopologyErrorKind::InvalidDomainModel
-    );
-
     let quadratic_request = request(ElementOrder::Tet10);
-    let domain_model = domain_model(&exact_topology);
     let input = |request| DelaunaySolverTopologyInput {
         exact_topology: &exact_topology,
         exact_surface: &exact_surface,
         volume_mesh: &volume_mesh,
         volume_options,
         request,
-        domain_model: &domain_model,
         exact_evaluation: None,
     };
     assert_eq!(
@@ -628,7 +572,6 @@ fn projection_preserves_cancellation() {
         &NeverCancelled,
     )
     .unwrap();
-    let domain_model = domain_model(&exact_topology);
     let result = build_delaunay_solver_topology(
         DelaunaySolverTopologyInput {
             exact_topology: &exact_topology,
@@ -636,7 +579,6 @@ fn projection_preserves_cancellation() {
             volume_mesh: &volume_mesh,
             volume_options,
             request: &request,
-            domain_model: &domain_model,
             exact_evaluation: None,
         },
         DelaunaySolverTopologyOptions::default(),

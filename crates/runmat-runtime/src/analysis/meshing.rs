@@ -1,6 +1,6 @@
 //! Runtime composition boundary for canonical study meshing.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock, RwLock};
 
@@ -21,8 +21,6 @@ pub struct AnalysisMeshingRequest {
     pub source_path: PathBuf,
     pub source_units: UnitSystem,
     pub settings: MeshingRequestSettings,
-    pub default_material_id: Option<String>,
-    pub region_materials: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -72,10 +70,7 @@ pub(super) struct ResolvedStudyMesh {
     pub boundary_region_ids: BTreeMap<String, PersistentEntityId>,
 }
 
-pub(super) fn resolve_study_mesh(
-    spec: &AnalysisStudySpec,
-    model: &AnalysisModel,
-) -> Result<ResolvedStudyMesh, String> {
+pub(super) fn resolve_study_mesh(spec: &AnalysisStudySpec) -> Result<ResolvedStudyMesh, String> {
     if let Some(path) = spec.solver_mesh_artifact_path.as_deref() {
         solver_mesh_artifact::load_solver_mesh_artifact(Path::new(path))
             .map_err(|error| error.to_string())?;
@@ -99,50 +94,16 @@ pub(super) fn resolve_study_mesh(
         .ok_or_else(|| {
             "this host cannot execute the requested meshing workload; use a native RunMat host or configure compatible execution capacity".to_string()
         })?;
-    let (default_material_id, region_materials) = material_intent(model)?;
     let output = provider(&AnalysisMeshingRequest {
         source_path: PathBuf::from(&spec.geometry.source.path),
         source_units: spec.geometry.units,
         settings,
-        default_material_id,
-        region_materials,
     })?;
     output
         .evidence
         .validate(&output.artifact)
         .map_err(|error| format!("meshing provider returned invalid evidence: {error}"))?;
     persist_mesh_output(&output)
-}
-
-fn material_intent(
-    model: &AnalysisModel,
-) -> Result<(Option<String>, BTreeMap<String, String>), String> {
-    let material_ids = model
-        .material_assignments
-        .iter()
-        .map(|assignment| assignment.assigned_material_id.clone())
-        .chain(
-            (model.material_assignments.is_empty() && model.materials.len() == 1)
-                .then(|| model.materials[0].material_id.clone()),
-        )
-        .collect::<BTreeSet<_>>();
-    if material_ids.is_empty() {
-        return Err("solid meshing requires at least one assigned material".to_string());
-    }
-    if material_ids.len() == 1 {
-        return Ok((material_ids.into_iter().next(), BTreeMap::new()));
-    }
-    let region_materials = model
-        .material_assignments
-        .iter()
-        .map(|assignment| {
-            (
-                assignment.region_id.clone(),
-                assignment.assigned_material_id.clone(),
-            )
-        })
-        .collect();
-    Ok((None, region_materials))
 }
 
 fn persist_mesh_output(output: &AnalysisMeshingOutput) -> Result<ResolvedStudyMesh, String> {

@@ -6,7 +6,7 @@ use runmat_analysis_core::{
 };
 
 use crate::{
-    assembly::assemble_linear_system,
+    assembly::try_assemble_linear_system,
     contracts::{
         ComputeBackend, ElectromagneticSolveOptions, FeaElectromagneticRunResult, FeaRunError,
         FeaRunResult, FEA_FIELD_EM_CURRENT_DENSITY_IMAG, FEA_FIELD_EM_CURRENT_DENSITY_REAL,
@@ -91,7 +91,8 @@ pub fn run_electromagnetic_with_options(
         Some(5),
     );
     let solver_mesh = options.solver_mesh.as_ref();
-    let mut summary = assemble_linear_system(model, options.solver_mesh.clone(), None, None);
+    let mut summary = try_assemble_linear_system(model, options.solver_mesh.clone(), None, None)
+        .map_err(|err| FeaRunError::Assembly(err.to_string()))?;
     emit_phase(
         "fea.run_electromagnetic",
         FeaProgressPhase::ModelAssembly,

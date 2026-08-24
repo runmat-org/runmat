@@ -1,9 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{
-    validate_token, MeshingContractError, PersistentEntityId, PersistentEntityKind,
-    SolverMeshTopology,
-};
+use super::{MeshingContractError, PersistentEntityId, PersistentEntityKind, SolverMeshTopology};
 
 pub(super) fn validate_classification(
     topology: &SolverMeshTopology,
@@ -11,7 +8,7 @@ pub(super) fn validate_classification(
     face_ids: &BTreeSet<u64>,
 ) -> Result<(), MeshingContractError> {
     if !strictly_increasing_by(&topology.regions, |region| &region.region_id)
-        || !strictly_increasing_by(&topology.material_interfaces, |interface| {
+        || !strictly_increasing_by(&topology.conformal_interfaces, |interface| {
             &interface.source_face_id
         })
         || !strictly_increasing_by(&topology.contacts, |contact| &contact.contact_id)
@@ -22,12 +19,12 @@ pub(super) fn validate_classification(
         ));
     }
 
-    let region_materials = validate_regions(topology, element_ids)?;
+    let region_ids = validate_regions(topology, element_ids)?;
     for element in &topology.volume_elements {
-        if region_materials.get(&element.region_id).copied() != Some(element.material_id.as_str()) {
+        if !region_ids.contains(&element.region_id) {
             return Err(MeshingContractError::invalid(
                 "volume element classification",
-                "region and material assignments must agree with the region inventory",
+                "element region must exist in the canonical region inventory",
             ));
         }
     }
@@ -41,7 +38,7 @@ pub(super) fn validate_classification(
         topology,
         face_ids,
         &faces,
-        &region_materials,
+        &region_ids,
         &mut classified_faces,
     )?;
     validate_contacts(topology, face_ids, &faces, &mut classified_faces)?;
@@ -60,12 +57,11 @@ pub(super) fn validate_classification(
 fn validate_regions<'a>(
     topology: &'a SolverMeshTopology,
     element_ids: &BTreeSet<u64>,
-) -> Result<BTreeMap<&'a PersistentEntityId, &'a str>, MeshingContractError> {
+) -> Result<BTreeSet<&'a PersistentEntityId>, MeshingContractError> {
     let mut classified_elements = BTreeSet::new();
-    let mut region_materials = BTreeMap::new();
+    let mut region_ids = BTreeSet::new();
     for region in &topology.regions {
         validate_region_id(&region.region_id)?;
-        validate_token("region material id", &region.material_id, 256)?;
         if region.element_ids.is_empty()
             || !strictly_increasing(&region.element_ids)
             || !region.element_ids.iter().all(|id| element_ids.contains(id))
@@ -79,7 +75,7 @@ fn validate_regions<'a>(
                 "element classification must be complete, unique, and canonical",
             ));
         }
-        region_materials.insert(&region.region_id, region.material_id.as_str());
+        region_ids.insert(&region.region_id);
     }
     if &classified_elements != element_ids {
         return Err(MeshingContractError::invalid(
@@ -87,20 +83,20 @@ fn validate_regions<'a>(
             "every volume element must belong to exactly one region",
         ));
     }
-    Ok(region_materials)
+    Ok(region_ids)
 }
 
 fn validate_interfaces(
     topology: &SolverMeshTopology,
     face_ids: &BTreeSet<u64>,
     faces: &BTreeMap<u64, &super::SolverBoundaryFace>,
-    region_materials: &BTreeMap<&PersistentEntityId, &str>,
+    region_ids: &BTreeSet<&PersistentEntityId>,
     classified_faces: &mut BTreeSet<u64>,
 ) -> Result<(), MeshingContractError> {
-    for interface in &topology.material_interfaces {
+    for interface in &topology.conformal_interfaces {
         if interface.source_face_id.kind != PersistentEntityKind::Face {
             return Err(MeshingContractError::invalid(
-                "material interface source face",
+                "conformal interface source face",
                 "must identify a persistent face entity",
             ));
         }
@@ -108,27 +104,27 @@ fn validate_interfaces(
         validate_region_id(&interface.side_a_region_id)?;
         validate_region_id(&interface.side_b_region_id)?;
         if interface.side_a_region_id == interface.side_b_region_id
-            || !region_materials.contains_key(&interface.side_a_region_id)
-            || !region_materials.contains_key(&interface.side_b_region_id)
+            || !region_ids.contains(&interface.side_a_region_id)
+            || !region_ids.contains(&interface.side_b_region_id)
         {
             return Err(MeshingContractError::invalid(
-                "material interface",
+                "conformal interface",
                 "both distinct sides must reference known regions",
             ));
         }
         validate_face_set(
-            "material interface faces",
+            "conformal interface faces",
             &interface.boundary_face_ids,
             face_ids,
         )?;
         for face_id in &interface.boundary_face_ids {
             let face = faces[face_id];
-            if face.role != super::BoundaryFaceRole::MaterialInterface
+            if face.role != super::BoundaryFaceRole::ConformalInterface
                 || !face.provenance.contains(&interface.source_face_id)
                 || !classified_faces.insert(*face_id)
             {
                 return Err(MeshingContractError::invalid(
-                    "material interface faces",
+                    "conformal interface faces",
                     "faces must have the interface role and exact source-face provenance exactly once",
                 ));
             }

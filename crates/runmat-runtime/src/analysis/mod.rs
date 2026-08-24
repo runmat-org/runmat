@@ -1144,7 +1144,7 @@ pub fn analysis_run_study_op(
             .data
         }
     };
-    let study_mesh = meshing::resolve_study_mesh(spec, &model).map_err(|message| {
+    let study_mesh = meshing::resolve_study_mesh(spec).map_err(|message| {
         operation_error(
             ANALYSIS_RUN_STUDY_OPERATION,
             ANALYSIS_RUN_STUDY_OP_VERSION,
@@ -9391,37 +9391,29 @@ fn material_coverage_gap_detail(
     if model.material_assignments.is_empty() {
         return (model.materials.len() != 1).then(|| {
             format!(
-                "solver mesh has {} materials but model has {} materials and no material assignments",
-                mesh.topology.volume_elements
-                    .iter()
-                    .map(|element| element.material_id.as_str())
-                    .collect::<HashSet<_>>()
-                    .len(),
+                "solver mesh has {} regions but model has {} materials and no region assignments",
+                mesh.topology.regions.len(),
                 model.materials.len()
             )
         });
-    }
-    if model.materials.len() == 1 {
-        let material_id = model.materials[0].material_id.as_str();
-        if model
-            .material_assignments
-            .iter()
-            .all(|assignment| assignment.assigned_material_id == material_id)
-        {
-            return None;
-        }
     }
     let material_ids = model
         .materials
         .iter()
         .map(|material| material.material_id.as_str())
         .collect::<HashSet<_>>();
+    let assigned_regions = model
+        .material_assignments
+        .iter()
+        .filter(|assignment| material_ids.contains(assignment.assigned_material_id.as_str()))
+        .map(|assignment| assignment.region_id.as_str())
+        .collect::<HashSet<_>>();
     let mut uncovered = mesh
         .topology
-        .volume_elements
+        .regions
         .iter()
-        .map(|element| element.material_id.as_str())
-        .filter(|material_id| !material_ids.contains(material_id))
+        .map(|region| region.region_id.source_topology_id.as_str())
+        .filter(|region_id| !assigned_regions.contains(region_id))
         .collect::<Vec<_>>();
     uncovered.sort_unstable();
     uncovered.dedup();
@@ -9429,7 +9421,7 @@ fn material_coverage_gap_detail(
         None
     } else {
         Some(format!(
-            "solver mesh materials are not present in the analysis model: {}",
+            "solver mesh regions lack valid analysis material assignments: {}",
             uncovered.join(",")
         ))
     }

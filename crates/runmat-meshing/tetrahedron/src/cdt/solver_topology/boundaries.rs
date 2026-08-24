@@ -44,7 +44,8 @@ pub(super) fn build_faces(
             .get(&key)
             .ok_or_else(|| invalid_mesh("protected facet is absent from volume topology"))?;
         let class = classifications.classify(&binding.entity_ids, &binding.region_ids)?;
-        let expected_adjacency = usize::from(class.role == BoundaryFaceRole::MaterialInterface) + 1;
+        let expected_adjacency =
+            usize::from(class.role == BoundaryFaceRole::ConformalInterface) + 1;
         if adjacent.len() != expected_adjacency {
             return Err(invalid_mesh(
                 "protected facet adjacency does not match its exterior/contact/interface role",

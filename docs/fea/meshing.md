@@ -1,12 +1,11 @@
 # Meshing
 
-RunMat turns exact CAD geometry into a deterministic, solver-ready tetrahedral mesh. The result is
-not just a list of points and tetrahedra: it is a validated artifact containing boundary topology,
-regions, material ownership, interfaces, contacts, field mappings, the fully resolved meshing
-request, and a canonical identity. A separate evidence artifact records what every stage checked
-and the resources it used.
+RunMat turns exact CAD geometry into a deterministic, solver-ready tetrahedral mesh. The resulting
+artifact contains nodes, tetrahedra, boundary topology, persistent regions, interfaces,
+contacts, field mappings, the resolved meshing request, and a canonical identity. A companion
+evidence artifact records each stage's checks and resource usage.
 
-Use meshing in either of two ways:
+Meshing has three entry points:
 
 | Goal | Entry point |
 | --- | --- |
@@ -25,8 +24,7 @@ Given `bracket.step`, generate a linear tetrahedral mesh in metres:
 ```sh
 runmat mesh bracket.step \
   --target-size 0.005 \
-  --deviation 0.00005 \
-  --material aluminum_6061
+  --deviation 0.00005
 ```
 
 This writes two files beside the source:
@@ -44,7 +42,6 @@ runmat mesh geometry/bracket.step \
   --target-size 0.005 \
   --deviation 0.00005 \
   --element-order tet10 \
-  --material aluminum_6061 \
   --max-elements 2000000 \
   --seed 42 \
   --json > artifacts/bracket.mesh-summary.json
@@ -69,14 +66,14 @@ cargo run -p runmat --features occt-native -- mesh \
   --json
 ```
 
-The deliberately large target size keeps this small fixture quick. Use dimensions appropriate to
-your own model in production.
+The large target size keeps this small fixture quick. Use dimensions appropriate to your own model
+in production.
 
 ## Geometry Admission
 
-Meshing consumes authoritative geometry, not display triangles. For exact CAD, RunMat imports the
-B-rep topology and its curve, surface, pcurve, trim-classifier, and mass-property evaluators. The
-geometry revision binds:
+The exact CAD representation is the authority for meshing. RunMat imports the B-rep topology and
+its curve, surface, pcurve, trim-classifier, and mass-property evaluators. The geometry revision
+binds:
 
 - source bytes and format;
 - source units and normalization to metres;
@@ -85,8 +82,8 @@ geometry revision binds:
 - persistent topology mapping; and
 - assemblies, bodies, shells, faces, coedges, edges, vertices, interfaces, and contacts.
 
-Display tessellation remains a revision-keyed visualization cache. It is useful for rendering and
-selection, but it never becomes the authority for exact curve, surface, or volume meshing.
+Display tessellation remains a revision-keyed cache for rendering and selection. Exact curve,
+surface, and volume meshing operate on the B-rep and its evaluators.
 
 The `runmat mesh` command interprets source coordinates as metres. A `.fea` study declares source
 units explicitly, and RunMat normalizes the imported geometry before deriving its revision:
@@ -100,11 +97,11 @@ geometry:
 Valid unit names include the values accepted by the geometry document schema, such as `meter` and
 `millimeter`. Paths in `.fea` files are resolved relative to the document. If the CAD file is
 changed, re-exported, imported with different units, or admitted under a different exact-kernel ABI,
-it receives a different geometry revision and cannot accidentally reuse an incompatible mesh.
+the geometry revision changes, preventing reuse of an incompatible mesh.
 
 Geometry admission fails closed when topology is inconsistent, healing would exceed its bound,
-exact evaluators are missing, or the worker does not provide the required kernel capability. It
-does not replace exact CAD with a bounding box or a display tessellation.
+exact evaluators are missing, or the worker does not provide the required kernel capability. RunMat
+does not substitute a bounding box or display tessellation for the exact CAD model.
 
 ## Meshing Controls
 
@@ -115,7 +112,6 @@ does not replace exact CAD with a bounding box or a display tessellation.
 | `--target-size <metres>` | Global target edge length used to construct the metric field | `0.01` |
 | `--deviation <metres>` | Maximum curve and surface chordal deviation | `0.0001` |
 | `--element-order tet4\|tet10` | Linear or quadratic tetrahedra | `tet4` |
-| `--material <id>` | Material assigned to every imported volume region | `material` |
 | `--max-elements <count>` | Hard element ceiling | `10000000` |
 | `--seed <integer>` | Deterministic tie-breaking seed | `0` |
 | `--output <path>` | Solver mesh destination | Source name with `.solver-mesh.cbor` |
@@ -126,8 +122,8 @@ does not replace exact CAD with a bounding box or a display tessellation.
 Smaller target sizes usually create more elements. Deviation is independent: curved geometry may
 need boundary edges much shorter than the global target to stay within the geometric error bound.
 Tet10 adds midside nodes, projects boundary midside nodes through exact evaluators, and validates
-positive curved Jacobians; it is more expensive than Tet4 but is often preferable for curved
-geometry and higher-order solvers.
+positive curved Jacobians. It has higher node and validation costs than Tet4 and is often preferable
+for curved geometry and higher-order solvers.
 
 The seed is part of the logical request. Keep it stable for reproducible artifacts. Changing the
 seed is an explicit request change, not a way to bypass a geometry, quality, or budget failure.
@@ -138,7 +134,7 @@ solver-ready result.
 
 ### Meshing in a `.fea` study
 
-The concise study schema exposes the controls most analysis users need:
+The `.fea` study schema exposes these meshing controls:
 
 ```yaml
 version: 1
@@ -176,8 +172,8 @@ identities and implementation choices are recorded as evidence; they are not use
 backends. `maximum_grading_ratio` limits how quickly the requested size may change through adjacent
 regions. Lower values produce smoother transitions and can require more elements.
 
-For a linear-static profile, omitting `mesh:` uses the defaults shown above. Declare it explicitly
-when artifact identity and reviewability matter, especially in CI.
+For a linear-static profile, omitting `mesh:` uses the defaults shown above. An explicit `mesh:`
+block pins those values in the study document and makes request changes visible in review and CI.
 
 ## What the Mesher Does
 
@@ -199,10 +195,10 @@ exact geometry admission and bounded healing
   -> canonical serialization and atomic publication
 ```
 
-Edge discretizations are shared by every adjacent face, including exact curve parameters and the
-separate pcurve images needed at seams. Faces are triangulated in parameter space with constructive
-trim recovery and exact/adaptive predicates. The joined surface must be stitched by shared identity,
-not coordinate welding, before it can define the protected boundary complex.
+Adjacent faces share edge discretizations, including exact curve parameters and the separate pcurve
+images needed at seams. Faces are triangulated in parameter space with constructive trim recovery
+and exact/adaptive predicates. The surface join uses shared topology identities instead of
+coordinate welding before constructing the protected boundary complex.
 
 Volume generation uses one general constrained-Delaunay tetrahedralizer. It constructively recovers
 authored segments and facets, blocks carving at those facets, and assigns retained tetrahedra to
@@ -247,7 +243,8 @@ jq '.stages[] | {
 
 The exact keys in `entity_counts` and `achieved_error_distributions` depend on the stage. Each error
 distribution includes a sample count, minimum, mean, 95th percentile, 99th percentile, maximum,
-and unit. Successful evidence cannot contain a failed invariant. Important quality concepts include:
+and unit. Successful evidence cannot contain a failed invariant. The evidence reports these quality
+measures and invariants:
 
 | Statistic or invariant | Interpretation |
 | --- | --- |
@@ -257,7 +254,7 @@ and unit. Successful evidence cannot contain a failed invariant. Important quali
 | Radius-edge ratio | Tetrahedron circumsphere radius relative to its shortest edge; lower is better |
 | Scaled Jacobian | Orientation and shape measure normalized to `[-1, 1]`; accepted elements are positive and must meet the request |
 | Recovered constraints | Every authored PLC segment and facet is present with orientation and provenance |
-| Region classification | Every retained tetrahedron belongs to exactly one material/physical region |
+| Region classification | Every retained tetrahedron belongs to exactly one persistent geometric region |
 
 Do not compare only element counts when assessing two meshes. A finer count can still hide poor
 elements, boundary error, missing topology, or a changed request. Compare the canonical request,
@@ -265,7 +262,8 @@ geometry revision, invariants, achieved distributions, and solver convergence to
 
 The CBOR evidence file is the durable record. Its identity is bound to the solver mesh, request,
 geometry revision, algorithm set, seed, platform capability cohort, and per-stage result identities.
-The JSON printed by the CLI is a convenient projection, not a replacement for that artifact.
+The JSON printed by the CLI contains selected evidence fields; retain the CBOR artifact for the
+complete record.
 
 ## Determinism and Caching
 
@@ -278,7 +276,7 @@ Stage results are immutable, content-addressed manifests over bounded objects. A
 accepted only when its complete logical identity matches and it independently revalidates. Partial
 or invalid output cannot satisfy a dependency or be published as a solver mesh.
 
-These rules have two practical effects:
+Caching follows the canonical identity:
 
 - the same supported request and geometry can reuse verified work; and
 - changing units, tolerances, sizing, seed, element order, source bytes, or relevant build
@@ -318,7 +316,7 @@ kernel and ABI, platform, memory/scratch class, and requested element-order capa
 stage objects, progress, and results remain application-encrypted; the Server sees only coarse run,
 allocation, quota, retention, and ciphertext metadata.
 
-Operators prepare capacity with the ordinary RunMat cluster workflow:
+Operators prepare capacity with the `runmat cluster` workflow:
 
 ```sh
 runmat login
@@ -338,19 +336,18 @@ cluster, queue, trust, and worker policy to the meshing DAG executor. Do not use
 with a CAD pathname as a substitute: that command submits a packaged RunMat program, and a local CAD
 path is not implicitly uploaded with it.
 
-This boundary is intentional and useful when integrating RunMat: placement context must remain
-outside `MeshingRequest`, so running the same logical request locally or on a compatible remote pool
-does not change the canonical mesh identity.
+Placement context remains outside `MeshingRequest`. Running the same logical request locally or on
+a compatible remote pool therefore preserves the canonical mesh identity.
 
 ## Solver and Runtime Integration
 
-The published `SolverMeshArtifact` contains everything downstream solvers need:
+The published `SolverMeshArtifact` provides solver-facing topology and metadata:
 
 - stable nodes with coordinates, source provenance, and exact curve/surface parameters;
-- Tet4 or Tet10 volume elements and material/region ownership;
+- Tet4 or Tet10 volume elements and persistent region ownership;
 - element neighbors;
 - Tri3 or Tri6 boundary faces and Line2 or Line3 boundary edges;
-- conformal material interfaces and independent nonconformal contact pairs;
+- conformal region interfaces and independent nonconformal contact pairs;
 - ordered field-topology maps; and
 - the geometry revision, resolved request, physical validation-manifest reference, and logical
   canonical digest. Legal partition and chunk layouts can have different manifest references while
@@ -360,11 +357,16 @@ When a `.fea` study does not provide an existing internal mesh artifact, the run
 installed meshing provider to generate one. It persists the mesh and evidence beneath the configured
 `[runtime.fea].artifact_root`, using content-derived names under the meshing store. Before solver
 use, the runtime decodes the canonical artifact, validates its complete topology and request, checks
-the evidence binding, verifies geometry compatibility, and projects only then into solver options.
+the evidence binding, verifies geometry compatibility, and then projects it into solver options.
 
-Materials and regions cross the boundary by persistent identity. Boundary selectors such as
-`face_000001` resolve to the imported exact face identity returned by meshing, so loads and boundary
-conditions are not assigned by nearest triangle or centroid.
+Meshing owns region identity, not material assignment. A canonical mesh can therefore be reused by
+multiple studies that assign different materials to the same regions without changing mesh
+identity. The analysis document resolves its `material_assignments` against each mesh region's
+persistent source identity when it constructs solver coefficients. A study with one material and no
+explicit assignments applies that material uniformly; multi-material studies must cover every mesh
+region explicitly. Boundary selectors such as `face_000001` resolve to the imported exact face
+identity returned by meshing, so loads and boundary conditions are not assigned by nearest triangle
+or centroid.
 
 ## Failures, Budgets, and Cancellation
 
@@ -373,17 +375,17 @@ Failure categories distinguish invalid geometry, healing limits, unsatisfiable c
 conflicts, unreachable quality, node/element/memory/scratch/time/artifact/search/recursion/iteration
 budgets, cancellation, numerical failure, and internal invariant violations.
 
-Useful first responses are:
+Investigate the reported failure category as follows:
 
 | Failure | What to check |
 | --- | --- |
 | Invalid geometry | Inspect CAD topology, units, open shells, duplicate entities, and exporter diagnostics |
-| Healing limit exceeded | Repair or re-export the CAD model; do not simply inflate a global tolerance |
+| Healing limit exceeded | Repair or re-export the CAD model; increasing a global tolerance is not a substitute for repair |
 | Unsatisfiable constraints | Inspect acute features, thin gaps, intersections, and model tolerance |
 | Element or memory budget exceeded | Increase the relevant operational budget or make the requested size/deviation less demanding |
 | Quality target unreachable | Inspect the reported entities and geometric witnesses; repair geometry or revise an explicit quality target |
 | Capability mismatch | Use a native worker with the required OCCT ABI and element-order support |
-| Cancelled | Re-run the same request when ready; no partial result is admitted to the production cache |
+| Cancelled | Re-run the same request; no partial result is admitted to the production cache |
 
 Cancellation is cooperative and checked throughout expensive geometry and meshing work. Local and
 remote hosts propagate the existing execution cancellation authority; bounded checkpoints let a
@@ -399,8 +401,8 @@ replayable after an ambiguous effect.
   even when the global target is larger.
 - Use Tet4 for quick linear studies and Tet10 when curved-boundary accuracy or a quadratic solver
   formulation justifies the additional nodes and validation cost.
-- Keep a hard element ceiling in CI. Treat a budget failure as information instead of accepting a
-  silently degraded mesh.
+- Keep a hard element ceiling in CI. Investigate a budget failure rather than accepting a mesh with
+  reduced sizing or quality requirements.
 - Save both CBOR artifacts and the JSON summary with analysis results. The mesh alone does not carry
   measured stage evidence.
 - Use stable seeds and explicit settings for regression tests. Compare canonical digests only when
@@ -408,7 +410,7 @@ replayable after an ambiguous effect.
 - Validate engineering conclusions with mesh-convergence studies: reduce target size and chordal
   deviation systematically and confirm that quantities of interest converge.
 
-Meshing proves that a discretization satisfies its declared geometric and numerical contracts. It
-does not prove that loads, constraints, material data, solver formulation, or a single chosen mesh
-are sufficient for the engineering decision. See [Verification & Validation](/docs/fea/validation)
-and [Results & Trust](/docs/fea/trust) for the rest of that workflow.
+A validated mesh proves that the discretization satisfies its declared geometric and numerical
+contracts. Engineering validation must also cover loads, constraints, material data, solver
+formulation, and mesh convergence. See [Verification & Validation](/docs/fea/validation) and
+[Results & Trust](/docs/fea/trust) for that workflow.

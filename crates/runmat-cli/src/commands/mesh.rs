@@ -6,7 +6,7 @@ use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_runner_native::{
     mesh_exact_geometry, NativeExactMeshingJob, NativeExactMeshingResult, NativeExecutionConfig,
-    NativeMeshingDomain, NativeMeshingExecutionPolicy,
+    NativeMeshingExecutionPolicy,
 };
 use runmat_geometry_core::UnitSystem;
 use runmat_geometry_io::ExactCadImportOptions;
@@ -30,7 +30,6 @@ pub struct MeshCommand {
     pub target_size_m: f64,
     pub maximum_deviation_m: f64,
     pub element_order: MeshElementOrderArg,
-    pub material: String,
     pub maximum_elements: u64,
     pub deterministic_seed: u64,
     pub force: bool,
@@ -41,7 +40,6 @@ struct NativeMeshRequest {
     source: PathBuf,
     source_units: UnitSystem,
     settings: MeshingRequestSettings,
-    domain: NativeMeshingDomain,
 }
 
 pub fn execute(command: MeshCommand) -> Result<()> {
@@ -70,10 +68,6 @@ pub fn execute(command: MeshCommand) -> Result<()> {
         source: command.source.clone(),
         source_units: UnitSystem::Meter,
         settings,
-        domain: NativeMeshingDomain {
-            default_material_id: Some(command.material.clone()),
-            region_materials: Default::default(),
-        },
     })?;
     let result = &generated.dag_result;
 
@@ -142,7 +136,6 @@ fn generate_native_mesh(request: NativeMeshRequest) -> Result<NativeExactMeshing
             source_bytes: &source_bytes,
             import_options,
             request: canonical_request,
-            domain: request.domain,
             program_revision,
             capability_cohort: Some(cohort.clone()),
             preferred_edges_per_partition: 8,
@@ -214,10 +207,6 @@ pub(crate) fn analysis_meshing_provider() -> AnalysisMeshingProvider {
             source: request.source_path.clone(),
             source_units: request.source_units,
             settings: request.settings.clone(),
-            domain: NativeMeshingDomain {
-                default_material_id: request.default_material_id.clone(),
-                region_materials: request.region_materials.clone(),
-            },
         })
         .map(|result| AnalysisMeshingOutput {
             artifact: result.dag_result.artifact,

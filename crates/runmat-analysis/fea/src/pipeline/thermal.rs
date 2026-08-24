@@ -3,7 +3,7 @@ use runmat_analysis_core::{
 };
 
 use crate::{
-    assembly::{assemble_linear_system, AssemblySummary},
+    assembly::{try_assemble_linear_system, AssemblySummary},
     contracts::{
         fea_thermal_boundary_heat_flux_field_id, fea_thermal_heat_flux_field_id,
         fea_thermal_heat_source_field_id, fea_thermal_temperature_field_id,
@@ -82,12 +82,13 @@ pub fn run_thermal_with_options(
         Some(1),
         Some(5),
     );
-    let summary = assemble_linear_system(
+    let summary = try_assemble_linear_system(
         model,
         options.solver_mesh.clone(),
         Some(thermo_context.clone()),
         None,
-    );
+    )
+    .map_err(|err| FeaRunError::Assembly(err.to_string()))?;
     super::validate_rotational_dof_targets(model, &summary)?;
     emit_phase(
         "fea.run_thermal",

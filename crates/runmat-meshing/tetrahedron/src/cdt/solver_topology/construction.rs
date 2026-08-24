@@ -24,14 +24,14 @@ pub(super) fn construct(
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<SolverMeshTopology, DelaunaySolverTopologyError> {
     let node_indices = node_indices(input)?;
-    let materials = validate_domain_model(input)?;
+    validate_regions(input)?;
     let nodes = build_nodes(input, &node_indices, options, cancellation)?;
-    let volume_elements = build_elements(input, &materials)?;
+    let volume_elements = build_elements(input)?;
     let neighbors = build_neighbors(input)?;
     let (boundary_faces, classes) = build_faces(input, &node_indices, options, cancellation)?;
     let boundary_edges = build_edges(input, &boundary_faces, options, cancellation)?;
-    let regions = build_regions(input, &materials)?;
-    let material_interfaces = build_interfaces(input, &classes)?;
+    let regions = build_regions(input)?;
+    let conformal_interfaces = build_interfaces(input, &classes)?;
     let contacts = build_contacts(input, &classes)?;
     let field_topologies = field_topologies(
         nodes.len(),
@@ -46,7 +46,7 @@ pub(super) fn construct(
         boundary_faces,
         boundary_edges,
         regions,
-        material_interfaces,
+        conformal_interfaces,
         contacts,
         field_topologies,
     })
@@ -69,9 +69,9 @@ fn node_indices(
     Ok(indices)
 }
 
-fn validate_domain_model<'a>(
-    input: &'a DelaunaySolverTopologyInput<'_>,
-) -> Result<BTreeMap<&'a PersistentEntityId, &'a str>, DelaunaySolverTopologyError> {
+fn validate_regions(
+    input: &DelaunaySolverTopologyInput<'_>,
+) -> Result<(), DelaunaySolverTopologyError> {
     let exact_regions = input
         .exact_topology
         .regions
@@ -87,21 +87,11 @@ fn validate_domain_model<'a>(
         .map(|region| &region.region_id)
         .collect::<BTreeSet<_>>();
     if exact_regions != mesh_regions {
-        return Err(invalid_domain_model(
+        return Err(invalid_mesh(
             "solver projection requires one nonempty mesh region for every exact region",
         ));
     }
-    input
-        .domain_model
-        .validate_against_exact_topology(input.exact_topology)
-        .map_err(|error| invalid_domain_model(error.to_string()))?;
-    let materials = input
-        .domain_model
-        .region_materials
-        .iter()
-        .map(|assignment| (&assignment.region_id, assignment.material_id.as_str()))
-        .collect();
-    Ok(materials)
+    Ok(())
 }
 
 fn build_nodes(
@@ -189,7 +179,6 @@ fn extend_nodes<const N: usize>(
 
 fn build_elements(
     input: &DelaunaySolverTopologyInput<'_>,
-    materials: &BTreeMap<&PersistentEntityId, &str>,
 ) -> Result<Vec<SolverVolumeElement>, DelaunaySolverTopologyError> {
     input
         .volume_mesh
@@ -202,9 +191,6 @@ fn build_elements(
                 .region_id
                 .clone()
                 .ok_or_else(|| invalid_mesh("volume tetrahedron has no assigned region"))?;
-            let material = materials
-                .get(&region)
-                .ok_or_else(|| invalid_domain_model("volume region has no material assignment"))?;
             let (vertices, _) = solver_vertices(input, tetrahedron.vertex_indices)?;
             Ok(SolverVolumeElement {
                 element_id: index as u64 + 1,
@@ -215,7 +201,6 @@ fn build_elements(
                 order: ElementOrder::Tet4,
                 node_ids: vertices.iter().map(|vertex| *vertex as u64 + 1).collect(),
                 region_id: region.clone(),
-                material_id: (*material).to_owned(),
                 provenance: vec![region],
             })
         })
@@ -273,8 +258,4 @@ fn solver_vertices(
 
 fn invalid_mesh(reason: impl Into<String>) -> DelaunaySolverTopologyError {
     error::failure(DelaunaySolverTopologyErrorKind::InvalidMesh, reason)
-}
-
-fn invalid_domain_model(reason: impl Into<String>) -> DelaunaySolverTopologyError {
-    error::failure(DelaunaySolverTopologyErrorKind::InvalidDomainModel, reason)
 }

@@ -3,11 +3,11 @@ use std::future::Future;
 use std::task::{Context, Poll, Waker};
 
 use crate::{
-    build_task_submission, import_exact_geometry_input, prepare_domain_model_input,
-    prepare_domain_model_objects, prepare_exact_geometry_input, prepare_exact_geometry_objects,
-    prepare_faceted_geometry_input, prepare_faceted_geometry_objects, prepare_result_publication,
-    prepare_stage_objects, MeshingArtifactAccess, MeshingExecutionContext, MeshingHostResponse,
-    MeshingHostWorkload, MeshingTaskEffectPolicy,
+    build_task_submission, import_exact_geometry_input, prepare_exact_geometry_input,
+    prepare_exact_geometry_objects, prepare_faceted_geometry_input,
+    prepare_faceted_geometry_objects, prepare_result_publication, prepare_stage_objects,
+    MeshingArtifactAccess, MeshingExecutionContext, MeshingHostResponse, MeshingHostWorkload,
+    MeshingTaskEffectPolicy,
 };
 use runmat_execution::identity::{ArtifactId, AttemptId, WorkerId};
 use runmat_execution::value::{ValuePayload, ValueRef};
@@ -28,9 +28,8 @@ use runmat_meshing_core::{
     MeshingManifestDisposition, MeshingPartitionDescriptor, MeshingPartitionKind,
     MeshingQualityTargets, MeshingRequest, MeshingResourceBudget, MeshingStageIdentity,
     MeshingStageKind, MeshingStageResultKind, MeshingWorkloadRequest, MeshingWorkloadResult,
-    MetricCombinationRule, MetricFieldRequest, MetricTensor3, NeverCancelled,
-    RegionMaterialAssignment, StableDigest, SurfaceQualityTargets, VolumeQualityTargets,
-    MESHING_DOMAIN_MODEL_SCHEMA_VERSION, MESHING_IDENTITY_SCHEMA_VERSION,
+    MetricCombinationRule, MetricFieldRequest, MetricTensor3, NeverCancelled, StableDigest,
+    SurfaceQualityTargets, VolumeQualityTargets, MESHING_IDENTITY_SCHEMA_VERSION,
     MESHING_REQUEST_SCHEMA_VERSION, MESHING_WORKLOAD_SCHEMA_VERSION,
 };
 

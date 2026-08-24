@@ -4529,8 +4529,6 @@ fn write_ready_minimal_analysis_mesh_artifact(test_name: &str) -> (PathBuf, Path
     for face in &mut mesh.topology.boundary_faces {
         face.provenance.sort();
     }
-    mesh.topology.volume_elements[0].material_id = "mat_steel".to_owned();
-    mesh.topology.regions[0].material_id = "mat_steel".to_owned();
     mesh.canonical_digest = StableDigest::ZERO;
     mesh.seal_canonical_digest()
         .expect("seal canonical solver mesh fixture");
@@ -4566,6 +4564,33 @@ fn canonical_meshing_boundary_ids_replace_display_face_aliases() {
 
     assert_eq!(model.boundary_conditions[0].region_id, "exact-face-a");
     assert_eq!(model.loads[0].region_id, "exact-face-b");
+}
+
+#[test]
+fn one_analysis_material_applies_uniformly_without_changing_the_mesh() {
+    let model = sample_solid_model();
+    let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+
+    assert_eq!(material_coverage_gap_detail(&model, &mesh), None);
+}
+
+#[test]
+fn multiple_analysis_materials_require_mesh_region_coverage() {
+    let mut model = sample_model_with_material_assignment_mismatch();
+    model.material_assignments.clear();
+    let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+
+    let gap =
+        material_coverage_gap_detail(&model, &mesh).expect("region coverage must be required");
+    assert!(gap.contains("2 materials and no region assignments"));
+
+    model.material_assignments = vec![MaterialAssignment {
+        region_id: "region".to_string(),
+        expected_material_id: "mat_steel".to_string(),
+        assigned_material_id: "mat_polymer".to_string(),
+        confidence: EvidenceConfidence::Verified,
+    }];
+    assert_eq!(material_coverage_gap_detail(&model, &mesh), None);
 }
 
 #[test]

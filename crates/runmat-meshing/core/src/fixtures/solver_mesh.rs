@@ -148,7 +148,6 @@ pub fn canonical_tetrahedron_solver_mesh(order: ElementOrder) -> SolverMeshArtif
                 order,
                 node_ids: (1..=node_count).collect(),
                 region_id: region.clone(),
-                material_id: "steel".into(),
                 provenance: vec![solid],
             }],
             neighbors: (0..4)
@@ -162,10 +161,9 @@ pub fn canonical_tetrahedron_solver_mesh(order: ElementOrder) -> SolverMeshArtif
             boundary_edges,
             regions: vec![MeshRegion {
                 region_id: region,
-                material_id: "steel".into(),
                 element_ids: vec![1],
             }],
-            material_interfaces: Vec::new(),
+            conformal_interfaces: Vec::new(),
             contacts: Vec::new(),
             field_topologies: vec![
                 field("nodes", FieldTopologyLocation::Node, 1..=node_count),

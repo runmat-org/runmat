@@ -1,8 +1,7 @@
 use crate::{
-    import_domain_model_input, import_evidence_input, import_exact_geometry_input,
-    import_faceted_geometry_input, import_result_publication, prepare_result_publication,
-    prepare_stage_objects, MeshingExecutionError, MeshingHostWorkload,
-    PreparedMeshingResultPublication,
+    import_evidence_input, import_exact_geometry_input, import_faceted_geometry_input,
+    import_result_publication, prepare_result_publication, prepare_stage_objects,
+    MeshingExecutionError, MeshingHostWorkload, PreparedMeshingResultPublication,
 };
 use runmat_execution::value::ValuePayload;
 use runmat_execution_artifact::cache::{CacheExport, CacheImport};
@@ -153,11 +152,6 @@ where
             )
             .map(Box::new)
             .map(PreparedMeshingInput::FacetedGeometry),
-            MeshingInputKind::DomainModel => {
-                import_domain_model_input(store, root, host.artifact_access.clone(), limits)
-                    .map(Box::new)
-                    .map(PreparedMeshingInput::DomainModel)
-            }
             MeshingInputKind::Evidence => {
                 import_evidence_input(store, root, host.artifact_access.clone(), limits)
                     .map(Box::new)

@@ -7,7 +7,6 @@ mod artifact_types;
 mod cancellation;
 mod chunk;
 mod codec;
-mod domain_model;
 mod error;
 mod evidence;
 mod failure;
@@ -28,8 +27,8 @@ pub use artifact_identity::{
 };
 pub use artifact_parameters::sort_solver_node_exact_parameters;
 pub use artifact_types::{
-    BoundaryEdgeOrder, BoundaryFaceRole, BoundaryTriangleOrder, ContactPair, FieldTopologyLocation,
-    FieldTopologyMap, MaterialInterface, MeshNeighbor, MeshRegion, SolverBoundaryEdge,
+    BoundaryEdgeOrder, BoundaryFaceRole, BoundaryTriangleOrder, ConformalInterface, ContactPair,
+    FieldTopologyLocation, FieldTopologyMap, MeshNeighbor, MeshRegion, SolverBoundaryEdge,
     SolverBoundaryFace, SolverMeshArtifact, SolverMeshNode, SolverMeshTopology,
     SolverNodeExactParameter, SolverVolumeElement, ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
     TETRAHEDRON_MIDSIDE_EDGE_CORNERS,
@@ -41,10 +40,6 @@ pub use chunk::{
     MeshingChunkedPayload,
 };
 pub use codec::{CanonicalMeshingContract, MeshingCanonicalLimits};
-pub use domain_model::{
-    MeshingDomainModel, RegionMaterialAssignment, MESHING_DOMAIN_MODEL_MEDIA_TYPE,
-    MESHING_DOMAIN_MODEL_SCHEMA_VERSION,
-};
 pub use error::MeshingContractError;
 pub use evidence::{
     CacheAdmissionDecision, ErrorDistribution, InvariantEvidence, MeshingEvidence,
