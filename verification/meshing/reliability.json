@@ -1,0 +1,202 @@
+{
+  "schema_version": 1,
+  "catalog_revision": 1,
+  "required_controls": [
+    "node-element-memory-scratch-budgets",
+    "search-recursion-iteration-budgets",
+    "wall-time-artifact-budgets",
+    "import-cancellation",
+    "curve-cancellation",
+    "surface-chart-cancellation",
+    "surface-cdt-cancellation",
+    "plc-cancellation",
+    "volume-bootstrap-cancellation",
+    "segment-recovery-cancellation",
+    "facet-recovery-cancellation",
+    "carving-cancellation",
+    "refinement-cancellation",
+    "optimization-cancellation-latency",
+    "projection-validation-cancellation",
+    "adaptive-transfer-cancellation",
+    "atomic-artifact-write",
+    "cache-corruption-rejection",
+    "schema-revision-mismatch",
+    "durable-restart",
+    "durable-cancellation-corrupt-metadata",
+    "serial-local-durable-remote-conformance",
+    "worker-loss-retry-fencing",
+    "stale-duplicate-publication",
+    "resumable-corrupt-transfer",
+    "stale-result-cache-safety"
+  ],
+  "cases": [
+    {
+      "id": "all-local-hard-counters",
+      "owner": "meshing-execution",
+      "controls": ["node-element-memory-scratch-budgets", "search-recursion-iteration-budgets"],
+      "expected": "every algorithm-local counter admits its exact boundary and returns its typed budget category on the first excess",
+      "test": {"source": "crates/runmat-meshing/execution/src/serial_tests.rs", "name": "stage_control_enforces_every_algorithm_local_resource_counter"}
+    },
+    {
+      "id": "wall-and-artifact-hard-limits",
+      "owner": "meshing-execution",
+      "controls": ["wall-time-artifact-budgets"],
+      "expected": "wall time and serialized artifact bytes fail before terminal publication",
+      "test": {"source": "crates/runmat-meshing/execution/src/serial_tests.rs", "name": "stage_control_enforces_wall_time_and_serialization_enforces_artifact_bytes"}
+    },
+    {
+      "id": "geometry-import-cancellation",
+      "owner": "geometry-io",
+      "controls": ["import-cancellation"],
+      "expected": "geometry loading observes the caller cancellation context and returns the typed cancellation category",
+      "test": {"source": "crates/runmat-geometry/io/src/lib.rs", "name": "import_context_cancels_geometry_load"}
+    },
+    {
+      "id": "curve-cancellation",
+      "owner": "meshing-curve",
+      "controls": ["curve-cancellation"],
+      "expected": "constructive curve evaluation preserves typed evaluator cancellation",
+      "test": {"source": "crates/runmat-meshing/curve/src/shared/tests.rs", "name": "constructive_curves_preserve_typed_evaluator_cancellation"}
+    },
+    {
+      "id": "surface-chart-cancellation",
+      "owner": "meshing-surface",
+      "controls": ["surface-chart-cancellation"],
+      "expected": "chart construction stops through the geometry cancellation boundary",
+      "test": {"source": "crates/runmat-meshing/surface/src/chart/tests.rs", "name": "chart_construction_preserves_typed_geometry_cancellation"}
+    },
+    {
+      "id": "surface-cdt-cancellation",
+      "owner": "meshing-surface",
+      "controls": ["surface-cdt-cancellation"],
+      "expected": "surface CDT construction checks cancellation and its predicate work budget",
+      "test": {"source": "crates/runmat-meshing/surface/src/exact_cdt/triangulation/tests.rs", "name": "construction_enforces_cancellation_and_predicate_budget"}
+    },
+    {
+      "id": "plc-cancellation",
+      "owner": "meshing-tetrahedron",
+      "controls": ["plc-cancellation"],
+      "expected": "PLC constraint construction rejects mismatches, limits, and cancellation before mutation",
+      "test": {"source": "crates/runmat-meshing/tetrahedron/src/cdt/constraints/tests.rs", "name": "build_rejects_surface_mismatch_limits_and_cancellation"}
+    },
+    {
+      "id": "volume-bootstrap-cancellation",
+      "owner": "meshing-tetrahedron",
+      "controls": ["volume-bootstrap-cancellation"],
+      "expected": "point-set bootstrap enforces inventory limits and cancellation",
+      "test": {"source": "crates/runmat-meshing/tetrahedron/src/cdt/point_set/tests.rs", "name": "point_set_bootstrap_enforces_limits_and_cancellation"}
+    },
+    {
+      "id": "segment-recovery-cancellation",
+      "owner": "meshing-tetrahedron",
+      "controls": ["segment-recovery-cancellation"],
+      "expected": "segment recovery enforces search work, Steiner inventory, and cancellation limits",
+      "test": {"source": "crates/runmat-meshing/tetrahedron/src/cdt/segment_recovery/tests.rs", "name": "recovery_enforces_search_work_steiner_and_cancellation_limits"}
+    },
+    {
+      "id": "facet-recovery-cancellation",
+      "owner": "meshing-tetrahedron",
+      "controls": ["facet-recovery-cancellation"],
+      "expected": "facet recovery enforces search limits and cancellation across constructive work",
+      "test": {"source": "crates/runmat-meshing/tetrahedron/src/cdt/facet_recovery/tests.rs", "name": "facet_recovery_enforces_search_limits_and_cancellation"}
+    },
+    {
+      "id": "carving-cancellation",
+      "owner": "meshing-tetrahedron",
+      "controls": ["carving-cancellation"],
+      "expected": "topological carving checks work limits and cancellation",
+      "test": {"source": "crates/runmat-meshing/tetrahedron/src/cdt/carving/tests.rs", "name": "carving_enforces_work_limits_and_cancellation"}
+    },
+    {
+      "id": "refinement-cancellation",
+      "owner": "meshing-tetrahedron",
+      "controls": ["refinement-cancellation"],
+      "expected": "refinement fails closed on nonconvergence, hard work exhaustion, and cancellation",
+      "test": {"source": "crates/runmat-meshing/tetrahedron/src/cdt/volume_refinement/tests.rs", "name": "refinement_loop_fails_closed_on_nonconvergence_budget_and_cancellation"}
+    },
+    {
+      "id": "optimization-cancellation-latency",
+      "owner": "meshing-tetrahedron",
+      "controls": ["optimization-cancellation-latency"],
+      "expected": "optimization candidate checkpoints bound cancellation latency",
+      "test": {"source": "crates/runmat-meshing/tetrahedron/src/cdt/solver_topology/order_elevation/optimization.rs", "name": "candidate_checkpoint_has_bounded_cancellation_latency"}
+    },
+    {
+      "id": "projection-validation-cancellation",
+      "owner": "meshing-tetrahedron",
+      "controls": ["projection-validation-cancellation"],
+      "expected": "solver projection and validation preserve cancellation",
+      "test": {"source": "crates/runmat-meshing/tetrahedron/src/cdt/solver_topology/tests.rs", "name": "projection_preserves_cancellation"}
+    },
+    {
+      "id": "adaptive-transfer-cancellation",
+      "owner": "meshing-tetrahedron",
+      "controls": ["adaptive-transfer-cancellation"],
+      "expected": "field transfer rejects mismatches, hard limits, invalid policies, and cancellation",
+      "test": {"source": "crates/runmat-meshing/tetrahedron/src/cdt/adaptive_transfer/tests.rs", "name": "adaptive_transfer_rejects_mismatches_limits_cancellation_and_invalid_options"}
+    },
+    {
+      "id": "atomic-verified-object-store",
+      "owner": "execution-artifact",
+      "controls": ["atomic-artifact-write", "cache-corruption-rejection"],
+      "expected": "object writes are atomic, bounded, idempotent, and every read is rehashed",
+      "test": {"source": "crates/runmat-execution-artifact/src/cache/filesystem.rs", "name": "store_is_atomic_idempotent_bounded_and_rehashes_reads"}
+    },
+    {
+      "id": "artifact-schema-and-revision",
+      "owner": "execution-artifact",
+      "controls": ["schema-revision-mismatch"],
+      "expected": "tampering and program revision mismatch fail artifact admission",
+      "test": {"source": "crates/runmat-execution-artifact/tests/program_artifact_identity.rs", "name": "artifact_tampering_and_revision_mismatch_are_rejected"}
+    },
+    {
+      "id": "durable-supervisor-restart",
+      "owner": "native-execution",
+      "controls": ["durable-restart"],
+      "expected": "detached work survives supervisor reopen and idempotent resubmission",
+      "test": {"source": "crates/runmat-execution-runner-native/src/supervisor/tests.rs", "name": "detached_job_survives_supervisor_reopen_and_submission_is_idempotent"}
+    },
+    {
+      "id": "durable-cancel-corrupt-metadata",
+      "owner": "native-execution",
+      "controls": ["durable-cancellation-corrupt-metadata"],
+      "expected": "cancellation persists and corrupt metadata recovers as indeterminate before bounded retention cleanup",
+      "test": {"source": "crates/runmat-execution-runner-native/src/supervisor/tests.rs", "name": "cancellation_is_durable_and_corrupt_metadata_recovers_indeterminate"}
+    },
+    {
+      "id": "portable-execution-shapes",
+      "owner": "native-execution",
+      "controls": ["serial-local-durable-remote-conformance"],
+      "expected": "the same meshing workload executes through serial, local process, durable local, and encrypted remote pool paths",
+      "test": {"source": "crates/runmat-execution-runner-native/tests/meshing_process_conformance.rs", "name": "main"}
+    },
+    {
+      "id": "remote-worker-loss-recovery",
+      "owner": "native-execution",
+      "controls": ["worker-loss-retry-fencing"],
+      "expected": "worker loss retries once on a replacement, fences the losing result, preserves progress order, and reuses cached input",
+      "test": {"source": "crates/runmat-execution-runner-native/tests/meshing_process_conformance/remote_recovery.rs", "name": "run_inner"}
+    },
+    {
+      "id": "result-publication-fencing",
+      "owner": "execution-runner",
+      "controls": ["stale-duplicate-publication"],
+      "expected": "duplicate, reordered, and stale attempt reports commit at most once",
+      "test": {"source": "crates/runmat-execution-runner/tests/result_fencing.rs", "name": "duplicate_reordered_and_stale_reports_commit_at_most_once"}
+    },
+    {
+      "id": "resumable-object-transfer",
+      "owner": "native-execution",
+      "controls": ["resumable-corrupt-transfer"],
+      "expected": "remote object transfer resumes only at the verified offset and rejects corruption",
+      "test": {"source": "crates/runmat-execution-runner-native/src/remote/object_transfer.rs", "name": "object_cache_resumes_and_rejects_corruption"}
+    },
+    {
+      "id": "stale-result-cache-protection",
+      "owner": "native-execution",
+      "controls": ["stale-result-cache-safety"],
+      "expected": "discarding stale result objects cannot evict prerequisite or committed cache entries",
+      "test": {"source": "crates/runmat-execution-runner-native/src/remote/pool_objects.rs", "name": "stale_results_are_discarded_without_evicting_inputs_or_commits"}
+    }
+  ]
+}
