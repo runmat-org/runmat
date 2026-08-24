@@ -273,6 +273,22 @@ pub(super) fn evidence(artifact: &SolverMeshArtifact) -> MeshingEvidence {
 }
 
 #[test]
+fn artifact_identity_excludes_the_physical_validation_manifest_layout() {
+    let first = artifact();
+    let mut second = first.clone();
+    second.root_stage_manifest_digest = digest(99);
+    second.seal_canonical_digest().unwrap();
+
+    assert_eq!(first.canonical_digest, second.canonical_digest);
+    assert_ne!(
+        first.canonical_encode().unwrap(),
+        second.canonical_encode().unwrap()
+    );
+    first.validate().unwrap();
+    second.validate().unwrap();
+}
+
+#[test]
 fn artifact_and_evidence_round_trip_with_complete_canonical_topology() {
     let artifact = artifact();
     artifact.validate().unwrap();

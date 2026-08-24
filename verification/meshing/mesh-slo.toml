@@ -1,11 +1,11 @@
 schema_version = 1
-policy_revision = 1
+policy_revision = 2
 approved_at = "2026-08-23"
-approval_basis = "Measured native exact-box smoke distribution with process allocation instrumentation; limits retain headroom for shared CI hosts while rejecting order-of-magnitude regressions."
+approval_basis = "Measured native exact-box smoke distribution with process allocation instrumentation; revision 2 adopts the scheduling-independent logical artifact identity while retaining the approved resource limits."
 workload_id = "native-exact-box"
 fixture = "crates/runmat-geometry/io/tests/fixtures/box.brep"
 fixture_sha256 = "79ad22b1cc652f2307a1d8f9c3ec5644fa2f86de1d9700820d234ee1199e6d34"
-expected_canonical_digest = "d8dd6fe93ac6f2e7a472356cef768255601b00bb341a2bb27cba0f03bd6e3b62"
+expected_canonical_digest = "e1cab504f8941d82894cf7f72be651aba9b0070b1a6bc0665abc193a8001111a"
 minimum_elements = 14
 maximum_report_age_hours = 24
 required_stages = ["curve_mesh", "surface_mesh", "tetrahedralization", "order_elevation", "validation", "serialization"]
