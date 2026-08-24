@@ -164,7 +164,7 @@ impl CanonicalMeshingContract for MeshingEvidence {
 }
 
 impl CanonicalMeshingContract for SolverMeshArtifact {
-    const DOMAIN: &'static str = "analysis.mesh.artifact/v2";
+    const DOMAIN: &'static str = "analysis.mesh.artifact/v3";
     const LIMITS: MeshingCanonicalLimits = MeshingCanonicalLimits::ARTIFACT;
 
     fn validate_canonical(&self) -> Result<(), MeshingContractError> {
@@ -200,6 +200,10 @@ fn artifact_identity_digest(
 ) -> Result<StableDigest, MeshingContractError> {
     let mut projection = artifact.clone();
     projection.canonical_digest = StableDigest::ZERO;
+    // The validation manifest authenticates one physical stage/chunk layout. It remains in the
+    // artifact for closure loading, but legal partition and chunk layouts must converge on the
+    // same logical solver-mesh identity.
+    projection.root_stage_manifest_digest = StableDigest::ZERO;
     let encoded = encode_contract(
         <SolverMeshArtifact as CanonicalMeshingContract>::DOMAIN,
         &projection,

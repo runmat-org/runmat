@@ -24,6 +24,8 @@ use runmat_meshing_execution::{
 };
 
 const BOX: &[u8] = include_bytes!("../../runmat-geometry/io/tests/fixtures/box.brep");
+const EXPECTED_BOX_ARTIFACT_DIGEST: &str =
+    "2f872016ffd636d36930c907f2eca57003a144089f65bc4b81c57710ac8ffcda";
 
 #[path = "occt_exact_meshing/differential.rs"]
 mod differential;
@@ -33,9 +35,35 @@ fn occt_box_executes_the_complete_serial_exact_dag() {
     let (_, result) = execute_box();
     result.evidence.validate(&result.artifact).unwrap();
     assert!(!result.artifact.topology.volume_elements.is_empty());
+    assert_eq!(
+        digest_hex(result.artifact.canonical_digest.bytes()),
+        EXPECTED_BOX_ARTIFACT_DIGEST
+    );
+}
+
+#[test]
+fn occt_box_artifact_is_independent_of_legal_partition_layout() {
+    let (_, fine) = execute_box_with_layout(1, 1);
+    let (_, coarse) = execute_box_with_layout(32, 32);
+
+    assert_eq!(fine.artifact.topology, coarse.artifact.topology);
+    assert_eq!(
+        fine.artifact.canonical_digest,
+        coarse.artifact.canonical_digest
+    );
 }
 
 fn execute_box() -> (
+    runmat_geometry_core::ExactBRepTopology,
+    runmat_meshing_execution::ExactMeshingDagRunResult,
+) {
+    execute_box_with_layout(8, 8)
+}
+
+fn execute_box_with_layout(
+    preferred_edges_per_partition: u32,
+    preferred_faces_per_partition: u32,
+) -> (
     runmat_geometry_core::ExactBRepTopology,
     runmat_meshing_execution::ExactMeshingDagRunResult,
 ) {
@@ -110,8 +138,8 @@ fn execute_box() -> (
             artifact_access: access,
             capability_cohort: Some("occt-native-corpus".into()),
             program_revision: revision(),
-            preferred_edges_per_partition: 8,
-            preferred_faces_per_partition: 8,
+            preferred_edges_per_partition,
+            preferred_faces_per_partition,
             inventory_limits: limits,
             evidence: MeshingRunEvidenceContext {
                 platform: PlatformBuildIdentity {
@@ -206,4 +234,8 @@ fn revision() -> ProgramRevision {
 
 fn stable(seed: u8) -> StableDigest {
     StableDigest::from_bytes([seed; 32])
+}
+
+fn digest_hex(bytes: &[u8; 32]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }

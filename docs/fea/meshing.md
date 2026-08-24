@@ -352,7 +352,9 @@ The published `SolverMeshArtifact` contains everything downstream solvers need:
 - Tri3 or Tri6 boundary faces and Line2 or Line3 boundary edges;
 - conformal material interfaces and independent nonconformal contact pairs;
 - ordered field-topology maps; and
-- the geometry revision, resolved request, root stage identity, and canonical digest.
+- the geometry revision, resolved request, physical validation-manifest reference, and logical
+  canonical digest. Legal partition and chunk layouts can have different manifest references while
+  retaining the same mesh digest.
 
 When a `.fea` study does not provide an existing internal mesh artifact, the runtime asks its
 installed meshing provider to generate one. It persists the mesh and evidence beneath the configured
