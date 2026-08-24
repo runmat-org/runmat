@@ -4281,7 +4281,10 @@ fn write_fixture_solver_mesh_artifact(
 fn fixture_requires_solver_mesh(spec: &FixtureSpec) -> bool {
     spec.expect_validate_error.is_none()
         && spec.expect_run_error.is_none()
-        && matches!(spec.run_kind, AnalysisRunKind::Electromagnetic)
+        && matches!(
+            spec.run_kind,
+            AnalysisRunKind::Thermal | AnalysisRunKind::Electromagnetic
+        )
 }
 
 pub(super) fn run_fixture(
