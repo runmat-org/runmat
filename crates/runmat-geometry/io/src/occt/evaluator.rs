@@ -3,6 +3,7 @@ use runmat_geometry_core::{
     GeometryEvaluationControl, GeometryEvaluationError, GeometryEvaluationErrorKind,
     ParameterRange,
 };
+use std::{sync::mpsc, time::Duration};
 
 use super::{evaluator_bindings::EvaluatorBindings, ffi};
 use crate::exact::ImportedExactCad;
@@ -42,6 +43,62 @@ impl OcctExactEvaluator {
         }
         let bindings = EvaluatorBindings::from_closure(representation, topology, evaluators, None)?;
         Self::start(representation, meters_per_source_unit, bindings)
+    }
+
+    /// Reconstructs a transferred evaluator while preserving the execution
+    /// host's cancellation and time-checkpoint contract during native session
+    /// startup.
+    pub fn from_closure_controlled(
+        representation: &[u8],
+        meters_per_source_unit: f64,
+        topology: &runmat_geometry_core::ExactBRepTopology,
+        evaluators: &runmat_geometry_core::ExactEvaluatorRegistry,
+        control: &dyn GeometryEvaluationControl,
+    ) -> Result<Self, GeometryEvaluationError> {
+        control.checkpoint()?;
+        control.consume_allocation_bytes(representation.len() as u64)?;
+        if !meters_per_source_unit.is_finite() || meters_per_source_unit <= 0.0 {
+            return Err(invalid_result(
+                "OCCT evaluator unit scale must be finite and positive",
+            ));
+        }
+        let bindings = EvaluatorBindings::from_closure(representation, topology, evaluators, None)?;
+        control.checkpoint()?;
+        let owned_representation = representation.to_vec();
+        let (sender, receiver) = mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            let result = ffi::bridge::start_exact_evaluator_session(
+                &owned_representation,
+                meters_per_source_unit,
+            )
+            .map_err(kernel_error);
+            match result {
+                Ok(session_id) => {
+                    if sender.send(Ok(session_id)).is_err() {
+                        ffi::bridge::close_exact_evaluator_session(session_id);
+                    }
+                }
+                Err(error) => {
+                    let _ = sender.send(Err(error));
+                }
+            }
+        });
+        let session_id = loop {
+            match receiver.recv_timeout(Duration::from_millis(10)) {
+                Ok(result) => break result?,
+                Err(mpsc::RecvTimeoutError::Timeout) => control.checkpoint()?,
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(invalid_result(
+                        "OCCT evaluator session worker stopped before returning a result",
+                    ));
+                }
+            }
+        };
+        control.checkpoint()?;
+        Ok(Self {
+            session_id,
+            bindings,
+        })
     }
 
     fn start(

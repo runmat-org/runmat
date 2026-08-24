@@ -1,4 +1,4 @@
-use runmat_geometry_core::GeometryContractError;
+use runmat_geometry_core::{GeometryContractError, GeometryEvaluationControl};
 use runmat_meshing_execution::{
     ExactMeshingEvaluatorProvider, ExactMeshingGeometryEvaluation, MeshingKernelDispatcher,
     PortableMeshingEvaluatorProvider, PreparedExactGeometryObjects,
@@ -15,10 +15,11 @@ impl ExactMeshingEvaluatorProvider for NativeMeshingEvaluatorProvider {
     fn evaluator<'a>(
         &self,
         geometry: &'a PreparedExactGeometryObjects,
+        control: &dyn GeometryEvaluationControl,
     ) -> Result<Box<dyn ExactMeshingGeometryEvaluation + 'a>, GeometryContractError> {
         match geometry.kernel_representation.as_deref() {
-            Some(representation) => kernel_evaluator(representation, geometry),
-            None => PortableMeshingEvaluatorProvider.evaluator(geometry),
+            Some(representation) => kernel_evaluator(representation, geometry, control),
+            None => PortableMeshingEvaluatorProvider.evaluator(geometry, control),
         }
     }
 }
@@ -27,12 +28,14 @@ impl ExactMeshingEvaluatorProvider for NativeMeshingEvaluatorProvider {
 fn kernel_evaluator<'a>(
     representation: &[u8],
     geometry: &'a PreparedExactGeometryObjects,
+    control: &dyn GeometryEvaluationControl,
 ) -> Result<Box<dyn ExactMeshingGeometryEvaluation + 'a>, GeometryContractError> {
-    runmat_geometry_io::OcctExactEvaluator::from_closure(
+    runmat_geometry_io::OcctExactEvaluator::from_closure_controlled(
         representation,
         geometry.document.source.meters_per_source_unit,
         &geometry.topology,
         &geometry.evaluators,
+        control,
     )
     .map(|evaluator| Box::new(evaluator) as Box<dyn ExactMeshingGeometryEvaluation>)
     .map_err(|error| GeometryContractError::invalid("native exact evaluator", error.to_string()))
@@ -42,6 +45,7 @@ fn kernel_evaluator<'a>(
 fn kernel_evaluator<'a>(
     _representation: &[u8],
     _geometry: &'a PreparedExactGeometryObjects,
+    _control: &dyn GeometryEvaluationControl,
 ) -> Result<Box<dyn ExactMeshingGeometryEvaluation + 'a>, GeometryContractError> {
     Err(GeometryContractError::invalid(
         "native exact evaluator",
@@ -56,6 +60,8 @@ pub fn native_meshing_kernel_dispatcher() -> MeshingKernelDispatcher<NativeMeshi
 
 #[cfg(all(test, feature = "occt-native"))]
 mod tests {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
     use runmat_execution_artifact::object::ObjectInventoryLimits;
     use runmat_geometry_core::{
         ExactCurveEvaluator, GeometryEvaluationControl, GeometryEvaluationError,
@@ -69,10 +75,14 @@ mod tests {
 
     const BOX: &[u8] = include_bytes!("../../runmat-geometry/io/tests/fixtures/box.brep");
 
-    struct Unlimited;
+    #[derive(Default)]
+    struct Unlimited {
+        checkpoints: AtomicU64,
+    }
 
     impl GeometryEvaluationControl for Unlimited {
         fn checkpoint(&self) -> Result<(), GeometryEvaluationError> {
+            self.checkpoints.fetch_add(1, Ordering::Relaxed);
             Ok(())
         }
 
@@ -109,12 +119,15 @@ mod tests {
             ObjectInventoryLimits::default(),
         )
         .unwrap();
-        let evaluator = NativeMeshingEvaluatorProvider.evaluator(&geometry).unwrap();
+        let control = Unlimited::default();
+        let evaluator = NativeMeshingEvaluatorProvider
+            .evaluator(&geometry, &control)
+            .unwrap();
+        assert!(control.checkpoints.load(Ordering::Relaxed) >= 3);
         let curve_id = &geometry.topology.edges[0].curve_evaluator_id;
         let range = ExactCurveEvaluator::parameter_range(evaluator.as_ref(), curve_id).unwrap();
-        let point =
-            ExactCurveEvaluator::point(evaluator.as_ref(), curve_id, range.start, &Unlimited)
-                .unwrap();
+        let point = ExactCurveEvaluator::point(evaluator.as_ref(), curve_id, range.start, &control)
+            .unwrap();
         assert!(point.into_iter().all(f64::is_finite));
     }
 }

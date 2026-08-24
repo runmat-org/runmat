@@ -58,11 +58,11 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSurfacePartit
         let curve_bytes = curve_record(geometry, curve_publication)?;
         let curves = decode_shared_curve_mesh(&curve_bytes, &geometry.topology)
             .map_err(crate::curve_kernel::map_curve_error)?;
+        let control = invocation.control.geometry_evaluation_control();
         let evaluator = self
             .evaluator_provider
-            .evaluator(geometry)
+            .evaluator(geometry, &control)
             .map_err(|error| invalid_input(&error.to_string()))?;
-        let control = invocation.control.geometry_evaluation_control();
         let options = surface_options(invocation.host);
         let result = mesh_exact_face_partition(
             invocation.host.workload.partition.clone(),

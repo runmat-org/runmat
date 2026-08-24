@@ -52,9 +52,10 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactCurveStageKer
             ));
         }
         let geometry = exact_geometry(invocation.inputs)?;
+        let control = invocation.control.geometry_evaluation_control();
         let evaluator = self
             .evaluator_provider
-            .evaluator(geometry)
+            .evaluator(geometry, &control)
             .map_err(|error| {
                 curve_failure(
                     MeshingFailureCategory::InvalidGeometry,
@@ -63,7 +64,6 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactCurveStageKer
                     &error.to_string(),
                 )
             })?;
-        let control = invocation.control.geometry_evaluation_control();
         let metric = resolved_curve_metric(
             geometry,
             evaluator.as_ref(),

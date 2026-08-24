@@ -100,11 +100,11 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactCurveRefineme
             ));
         };
 
+        let control = invocation.control.geometry_evaluation_control();
         let evaluator = self
             .evaluator_provider
-            .evaluator(geometry)
+            .evaluator(geometry, &control)
             .map_err(|error| invalid_input(&error.to_string()))?;
-        let control = invocation.control.geometry_evaluation_control();
         let metric = resolved_curve_metric(
             geometry,
             evaluator.as_ref(),

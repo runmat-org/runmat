@@ -72,7 +72,7 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
         .map_err(|error| failure(MeshingFailureCategory::InvalidGeometry, &error.to_string()))?;
         let evaluator = self
             .evaluator_provider
-            .evaluator(sources.geometry)
+            .evaluator(sources.geometry, &control)
             .map_err(|error| {
                 failure(MeshingFailureCategory::InvalidGeometry, &error.to_string())
             })?;

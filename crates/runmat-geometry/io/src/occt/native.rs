@@ -8,7 +8,10 @@ use crate::import::{
     GeometryImportBudgetPolicy, GeometryImportContext, GeometryImportError, GeometryImportOptions,
     LabeledSubshapeRemapConflict, LabeledSubshapeRemapConflictKind,
 };
-use runmat_geometry_core::{BodyMassProperties, GeometryDigest, GeometrySourceFormat, UnitSystem};
+use runmat_geometry_core::{
+    BodyMassProperties, ExactMassPropertiesEvaluator, ExactMassPropertiesImplementation,
+    GeometryDigest, GeometrySourceFormat, UnitSystem,
+};
 use sha2::{Digest, Sha256};
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -194,6 +197,36 @@ pub(crate) fn import_exact_cad_shape(
             &import_validation::ImportEvaluationControl::new(context, options),
         )
         .map_err(import_validation::map_validation_error)?;
+    let evaluation_control = import_validation::ImportEvaluationControl::new(context, options);
+    let validated_mass_properties = imported
+        .topology
+        .bodies
+        .iter()
+        .map(|body| {
+            ExactMassPropertiesEvaluator::mass_properties(
+                &evaluator,
+                &body.mass_properties_evaluator_id,
+                &evaluation_control,
+            )
+            .map(|properties| (body.mass_properties_evaluator_id.clone(), properties))
+            .map_err(import_validation::map_validation_error)
+        })
+        .collect::<Result<std::collections::BTreeMap<_, _>, _>>()?;
+    let representation_digest = imported.representation_digest();
+    for record in &mut imported.evaluators.mass_properties {
+        let properties = validated_mass_properties.get(&record.id).ok_or_else(|| {
+            GeometryImportError::InvalidGeometry(
+                "OCCT body mass-properties evidence is incomplete".into(),
+            )
+        })?;
+        record.implementation = ExactMassPropertiesImplementation::KernelValidated {
+            properties: *properties,
+            validation_digest: exact_projection::mass_validation_digest(
+                representation_digest,
+                properties,
+            ),
+        };
+    }
     if orientation_repaired
         || duplicates_consolidated
         || sewn

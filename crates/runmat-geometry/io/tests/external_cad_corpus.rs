@@ -68,6 +68,13 @@ fn public_industrial_step_imports_exact_topology_and_mass_properties() {
     assert!(mass.centroid_m[1].abs() < 1.0e-12);
     assert!((mass.centroid_m[2] + 0.005).abs() < 1.0e-12);
     imported.build_closure().expect("closure must validate");
+    OcctExactEvaluator::from_closure(
+        &imported.representation,
+        imported.meters_per_source_unit,
+        &imported.topology,
+        &imported.evaluators,
+    )
+    .expect("the distributed exact-geometry closure must reconstruct its evaluator");
 }
 
 #[test]
