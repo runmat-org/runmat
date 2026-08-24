@@ -215,6 +215,12 @@ jobs:
       - name: Validate public FEA field ids
         run: python3 scripts/fea/governance/validate_public_field_ids.py
 
+      - name: Validate immutable meshing corpus
+        run: python3 scripts/meshing/validate_corpus.py
+
+      - name: Test meshing governance
+        run: python3 -m unittest discover -s scripts/meshing/tests -p 'test_*.py'
+
       - name: Clippy (Unix)
         run: cargo clippy --all-targets --all-features -- -D warnings
 
