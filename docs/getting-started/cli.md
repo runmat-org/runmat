@@ -124,6 +124,8 @@ Use `--explain-link` to see the exact program functions, builtins, classes, meth
 
 The compiler validates that the embedded runtime matches the current target, native ABI, schema, RunMat version, runtime identity, and builtin catalog before linking. A source build made with ordinary `cargo build` intentionally lacks that large embedded archive; use the two-phase build helper described in [Build System](/docs/runtime/development/build-system) when developing the standalone workflow.
 
+See [Native Compilation](/docs/runtime/compiler/native-compilation) for entrypoint and source-closure rules, runtime composition policies, link-plan inspection, platform requirements, and failure diagnosis.
+
 ## Check
 
 Use `runmat check` before running a `.m` script or `.fea` study:
