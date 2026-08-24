@@ -75,10 +75,7 @@ use runmat_geometry_core::{
     SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
 };
 use runmat_meshing_core::{
-    contracts::artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryFace, AnalysisMeshArtifact,
-    AnalysisMeshNode, AnalysisMeshProvenance, AnalysisMeshQualityReport, AnalysisVolumeElement,
-    BoundaryElementKind, CanonicalMeshingContract, ElementOrder, MeshSizingField,
-    PersistentEntityId, PersistentEntityKind, StableDigest, VolumeElementKind,
+    CanonicalMeshingContract, ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest,
 };
 
 use super::*;
@@ -1968,36 +1965,26 @@ fn analysis_run_study_preserves_requested_canonical_solver_mesh_artifact() {
 }
 
 #[test]
-fn analysis_author_study_uses_mesh_authoring_summary_regions() {
+fn analysis_author_study_uses_physical_mesh_regions() {
     let _guard = analysis_test_guard();
     let root = temp_artifact_root("author-study-mesh-summary");
     let _ = fs::remove_dir_all(&root);
     let _runtime_guard = scoped_study_artifact_root(&root);
 
-    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
-    let validation = runmat_meshing_core::AnalysisMeshValidationOptions {
-        required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
-        required_material_region_ids: vec!["solid".to_string()],
-        ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
-    };
-    let evidence = runmat_meshing_evidence::build_mesh_evidence_artifact(&mesh, &validation);
-    let mut summary = runmat_meshing_evidence::build_mesh_authoring_summary(&evidence);
-    summary.solve_ready = true;
-    summary.validation_error_code = None;
-    summary.validation_error_message = None;
+    let summary = analysis_mesh_summary(&["root"], &["tip"], true);
 
     let authored = analysis_author_study_op(
         AnalysisStudyAuthoringIntent {
             study_id: "authored_static".to_string(),
             model_id: None,
             geometry: closed_cube_geometry_asset(),
-            mesh_authoring_summary: summary,
+            mesh_summary: summary,
             profile: AnalysisCreateModelProfile::LinearStaticStructural,
             run_kind: AnalysisRunKind::LinearStatic,
             backend: ComputeBackend::Cpu,
             solver_mesh_artifact_path: None,
             meshing_evidence_artifact_path: None,
-            material_region_id: None,
+            physical_region_id: None,
             boundary_condition_region_id: None,
             driving_condition_region_id: None,
             structural_force_n: Some([25.0, -50.0, 0.0]),
@@ -2024,7 +2011,7 @@ fn analysis_author_study_uses_mesh_authoring_summary_regions() {
         }
     );
     assert_eq!(
-        authored.data.evidence.selected_material_region_id,
+        authored.data.evidence.selected_physical_region_id,
         "solid".to_string()
     );
     assert_eq!(
@@ -2082,30 +2069,20 @@ fn analysis_author_study_preserves_non_structural_profile_defaults() {
     let _ = fs::remove_dir_all(&root);
     let _runtime_guard = scoped_study_artifact_root(&root);
 
-    let mesh = analysis_mesh_with_boundary_regions(&["ground"], &["coil"]);
-    let validation = runmat_meshing_core::AnalysisMeshValidationOptions {
-        required_boundary_region_ids: vec!["ground".to_string(), "coil".to_string()],
-        required_material_region_ids: vec!["solid".to_string()],
-        ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
-    };
-    let evidence = runmat_meshing_evidence::build_mesh_evidence_artifact(&mesh, &validation);
-    let mut summary = runmat_meshing_evidence::build_mesh_authoring_summary(&evidence);
-    summary.solve_ready = true;
-    summary.validation_error_code = None;
-    summary.validation_error_message = None;
+    let summary = analysis_mesh_summary(&["ground"], &["coil"], true);
 
     let authored = analysis_author_study_op(
         AnalysisStudyAuthoringIntent {
             study_id: "authored_em".to_string(),
             model_id: None,
             geometry: closed_cube_geometry_asset(),
-            mesh_authoring_summary: summary,
+            mesh_summary: summary,
             profile: AnalysisCreateModelProfile::ElectromagneticStatic,
             run_kind: AnalysisRunKind::Electromagnetic,
             backend: ComputeBackend::Cpu,
             solver_mesh_artifact_path: None,
             meshing_evidence_artifact_path: None,
-            material_region_id: Some("solid".to_string()),
+            physical_region_id: Some("solid".to_string()),
             boundary_condition_region_id: Some("ground".to_string()),
             driving_condition_region_id: Some("coil".to_string()),
             structural_force_n: Some([25.0, -50.0, 0.0]),
@@ -2165,30 +2142,20 @@ fn analysis_author_study_records_modal_driver_without_structural_force_evidence(
     let _ = fs::remove_dir_all(&root);
     let _runtime_guard = scoped_study_artifact_root(&root);
 
-    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
-    let validation = runmat_meshing_core::AnalysisMeshValidationOptions {
-        required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
-        required_material_region_ids: vec!["solid".to_string()],
-        ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
-    };
-    let evidence = runmat_meshing_evidence::build_mesh_evidence_artifact(&mesh, &validation);
-    let mut summary = runmat_meshing_evidence::build_mesh_authoring_summary(&evidence);
-    summary.solve_ready = true;
-    summary.validation_error_code = None;
-    summary.validation_error_message = None;
+    let summary = analysis_mesh_summary(&["root"], &["tip"], true);
 
     let authored = analysis_author_study_op(
         AnalysisStudyAuthoringIntent {
             study_id: "authored_modal".to_string(),
             model_id: None,
             geometry: closed_cube_geometry_asset(),
-            mesh_authoring_summary: summary,
+            mesh_summary: summary,
             profile: AnalysisCreateModelProfile::ModalStructural,
             run_kind: AnalysisRunKind::Modal,
             backend: ComputeBackend::Cpu,
             solver_mesh_artifact_path: None,
             meshing_evidence_artifact_path: None,
-            material_region_id: Some("solid".to_string()),
+            physical_region_id: Some("solid".to_string()),
             boundary_condition_region_id: Some("root".to_string()),
             driving_condition_region_id: Some("tip".to_string()),
             structural_force_n: Some([99.0, 88.0, 77.0]),
@@ -2248,30 +2215,20 @@ fn analysis_author_study_uses_diagram_observation_when_regions_are_not_requested
     let _ = fs::remove_dir_all(&root);
     let _runtime_guard = scoped_study_artifact_root(&root);
 
-    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
-    let validation = runmat_meshing_core::AnalysisMeshValidationOptions {
-        required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
-        required_material_region_ids: vec!["solid".to_string()],
-        ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
-    };
-    let evidence = runmat_meshing_evidence::build_mesh_evidence_artifact(&mesh, &validation);
-    let mut summary = runmat_meshing_evidence::build_mesh_authoring_summary(&evidence);
-    summary.solve_ready = true;
-    summary.validation_error_code = None;
-    summary.validation_error_message = None;
+    let summary = analysis_mesh_summary(&["root"], &["tip"], true);
 
     let authored = analysis_author_study_op(
         AnalysisStudyAuthoringIntent {
             study_id: "authored_from_diagram".to_string(),
             model_id: None,
             geometry: closed_cube_geometry_asset(),
-            mesh_authoring_summary: summary,
+            mesh_summary: summary,
             profile: AnalysisCreateModelProfile::LinearStaticStructural,
             run_kind: AnalysisRunKind::LinearStatic,
             backend: ComputeBackend::Cpu,
             solver_mesh_artifact_path: None,
             meshing_evidence_artifact_path: None,
-            material_region_id: None,
+            physical_region_id: None,
             boundary_condition_region_id: None,
             driving_condition_region_id: None,
             structural_force_n: None,
@@ -2281,7 +2238,7 @@ fn analysis_author_study_uses_diagram_observation_when_regions_are_not_requested
                 summary: Some(
                     "boundary condition on tip and driving condition on root".to_string(),
                 ),
-                material_region_id: Some("solid".to_string()),
+                physical_region_id: Some("solid".to_string()),
                 boundary_condition_region_id: Some("tip".to_string()),
                 driving_condition_region_id: Some("root".to_string()),
                 structural_force_n: Some([12.0, -3.0, 4.0]),
@@ -2309,7 +2266,7 @@ fn analysis_author_study_uses_diagram_observation_when_regions_are_not_requested
             fz: 4.0
         }
     );
-    assert_eq!(authored.data.evidence.material_region_source, "diagram");
+    assert_eq!(authored.data.evidence.physical_region_source, "diagram");
     assert_eq!(
         authored
             .data
@@ -2363,28 +2320,20 @@ fn analysis_author_study_uses_diagram_observation_when_regions_are_not_requested
 #[test]
 fn analysis_author_study_rejects_not_solve_ready_mesh_summary() {
     let _guard = analysis_test_guard();
-    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
-    let evidence = runmat_meshing_evidence::build_mesh_evidence_artifact(
-        &mesh,
-        &runmat_meshing_core::AnalysisMeshValidationOptions {
-            required_boundary_region_ids: vec!["missing".to_string()],
-            ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
-        },
-    );
-    let summary = runmat_meshing_evidence::build_mesh_authoring_summary(&evidence);
+    let summary = analysis_mesh_summary(&["root"], &["tip"], false);
 
     let err = analysis_author_study_op(
         AnalysisStudyAuthoringIntent {
             study_id: "rejected_static".to_string(),
             model_id: None,
             geometry: closed_cube_geometry_asset(),
-            mesh_authoring_summary: summary,
+            mesh_summary: summary,
             profile: AnalysisCreateModelProfile::LinearStaticStructural,
             run_kind: AnalysisRunKind::LinearStatic,
             backend: ComputeBackend::Cpu,
             solver_mesh_artifact_path: None,
             meshing_evidence_artifact_path: None,
-            material_region_id: None,
+            physical_region_id: None,
             boundary_condition_region_id: None,
             driving_condition_region_id: None,
             structural_force_n: None,
@@ -5156,85 +5105,44 @@ fn direct_solid_run_without_solver_mesh_fails_closed() {
     assert!(err.message.contains("require a canonical solver mesh"));
 }
 
-fn analysis_mesh_with_boundary_regions(
+fn analysis_mesh_summary(
     boundary_condition_region_ids: &[&str],
     driving_condition_region_ids: &[&str],
-) -> AnalysisMeshArtifact {
-    let mut mesh = minimal_analysis_mesh();
-    mesh.boundary_faces = vec![
-        analysis_boundary_face(
-            "face_boundary_condition",
-            vec![1, 2, 3],
-            boundary_condition_region_ids,
-        ),
-        analysis_boundary_face(
-            "face_driving_condition",
-            vec![1, 2, 4],
-            driving_condition_region_ids,
-        ),
-    ];
-    mesh.refresh_field_topology();
-    mesh
-}
-
-fn analysis_boundary_face(
-    face_id: &str,
-    node_ids: Vec<u32>,
-    region_ids: &[&str],
-) -> AnalysisBoundaryFace {
-    AnalysisBoundaryFace {
-        face_id: face_id.to_string(),
-        kind: BoundaryElementKind::Tri3,
-        node_ids,
-        adjacent_volume_element_ids: vec!["tetrahedron_1".to_string()],
-        region_ids: region_ids
-            .iter()
-            .map(|region| (*region).to_string())
-            .collect(),
-        provenance: Vec::new(),
-    }
-}
-
-fn minimal_analysis_mesh() -> AnalysisMeshArtifact {
-    let mut mesh = AnalysisMeshArtifact {
-        schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
+    solve_ready: bool,
+) -> AnalysisMeshSummary {
+    let boundary_regions = boundary_condition_region_ids
+        .iter()
+        .chain(driving_condition_region_ids)
+        .map(|region_id| AnalysisMeshBoundaryRegion {
+            region_id: (*region_id).to_string(),
+            face_count: 1,
+            edge_count: 3,
+            fully_recovered: true,
+        })
+        .collect();
+    AnalysisMeshSummary {
+        schema_version: ANALYSIS_MESH_SUMMARY_SCHEMA_VERSION,
         mesh_id: "unit_tetrahedron".to_string(),
-        nodes: vec![
-            analysis_mesh_node(1, [0.0, 0.0, 0.0]),
-            analysis_mesh_node(2, [1.0, 0.0, 0.0]),
-            analysis_mesh_node(3, [0.0, 1.0, 0.0]),
-            analysis_mesh_node(4, [0.0, 0.0, 1.0]),
-        ],
-        volume_elements: vec![AnalysisVolumeElement {
-            element_id: "tetrahedron_1".to_string(),
-            kind: VolumeElementKind::Tetrahedron4,
-            node_ids: vec![1, 2, 3, 4],
-            material_region_id: "solid".to_string(),
-            provenance: Vec::new(),
-        }],
-        boundary_faces: Vec::new(),
-        boundary_edges: Vec::new(),
-        quality: AnalysisMeshQualityReport::default(),
-        sizing: MeshSizingField::default(),
-        field_topology: Vec::new(),
-        backend: Default::default(),
-        adaptive_iterations: Vec::new(),
-        provenance: AnalysisMeshProvenance {
-            algorithm: "test".to_string(),
-            source_geometry_id: "geo:test".to_string(),
-            source_geometry_revision: 1,
-            source_geometry_sha256: None,
+        solve_ready,
+        validation_error_code: (!solve_ready).then(|| "missing_boundary_region".to_string()),
+        validation_error_message: (!solve_ready)
+            .then(|| "required boundary region is absent".to_string()),
+        topology: AnalysisMeshTopologySummary {
+            node_count: 4,
+            volume_element_count: 1,
+            boundary_face_count: 2,
+            boundary_edge_count: 3,
+            bounds_min_m: Some([0.0, 0.0, 0.0]),
+            bounds_max_m: Some([1.0, 1.0, 1.0]),
         },
-    };
-    mesh.refresh_field_topology();
-    mesh
-}
-
-fn analysis_mesh_node(node_id: u32, coordinates_m: [f64; 3]) -> AnalysisMeshNode {
-    AnalysisMeshNode {
-        node_id,
-        coordinates_m,
-        provenance: Vec::new(),
+        regions: AnalysisMeshRegionSummary {
+            physical_regions: vec![AnalysisMeshPhysicalRegion {
+                region_id: "solid".to_string(),
+                element_count: 1,
+                volume_m3: 1.0 / 6.0,
+            }],
+            boundary_regions,
+        },
     }
 }
 

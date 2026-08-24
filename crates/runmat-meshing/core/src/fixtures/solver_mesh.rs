@@ -8,7 +8,7 @@ use crate::{
     MetricTensor3, PersistentEntityId, PersistentEntityKind, SolverBoundaryEdge,
     SolverBoundaryFace, SolverMeshArtifact, SolverMeshNode, SolverMeshTopology,
     SolverNodeExactParameter, SolverVolumeElement, StableDigest, SurfaceQualityTargets,
-    VolumeQualityTargets, ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION, MESHING_REQUEST_SCHEMA_VERSION,
+    VolumeQualityTargets, MESHING_REQUEST_SCHEMA_VERSION, SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
 };
 
 pub fn canonical_tetrahedron_solver_mesh(order: ElementOrder) -> SolverMeshArtifact {
@@ -126,7 +126,7 @@ pub fn canonical_tetrahedron_solver_mesh(order: ElementOrder) -> SolverMeshArtif
     let mut request = request();
     request.element_order = order;
     let mut artifact = SolverMeshArtifact {
-        schema_version: ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
+        schema_version: SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
         canonical_digest: StableDigest::ZERO,
         root_stage_manifest_digest: digest(2),
         geometry: GeometryRevisionRef {

@@ -3,9 +3,10 @@ use runmat_analysis_fea::diagnostics::FeaDiagnostic;
 use runmat_analysis_fea::{ComputeBackend, FeaProgressEvent, FeaRunResult};
 use runmat_geometry_core::GeometryAsset;
 use runmat_meshing_core::MeshingRequestSettings;
-use runmat_meshing_evidence::MeshAuthoringSummary;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+
+use super::mesh_summary::AnalysisMeshSummary;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AnalysisValidateResult {
@@ -2123,7 +2124,7 @@ pub struct AnalysisStudyDiagramObservation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub material_region_id: Option<String>,
+    pub physical_region_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub boundary_condition_region_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2140,7 +2141,7 @@ pub struct AnalysisStudyAuthoringIntent {
     #[serde(default)]
     pub model_id: Option<String>,
     pub geometry: GeometryAsset,
-    pub mesh_authoring_summary: MeshAuthoringSummary,
+    pub mesh_summary: AnalysisMeshSummary,
     pub profile: AnalysisCreateModelProfile,
     pub run_kind: AnalysisRunKind,
     pub backend: ComputeBackend,
@@ -2149,7 +2150,7 @@ pub struct AnalysisStudyAuthoringIntent {
     #[serde(default)]
     pub meshing_evidence_artifact_path: Option<String>,
     #[serde(default)]
-    pub material_region_id: Option<String>,
+    pub physical_region_id: Option<String>,
     #[serde(default)]
     pub boundary_condition_region_id: Option<String>,
     #[serde(default)]
@@ -2171,8 +2172,8 @@ pub struct AnalysisStudyAuthoringData {
 pub struct AnalysisStudyAuthoringEvidence {
     pub schema_version: String,
     pub mesh_id: String,
-    pub mesh_authoring_summary_schema_version: String,
-    pub selected_material_region_id: String,
+    pub mesh_summary_schema_version: u16,
+    pub selected_physical_region_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_boundary_condition_region_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2193,7 +2194,7 @@ pub struct AnalysisStudyAuthoringEvidence {
     pub solver_mesh_artifact_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub meshing_evidence_artifact_path: Option<String>,
-    pub material_region_source: String,
+    pub physical_region_source: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub boundary_condition_region_source: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -6779,11 +6779,6 @@ dependencies = [
 [[package]]
 name = "runmat-meshing"
 version = "0.6.2"
-dependencies = [
- "runmat-geometry-core",
- "runmat-meshing-core",
- "serde",
-]
 
 [[package]]
 name = "runmat-meshing-core"
@@ -6811,15 +6806,6 @@ dependencies = [
  "runmat-meshing-size",
  "serde",
  "sha2 0.10.9",
-]
-
-[[package]]
-name = "runmat-meshing-evidence"
-version = "0.6.2"
-dependencies = [
- "runmat-meshing-core",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -7133,9 +7119,7 @@ dependencies = [
  "runmat-geometry-io",
  "runmat-geometry-ops",
  "runmat-macros",
- "runmat-meshing",
  "runmat-meshing-core",
- "runmat-meshing-evidence",
  "runmat-plot",
  "runmat-test",
  "runmat-thread-local",

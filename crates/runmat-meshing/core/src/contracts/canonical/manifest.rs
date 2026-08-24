@@ -32,7 +32,7 @@ pub enum MeshingChunkMediaType {
     SolverMeshProjection,
     ValidationEvidence,
     DiagnosticEvidence,
-    AnalysisMeshArtifact,
+    SolverMeshArtifact,
     MeshingEvidence,
 }
 
@@ -55,7 +55,7 @@ impl MeshingChunkMediaType {
             Self::SolverMeshProjection => "application/vnd.runmat.solver-mesh-projection.v1",
             Self::ValidationEvidence => "application/vnd.runmat.mesh-validation.v2",
             Self::DiagnosticEvidence => "application/vnd.runmat.mesh-diagnostics.v2",
-            Self::AnalysisMeshArtifact => "application/vnd.runmat.analysis-mesh.v2",
+            Self::SolverMeshArtifact => "application/vnd.runmat.solver-mesh.v4",
             Self::MeshingEvidence => "application/vnd.runmat.meshing-evidence.v3",
         }
     }
@@ -78,7 +78,7 @@ impl MeshingChunkMediaType {
             Self::SolverMeshProjection,
             Self::ValidationEvidence,
             Self::DiagnosticEvidence,
-            Self::AnalysisMeshArtifact,
+            Self::SolverMeshArtifact,
             Self::MeshingEvidence,
         ]
         .into_iter()

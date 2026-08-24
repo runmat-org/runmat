@@ -308,7 +308,7 @@ fn validate_stage_streams(
         }
         MeshingStageKind::Serialization | MeshingStageKind::Publication => matches!(
             media,
-            MeshingChunkMediaType::AnalysisMeshArtifact | MeshingChunkMediaType::MeshingEvidence
+            MeshingChunkMediaType::SolverMeshArtifact | MeshingChunkMediaType::MeshingEvidence
         ),
     };
     if streams.is_empty() || streams.iter().any(|stream| !legal(stream.media_type)) {

@@ -4,7 +4,7 @@ use super::{
     solver_boundary_edge_identity, solver_boundary_face_identity, solver_volume_element_identity,
     validate_finite, validate_token, CanonicalMeshingContract, ElementOrder, FieldTopologyLocation,
     MeshingContractError, MeshingRequest, PersistentEntityId, PersistentEntityKind,
-    SolverMeshArtifact, SolverMeshTopology, StableDigest, ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
+    SolverMeshArtifact, SolverMeshTopology, StableDigest, SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
 };
 
 const MAX_ENTITY_PROVENANCE: usize = 32;
@@ -15,10 +15,10 @@ impl SolverMeshArtifact {
     }
 
     pub(super) fn validate_payload(&self) -> Result<(), MeshingContractError> {
-        if self.schema_version != ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION {
+        if self.schema_version != SOLVER_MESH_ARTIFACT_SCHEMA_VERSION {
             return Err(MeshingContractError::invalid(
                 "analysis mesh artifact schema version",
-                format!("expected {ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION}"),
+                format!("expected {SOLVER_MESH_ARTIFACT_SCHEMA_VERSION}"),
             ));
         }
         self.root_stage_manifest_digest

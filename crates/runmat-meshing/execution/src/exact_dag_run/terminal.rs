@@ -108,7 +108,7 @@ fn decode_serialized_artifact(
     let [record] = stream.records.as_slice() else {
         return Err(invalid_terminal());
     };
-    if stream.media_type != MeshingChunkMediaType::AnalysisMeshArtifact {
+    if stream.media_type != MeshingChunkMediaType::SolverMeshArtifact {
         return Err(invalid_terminal());
     }
     Ok(runmat_meshing_core::SolverMeshArtifact::canonical_decode(
@@ -137,7 +137,7 @@ fn decode_terminal_publication(
     ) else {
         return Err(invalid_terminal());
     };
-    if artifact_stream.media_type != MeshingChunkMediaType::AnalysisMeshArtifact
+    if artifact_stream.media_type != MeshingChunkMediaType::SolverMeshArtifact
         || evidence_stream.media_type != MeshingChunkMediaType::MeshingEvidence
     {
         return Err(invalid_terminal());

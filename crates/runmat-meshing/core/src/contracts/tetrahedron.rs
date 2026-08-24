@@ -81,7 +81,7 @@ pub struct TetrahedronMeshNode {
 pub struct Tetrahedron4Element {
     pub element_id: TopologyEntityId,
     pub node_ids: [TopologyEntityId; 4],
-    pub material_region_id: String,
+    pub region_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

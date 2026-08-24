@@ -63,7 +63,6 @@ members = [
     "crates/runmat-meshing/curve",
     "crates/runmat-meshing/surface",
     "crates/runmat-meshing/tetrahedron",
-    "crates/runmat-meshing/evidence",
 ]
 resolver = "2"
 
@@ -159,11 +158,9 @@ runmat-geometry-io = { version = "=0.6.2", path = "crates/runmat-geometry/io" }
 runmat-geometry-ops = { version = "=0.6.2", path = "crates/runmat-geometry/ops" }
 runmat-analysis-core = { version = "=0.6.2", path = "crates/runmat-analysis/core" }
 runmat-analysis-fea = { version = "=0.6.2", path = "crates/runmat-analysis/fea" }
-runmat-meshing = { version = "=0.6.2", path = "crates/runmat-meshing" }
 runmat-meshing-core = { version = "=0.6.2", path = "crates/runmat-meshing/core" }
 runmat-meshing-execution = { version = "=0.6.2", path = "crates/runmat-meshing/execution" }
 runmat-meshing-size = { version = "=0.6.2", path = "crates/runmat-meshing/size" }
 runmat-meshing-curve = { version = "=0.6.2", path = "crates/runmat-meshing/curve" }
 runmat-meshing-surface = { version = "=0.6.2", path = "crates/runmat-meshing/surface" }
 runmat-meshing-tetrahedron = { version = "=0.6.2", path = "crates/runmat-meshing/tetrahedron" }
-runmat-meshing-evidence = { version = "=0.6.2", path = "crates/runmat-meshing/evidence" }

@@ -338,12 +338,12 @@ fn two_tetrahedron_mesh(coordinates: [[f64; 3]; 5]) -> TetrahedronMesh {
             Tetrahedron4Element {
                 element_id: entity(10),
                 node_ids: [entity(0), entity(1), entity(2), entity(3)],
-                material_region_id: "body".to_string(),
+                region_id: "body".to_string(),
             },
             Tetrahedron4Element {
                 element_id: entity(11),
                 node_ids: [entity(0), entity(2), entity(1), entity(4)],
-                material_region_id: "body".to_string(),
+                region_id: "body".to_string(),
             },
         ],
         boundary_faces: Vec::new(),
@@ -377,12 +377,12 @@ fn two_reconnection_pair_mesh() -> TetrahedronMesh {
         Tetrahedron4Element {
             element_id: entity(20),
             node_ids: [entity(5), entity(6), entity(7), entity(8)],
-            material_region_id: "body".to_string(),
+            region_id: "body".to_string(),
         },
         Tetrahedron4Element {
             element_id: entity(21),
             node_ids: [entity(5), entity(7), entity(6), entity(9)],
-            material_region_id: "body".to_string(),
+            region_id: "body".to_string(),
         },
     ]);
     mesh

@@ -38,7 +38,7 @@ fn collect_active_source_files(root: &Path, files: &mut Vec<std::path::PathBuf>)
 #[test]
 fn meshing_crate_layout_keeps_stage_implementations_out_of_core() {
     let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    for stage_crate in ["size", "curve", "surface", "tetrahedron", "evidence"] {
+    for stage_crate in ["size", "curve", "surface", "tetrahedron"] {
         assert!(
             crate_root.join(stage_crate).join("Cargo.toml").is_file(),
             "missing stage crate: {stage_crate}"
@@ -52,6 +52,8 @@ fn meshing_crate_layout_keeps_stage_implementations_out_of_core() {
         "core/src/solid.rs",
         "core/src/tetrahedron_candidate.rs",
         "core/src/volume_candidate.rs",
+        "core/src/contracts/artifact.rs",
+        "core/src/validation/mod.rs",
     ] {
         assert!(
             !crate_root.join(stale_core_path).exists(),
@@ -65,19 +67,12 @@ fn meshing_crate_layout_keeps_stage_implementations_out_of_core() {
         "runmat-meshing-curve",
         "runmat-meshing-surface",
         "runmat-meshing-tetrahedron",
-        "runmat-meshing-evidence",
     ] {
         assert!(
             !core_manifest.contains(implementation_crate),
             "core depends on implementation crate: {implementation_crate}"
         );
     }
-    let evidence_manifest = read_source(&crate_root.join("evidence").join("Cargo.toml"));
-    let implementation_crate = "runmat-meshing-size";
-    assert!(
-        !evidence_manifest.contains(implementation_crate),
-        "evidence depends on implementation crate instead of core contract exports: {implementation_crate}"
-    );
     for facade_export in [
         "pub use runmat_meshing_size as size",
         "pub mod source_topology",
@@ -105,6 +100,9 @@ fn meshing_crate_layout_keeps_stage_implementations_out_of_core() {
         "plc/src/lib.rs",
         "opt/Cargo.toml",
         "opt/src/lib.rs",
+        "evidence/Cargo.toml",
+        "evidence/src/lib.rs",
+        "src/visualization/mod.rs",
         "src/solid/mod.rs",
         "src/solid/artifact/mod.rs",
         "src/solid/artifact/backend_counts.rs",
@@ -196,36 +194,8 @@ fn retired_standalone_plc_and_optimization_authorities_are_absent() {
 }
 
 #[test]
-fn meshing_development_observability_stays_feature_gated() {
+fn meshing_development_observability_stays_test_only() {
     let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
-
-    let evidence_manifest = read_source(&crate_root.join("evidence").join("Cargo.toml"));
-    assert!(
-        evidence_manifest.contains("dev-evidence = []"),
-        "mesh debug evidence must remain behind the evidence crate dev-evidence feature"
-    );
-
-    let evidence_lib = read_source(&crate_root.join("evidence").join("src").join("lib.rs"));
-    assert!(
-        evidence_lib.contains("#[cfg(feature = \"dev-evidence\")]\npub mod dev_traces;"),
-        "dev_traces module must not be exported without the dev-evidence feature"
-    );
-    assert!(
-        evidence_lib.contains("#[cfg(feature = \"dev-evidence\")]\npub use dev_traces::"),
-        "debug evidence API must not be exported without the dev-evidence feature"
-    );
-
-    let evidence_artifact =
-        read_source(&crate_root.join("evidence").join("src").join("artifact.rs"));
-    assert!(
-        evidence_artifact
-            .contains("#[cfg(feature = \"dev-evidence\")]\nuse crate::MeshDebugEvidence;"),
-        "MeshDebugEvidence must not be part of the default evidence artifact type"
-    );
-    assert!(
-        evidence_artifact.contains("#[cfg(feature = \"dev-evidence\")]\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    pub debug: Option<MeshDebugEvidence>,"),
-        "debug evidence field must remain feature-gated and omitted from default artifacts"
-    );
 
     let constrained_cavity_mod = read_source(
         &crate_root
@@ -319,6 +289,10 @@ fn retired_public_meshing_contracts_are_absent() {
         ["geometry.prep", "_for_analysis/v1"].concat(),
         ["geometry-prep", "-for-analysis/v1"].concat(),
         ["deterministic_topology", "_seed/v1"].concat(),
+        ["AnalysisMesh", "Artifact"].concat(),
+        ["MeshAuthoring", "Summary"].concat(),
+        ["mesh-authoring", "-summary"].concat(),
+        ["runmat-meshing", "-evidence"].concat(),
     ];
 
     let mut violations = Vec::new();
@@ -371,6 +345,32 @@ fn meshing_owned_and_bridge_code_has_no_lint_suppressions() {
     assert!(
         violations.is_empty(),
         "lint suppressions are forbidden in meshing-owned and bridge code:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
+fn meshing_owned_code_has_no_analysis_material_vocabulary() {
+    let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut files = Vec::new();
+    collect_active_source_files(crate_root, &mut files);
+
+    let forbidden_fragments = [
+        ["material", "_region"].concat(),
+        ["material", "_interface"].concat(),
+    ];
+    let mut violations = Vec::new();
+    for path in files {
+        let source = read_source(&path);
+        for forbidden in &forbidden_fragments {
+            if source.contains(forbidden) {
+                violations.push(format!("{} contains {forbidden}", path.display()));
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "analysis material vocabulary remains in meshing-owned code:\n{}",
         violations.join("\n")
     );
 }
