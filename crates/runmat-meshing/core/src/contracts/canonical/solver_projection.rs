@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     CanonicalMeshingContract, GeometryRevisionRef, MeshingContractError, MeshingRequest,
-    SolverMeshArtifact, SolverMeshTopology, StableDigest, ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
+    SolverMeshArtifact, SolverMeshTopology, StableDigest, SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
 };
 
 pub const SOLVER_MESH_PROJECTION_SCHEMA_VERSION: u16 = 1;
@@ -40,7 +40,7 @@ impl SolverMeshProjection {
     ) -> Result<SolverMeshArtifact, MeshingContractError> {
         validation_manifest_digest.validate_nonzero("solver mesh validation manifest digest")?;
         let mut artifact = SolverMeshArtifact {
-            schema_version: ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
+            schema_version: SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
             canonical_digest: StableDigest::ZERO,
             root_stage_manifest_digest: validation_manifest_digest,
             geometry: self.geometry,

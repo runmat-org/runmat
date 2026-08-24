@@ -6,8 +6,8 @@ use runmat_meshing_core::{
     MeshingCancellationSignal, MeshingQualityTargets, MeshingRequest, MeshingResourceBudget,
     NeverCancelled, SolverMeshAdaptationKind, SolverMeshAdaptationLineage, SolverMeshArtifact,
     SolverMeshNode, SolverMeshTopology, SolverTransferMethod, SolverVolumeElement, StableDigest,
-    SurfaceQualityTargets, VolumeQualityTargets, ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
-    MESHING_REQUEST_SCHEMA_VERSION,
+    SurfaceQualityTargets, VolumeQualityTargets, MESHING_REQUEST_SCHEMA_VERSION,
+    SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
 };
 use runmat_meshing_size::metric::{MetricCombinationRule, MetricFieldRequest, MetricTensor3};
 
@@ -178,7 +178,7 @@ fn artifact(topology: &DelaunayVolumeTopology) -> SolverMeshArtifact {
     let node_ids = (1..=nodes.len() as u64).collect::<Vec<_>>();
     let element_ids = (1..=volume_elements.len() as u64).collect::<Vec<_>>();
     let mut artifact = SolverMeshArtifact {
-        schema_version: ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
+        schema_version: SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
         canonical_digest: StableDigest::ZERO,
         root_stage_manifest_digest: StableDigest::from_bytes([90; 32]),
         geometry: GeometryRevisionRef {

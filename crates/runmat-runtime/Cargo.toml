@@ -31,9 +31,7 @@ runmat-geometry-io = { workspace = true }
 runmat-geometry-ops = { workspace = true }
 runmat-analysis-core = { workspace = true }
 runmat-analysis-fea = { workspace = true }
-runmat-meshing = { workspace = true }
 runmat-meshing-core = { workspace = true }
-runmat-meshing-evidence = { workspace = true }
 runmat-time = { workspace = true }
 runmat-thread-local = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

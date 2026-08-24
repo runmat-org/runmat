@@ -4,8 +4,8 @@ use runmat_meshing_core::{
     CanonicalMeshingContract, MeshingChunkMediaType, MeshingChunkStream, MeshingDiagnosticEntry,
     MeshingDiagnosticValue, MeshingFailure, MeshingFailureCategory, MeshingPartitionKind,
     MeshingStageKind, MeshingStageResultKind, SolverMeshArtifact, SolverMeshProjection,
-    SolverMeshValidation, StableDigest, ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
-    MESHING_EVIDENCE_SCHEMA_VERSION, MESHING_FAILURE_SCHEMA_VERSION,
+    SolverMeshValidation, StableDigest, MESHING_EVIDENCE_SCHEMA_VERSION,
+    MESHING_FAILURE_SCHEMA_VERSION, SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
     SOLVER_MESH_PROJECTION_SCHEMA_VERSION, SOLVER_MESH_VALIDATION_SCHEMA_VERSION,
 };
 
@@ -102,8 +102,8 @@ impl MeshingStageKernel for SolverSerializationKernel {
         Ok(ValidatedMeshingStageOutput {
             invariant_summary_digest: artifact.canonical_digest,
             streams: vec![MeshingChunkStream {
-                media_type: MeshingChunkMediaType::AnalysisMeshArtifact,
-                schema_version: ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
+                media_type: MeshingChunkMediaType::SolverMeshArtifact,
+                schema_version: SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
                 records: vec![encoded],
             }],
             final_checkpoint: checkpoint,
@@ -170,8 +170,8 @@ impl MeshingStageKernel for SolverPublicationKernel {
             })?,
             streams: vec![
                 MeshingChunkStream {
-                    media_type: MeshingChunkMediaType::AnalysisMeshArtifact,
-                    schema_version: ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
+                    media_type: MeshingChunkMediaType::SolverMeshArtifact,
+                    schema_version: SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
                     records: vec![artifact_bytes],
                 },
                 MeshingChunkStream {
@@ -304,8 +304,8 @@ fn decode_artifact(
     let bytes = one_record(
         publication,
         MeshingStageKind::Serialization,
-        MeshingChunkMediaType::AnalysisMeshArtifact,
-        ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
+        MeshingChunkMediaType::SolverMeshArtifact,
+        SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
         MeshingStageKind::Publication,
     )?;
     SolverMeshArtifact::canonical_decode(&bytes)

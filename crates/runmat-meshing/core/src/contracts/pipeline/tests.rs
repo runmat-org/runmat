@@ -342,7 +342,7 @@ fn protected_boundary_complex() -> ProtectedBoundaryComplex {
             watertight: true,
             manifold: true,
             shell_nesting_classified: true,
-            material_interfaces_classified: true,
+            conformal_interfaces_classified: true,
         },
         evidence: StageEvidence::complete(MeshingStage::ProtectedBoundaryComplex),
     }

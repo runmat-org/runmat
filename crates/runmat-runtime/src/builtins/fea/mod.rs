@@ -499,7 +499,7 @@ const STUDY_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     },
 ];
 const AUTHOR_STUDY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "study = fea.authorStudy(id, geometry, meshAuthoringSummary, Name, Value, ...)",
+    label: "study = fea.authorStudy(id, geometry, meshSummary, Name, Value, ...)",
     inputs: &IN_AUTHOR_STUDY_ARGS,
     outputs: &OUT_ANY,
 }];

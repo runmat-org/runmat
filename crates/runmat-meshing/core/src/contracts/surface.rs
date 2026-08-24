@@ -37,7 +37,7 @@ pub struct SurfaceMeshTriangle {
     #[serde(default)]
     pub region_ids: Vec<String>,
     #[serde(default)]
-    pub material_region_ids: Vec<String>,
+    pub physical_region_ids: Vec<String>,
     #[serde(default)]
     pub max_projection_error_m: f64,
     pub area_m2: f64,

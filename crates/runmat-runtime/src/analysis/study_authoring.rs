@@ -27,20 +27,25 @@ pub fn analysis_author_study_op(
             BTreeMap::new(),
         ));
     }
-    if !intent.mesh_authoring_summary.solve_ready {
+    if let Err(message) = intent.mesh_summary.validate() {
+        return Err(author_study_error(
+            &context,
+            "RM.FEA.AUTHOR_STUDY.MESH_SUMMARY_INVALID",
+            message,
+            BTreeMap::from([("mesh_id".to_string(), intent.mesh_summary.mesh_id.clone())]),
+        ));
+    }
+    if !intent.mesh_summary.solve_ready {
         return Err(author_study_error(
             &context,
             "RM.FEA.AUTHOR_STUDY.MESH_NOT_SOLVE_READY",
-            "mesh authoring summary is not solve-ready",
+            "analysis mesh summary is not solve-ready",
             BTreeMap::from([
-                (
-                    "mesh_id".to_string(),
-                    intent.mesh_authoring_summary.mesh_id.clone(),
-                ),
+                ("mesh_id".to_string(), intent.mesh_summary.mesh_id.clone()),
                 (
                     "validation_error_code".to_string(),
                     intent
-                        .mesh_authoring_summary
+                        .mesh_summary
                         .validation_error_code
                         .clone()
                         .unwrap_or_default(),
@@ -60,20 +65,17 @@ pub fn analysis_author_study_op(
         ));
     }
 
-    let (material_region_id, material_region_source) = select_authoring_material_region(
-        &intent.mesh_authoring_summary,
-        intent.material_region_id.as_deref(),
+    let (physical_region_id, physical_region_source) = select_authoring_physical_region(
+        &intent.mesh_summary,
+        intent.physical_region_id.as_deref(),
         intent.diagram_observation.as_ref(),
     )
     .map_err(|message| {
         author_study_error(
             &context,
-            "RM.FEA.AUTHOR_STUDY.MATERIAL_REGION_UNAVAILABLE",
+            "RM.FEA.AUTHOR_STUDY.PHYSICAL_REGION_UNAVAILABLE",
             message,
-            BTreeMap::from([(
-                "mesh_id".to_string(),
-                intent.mesh_authoring_summary.mesh_id.clone(),
-            )]),
+            BTreeMap::from([("mesh_id".to_string(), intent.mesh_summary.mesh_id.clone())]),
         )
     })?;
     let model_id = intent
@@ -97,7 +99,7 @@ pub fn analysis_author_study_op(
         .map(|material| material.material_id.clone())
         .unwrap_or_else(|| "mat_default_steel".to_string());
     model.material_assignments = vec![MaterialAssignment {
-        region_id: material_region_id.clone(),
+        region_id: physical_region_id.clone(),
         expected_material_id: material_id.clone(),
         assigned_material_id: material_id,
         confidence: EvidenceConfidence::Inferred,
@@ -107,7 +109,7 @@ pub fn analysis_author_study_op(
             (None, None)
         } else {
             let (region_id, source) = select_authoring_boundary_region(
-                &intent.mesh_authoring_summary,
+                &intent.mesh_summary,
                 intent.boundary_condition_region_id.as_deref(),
                 intent
                     .diagram_observation
@@ -120,10 +122,7 @@ pub fn analysis_author_study_op(
                     &context,
                     "RM.FEA.AUTHOR_STUDY.BOUNDARY_CONDITION_REGION_UNAVAILABLE",
                     message,
-                    BTreeMap::from([(
-                        "mesh_id".to_string(),
-                        intent.mesh_authoring_summary.mesh_id.clone(),
-                    )]),
+                    BTreeMap::from([("mesh_id".to_string(), intent.mesh_summary.mesh_id.clone())]),
                 )
             })?;
             (Some(region_id), Some(source))
@@ -132,7 +131,7 @@ pub fn analysis_author_study_op(
         (None, None)
     } else {
         let (region_id, source) = select_authoring_boundary_region(
-            &intent.mesh_authoring_summary,
+            &intent.mesh_summary,
             intent.driving_condition_region_id.as_deref(),
             intent
                 .diagram_observation
@@ -145,10 +144,7 @@ pub fn analysis_author_study_op(
                 &context,
                 "RM.FEA.AUTHOR_STUDY.DRIVING_CONDITION_REGION_UNAVAILABLE",
                 message,
-                BTreeMap::from([(
-                    "mesh_id".to_string(),
-                    intent.mesh_authoring_summary.mesh_id.clone(),
-                )]),
+                BTreeMap::from([("mesh_id".to_string(), intent.mesh_summary.mesh_id.clone())]),
             )
         })?;
         (Some(region_id), Some(source))
@@ -218,9 +214,9 @@ pub fn analysis_author_study_op(
 
     let evidence = AnalysisStudyAuthoringEvidence {
         schema_version: "fea_study_authoring_evidence/v1".to_string(),
-        mesh_id: intent.mesh_authoring_summary.mesh_id.clone(),
-        mesh_authoring_summary_schema_version: intent.mesh_authoring_summary.schema_version.clone(),
-        selected_material_region_id: material_region_id,
+        mesh_id: intent.mesh_summary.mesh_id.clone(),
+        mesh_summary_schema_version: intent.mesh_summary.schema_version,
+        selected_physical_region_id: physical_region_id,
         selected_boundary_condition_region_id: boundary_condition_region_id,
         selected_driving_condition_region_id: driving_condition_region_id,
         selected_driving_condition_kind,
@@ -243,7 +239,7 @@ pub fn analysis_author_study_op(
             .and_then(|observation| observation.confidence),
         solver_mesh_artifact_path: intent.solver_mesh_artifact_path,
         meshing_evidence_artifact_path: intent.meshing_evidence_artifact_path,
-        material_region_source,
+        physical_region_source,
         boundary_condition_region_source,
         driving_condition_region_source,
     };
@@ -314,62 +310,52 @@ fn author_study_error(
     )
 }
 
-fn select_authoring_material_region(
-    summary: &runmat_meshing_evidence::MeshAuthoringSummary,
+fn select_authoring_physical_region(
+    summary: &super::AnalysisMeshSummary,
     requested: Option<&str>,
     diagram_observation: Option<&AnalysisStudyDiagramObservation>,
 ) -> Result<(String, String), String> {
     if let Some(requested) = requested {
         let Some(region) = summary
             .regions
-            .material_regions
+            .physical_regions
             .iter()
             .find(|region| region.region_id == requested && region.element_count > 0)
         else {
             return Err(format!(
-                "requested material region `{requested}` is not available in mesh authoring evidence"
+                "requested physical region `{requested}` is not available in mesh summary"
             ));
         };
         return Ok((region.region_id.clone(), "requested".to_string()));
     }
 
     if let Some(region_id) =
-        diagram_observation.and_then(|observation| observation.material_region_id.as_deref())
+        diagram_observation.and_then(|observation| observation.physical_region_id.as_deref())
     {
         let Some(region) = summary
             .regions
-            .material_regions
+            .physical_regions
             .iter()
             .find(|region| region.region_id == region_id && region.element_count > 0)
         else {
             return Err(format!(
-                "diagram-selected material region `{region_id}` is not available in mesh authoring evidence"
+                "diagram-selected physical region `{region_id}` is not available in mesh summary"
             ));
         };
         return Ok((region.region_id.clone(), "diagram".to_string()));
     }
 
-    for required in &summary.regions.required_material_region_ids {
-        if summary
-            .regions
-            .material_regions
-            .iter()
-            .any(|region| region.region_id == *required && region.element_count > 0)
-        {
-            return Ok((required.clone(), "required".to_string()));
-        }
-    }
     summary
         .regions
-        .material_regions
+        .physical_regions
         .iter()
         .find(|region| region.element_count > 0)
         .map(|region| (region.region_id.clone(), "available".to_string()))
-        .ok_or_else(|| "mesh authoring evidence has no material regions".to_string())
+        .ok_or_else(|| "mesh summary has no physical regions".to_string())
 }
 
 fn select_authoring_boundary_region(
-    summary: &runmat_meshing_evidence::MeshAuthoringSummary,
+    summary: &super::AnalysisMeshSummary,
     requested: Option<&str>,
     diagram_region_id: Option<&str>,
     avoid_region_id: Option<&str>,
@@ -398,16 +384,6 @@ fn select_authoring_boundary_region(
         }
     }
 
-    for required in &summary.regions.required_boundary_region_ids {
-        if avoid_region_id == Some(required.as_str()) {
-            continue;
-        }
-        if summary.regions.boundary_regions.iter().any(|region| {
-            region.region_id == *required && region.face_count > 0 && region.fully_recovered
-        }) {
-            return Ok((required.clone(), "required".to_string()));
-        }
-    }
     if let Some(region) = summary.regions.boundary_regions.iter().find(|region| {
         avoid_region_id != Some(region.region_id.as_str())
             && region.face_count > 0

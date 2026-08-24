@@ -2,7 +2,7 @@ use runmat_analysis_fea::ComputeBackend;
 use runmat_value::Value;
 
 use crate::analysis::{
-    analysis_author_study_op, AnalysisCreateModelProfile, AnalysisRunKind,
+    analysis_author_study_op, AnalysisCreateModelProfile, AnalysisMeshSummary, AnalysisRunKind,
     AnalysisStudyAuthoringIntent, AnalysisStudyDiagramObservation,
 };
 use crate::operations::OperationContext;
@@ -19,7 +19,7 @@ pub(super) fn create_author_study_object_from_args(args: Vec<Value>) -> BuiltinR
         return Err(builtin_error(
             AUTHOR_STUDY_NAME,
             &ERROR_INPUT,
-            "fea.authorStudy requires id, geometry, and mesh authoring summary arguments",
+            "fea.authorStudy requires id, geometry, and analysis mesh summary arguments",
         ));
     }
     if !(args.len() - 3).is_multiple_of(2) {
@@ -32,12 +32,12 @@ pub(super) fn create_author_study_object_from_args(args: Vec<Value>) -> BuiltinR
 
     let study_id = scalar_string(&args[0], AUTHOR_STUDY_NAME, &ERROR_INPUT)?;
     let geometry = geometry_asset_from_value_with_builtin(&args[1], AUTHOR_STUDY_NAME)?;
-    let mesh_authoring_summary = mesh_authoring_summary_from_value(&args[2])?;
+    let mesh_summary = mesh_summary_from_value(&args[2])?;
     let mut profile = None::<AnalysisCreateModelProfile>;
     let mut run_kind = None::<AnalysisRunKind>;
     let mut backend = ComputeBackend::Cpu;
     let mut model_id = None::<String>;
-    let mut material_region_id = None::<String>;
+    let mut physical_region_id = None::<String>;
     let mut boundary_condition_region_id = None::<String>;
     let mut driving_condition_region_id = None::<String>;
     let mut structural_force_n = None::<[f64; 3]>;
@@ -63,8 +63,8 @@ pub(super) fn create_author_study_object_from_args(args: Vec<Value>) -> BuiltinR
             "modelid" => {
                 model_id = Some(scalar_string(&pair[1], AUTHOR_STUDY_NAME, &ERROR_INPUT)?);
             }
-            "materialregion" | "materialregionid" => {
-                material_region_id =
+            "physicalregion" | "physicalregionid" => {
+                physical_region_id =
                     Some(scalar_string(&pair[1], AUTHOR_STUDY_NAME, &ERROR_INPUT)?);
             }
             "boundaryconditionregion"
@@ -137,13 +137,13 @@ pub(super) fn create_author_study_object_from_args(args: Vec<Value>) -> BuiltinR
             study_id,
             model_id,
             geometry,
-            mesh_authoring_summary,
+            mesh_summary,
             profile,
             run_kind,
             backend,
             solver_mesh_artifact_path,
             meshing_evidence_artifact_path,
-            material_region_id,
+            physical_region_id,
             boundary_condition_region_id,
             driving_condition_region_id,
             structural_force_n,
@@ -156,18 +156,16 @@ pub(super) fn create_author_study_object_from_args(args: Vec<Value>) -> BuiltinR
     study_to_object(authored.data.study)
 }
 
-fn mesh_authoring_summary_from_value(
-    value: &Value,
-) -> BuiltinResult<runmat_meshing_evidence::MeshAuthoringSummary> {
+fn mesh_summary_from_value(value: &Value) -> BuiltinResult<AnalysisMeshSummary> {
     if let Ok(text) = scalar_string(value, AUTHOR_STUDY_NAME, &ERROR_INPUT) {
         let json: serde_json::Value = serde_json::from_str(&text).map_err(|err| {
             builtin_error_with_source(AUTHOR_STUDY_NAME, &ERROR_INPUT, err.to_string(), err)
         })?;
-        return mesh_authoring_summary_from_json(json);
+        return mesh_summary_from_json(json);
     }
 
     let json = value_to_json(AUTHOR_STUDY_NAME, value)?;
-    mesh_authoring_summary_from_json(json)
+    mesh_summary_from_json(json)
 }
 
 fn diagram_observation_from_value(value: &Value) -> BuiltinResult<AnalysisStudyDiagramObservation> {
@@ -185,17 +183,10 @@ fn diagram_observation_from_value(value: &Value) -> BuiltinResult<AnalysisStudyD
     )
 }
 
-fn mesh_authoring_summary_from_json(
-    json: serde_json::Value,
-) -> BuiltinResult<runmat_meshing_evidence::MeshAuthoringSummary> {
-    let mut summary_json = json.get("mesh_authoring_summary").cloned().unwrap_or(json);
-    normalize_mesh_authoring_summary_json(&mut summary_json);
-    json_deserialize(AUTHOR_STUDY_NAME, summary_json, "mesh authoring summary")
-}
-
-fn normalize_mesh_authoring_summary_json(value: &mut serde_json::Value) {
-    normalize_integral_json_numbers(value);
-    wrap_scalar_string_arrays(value);
+fn mesh_summary_from_json(json: serde_json::Value) -> BuiltinResult<AnalysisMeshSummary> {
+    let mut summary_json = json.get("mesh_summary").cloned().unwrap_or(json);
+    normalize_integral_json_numbers(&mut summary_json);
+    json_deserialize(AUTHOR_STUDY_NAME, summary_json, "analysis mesh summary")
 }
 
 fn normalize_integral_json_numbers(value: &mut serde_json::Value) {
@@ -221,35 +212,6 @@ fn normalize_integral_json_numbers(value: &mut serde_json::Value) {
                 return;
             }
             *number = serde_json::Number::from(value as u64);
-        }
-        _ => {}
-    }
-}
-
-fn wrap_scalar_string_arrays(value: &mut serde_json::Value) {
-    match value {
-        serde_json::Value::Array(values) => {
-            for value in values {
-                wrap_scalar_string_arrays(value);
-            }
-        }
-        serde_json::Value::Object(fields) => {
-            for key in [
-                "required_material_region_ids",
-                "missing_required_material_region_ids",
-                "required_boundary_region_ids",
-                "missing_required_boundary_region_ids",
-            ] {
-                if let Some(serde_json::Value::String(region_id)) = fields.get(key).cloned() {
-                    fields.insert(
-                        key.to_string(),
-                        serde_json::Value::Array(vec![serde_json::Value::String(region_id)]),
-                    );
-                }
-            }
-            for value in fields.values_mut() {
-                wrap_scalar_string_arrays(value);
-            }
         }
         _ => {}
     }
@@ -286,72 +248,44 @@ mod tests {
     };
     use super::*;
 
-    fn authoring_summary_value() -> Value {
+    fn mesh_summary_value() -> Value {
         crate::builtins::io::json::jsondecode::value_from_json(&serde_json::json!({
-            "mesh_authoring_summary": {
-                "schema_version": "mesh-authoring-summary/v1",
-                "mesh_id": "mesh_authoring_fixture",
+            "mesh_summary": {
+                "schema_version": 1,
+                "mesh_id": "mesh_summary_fixture",
                 "solve_ready": true,
-                "backend": "solid",
                 "topology": {
                     "node_count": 4,
                     "volume_element_count": 1,
                     "boundary_face_count": 2,
-                    "boundary_edge_count": 3,
-                    "adaptive_iteration_count": 0
-                },
-                "quality": {
-                    "meets_quality_thresholds": true,
-                    "min_scaled_jacobian": 0.5,
-                    "min_exact_scaled_jacobian": 0.45,
-                    "max_aspect_ratio": 2.0,
-                    "max_boundary_projection_error_m": 0.0,
-                    "inverted_element_count": 0,
-                    "sliver_count": 0,
-                    "sliver_removed_count": 0,
-                    "unrepaired_exact_quality_count": 0
-                },
-                "recovery": {
-                    "boundary_face_recovery_ratio": 1.0,
-                    "boundary_edge_recovery_ratio": 1.0,
-                    "recovery_item_count": 2,
-                    "recovered_item_count": 2,
-                    "missing_recovery_item_count": 0,
-                    "unrecovered_tetrahedron_component_count": 0
+                    "boundary_edge_count": 3
                 },
                 "regions": {
-                    "material_regions": [
+                    "physical_regions": [
                         {
                             "region_id": "solid",
                             "element_count": 1,
-                            "volume_m3": 0.16666666666666666,
-                            "required": true
+                            "volume_m3": 0.16666666666666666
                         }
                     ],
                     "boundary_regions": [
                         {
                             "region_id": "root",
                             "face_count": 1,
-                            "recovered_face_count": 1,
                             "edge_count": 3,
-                            "fully_recovered": true,
-                            "required": true
+                            "fully_recovered": true
                         },
                         {
                             "region_id": "tip",
                             "face_count": 1,
-                            "recovered_face_count": 1,
                             "edge_count": 3,
-                            "fully_recovered": true,
-                            "required": true
+                            "fully_recovered": true
                         }
-                    ],
-                    "required_material_region_ids": ["solid"],
-                    "required_boundary_region_ids": ["root", "tip"]
+                    ]
                 }
             }
         }))
-        .expect("authoring summary value should convert")
+        .expect("mesh summary value should convert")
     }
 
     fn generic_authoring_geometry_value() -> Value {
@@ -446,7 +380,7 @@ mod tests {
             "artifact_path": "diagram://fixture/free-body.png",
             "source_mime_type": "image/png",
             "summary": "boundary condition on tip and driving condition on root",
-            "material_region_id": "solid",
+            "physical_region_id": "solid",
             "boundary_condition_region_id": "tip",
             "driving_condition_region_id": "root",
             "structural_force_n": [12.0, -3.0, 4.0],
@@ -463,6 +397,13 @@ mod tests {
 
         let mut mesh =
             runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+        let physical_region = PersistentEntityId {
+            kind: PersistentEntityKind::Region,
+            source_topology_id: "solid".to_owned(),
+            assembly_path: vec!["root".to_owned()],
+        };
+        mesh.topology.volume_elements[0].region_id = physical_region.clone();
+        mesh.topology.regions[0].region_id = physical_region;
         for (face_index, region_id) in [(0, "root"), (1, "tip")] {
             mesh.topology.boundary_faces[face_index]
                 .provenance
@@ -487,16 +428,16 @@ mod tests {
 
         (
             mesh_path.to_string_lossy().to_string(),
-            authoring_summary_value(),
+            mesh_summary_value(),
         )
     }
 
     #[test]
-    fn builds_study_from_mesh_authoring_summary() {
+    fn builds_study_from_mesh_summary() {
         let study = create_author_study_object_from_args(vec![
             Value::String("authored_static".to_string()),
             generic_authoring_geometry_value(),
-            authoring_summary_value(),
+            mesh_summary_value(),
             Value::String("Profile".to_string()),
             Value::String("linear_static_structural".to_string()),
             Value::String("StructuralForceN".to_string()),
@@ -589,34 +530,11 @@ mod tests {
     }
 
     #[test]
-    fn rejects_retired_mesh_artifact_option_names() {
-        for retired_name in [
-            "AnalysisMeshArtifactPath",
-            "MeshArtifactPath",
-            "AnalysisMeshEvidenceArtifactPath",
-            "MeshEvidenceArtifactPath",
-        ] {
-            let error = create_author_study_object_from_args(vec![
-                Value::String("retired_mesh_option".to_string()),
-                generic_authoring_geometry_value(),
-                authoring_summary_value(),
-                Value::String("Profile".to_string()),
-                Value::String("linear_static_structural".to_string()),
-                Value::String(retired_name.to_string()),
-                Value::String("retired.mesh".to_string()),
-            ])
-            .expect_err("retired mesh artifact option should be rejected");
-
-            assert!(error.message.contains("unsupported fea.authorStudy option"));
-        }
-    }
-
-    #[test]
     fn builds_study_from_diagram_observation() {
         let study = create_author_study_object_from_args(vec![
             Value::String("authored_diagram_static".to_string()),
             generic_authoring_geometry_value(),
-            authoring_summary_value(),
+            mesh_summary_value(),
             Value::String("Profile".to_string()),
             Value::String("linear_static_structural".to_string()),
             Value::String("DiagramObservation".to_string()),
@@ -711,7 +629,7 @@ mod tests {
         let err = create_author_study_object_from_args(vec![
             Value::String("missing_profile".to_string()),
             generic_authoring_geometry_value(),
-            authoring_summary_value(),
+            mesh_summary_value(),
         ])
         .expect_err("missing profile should fail");
         assert_eq!(err.identifier(), Some("RunMat:fea:InvalidInput"));
@@ -723,7 +641,7 @@ mod tests {
         let err = create_author_study_object_from_args(vec![
             Value::String("bad".to_string()),
             Value::Num(1.0),
-            authoring_summary_value(),
+            mesh_summary_value(),
         ])
         .expect_err("invalid geometry should fail");
         assert_eq!(err.identifier(), Some("RunMat:fea:InvalidInput"));

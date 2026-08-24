@@ -133,7 +133,7 @@ pub(super) fn artifact() -> SolverMeshArtifact {
     )
     .collect();
     let mut artifact = SolverMeshArtifact {
-        schema_version: ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
+        schema_version: SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
         canonical_digest: digest(1),
         root_stage_manifest_digest: digest(2),
         geometry: GeometryRevisionRef {

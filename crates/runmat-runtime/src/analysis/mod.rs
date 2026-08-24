@@ -71,6 +71,7 @@ mod fea_document;
 mod fea_document_authoring;
 #[cfg(feature = "plot-core")]
 mod figures;
+mod mesh_summary;
 mod meshing;
 mod policy;
 mod promotion;
@@ -205,6 +206,10 @@ pub use fea_document_authoring::{
 pub use figures::{
     analysis_generate_study_run_figures, AnalysisFigureGenerationOptions, AnalysisFigureMeshSource,
     AnalysisGeneratedFigure, AnalysisGeneratedFigureKind,
+};
+pub use mesh_summary::{
+    AnalysisMeshBoundaryRegion, AnalysisMeshPhysicalRegion, AnalysisMeshRegionSummary,
+    AnalysisMeshSummary, AnalysisMeshTopologySummary, ANALYSIS_MESH_SUMMARY_SCHEMA_VERSION,
 };
 pub use meshing::{
     replace_analysis_meshing_provider, AnalysisMeshingOutput, AnalysisMeshingProvider,

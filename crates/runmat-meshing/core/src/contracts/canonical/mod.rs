@@ -30,7 +30,7 @@ pub use artifact_types::{
     BoundaryEdgeOrder, BoundaryFaceRole, BoundaryTriangleOrder, ConformalInterface, ContactPair,
     FieldTopologyLocation, FieldTopologyMap, MeshNeighbor, MeshRegion, SolverBoundaryEdge,
     SolverBoundaryFace, SolverMeshArtifact, SolverMeshNode, SolverMeshTopology,
-    SolverNodeExactParameter, SolverVolumeElement, ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
+    SolverNodeExactParameter, SolverVolumeElement, SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
     TETRAHEDRON_MIDSIDE_EDGE_CORNERS,
 };
 pub use cancellation::{CancellationPolicy, MeshingCancellationSignal, NeverCancelled};

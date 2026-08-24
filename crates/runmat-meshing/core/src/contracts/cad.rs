@@ -64,7 +64,7 @@ pub struct CadVolumeContract {
     #[serde(default)]
     pub shell_ids: Vec<TopologyEntityId>,
     #[serde(default)]
-    pub material_region_ids: Vec<String>,
+    pub physical_region_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

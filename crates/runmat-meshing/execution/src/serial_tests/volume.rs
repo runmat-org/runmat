@@ -351,7 +351,7 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
     assert_eq!(final_streams.len(), 2);
     assert_eq!(
         final_streams[0].media_type,
-        MeshingChunkMediaType::AnalysisMeshArtifact
+        MeshingChunkMediaType::SolverMeshArtifact
     );
     assert_eq!(
         final_streams[1].media_type,
