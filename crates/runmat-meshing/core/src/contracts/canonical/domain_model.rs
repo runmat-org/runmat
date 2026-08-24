@@ -179,4 +179,39 @@ mod tests {
         topology.regions.clear();
         assert!(model.validate_against_exact_topology(&topology).is_err());
     }
+
+    #[test]
+    fn mixed_material_regions_are_complete_canonical_and_identity_bound() {
+        let (_, mut topology, _) = runmat_geometry_fixtures::exact_tetrahedron();
+        let mut second_region = topology.regions[0].clone();
+        second_region.id.source_topology_id = "tetrahedron-region:b".into();
+        topology.regions.push(second_region);
+        topology
+            .regions
+            .sort_by(|left, right| left.id.cmp(&right.id));
+
+        let model = MeshingDomainModel {
+            schema_version: MESHING_DOMAIN_MODEL_SCHEMA_VERSION,
+            region_materials: topology
+                .regions
+                .iter()
+                .enumerate()
+                .map(|(index, region)| RegionMaterialAssignment {
+                    region_id: region.id.clone(),
+                    material_id: format!("material-{index}"),
+                })
+                .collect(),
+            contact_ids: Vec::new(),
+        };
+        model.validate_against_exact_topology(&topology).unwrap();
+        let digest = model.canonical_digest().unwrap();
+
+        let mut swapped_materials = model.clone();
+        swapped_materials.region_materials[0].material_id = "material-1".into();
+        swapped_materials.region_materials[1].material_id = "material-0".into();
+        swapped_materials
+            .validate_against_exact_topology(&topology)
+            .unwrap();
+        assert_ne!(swapped_materials.canonical_digest().unwrap(), digest);
+    }
 }

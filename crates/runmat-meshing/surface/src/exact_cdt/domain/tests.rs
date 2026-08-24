@@ -52,6 +52,36 @@ fn hole_carving_is_independent_of_parametric_loop_winding() {
 }
 
 #[test]
+fn many_trim_inventory_loops_are_recovered_and_carved() {
+    let boundary = boundary(
+        &[[-20.0, -20.0], [20.0, -20.0], [20.0, 20.0], [-20.0, 20.0]],
+        &[
+            vec![[-15.0, -15.0], [-9.0, -14.0], [-13.0, -9.0]],
+            vec![[9.0, -14.0], [15.0, -15.0], [13.0, -9.0]],
+            vec![[10.0, 10.0], [15.0, 11.0], [12.0, 16.0]],
+            vec![[-15.0, 11.0], [-10.0, 10.0], [-12.0, 16.0]],
+            vec![[-3.0, -2.0], [4.0, -1.0], [1.0, 5.0]],
+        ],
+    );
+    let (pslg, constrained, options) = constrained(&boundary);
+    let trimmed =
+        carve_exact_face_domain(&constrained, &pslg, &boundary, &NeverCancelled, options).unwrap();
+
+    assert_eq!(boundary.inner_loops.len(), 5);
+    assert!(trimmed.removed_hole_triangle_count >= 5);
+    assert_eq!(boundary_edges(&trimmed.triangles), pslg_edges(&pslg));
+    validate_exact_face_trimmed_delaunay(
+        &trimmed,
+        &constrained,
+        &pslg,
+        &boundary,
+        &NeverCancelled,
+        options,
+    )
+    .unwrap();
+}
+
+#[test]
 fn concave_outer_loop_removes_the_unprotected_exterior_component() {
     let boundary = boundary(
         &[[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [2.0, 2.0], [0.0, 4.0]],
