@@ -127,7 +127,7 @@ impl RunMatSession {
         self.compat_mode
     }
 
-    /// Set the language compatibility mode (`matlab` or `strict`).
+    /// Set the language compatibility mode (`runmat`, `matlab`, or `strict`).
     pub fn set_compat_mode(&mut self, mode: CompatMode) {
         self.compat_mode = mode;
         self.runtime_context

@@ -1347,6 +1347,14 @@ impl RunMatWasm {
         }
     }
 
+    #[wasm_bindgen(js_name = "setErrorNamespace")]
+    pub fn set_error_namespace(&self, namespace: String) {
+        if self.disposed.get() {
+            return;
+        }
+        self.session.borrow_mut().set_error_namespace(namespace);
+    }
+
     #[wasm_bindgen(js_name = setInputHandler)]
     pub fn set_input_handler(&self, handler: JsValue) -> Result<(), JsValue> {
         #[cfg(target_arch = "wasm32")]

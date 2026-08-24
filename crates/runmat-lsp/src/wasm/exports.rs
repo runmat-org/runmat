@@ -34,7 +34,7 @@ struct DocEntry {
 }
 
 runmat_thread_local! {
-    static COMPAT_MODE: Cell<CompatMode> = Cell::new(CompatMode::Matlab);
+    static COMPAT_MODE: Cell<CompatMode> = Cell::new(CompatMode::RunMat);
 }
 
 runmat_thread_local! {
@@ -452,7 +452,7 @@ pub fn set_compat_mode(mode: String) {
         "runmat" | "RUNMAT" => CompatMode::RunMat,
         "matlab" | "MATLAB" => CompatMode::Matlab,
         "strict" | "STRICT" => CompatMode::Strict,
-        _ => CompatMode::Matlab,
+        _ => CompatMode::RunMat,
     };
     COMPAT_MODE.with(|c| c.set(parsed));
 }

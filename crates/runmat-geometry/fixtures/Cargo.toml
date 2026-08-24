@@ -1,6 +1,6 @@
 [package]
 name = "runmat-geometry-fixtures"
-version = "0.0.0"
+version = "0.6.2"
 edition = "2021"
 publish = false
 

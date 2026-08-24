@@ -1,6 +1,6 @@
 [package]
 name = "runmat-test"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2021"
 description = "Portable test identities, lifecycle, results, events, and worker protocol for RunMat"
 license = "Apache-2.0"

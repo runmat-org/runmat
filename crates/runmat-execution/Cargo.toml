@@ -1,6 +1,6 @@
 [package]
 name = "runmat-execution"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2021"
 description = "Portable identities, handles, resource models, value payloads, and protocol contracts for RunMat execution"
 license = "Apache-2.0"

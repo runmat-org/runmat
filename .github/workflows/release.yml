@@ -20,7 +20,26 @@ env:
   VERSION: ${{ github.ref_name }}
 
 jobs:
+  validate-release-state:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref_name }}
+      - uses: dtolnay/rust-toolchain@1.90.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Verify tag matches reviewed package versions
+        if: github.event_name == 'push'
+        shell: bash
+        run: node scripts/verify-release-version.mjs "${GITHUB_REF_NAME#v}"
+      - name: Record workflow-dispatch source
+        if: github.event_name == 'workflow_dispatch'
+        run: echo "Testing ${{ inputs.ref }} without publishing a release."
+
   build-and-test:
+    needs: [validate-release-state]
     runs-on: ["self-hosted", "windows", "GCP"]
     env:
       # Enable backtraces on CI to aid debugging of panics/segfaults
@@ -235,6 +254,7 @@ jobs:
   
   build-release:
     if: github.event_name == 'push'
+    needs: [validate-release-state]
     environment: Production
     name: Build ${{ matrix.platform.release_for }}
     env:

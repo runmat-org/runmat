@@ -1,6 +1,6 @@
 [package]
 name = "runmat-package-cache-native"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2021"
 description = "Native transactional storage and materialization adapter for RunMat packages"
 license = "Apache-2.0"
