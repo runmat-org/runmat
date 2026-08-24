@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_meshing_core::SolverMeshArtifact;
 
@@ -83,6 +83,33 @@ impl MaxwellMeshTopology {
     }
 }
 
+pub(super) fn boundary_node_indices<'a>(
+    mesh: &SolverMeshArtifact,
+    selector_ids: impl IntoIterator<Item = &'a str>,
+) -> Vec<usize> {
+    let selector_ids = selector_ids.into_iter().collect::<BTreeSet<_>>();
+    let node_indices = mesh
+        .topology
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| (node.node_id, index))
+        .collect::<BTreeMap<_, _>>();
+    mesh.topology
+        .boundary_faces
+        .iter()
+        .filter(|face| {
+            face.provenance
+                .iter()
+                .any(|entity| selector_ids.contains(entity.source_topology_id.as_str()))
+        })
+        .flat_map(|face| face.node_ids.iter())
+        .filter_map(|node_id| node_indices.get(node_id).copied())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
 fn triangle_area(a: [f64; 3], b: [f64; 3], c: [f64; 3]) -> f64 {
     let ab = subtract(b, a);
     let ac = subtract(c, a);
@@ -108,4 +135,20 @@ fn norm(vector: [f64; 3]) -> f64 {
         .map(|value| value * value)
         .sum::<f64>()
         .sqrt()
+}
+
+#[cfg(test)]
+mod tests {
+    use runmat_meshing_core::{fixtures, ElementOrder};
+
+    use super::boundary_node_indices;
+
+    #[test]
+    fn boundary_selector_resolves_canonical_node_indices() {
+        let mut mesh = fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+        mesh.topology.boundary_faces[0].provenance[0].source_topology_id = "ground".to_owned();
+
+        assert_eq!(boundary_node_indices(&mesh, ["ground"]), vec![0, 1, 2]);
+        assert!(boundary_node_indices(&mesh, ["missing"]).is_empty());
+    }
 }

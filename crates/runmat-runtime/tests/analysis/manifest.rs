@@ -2350,12 +2350,12 @@ pub(super) fn fixture_manifest(specs: &[FixtureSpec]) -> FixtureManifest {
     }
 }
 
-pub(super) fn default_options() -> AnalysisRunOptions {
+pub(super) fn default_options(solver_mesh_artifact_path: Option<String>) -> AnalysisRunOptions {
     AnalysisRunOptions {
         deterministic_mode: true,
         precision_mode: PrecisionMode::Fp64,
         preconditioner_mode: PreconditionerMode::Auto,
         quality_policy: QualityPolicy::Balanced,
-        solver_mesh_artifact_path: None,
+        solver_mesh_artifact_path,
     }
 }

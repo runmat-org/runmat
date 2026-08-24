@@ -219,8 +219,12 @@ fn env_bool(name: &str) -> Option<bool> {
         })
 }
 
-fn nonlinear_options_for_spec(spec: &FixtureSpec) -> AnalysisNonlinearRunOptions {
+fn nonlinear_options_for_spec(
+    spec: &FixtureSpec,
+    solver_mesh_artifact_path: Option<String>,
+) -> AnalysisNonlinearRunOptions {
     let mut options = AnalysisNonlinearRunOptions::solid_recommended();
+    options.solver_mesh_artifact_path = solver_mesh_artifact_path;
     options.increment_count = spec.transient_step_count.unwrap_or(options.increment_count);
 
     if let Some(value) = env_usize("RUNMAT_NONLINEAR_INCREMENT_COUNT") {
@@ -653,16 +657,23 @@ fn electro_coupling_for_fixture(spec_id: &str) -> Option<ElectroThermalCouplingO
     }
 }
 
-fn thermal_options_for_spec(spec: &FixtureSpec) -> AnalysisThermalRunOptions {
+fn thermal_options_for_spec(
+    spec: &FixtureSpec,
+    solver_mesh_artifact_path: Option<String>,
+) -> AnalysisThermalRunOptions {
     AnalysisThermalRunOptions {
         step_count: spec
             .transient_step_count
             .unwrap_or(AnalysisThermalRunOptions::default().step_count),
+        solver_mesh_artifact_path,
         ..AnalysisThermalRunOptions::default()
     }
 }
 
-fn electromagnetic_options_for_spec(spec: &FixtureSpec) -> AnalysisElectromagneticRunOptions {
+fn electromagnetic_options_for_spec(
+    spec: &FixtureSpec,
+    solver_mesh_artifact_path: Option<String>,
+) -> AnalysisElectromagneticRunOptions {
     AnalysisElectromagneticRunOptions {
         deterministic_mode: true,
         precision_mode: PrecisionMode::Fp64,
@@ -670,13 +681,16 @@ fn electromagnetic_options_for_spec(spec: &FixtureSpec) -> AnalysisElectromagnet
         residual_target: 1.0e-6,
         harmonic_tolerance: 1.0e-7,
         harmonic_max_iterations: 96,
-        solver_mesh_artifact_path: None,
+        solver_mesh_artifact_path,
         sweep_enabled: !electromagnetic_sweep_frequency_hz_for_fixture(spec.id).is_empty(),
         sweep_frequency_hz: electromagnetic_sweep_frequency_hz_for_fixture(spec.id),
     }
 }
 
-fn transient_options_for_spec(spec: &FixtureSpec) -> AnalysisTransientRunOptions {
+fn transient_options_for_spec(
+    spec: &FixtureSpec,
+    solver_mesh_artifact_path: Option<String>,
+) -> AnalysisTransientRunOptions {
     let requested_bucket_rel_tol = std::env::var("RUNMAT_TRANSIENT_DT_BUCKET_REL_TOL")
         .ok()
         .and_then(|value| value.parse::<f64>().ok());
@@ -686,6 +700,7 @@ fn transient_options_for_spec(spec: &FixtureSpec) -> AnalysisTransientRunOptions
             .unwrap_or(AnalysisTransientRunOptions::default().step_count),
         dt_bucket_rel_tolerance: requested_bucket_rel_tol
             .unwrap_or(AnalysisTransientRunOptions::solid_recommended().dt_bucket_rel_tolerance),
+        solver_mesh_artifact_path,
         ..AnalysisTransientRunOptions::solid_recommended()
     }
 }
@@ -2566,19 +2581,24 @@ fn boxed_fixture_run_result(
     result.map_err(Box::new)
 }
 
-fn run_fixture_cpu(spec: &FixtureSpec, model: &AnalysisModel) -> FixtureRunResult {
+fn run_fixture_cpu(
+    spec: &FixtureSpec,
+    model: &AnalysisModel,
+    solver_mesh_artifact_path: Option<&str>,
+) -> FixtureRunResult {
+    let solver_mesh_artifact_path = solver_mesh_artifact_path.map(str::to_owned);
     boxed_fixture_run_result(match spec.run_kind {
         AnalysisRunKind::LinearStatic => analysis_run_linear_static_with_options(
             model,
             ComputeBackend::Cpu,
-            default_options(),
+            default_options(solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
         AnalysisRunKind::Modal => analysis_run_modal_with_options_op(
             model,
             ComputeBackend::Cpu,
             AnalysisModalRunOptions {
-                solver_mesh_artifact_path: None,
+                solver_mesh_artifact_path: solver_mesh_artifact_path.clone(),
                 mode_count: spec
                     .modal_mode_count
                     .unwrap_or(AnalysisModalRunOptions::default().mode_count),
@@ -2600,13 +2620,13 @@ fn run_fixture_cpu(spec: &FixtureSpec, model: &AnalysisModel) -> FixtureRunResul
         AnalysisRunKind::Transient => analysis_run_transient_with_options_op(
             model,
             ComputeBackend::Cpu,
-            transient_options_for_spec(spec),
+            transient_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
         AnalysisRunKind::Thermal => analysis_run_thermal_with_options_op(
             model,
             ComputeBackend::Cpu,
-            thermal_options_for_spec(spec),
+            thermal_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
         AnalysisRunKind::Cfd => analysis_run_cfd_with_options_op(
@@ -2623,7 +2643,7 @@ fn run_fixture_cpu(spec: &FixtureSpec, model: &AnalysisModel) -> FixtureRunResul
                 max_linear_iters: 128,
                 tolerance: 1.0e-8,
                 residual_warn_threshold: 1.0e-4,
-                solver_mesh_artifact_path: None,
+                solver_mesh_artifact_path: solver_mesh_artifact_path.clone(),
             },
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
@@ -2641,7 +2661,7 @@ fn run_fixture_cpu(spec: &FixtureSpec, model: &AnalysisModel) -> FixtureRunResul
                 max_linear_iters: 128,
                 tolerance: 1.0e-8,
                 residual_warn_threshold: 1.0e-4,
-                solver_mesh_artifact_path: None,
+                solver_mesh_artifact_path: solver_mesh_artifact_path.clone(),
             },
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
@@ -2659,38 +2679,44 @@ fn run_fixture_cpu(spec: &FixtureSpec, model: &AnalysisModel) -> FixtureRunResul
                 max_linear_iters: 128,
                 tolerance: 1.0e-8,
                 residual_warn_threshold: 1.0e-4,
-                solver_mesh_artifact_path: None,
+                solver_mesh_artifact_path: solver_mesh_artifact_path.clone(),
             },
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
         AnalysisRunKind::Nonlinear => analysis_run_nonlinear_with_options_op(
             model,
             ComputeBackend::Cpu,
-            nonlinear_options_for_spec(spec),
+            nonlinear_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
         AnalysisRunKind::Electromagnetic => analysis_run_electromagnetic_with_options_op(
             model,
             ComputeBackend::Cpu,
-            electromagnetic_options_for_spec(spec),
+            electromagnetic_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
     })
 }
 
-fn run_fixture_gpu(spec: &FixtureSpec, model: &AnalysisModel, mode: GpuMode) -> FixtureRunResult {
+fn run_fixture_gpu(
+    spec: &FixtureSpec,
+    model: &AnalysisModel,
+    mode: GpuMode,
+    solver_mesh_artifact_path: Option<&str>,
+) -> FixtureRunResult {
+    let solver_mesh_artifact_path = solver_mesh_artifact_path.map(str::to_owned);
     let run = || match spec.run_kind {
         AnalysisRunKind::LinearStatic => analysis_run_linear_static_with_options(
             model,
             ComputeBackend::Gpu,
-            default_options(),
+            default_options(solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
         AnalysisRunKind::Modal => analysis_run_modal_with_options_op(
             model,
             ComputeBackend::Gpu,
             AnalysisModalRunOptions {
-                solver_mesh_artifact_path: None,
+                solver_mesh_artifact_path: solver_mesh_artifact_path.clone(),
                 mode_count: spec
                     .modal_mode_count
                     .unwrap_or(AnalysisModalRunOptions::default().mode_count),
@@ -2712,13 +2738,13 @@ fn run_fixture_gpu(spec: &FixtureSpec, model: &AnalysisModel, mode: GpuMode) -> 
         AnalysisRunKind::Transient => analysis_run_transient_with_options_op(
             model,
             ComputeBackend::Gpu,
-            transient_options_for_spec(spec),
+            transient_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
         AnalysisRunKind::Thermal => analysis_run_thermal_with_options_op(
             model,
             ComputeBackend::Gpu,
-            thermal_options_for_spec(spec),
+            thermal_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
         AnalysisRunKind::Cfd => analysis_run_cfd_with_options_op(
@@ -2735,7 +2761,7 @@ fn run_fixture_gpu(spec: &FixtureSpec, model: &AnalysisModel, mode: GpuMode) -> 
                 max_linear_iters: 128,
                 tolerance: 1.0e-8,
                 residual_warn_threshold: 1.0e-4,
-                solver_mesh_artifact_path: None,
+                solver_mesh_artifact_path: solver_mesh_artifact_path.clone(),
             },
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
@@ -2753,7 +2779,7 @@ fn run_fixture_gpu(spec: &FixtureSpec, model: &AnalysisModel, mode: GpuMode) -> 
                 max_linear_iters: 128,
                 tolerance: 1.0e-8,
                 residual_warn_threshold: 1.0e-4,
-                solver_mesh_artifact_path: None,
+                solver_mesh_artifact_path: solver_mesh_artifact_path.clone(),
             },
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
@@ -2771,20 +2797,20 @@ fn run_fixture_gpu(spec: &FixtureSpec, model: &AnalysisModel, mode: GpuMode) -> 
                 max_linear_iters: 128,
                 tolerance: 1.0e-8,
                 residual_warn_threshold: 1.0e-4,
-                solver_mesh_artifact_path: None,
+                solver_mesh_artifact_path: solver_mesh_artifact_path.clone(),
             },
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
         AnalysisRunKind::Nonlinear => analysis_run_nonlinear_with_options_op(
             model,
             ComputeBackend::Gpu,
-            nonlinear_options_for_spec(spec),
+            nonlinear_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
         AnalysisRunKind::Electromagnetic => analysis_run_electromagnetic_with_options_op(
             model,
             ComputeBackend::Gpu,
-            electromagnetic_options_for_spec(spec),
+            electromagnetic_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
     };
@@ -4121,6 +4147,143 @@ fn compute_parity(left: &[f64], right: &[f64]) -> ParitySummary {
     }
 }
 
+fn subdivide_fixture_tetrahedron(mesh: &mut SolverMeshArtifact, model: &AnalysisModel) {
+    let mut identity_hasher = Sha256::new();
+    identity_hasher.update(b"runmat-analysis-fixture-interior-node\0");
+    identity_hasher.update(model.geometry_id.as_bytes());
+    let interior_identity = StableDigest::from_bytes(identity_hasher.finalize().into());
+    let interior_node_id = 5;
+    mesh.topology.nodes.push(SolverMeshNode {
+        node_id: interior_node_id,
+        stable_identity: interior_identity,
+        coordinates_m: [0.25, 0.25, 0.25],
+        provenance: mesh.topology.nodes[0].provenance.clone(),
+        exact_parameters: Vec::new(),
+    });
+
+    let original_element = mesh.topology.volume_elements[0].clone();
+    let tetrahedra = [
+        [1, 2, 3, interior_node_id],
+        [1, 4, 2, interior_node_id],
+        [1, 3, 4, interior_node_id],
+        [2, 4, 3, interior_node_id],
+    ];
+    let node_identity = mesh
+        .topology
+        .nodes
+        .iter()
+        .map(|node| (node.node_id, node.stable_identity))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    mesh.topology.volume_elements = tetrahedra
+        .into_iter()
+        .enumerate()
+        .map(|(index, node_ids)| SolverVolumeElement {
+            element_id: index as u64 + 1,
+            stable_identity: solver_volume_element_identity(
+                node_ids.map(|node_id| node_identity[&node_id]),
+            ),
+            order: ElementOrder::Tet4,
+            node_ids: node_ids.to_vec(),
+            region_id: original_element.region_id.clone(),
+            material_id: original_element.material_id.clone(),
+            provenance: original_element.provenance.clone(),
+        })
+        .collect();
+    mesh.topology.neighbors = (1_u64..=4)
+        .flat_map(|element_id| {
+            let adjacent = (1_u64..=4)
+                .filter(|candidate| *candidate != element_id)
+                .collect::<Vec<_>>();
+            (0_u8..4).map(move |local_face_index| MeshNeighbor {
+                element_id,
+                local_face_index,
+                adjacent_element_id: if local_face_index == 0 {
+                    None
+                } else {
+                    Some(adjacent[usize::from(local_face_index - 1)])
+                },
+            })
+        })
+        .collect();
+    for (index, face) in mesh.topology.boundary_faces.iter_mut().enumerate() {
+        face.adjacent_volume_element_ids = vec![index as u64 + 1];
+    }
+    mesh.topology.regions[0].element_ids = (1_u64..=4).collect();
+    for field in &mut mesh.topology.field_topologies {
+        match field.location {
+            FieldTopologyLocation::Node => field.ordered_entity_ids = (1_u64..=5).collect(),
+            FieldTopologyLocation::VolumeElement => {
+                field.ordered_entity_ids = (1_u64..=4).collect()
+            }
+            FieldTopologyLocation::BoundaryFace | FieldTopologyLocation::BoundaryEdge => {}
+        }
+    }
+}
+
+fn write_fixture_solver_mesh_artifact(
+    root: &Path,
+    model: &AnalysisModel,
+) -> Result<PathBuf, String> {
+    fs::create_dir_all(root).map_err(|error| error.to_string())?;
+    let mut mesh =
+        runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    subdivide_fixture_tetrahedron(&mut mesh, model);
+    let mut source_hasher = Sha256::new();
+    source_hasher.update(model.geometry_id.as_bytes());
+    mesh.geometry.source_digest = StableDigest::from_bytes(source_hasher.finalize().into());
+    mesh.geometry.geometry_revision = u64::from(model.geometry_revision);
+
+    let mut boundary_regions = std::collections::BTreeSet::new();
+    boundary_regions.extend(
+        model
+            .boundary_conditions
+            .iter()
+            .map(|condition| condition.region_id.clone()),
+    );
+    boundary_regions.extend(model.loads.iter().map(|load| load.region_id.clone()));
+    for interface in &model.interfaces {
+        boundary_regions.insert(interface.primary_region_id.clone());
+        boundary_regions.insert(interface.secondary_region_id.clone());
+    }
+    let boundary_face_count = mesh.topology.boundary_faces.len();
+    for (index, region_id) in boundary_regions.into_iter().enumerate() {
+        let face = &mut mesh.topology.boundary_faces[index % boundary_face_count];
+        face.provenance.push(PersistentEntityId {
+            kind: PersistentEntityKind::Region,
+            source_topology_id: region_id,
+            assembly_path: vec!["root".to_owned()],
+        });
+        face.provenance.sort();
+        face.provenance.dedup();
+    }
+    if let Some(material_id) = model
+        .materials
+        .first()
+        .map(|material| material.material_id.clone())
+    {
+        for element in &mut mesh.topology.volume_elements {
+            element.material_id = material_id.clone();
+        }
+        mesh.topology.regions[0].material_id = material_id;
+    }
+    mesh.canonical_digest = StableDigest::ZERO;
+    mesh.seal_canonical_digest()
+        .map_err(|error| format!("{}: {error}", model.model_id.0))?;
+    let path = root.join("solver_mesh.cbor");
+    fs::write(
+        &path,
+        mesh.canonical_encode().map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(path)
+}
+
+fn fixture_requires_solver_mesh(spec: &FixtureSpec) -> bool {
+    spec.expect_validate_error.is_none()
+        && spec.expect_run_error.is_none()
+        && matches!(spec.run_kind, AnalysisRunKind::Electromagnetic)
+}
+
 pub(super) fn run_fixture(
     spec: &FixtureSpec,
     filesystem_root: Option<&PathBuf>,
@@ -4137,6 +4300,15 @@ pub(super) fn run_fixture(
         )
         .expect("configure isolated fixture artifact store");
     }
+    let solver_mesh_artifact_path = if fixture_requires_solver_mesh(spec) {
+        filesystem_root.map(|root| {
+            write_fixture_solver_mesh_artifact(root, &model)
+                .expect("write canonical fixture solver mesh artifact")
+        })
+    } else {
+        None
+    };
+    let solver_mesh_artifact_path = solver_mesh_artifact_path.as_deref().and_then(Path::to_str);
     ensure_thermo_field_artifacts_for_fixture(spec.id, &model);
     let mut failures = Vec::new();
 
@@ -4290,7 +4462,7 @@ pub(super) fn run_fixture(
 
     if spec.expect_validate_error.is_none() && spec.expect_run_error.is_none() {
         let cpu_start = Instant::now();
-        let cpu_result = run_fixture_cpu(spec, &model);
+        let cpu_result = run_fixture_cpu(spec, &model, solver_mesh_artifact_path);
         cpu_run_ms = Some(cpu_start.elapsed().as_secs_f64() * 1_000.0);
 
         let cpu_envelope = match cpu_result {
@@ -4410,7 +4582,6 @@ pub(super) fn run_fixture(
         };
         run_ok = true;
         publishable = Some(cpu_envelope.data.publishable);
-
         if let Some(expected_publishable) = spec.expected_publishable {
             if cpu_envelope.data.publishable != expected_publishable {
                 failures.push(format!(
@@ -6442,7 +6613,7 @@ pub(super) fn run_fixture(
 
         if let Some(gpu_mode) = spec.gpu_mode {
             let gpu_start = Instant::now();
-            let gpu_result = run_fixture_gpu(spec, &model, gpu_mode);
+            let gpu_result = run_fixture_gpu(spec, &model, gpu_mode, solver_mesh_artifact_path);
             gpu_run_ms = Some(gpu_start.elapsed().as_secs_f64() * 1_000.0);
 
             match gpu_result {
@@ -10245,15 +10416,15 @@ pub(super) fn run_fixture(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
-                            "em_boundary_kernel_ground_anchor_effectiveness_ratio",
+                            "em_boundary_kernel_ground_selector_coverage_ratio",
                             "FEA_EM_BOUNDARY_KNOWN_ANSWER",
                             diagnostic_metric(
                                 &gpu_envelope.data,
                                 "FEA_EM_BOUNDARY_KNOWN_ANSWER",
                                 "ground_anchor_effectiveness_ratio",
                             ),
-                            Some(0.0),
-                            Some(0.6),
+                            Some(1.0),
+                            Some(1.0),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -10289,15 +10460,15 @@ pub(super) fn run_fixture(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
-                            "em_boundary_penalty_conditioning_contribution",
+                            "em_boundary_strong_constraint_penalty_ratio",
                             "FEA_EM_BOUNDARY_KNOWN_ANSWER",
                             diagnostic_metric(
                                 &gpu_envelope.data,
                                 "FEA_EM_BOUNDARY_KNOWN_ANSWER",
                                 "boundary_penalty_conditioning_contribution",
                             ),
-                            Some(0.35),
-                            Some(1.0),
+                            Some(0.0),
+                            Some(0.0),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -11030,7 +11201,7 @@ pub(super) fn run_fixture(
     }
 
     if let Some(expected_run_error) = spec.expect_run_error {
-        let result = run_fixture_cpu(spec, &model);
+        let result = run_fixture_cpu(spec, &model, solver_mesh_artifact_path);
         match result {
             Ok(_) => failures.push(format!(
                 "expected run error code {expected_run_error}, but run succeeded"
