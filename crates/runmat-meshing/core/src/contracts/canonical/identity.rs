@@ -51,7 +51,6 @@ pub struct GeometryRevisionRef {
 pub enum MeshingInputKind {
     ExactGeometry,
     FacetedGeometry,
-    DomainModel,
     Evidence,
     StageArtifact,
 }

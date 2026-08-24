@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_revision": 1,
+  "catalog_revision": 2,
   "required_features": [
     "analytic-primitives",
     "freeform-nurbs",
@@ -17,7 +17,7 @@
     "large-assemblies",
     "conformal-interfaces",
     "nonconformal-contacts",
-    "mixed-material-regions"
+    "multiple-physical-regions"
   ],
   "cases": [
     {
@@ -25,7 +25,7 @@
       "tier": "small",
       "features": ["analytic-primitives"],
       "supported_input": true,
-      "expected": { "outcome": "success", "topology": "complete exact curve, surface, volume, Tet10, validation, and publication DAG", "mass_properties": "exact source tetrahedron volume and centroid remain the geometry oracle", "regions": "one material region", "error_bounds": "resolved curve, surface, volume, and curved-Jacobian request bounds" },
+      "expected": { "outcome": "success", "topology": "complete exact curve, surface, volume, Tet10, validation, and publication DAG", "mass_properties": "exact source tetrahedron volume and centroid remain the geometry oracle", "regions": "one persistent geometric region", "error_bounds": "resolved curve, surface, volume, and curved-Jacobian request bounds" },
       "test": { "source": "crates/runmat-meshing/execution/src/serial_tests/volume.rs", "name": "production_dag_runner_executes_the_complete_serial_exact_pipeline" }
     },
     {
@@ -133,12 +133,12 @@
       "test": { "source": "crates/runmat-meshing/tetrahedron/src/cdt/solver_topology/tests.rs", "name": "exact_interface_and_contact_classification_preserve_typed_sides" }
     },
     {
-      "id": "mixed-material-domain",
+      "id": "multiple-physical-regions",
       "tier": "small",
-      "features": ["mixed-material-regions"],
+      "features": ["multiple-physical-regions"],
       "supported_input": true,
-      "expected": { "outcome": "success", "topology": "every canonical region identity has exactly one material assignment", "mass_properties": "material assignment is metadata and does not alter exact source mass properties", "regions": "two distinct canonical region identities", "error_bounds": "material mapping is canonical and artifact-identity bound" },
-      "test": { "source": "crates/runmat-meshing/core/src/contracts/canonical/domain_model.rs", "name": "mixed_material_regions_are_complete_canonical_and_identity_bound" }
+      "expected": { "outcome": "success", "topology": "two canonical region identities classify a shared conformal interface", "mass_properties": "region classification does not alter exact source mass properties", "regions": "two distinct persistent geometric regions", "error_bounds": "region identities and oriented interface sides are canonical" },
+      "test": { "source": "crates/runmat-meshing/tetrahedron/src/cdt/solver_topology/tests.rs", "name": "exact_interface_and_contact_classification_preserve_typed_sides" }
     }
   ]
 }

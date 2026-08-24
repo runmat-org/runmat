@@ -102,7 +102,7 @@ fn interface_signatures(artifact: &SolverMeshArtifact) -> Vec<InterfaceSignature
     let faces = face_identities(artifact);
     artifact
         .topology
-        .material_interfaces
+        .conformal_interfaces
         .iter()
         .map(|interface| InterfaceSignature {
             source_face_id: interface.source_face_id.clone(),

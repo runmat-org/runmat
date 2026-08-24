@@ -31,7 +31,6 @@ fn two_tetrahedron_artifact() -> SolverMeshArtifact {
         order: ElementOrder::Tet4,
         node_ids: vec![2, 3, 4, 5],
         region_id: region.clone(),
-        material_id: "steel".into(),
         provenance: vec![region],
     });
     artifact.topology.neighbors = (0..4)
@@ -48,7 +47,7 @@ fn two_tetrahedron_artifact() -> SolverMeshArtifact {
         .collect();
     artifact.topology.boundary_faces.clear();
     artifact.topology.boundary_edges.clear();
-    artifact.topology.material_interfaces.clear();
+    artifact.topology.conformal_interfaces.clear();
     artifact.topology.contacts.clear();
     artifact.topology.regions[0].element_ids = vec![1, 2];
     for topology in &mut artifact.topology.field_topologies {

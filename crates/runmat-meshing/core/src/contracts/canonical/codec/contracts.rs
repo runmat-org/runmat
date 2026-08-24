@@ -2,13 +2,13 @@ use sha2::{Digest as _, Sha256};
 
 use super::{encode_contract, CanonicalMeshingContract, MeshingCanonicalLimits};
 use crate::contracts::canonical::{
-    AlgorithmVersionSet, GeometryTolerancePolicy, MeshingContractError, MeshingDomainModel,
-    MeshingEvidence, MeshingFailure, MeshingJoinIdentity, MeshingPartitionDescriptor,
-    MeshingPartitionIdentity, MeshingProgress, MeshingRequest, MeshingStageEvidence,
-    MeshingStageIdentity, MeshingStageManifest, MeshingStageResultIdentity,
-    MeshingValidationIdentity, MeshingWorkloadRequest, MeshingWorkloadResult, MetricFieldRequest,
-    SolverMeshAdaptationLineage, SolverMeshArtifact, SolverMeshProjection, SolverMeshTransferMap,
-    SolverMeshValidation, StableDigest,
+    AlgorithmVersionSet, GeometryTolerancePolicy, MeshingContractError, MeshingEvidence,
+    MeshingFailure, MeshingJoinIdentity, MeshingPartitionDescriptor, MeshingPartitionIdentity,
+    MeshingProgress, MeshingRequest, MeshingStageEvidence, MeshingStageIdentity,
+    MeshingStageManifest, MeshingStageResultIdentity, MeshingValidationIdentity,
+    MeshingWorkloadRequest, MeshingWorkloadResult, MetricFieldRequest, SolverMeshAdaptationLineage,
+    SolverMeshArtifact, SolverMeshProjection, SolverMeshTransferMap, SolverMeshValidation,
+    StableDigest,
 };
 
 macro_rules! canonical_contract {
@@ -53,12 +53,6 @@ canonical_contract!(
     "analysis.mesh.algorithm-versions/v2",
     MeshingCanonicalLimits::IDENTITY,
     AlgorithmVersionSet::validate
-);
-canonical_contract!(
-    MeshingDomainModel,
-    "analysis.mesh.domain-model/v1",
-    MeshingCanonicalLimits::REQUEST,
-    MeshingDomainModel::validate
 );
 canonical_contract!(
     SolverMeshProjection,
@@ -164,7 +158,7 @@ impl CanonicalMeshingContract for MeshingEvidence {
 }
 
 impl CanonicalMeshingContract for SolverMeshArtifact {
-    const DOMAIN: &'static str = "analysis.mesh.artifact/v3";
+    const DOMAIN: &'static str = "analysis.mesh.artifact/v4";
     const LIMITS: MeshingCanonicalLimits = MeshingCanonicalLimits::ARTIFACT;
 
     fn validate_canonical(&self) -> Result<(), MeshingContractError> {

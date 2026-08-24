@@ -99,7 +99,6 @@ impl SolverMeshTopology {
                     "identity must be unique and derive from the stable corner nodes",
                 ));
             }
-            validate_token("material id", &element.material_id, 256)?;
             validate_region_id(&element.region_id)?;
             validate_provenance("volume element", &element.provenance)?;
         }
@@ -147,7 +146,7 @@ impl SolverMeshTopology {
                         .all(|node| element_nodes[element].contains(node))
                 })
                 || match face.role {
-                    super::BoundaryFaceRole::MaterialInterface => {
+                    super::BoundaryFaceRole::ConformalInterface => {
                         face.adjacent_volume_element_ids.len() != 2
                     }
                     super::BoundaryFaceRole::Exterior

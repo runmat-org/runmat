@@ -10,22 +10,20 @@ use runmat_geometry_io::{
 };
 use runmat_meshing_core::{
     AlgorithmVersionSet, CacheAdmissionDecision, CancellationPolicy, CurveQualityTargets,
-    ElementOrder, MeshingChunkPolicy, MeshingDomainModel, MeshingQualityTargets, MeshingRequest,
-    MeshingResourceBudget, MetricCombinationRule, MetricFieldRequest, MetricTensor3,
-    NeverCancelled, PlatformBuildIdentity, RegionMaterialAssignment, StableDigest,
-    SurfaceQualityTargets, VolumeQualityTargets, MESHING_DOMAIN_MODEL_SCHEMA_VERSION,
+    ElementOrder, MeshingChunkPolicy, MeshingQualityTargets, MeshingRequest, MeshingResourceBudget,
+    MetricCombinationRule, MetricFieldRequest, MetricTensor3, NeverCancelled,
+    PlatformBuildIdentity, StableDigest, SurfaceQualityTargets, VolumeQualityTargets,
     MESHING_REQUEST_SCHEMA_VERSION,
 };
 use runmat_meshing_execution::{
-    execute_exact_meshing_dag, prepare_domain_model_input, prepare_domain_model_objects,
-    prepare_exact_geometry_input, prepare_exact_geometry_objects, ExactMeshingDagRun,
-    MeshingArtifactAccess, MeshingRunEvidenceContext, NoopMeshingProgress,
+    execute_exact_meshing_dag, prepare_exact_geometry_input, prepare_exact_geometry_objects,
+    ExactMeshingDagRun, MeshingArtifactAccess, MeshingRunEvidenceContext, NoopMeshingProgress,
     SerialExactMeshingExecutor,
 };
 
 const BOX: &[u8] = include_bytes!("../../runmat-geometry/io/tests/fixtures/box.brep");
 const EXPECTED_BOX_ARTIFACT_DIGEST: &str =
-    "2f872016ffd636d36930c907f2eca57003a144089f65bc4b81c57710ac8ffcda";
+    "15477bc5436facd3e152c1fd53be94d959222808a3b608f9a69dea8d4ca7e7b6";
 
 #[path = "occt_exact_meshing/differential.rs"]
 mod differential;
@@ -76,7 +74,6 @@ fn execute_box_with_layout(
     )
     .unwrap();
     let topology = imported.topology.clone();
-    let region_id = imported.topology.regions[0].id.clone();
     let document = imported.geometry_document().unwrap();
     let limits = ObjectInventoryLimits::default();
     let access = MeshingArtifactAccess {
@@ -93,28 +90,10 @@ fn execute_box_with_layout(
     )
     .unwrap();
     let geometry = prepare_exact_geometry_input(geometry_objects, access.clone(), limits).unwrap();
-    let domain_objects = prepare_domain_model_objects(
-        MeshingDomainModel {
-            schema_version: MESHING_DOMAIN_MODEL_SCHEMA_VERSION,
-            region_materials: vec![RegionMaterialAssignment {
-                region_id,
-                material_id: "steel".into(),
-            }],
-            contact_ids: Vec::new(),
-        },
-        limits,
-    )
-    .unwrap();
-    let domain = prepare_domain_model_input(domain_objects, access.clone(), limits).unwrap();
     let directory = tempfile::tempdir().unwrap();
     let mut store =
         FilesystemObjectStore::open(directory.path().join("objects"), 512 << 20).unwrap();
-    for object in geometry
-        .geometry_objects()
-        .objects
-        .iter()
-        .chain(&domain.domain_model_objects().objects)
-    {
+    for object in &geometry.geometry_objects().objects {
         store.write_verified(object).unwrap();
     }
     let mut progress = NoopMeshingProgress;
@@ -133,7 +112,6 @@ fn execute_box_with_layout(
     let result = execute_exact_meshing_dag(
         ExactMeshingDagRun {
             geometry: &geometry,
-            domain_model: &domain,
             request: request(document.tolerance),
             artifact_access: access,
             capability_cohort: Some("occt-native-corpus".into()),

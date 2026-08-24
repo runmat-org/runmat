@@ -1,5 +1,5 @@
 use runmat_meshing_core::{
-    ContactPair, FieldTopologyLocation, FieldTopologyMap, MaterialInterface, MeshRegion,
+    ConformalInterface, ContactPair, FieldTopologyLocation, FieldTopologyMap, MeshRegion,
 };
 
 use super::{
@@ -9,7 +9,6 @@ use super::{
 
 pub(super) fn build_regions(
     input: &DelaunaySolverTopologyInput<'_>,
-    materials: &std::collections::BTreeMap<&runmat_geometry_core::PersistentEntityId, &str>,
 ) -> Result<Vec<MeshRegion>, DelaunaySolverTopologyError> {
     input
         .volume_mesh
@@ -18,12 +17,8 @@ pub(super) fn build_regions(
         .regions
         .iter()
         .map(|region| {
-            let material = materials
-                .get(&region.region_id)
-                .ok_or_else(|| invalid_domain_model("mesh region has no material assignment"))?;
             Ok(MeshRegion {
                 region_id: region.region_id.clone(),
-                material_id: (*material).to_owned(),
                 element_ids: region
                     .tetrahedron_indices
                     .iter()
@@ -37,7 +32,7 @@ pub(super) fn build_regions(
 pub(super) fn build_interfaces(
     input: &DelaunaySolverTopologyInput<'_>,
     classes: &[ProjectedFaceClass],
-) -> Result<Vec<MaterialInterface>, DelaunaySolverTopologyError> {
+) -> Result<Vec<ConformalInterface>, DelaunaySolverTopologyError> {
     input
         .exact_topology
         .interfaces
@@ -54,7 +49,7 @@ pub(super) fn build_interfaces(
                     "exact conformal interface has no solver boundary faces",
                 ));
             }
-            Ok(MaterialInterface {
+            Ok(ConformalInterface {
                 source_face_id: interface.face_id.clone(),
                 side_a_region_id: interface.side_a_region_id.clone(),
                 side_b_region_id: interface.side_b_region_id.clone(),
@@ -124,8 +119,4 @@ pub(super) fn field_topologies(
 
 fn invalid_mesh(reason: impl Into<String>) -> DelaunaySolverTopologyError {
     error::failure(DelaunaySolverTopologyErrorKind::InvalidMesh, reason)
-}
-
-fn invalid_domain_model(reason: impl Into<String>) -> DelaunaySolverTopologyError {
-    error::failure(DelaunaySolverTopologyErrorKind::InvalidDomainModel, reason)
 }

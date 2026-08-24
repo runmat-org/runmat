@@ -155,7 +155,6 @@ pub(super) fn artifact() -> SolverMeshArtifact {
                 order: ElementOrder::Tet4,
                 node_ids: vec![1, 2, 3, 4],
                 region_id: region.clone(),
-                material_id: "steel".into(),
                 provenance: vec![solid],
             }],
             neighbors: (0..4)
@@ -169,10 +168,9 @@ pub(super) fn artifact() -> SolverMeshArtifact {
             boundary_edges,
             regions: vec![MeshRegion {
                 region_id: region,
-                material_id: "steel".into(),
                 element_ids: vec![1],
             }],
-            material_interfaces: Vec::new(),
+            conformal_interfaces: Vec::new(),
             contacts: Vec::new(),
             field_topologies: vec![
                 FieldTopologyMap {
@@ -411,7 +409,7 @@ fn artifact_rejects_noncanonical_or_dangling_connectivity() {
     assert_eq!(invalid.validate().unwrap_err().field, "volume element");
 
     let mut invalid = artifact();
-    invalid.topology.boundary_faces[0].role = BoundaryFaceRole::MaterialInterface;
+    invalid.topology.boundary_faces[0].role = BoundaryFaceRole::ConformalInterface;
     assert_eq!(invalid.validate().unwrap_err().field, "boundary face");
 
     let mut invalid = artifact();

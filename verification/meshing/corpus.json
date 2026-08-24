@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "corpus_revision": 2,
+  "corpus_revision": 3,
   "fixture_root": "crates/runmat-geometry/io/tests/fixtures",
   "entries": [
     {
@@ -119,7 +119,7 @@
       "format": "brep",
       "supported_input": true,
       "provenance": { "origin": "repository-authored interface fixture", "exporter": "Open CASCADE BREP", "exporter_version": "Topology V3", "license": "RunMat repository license" },
-      "features": ["conformal-interface", "mixed-material-regions"],
+      "features": ["conformal-interface", "multiple-physical-regions"],
       "expected": { "outcome": "success", "topology": "2 solids, 11 faces, one shared oriented interface", "mass_properties": "independent adjacent body properties", "regions": 2, "mesh_error_bounds": "resolved request bounds" },
       "test": { "source": "crates/runmat-geometry/io/src/occt/evaluator/tests.rs", "name": "conformal_solids_share_one_oriented_interface_identity" }
     },

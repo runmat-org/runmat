@@ -24,6 +24,7 @@ pub struct SolverSolidTopology {
 pub enum SolverSolidAssemblyError {
     InvalidArtifact(String),
     UnknownElementNode { element_id: u64, node_id: u64 },
+    UnassignedRegion { element_id: u64, region_id: String },
     ElementStiffness { element_id: u64, message: String },
 }
 
@@ -49,8 +50,8 @@ pub fn solver_solid_topology(
 
 pub fn assemble_solver_solid_stiffness_csr(
     artifact: &SolverMeshArtifact,
-    default_material: SolidMaterial,
-    materials_by_id: &BTreeMap<String, SolidMaterial>,
+    default_material: Option<SolidMaterial>,
+    materials_by_region: &BTreeMap<String, SolidMaterial>,
     base_dof_count: usize,
 ) -> Result<CsrMatrix, SolverSolidAssemblyError> {
     let topology = solver_solid_topology(artifact, base_dof_count)?;
@@ -63,10 +64,14 @@ pub fn assemble_solver_solid_stiffness_csr(
         .collect::<BTreeMap<_, _>>();
     let mut rows = empty_rows(topology.dof_count);
     for element in &artifact.topology.volume_elements {
-        let material = materials_by_id
-            .get(&element.material_id)
+        let material = materials_by_region
+            .get(&element.region_id.source_topology_id)
             .copied()
-            .unwrap_or(default_material);
+            .or(default_material)
+            .ok_or_else(|| SolverSolidAssemblyError::UnassignedRegion {
+                element_id: element.element_id,
+                region_id: element.region_id.source_topology_id.clone(),
+            })?;
         match element.order {
             ElementOrder::Tet4 => {
                 let (coordinates, offsets) =

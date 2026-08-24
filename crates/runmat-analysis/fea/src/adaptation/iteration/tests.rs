@@ -47,7 +47,6 @@ fn adaptation_fixture() -> (
             order: ElementOrder::Tet4,
             node_ids: node_ids.into(),
             region_id: region.clone(),
-            material_id: "steel".into(),
             provenance: vec![region.clone()],
         })
         .collect();
@@ -140,7 +139,7 @@ fn adaptation_fixture() -> (
 fn clear_boundaries(artifact: &mut SolverMeshArtifact) {
     artifact.topology.boundary_faces.clear();
     artifact.topology.boundary_edges.clear();
-    artifact.topology.material_interfaces.clear();
+    artifact.topology.conformal_interfaces.clear();
     artifact.topology.contacts.clear();
     for topology in &mut artifact.topology.field_topologies {
         if matches!(

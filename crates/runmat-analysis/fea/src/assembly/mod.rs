@@ -610,11 +610,11 @@ fn assemble_linear_system_impl(
     let stiffness_csr = match solver_mesh.as_ref() {
         Some(mesh) => match assemble_solver_solid_stiffness_csr(
             mesh,
-            SolidMaterial {
+            (model.materials.len() == 1).then_some(SolidMaterial {
                 youngs_modulus_pa: structural_material.youngs_modulus_pa,
                 poisson_ratio: structural_material.poisson_ratio,
-            },
-            &solid_materials_by_id(model),
+            }),
+            &solid_materials_by_region(model),
             base_dof_count,
         ) {
             Ok(dense) => Some(dense),
@@ -1125,8 +1125,8 @@ fn structural_material_summary(model: &AnalysisModel) -> StructuralMaterialSumma
     }
 }
 
-fn solid_materials_by_id(model: &AnalysisModel) -> BTreeMap<String, SolidMaterial> {
-    model
+fn solid_materials_by_region(model: &AnalysisModel) -> BTreeMap<String, SolidMaterial> {
+    let materials = model
         .materials
         .iter()
         .map(|material| {
@@ -1137,6 +1137,16 @@ fn solid_materials_by_id(model: &AnalysisModel) -> BTreeMap<String, SolidMateria
                     poisson_ratio: material.mechanical.poisson_ratio.clamp(0.0, 0.49),
                 },
             )
+        })
+        .collect::<BTreeMap<_, _>>();
+    model
+        .material_assignments
+        .iter()
+        .filter_map(|assignment| {
+            materials
+                .get(&assignment.assigned_material_id)
+                .copied()
+                .map(|material| (assignment.region_id.clone(), material))
         })
         .collect()
 }
@@ -1901,7 +1911,7 @@ mod tests {
             confidence: runmat_analysis_core::EvidenceConfidence::Verified,
         }];
         let mut soft_mesh = tetrahedron4_mesh();
-        set_solver_mesh_material(&mut soft_mesh, "mat_soft", "soft_region");
+        set_solver_mesh_region(&mut soft_mesh, "soft_region");
 
         let mut hard_model = soft_model.clone();
         hard_model.material_assignments = vec![runmat_analysis_core::MaterialAssignment {
@@ -1910,8 +1920,8 @@ mod tests {
             assigned_material_id: "mat_hard".to_string(),
             confidence: runmat_analysis_core::EvidenceConfidence::Verified,
         }];
-        let mut hard_mesh = soft_mesh.clone();
-        set_solver_mesh_material(&mut hard_mesh, "mat_hard", "soft_region");
+        let hard_mesh = soft_mesh.clone();
+        assert_eq!(soft_mesh.canonical_digest, hard_mesh.canonical_digest);
 
         let soft_summary = assemble_linear_system(&soft_model, Some(soft_mesh), None, None);
         let hard_summary = assemble_linear_system(&hard_model, Some(hard_mesh), None, None);
@@ -2126,15 +2136,13 @@ mod tests {
         }
     }
 
-    fn set_solver_mesh_material(mesh: &mut SolverMeshArtifact, material_id: &str, region_id: &str) {
+    fn set_solver_mesh_region(mesh: &mut SolverMeshArtifact, region_id: &str) {
         let region = PersistentEntityId {
             kind: PersistentEntityKind::Region,
             source_topology_id: region_id.to_owned(),
             assembly_path: vec!["root".to_owned()],
         };
-        mesh.topology.volume_elements[0].material_id = material_id.to_owned();
         mesh.topology.volume_elements[0].region_id = region.clone();
-        mesh.topology.regions[0].material_id = material_id.to_owned();
         mesh.topology.regions[0].region_id = region;
         reseal(mesh);
     }

@@ -3,8 +3,7 @@ use runmat_geometry_core::{
     ExactTrimClassifier, GeometryEvaluationControl,
 };
 use runmat_meshing_core::{
-    validate_solver_mesh_topology, MeshingCancellationSignal, MeshingDomainModel, MeshingRequest,
-    SolverMeshTopology,
+    validate_solver_mesh_topology, MeshingCancellationSignal, MeshingRequest, SolverMeshTopology,
 };
 use runmat_meshing_surface::ExactSurfaceMesh;
 
@@ -29,7 +28,6 @@ pub struct DelaunaySolverTopologyInput<'a> {
     pub volume_mesh: &'a DelaunayVolumeMesh,
     pub volume_options: DelaunayVolumeMeshOptions,
     pub request: &'a MeshingRequest,
-    pub domain_model: &'a MeshingDomainModel,
     pub exact_evaluation: Option<DelaunayExactEvaluation<'a>>,
 }
 

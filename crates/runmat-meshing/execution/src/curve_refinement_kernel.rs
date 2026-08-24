@@ -212,7 +212,6 @@ fn inputs(
             PreparedMeshingInput::StageArtifact(input) => partitions.push(input.as_ref()),
             PreparedMeshingInput::ExactGeometry(_)
             | PreparedMeshingInput::FacetedGeometry(_)
-            | PreparedMeshingInput::DomainModel(_)
             | PreparedMeshingInput::Evidence(_) => {
                 return Err(invalid_input("curve refinement input kinds are invalid"));
             }

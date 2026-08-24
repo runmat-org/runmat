@@ -80,27 +80,8 @@ fn execute_native_dag(
     let document = geometry_objects.document.clone();
     let geometry =
         prepare_exact_geometry_input(geometry_objects, access.clone(), limits().inventory).unwrap();
-    let domain_objects = prepare_domain_model_objects(
-        runmat_meshing_core::MeshingDomainModel {
-            schema_version: MESHING_DOMAIN_MODEL_SCHEMA_VERSION,
-            region_materials: vec![runmat_meshing_core::RegionMaterialAssignment {
-                region_id: geometry.geometry_objects().topology.regions[0].id.clone(),
-                material_id: "steel".into(),
-            }],
-            contact_ids: Vec::new(),
-        },
-        limits().inventory,
-    )
-    .unwrap();
-    let domain =
-        prepare_domain_model_input(domain_objects, access.clone(), limits().inventory).unwrap();
     let mut store = session.object_store();
-    for object in geometry
-        .geometry_objects()
-        .objects
-        .iter()
-        .chain(&domain.domain_model_objects().objects)
-    {
+    for object in &geometry.geometry_objects().objects {
         store.write_verified(object).unwrap();
     }
     let mut request = request();
@@ -125,7 +106,6 @@ fn execute_native_dag(
     let result = runmat_meshing_execution::execute_exact_meshing_dag(
         runmat_meshing_execution::ExactMeshingDagRun {
             geometry: &geometry,
-            domain_model: &domain,
             request,
             artifact_access: access,
             capability_cohort: Some("native-cohort-v1".into()),
@@ -149,10 +129,6 @@ fn execute_native_dag(
     .unwrap();
     result.evidence.validate(&result.artifact).unwrap();
     assert_eq!(result.artifact.topology.volume_elements.len(), 1);
-    assert_eq!(
-        result.artifact.topology.volume_elements[0].material_id,
-        "steel"
-    );
     assert!(!executor.drain_progress().is_empty());
     result.artifact
 }

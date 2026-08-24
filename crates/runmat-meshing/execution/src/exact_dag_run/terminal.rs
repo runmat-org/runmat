@@ -26,11 +26,7 @@ pub(super) fn execute_terminal_dag<E: ExactMeshingDagExecutor>(
     )?;
     let projection = execute(
         executor,
-        &planner.solver_projection(
-            surface_root,
-            volume.root,
-            run.domain_model.root_input().clone(),
-        )?,
+        &planner.solver_projection(surface_root, volume.root)?,
         run,
         &mut observations,
     )?;

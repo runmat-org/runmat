@@ -1,11 +1,11 @@
 schema_version = 1
-policy_revision = 2
+policy_revision = 3
 approved_at = "2026-08-23"
-approval_basis = "Measured native exact-box smoke distribution with process allocation instrumentation; revision 2 adopts the scheduling-independent logical artifact identity while retaining the approved resource limits."
+approval_basis = "Measured native exact-box smoke distribution with process allocation instrumentation; revision 3 adopts the material-independent geometric-region artifact identity while retaining the approved resource limits."
 workload_id = "native-exact-box"
 fixture = "crates/runmat-geometry/io/tests/fixtures/box.brep"
 fixture_sha256 = "79ad22b1cc652f2307a1d8f9c3ec5644fa2f86de1d9700820d234ee1199e6d34"
-expected_canonical_digest = "e1cab504f8941d82894cf7f72be651aba9b0070b1a6bc0665abc193a8001111a"
+expected_canonical_digest = "13cd25a99b9865e3b2d0845086adeb61d2432afd993e3d97164316138ce1b6f1"
 minimum_elements = 14
 maximum_report_age_hours = 24
 required_stages = ["curve_mesh", "surface_mesh", "tetrahedralization", "order_elevation", "validation", "serialization"]

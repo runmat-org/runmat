@@ -70,7 +70,7 @@ impl<'a> ClassificationIndex<'a> {
             }
             return Ok(ProjectedFaceClass {
                 source_face_id: (*source_face_id).clone(),
-                role: BoundaryFaceRole::MaterialInterface,
+                role: BoundaryFaceRole::ConformalInterface,
                 contact_id: None,
                 outward_region_id: interface.side_a_region_id.clone(),
             });

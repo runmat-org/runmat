@@ -770,6 +770,15 @@ fn single_tetrahedron_solver_mesh_for_model(
     model: &runmat_analysis_core::AnalysisModel,
 ) -> SolverMeshArtifact {
     let mut mesh = single_tetrahedron_solver_mesh();
+    if let Some(assignment) = model.material_assignments.first() {
+        let region = PersistentEntityId {
+            kind: PersistentEntityKind::Region,
+            source_topology_id: assignment.region_id.clone(),
+            assembly_path: vec!["root".to_owned()],
+        };
+        mesh.topology.volume_elements[0].region_id = region.clone();
+        mesh.topology.regions[0].region_id = region;
+    }
     let mut root_regions = std::collections::BTreeSet::from(["root".to_string()]);
     root_regions.extend(
         model
@@ -796,14 +805,6 @@ fn single_tetrahedron_solver_mesh_for_model(
     }
     for region in loaded_regions {
         add_face_region(&mut mesh, 1, &region);
-    }
-    if let Some(material_id) = model
-        .materials
-        .first()
-        .map(|material| material.material_id.clone())
-    {
-        mesh.topology.volume_elements[0].material_id = material_id.clone();
-        mesh.topology.regions[0].material_id = material_id;
     }
     reseal_solver_mesh(&mut mesh);
     mesh

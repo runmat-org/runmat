@@ -259,9 +259,6 @@ pub enum Commands {
         /// Tetrahedral element order
         #[arg(long, value_enum, default_value = "tet4")]
         element_order: MeshElementOrderArg,
-        /// Material assigned to every exact solid region
-        #[arg(long, default_value = "material")]
-        material: String,
         /// Hard maximum generated element count
         #[arg(long, default_value_t = 10_000_000)]
         max_elements: u64,
@@ -505,6 +502,21 @@ mod tests {
             cli.script.as_deref(),
             Some(std::path::Path::new("snapshot"))
         );
+    }
+
+    #[test]
+    fn mesh_rejects_analysis_material_assignment() {
+        let error = match Cli::try_parse_from([
+            "runmat",
+            "mesh",
+            "part.step",
+            "--material",
+            "aluminum_6061",
+        ]) {
+            Ok(_) => panic!("meshing must not accept analysis material assignment"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("--material"));
     }
 
     #[test]

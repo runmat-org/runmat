@@ -10,9 +10,13 @@ fn canonical_tet4_and_tet10_artifacts_assemble_into_solver_csr() {
         let topology = solver_solid_topology(&artifact, 3).unwrap();
         assert_eq!(topology.order, order);
         assert_eq!(topology.dof_count, topology.node_count * 3);
-        let csr =
-            assemble_solver_solid_stiffness_csr(&artifact, material(200.0e9), &BTreeMap::new(), 3)
-                .unwrap();
+        let csr = assemble_solver_solid_stiffness_csr(
+            &artifact,
+            Some(material(200.0e9)),
+            &BTreeMap::new(),
+            3,
+        )
+        .unwrap();
         assert_eq!(csr.row_offsets.len(), topology.dof_count + 1);
         assert_eq!(csr.column_indices.len(), csr.values.len());
         assert!(csr.values.iter().all(|value| value.is_finite()));
@@ -20,15 +24,21 @@ fn canonical_tet4_and_tet10_artifacts_assemble_into_solver_csr() {
 }
 
 #[test]
-fn canonical_solver_assembly_revalidates_digest_and_uses_material_id() {
+fn canonical_solver_assembly_revalidates_digest_and_uses_region_assignment() {
     let artifact = artifact(ElementOrder::Tet10);
     let default =
-        assemble_solver_solid_stiffness_csr(&artifact, material(1.0e6), &BTreeMap::new(), 3)
+        assemble_solver_solid_stiffness_csr(&artifact, Some(material(1.0e6)), &BTreeMap::new(), 3)
             .unwrap();
     let selected = assemble_solver_solid_stiffness_csr(
         &artifact,
-        material(1.0e6),
-        &BTreeMap::from([("steel".to_owned(), material(2.0e6))]),
+        Some(material(1.0e6)),
+        &BTreeMap::from([(
+            artifact.topology.volume_elements[0]
+                .region_id
+                .source_topology_id
+                .clone(),
+            material(2.0e6),
+        )]),
         3,
     )
     .unwrap();
@@ -40,8 +50,20 @@ fn canonical_solver_assembly_revalidates_digest_and_uses_material_id() {
     let mut tampered = artifact;
     tampered.topology.nodes[0].coordinates_m[0] = 0.25;
     assert!(matches!(
-        assemble_solver_solid_stiffness_csr(&tampered, material(1.0e6), &BTreeMap::new(), 3),
+        assemble_solver_solid_stiffness_csr(&tampered, Some(material(1.0e6)), &BTreeMap::new(), 3,),
         Err(SolverSolidAssemblyError::InvalidArtifact(_))
+    ));
+}
+
+#[test]
+fn multi_material_assembly_rejects_an_unassigned_mesh_region() {
+    let artifact = artifact(ElementOrder::Tet4);
+    assert!(matches!(
+        assemble_solver_solid_stiffness_csr(&artifact, None, &BTreeMap::new(), 3),
+        Err(SolverSolidAssemblyError::UnassignedRegion {
+            element_id: 1,
+            region_id,
+        }) if region_id == "region"
     ));
 }
 

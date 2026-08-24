@@ -31,8 +31,6 @@ struct Arguments {
     max_elements: u64,
     #[arg(long, value_enum, default_value_t = ElementOrderArgument::Tet4)]
     element_order: ElementOrderArgument,
-    #[arg(long, default_value = "material")]
-    material: String,
     #[arg(long, default_value_t = 0)]
     seed: u64,
 }
@@ -67,7 +65,6 @@ async fn main() -> ExitCode {
             ElementOrderArgument::Tet4 => MeshElementOrderArg::Tet4,
             ElementOrderArgument::Tet10 => MeshElementOrderArg::Tet10,
         },
-        material: arguments.material,
         maximum_elements: arguments.max_elements,
         deterministic_seed: arguments.seed,
         force: false,

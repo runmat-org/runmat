@@ -4185,7 +4185,6 @@ fn subdivide_fixture_tetrahedron(mesh: &mut SolverMeshArtifact, model: &Analysis
             order: ElementOrder::Tet4,
             node_ids: node_ids.to_vec(),
             region_id: original_element.region_id.clone(),
-            material_id: original_element.material_id.clone(),
             provenance: original_element.provenance.clone(),
         })
         .collect();
@@ -4255,16 +4254,6 @@ fn write_fixture_solver_mesh_artifact(
         });
         face.provenance.sort();
         face.provenance.dedup();
-    }
-    if let Some(material_id) = model
-        .materials
-        .first()
-        .map(|material| material.material_id.clone())
-    {
-        for element in &mut mesh.topology.volume_elements {
-            element.material_id = material_id.clone();
-        }
-        mesh.topology.regions[0].material_id = material_id;
     }
     mesh.canonical_digest = StableDigest::ZERO;
     mesh.seal_canonical_digest()
