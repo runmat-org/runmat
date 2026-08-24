@@ -138,7 +138,127 @@ fn complete_boundary_surface_parameters(
             }
         }
     }
+    for (edge, uses) in surface_uses {
+        for node_id in edge {
+            let node = topology
+                .nodes
+                .get_mut(
+                    *node_index
+                        .get(node_id)
+                        .ok_or_else(|| invalid("surface edge node is absent"))?,
+                )
+                .ok_or_else(|| invalid("surface edge node index is invalid"))?;
+            for surface_use in uses {
+                if has_surface_parameter(node, surface_use) {
+                    continue;
+                }
+                let evaluator_uv = derive_surface_parameter(input, node, surface_use)?;
+                insert_surface_parameter(node, surface_use, evaluator_uv)?;
+            }
+        }
+    }
     Ok(())
+}
+
+fn has_surface_parameter(node: &SolverMeshNode, surface_use: &SurfaceUse) -> bool {
+    node.exact_parameters.iter().any(|parameter| {
+        matches!(
+            parameter,
+            SolverNodeExactParameter::Surface {
+                source_face_id,
+                chart_id,
+                ..
+            } if source_face_id == &surface_use.source_face_id
+                && chart_id == &surface_use.chart_id
+        )
+    })
+}
+
+fn derive_surface_parameter(
+    input: &DelaunaySolverTopologyInput<'_>,
+    node: &SolverMeshNode,
+    surface_use: &SurfaceUse,
+) -> Result<[f64; 2], DelaunaySolverTopologyError> {
+    let source_nodes = input
+        .exact_surface
+        .nodes
+        .iter()
+        .map(|source| (source.node_id, source))
+        .collect::<BTreeMap<_, _>>();
+    for triangle in input.exact_surface.triangles.iter().filter(|triangle| {
+        triangle.source_face_id == surface_use.source_face_id
+            && triangle.chart_id == surface_use.chart_id
+    }) {
+        let sources = triangle
+            .node_ids
+            .map(|identity| source_nodes.get(&identity).copied());
+        let [Some(first), Some(second), Some(third)] = sources else {
+            return Err(invalid(
+                "source surface triangle references an absent exact surface node",
+            ));
+        };
+        let points = [first.point_m, second.point_m, third.point_m];
+        let Some(weights) = triangle_coordinates(points, node.coordinates_m) else {
+            continue;
+        };
+        let uses = [first, second, third].map(|source| {
+            source.uses.iter().find(|candidate| {
+                candidate.source_face_id == surface_use.source_face_id
+                    && candidate.chart_id == surface_use.chart_id
+            })
+        });
+        let [Some(first_use), Some(second_use), Some(third_use)] = uses else {
+            return Err(invalid(
+                "source surface triangle is missing its exact chart coordinates",
+            ));
+        };
+        return Ok(std::array::from_fn(|axis| {
+            weights[0] * first_use.evaluator_uv[axis]
+                + weights[1] * second_use.evaluator_uv[axis]
+                + weights[2] * third_use.evaluator_uv[axis]
+        }));
+    }
+    Err(invalid(format!(
+        "surface edge node {} cannot be located in its authoritative source triangle",
+        node.node_id
+    )))
+}
+
+fn triangle_coordinates(points: [[f64; 3]; 3], point: [f64; 3]) -> Option<[f64; 3]> {
+    let subtract =
+        |left: [f64; 3], right: [f64; 3]| std::array::from_fn(|axis| left[axis] - right[axis]);
+    let dot = |left: [f64; 3], right: [f64; 3]| {
+        left.into_iter().zip(right).map(|(a, b)| a * b).sum::<f64>()
+    };
+    let first_edge = subtract(points[1], points[0]);
+    let second_edge = subtract(points[2], points[0]);
+    let offset = subtract(point, points[0]);
+    let first_squared = dot(first_edge, first_edge);
+    let cross = dot(first_edge, second_edge);
+    let second_squared = dot(second_edge, second_edge);
+    let first_offset = dot(offset, first_edge);
+    let second_offset = dot(offset, second_edge);
+    let denominator = first_squared * second_squared - cross * cross;
+    if !denominator.is_finite() || denominator <= 0.0 {
+        return None;
+    }
+    let second = (second_squared * first_offset - cross * second_offset) / denominator;
+    let third = (first_squared * second_offset - cross * first_offset) / denominator;
+    let first = 1.0 - second - third;
+    let weights = [first, second, third];
+    let scale = first_squared.max(second_squared).sqrt().max(1.0);
+    let coordinate_tolerance = 64.0 * f64::EPSILON;
+    if weights
+        .iter()
+        .any(|weight| *weight < -coordinate_tolerance || *weight > 1.0 + coordinate_tolerance)
+    {
+        return None;
+    }
+    let reconstructed = std::array::from_fn(|axis| {
+        first * points[0][axis] + second * points[1][axis] + third * points[2][axis]
+    });
+    let residual = subtract(point, reconstructed);
+    (dot(residual, residual).sqrt() <= 64.0 * f64::EPSILON * scale).then_some(weights)
 }
 
 fn insert_surface_parameter(

@@ -322,7 +322,17 @@ fn surface_parameter(
                 None
             }
         })
-        .ok_or_else(|| invalid("surface edge endpoint has no matching exact chart parameter"))
+        .ok_or_else(|| {
+            invalid(format!(
+                "surface edge endpoint {} ({:?}) has no parameter for face {:?}, chart {:?}; \
+                 available exact parameters: {:?}",
+                node.node_id,
+                node.stable_identity,
+                surface_use.source_face_id,
+                surface_use.chart_id,
+                node.exact_parameters
+            ))
+        })
 }
 
 pub(super) fn require_matching_points(
