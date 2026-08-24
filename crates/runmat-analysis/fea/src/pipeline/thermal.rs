@@ -18,6 +18,10 @@ use crate::{
     progress::{check_cancelled, emit_phase, is_cancelled, FeaProgressPhase, FeaProgressStatus},
 };
 
+mod solver_mesh_topology;
+
+use solver_mesh_topology::ThermalMeshTopology;
+
 const VECTOR_COMPONENT_COUNT: usize = 3;
 const BOUNDARY_HEAT_FLUX_COMPONENT_COUNT: usize = 6;
 
@@ -95,6 +99,8 @@ pub fn run_thermal_with_options(
     );
     check_cancelled("fea.run_thermal")?;
     let node_count = thermal_solution_node_count(&summary);
+    let recovery_topology =
+        ThermalRecoveryTopology::from_assembly(&summary, node_count, options.solver_mesh.as_ref());
 
     let region_avg_delta = if thermo_context.region_temperature_deltas.is_empty() {
         thermo_context.applied_temperature_delta_k
@@ -172,7 +178,7 @@ pub fn run_thermal_with_options(
             let spatial_factor = if node_count <= 1 {
                 1.0
             } else {
-                0.9 + 0.2 * (i as f64 / (node_count - 1) as f64)
+                0.9 + 0.2 * recovery_topology.normalized_coordinate(i, 0)
             };
             target_temperatures
                 .push(thermo_context.reference_temperature_k + effective_delta * spatial_factor);
@@ -182,17 +188,7 @@ pub fn run_thermal_with_options(
         let mut residual_sum = 0.0;
         for i in 0..node_count {
             let prev = previous_temperatures[i];
-            let left = if i == 0 {
-                prev
-            } else {
-                previous_temperatures[i - 1]
-            };
-            let right = if i + 1 >= node_count {
-                prev
-            } else {
-                previous_temperatures[i + 1]
-            };
-            let laplacian = left + right - 2.0 * prev;
+            let laplacian = recovery_topology.diffusion_laplacian(&previous_temperatures, i);
             let candidate =
                 prev + relax_gain * (target_temperatures[i] - prev) + diffusion_gain * laplacian;
             residual_sum += (candidate - prev).abs();
@@ -237,7 +233,6 @@ pub fn run_thermal_with_options(
             )
         })
         .collect::<Vec<_>>();
-    let recovery_topology = ThermalRecoveryTopology::from_assembly(&summary, node_count);
     let temperature_gradient_raw =
         recover_temperature_gradients(&temperature_snapshots_raw, &recovery_topology);
     let heat_flux_raw =
@@ -443,7 +438,7 @@ pub fn run_thermal_with_options(
         code: "FEA_THERMAL_FIELD_RECOVERY".to_string(),
         severity: FeaDiagnosticSeverity::Info,
         message: format!(
-            "basis={} recovery_node_count={} recovery_dimensions={}x{}x{} recovery_spacing_x={} recovery_spacing_y={} recovery_spacing_z={} coordinate_active_dimension_count={} coordinate_characteristic_length_m={} boundary_face_count={}",
+            "basis={} recovery_node_count={} recovery_dimensions={}x{}x{} recovery_spacing_x={} recovery_spacing_y={} recovery_spacing_z={} coordinate_active_dimension_count={} coordinate_characteristic_length_m={} boundary_face_count={} full_topology_element_count={}",
             recovery_topology.basis.as_str(),
             recovery_topology.node_count,
             recovery_topology.dims[0],
@@ -454,7 +449,8 @@ pub fn run_thermal_with_options(
             recovery_topology.spacing[2],
             recovery_topology.active_dimension_count,
             recovery_topology.characteristic_length_m,
-            BOUNDARY_HEAT_FLUX_COMPONENT_COUNT,
+            recovery_topology.boundary_face_count(),
+            recovery_topology.element_count(),
         ),
     });
     diagnostics.push(FeaDiagnostic {
@@ -569,23 +565,42 @@ struct ThermalRecoveryTopology {
     active_dimension_count: usize,
     characteristic_length_m: f64,
     basis: ThermalRecoveryBasis,
+    solver_mesh: Option<ThermalMeshTopology>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ThermalRecoveryBasis {
     InferredLattice,
+    SolverMesh,
 }
 
 impl ThermalRecoveryBasis {
     const fn as_str(self) -> &'static str {
         match self {
             Self::InferredLattice => "inferred_lattice",
+            Self::SolverMesh => "solver_mesh",
         }
     }
 }
 
 impl ThermalRecoveryTopology {
-    fn from_assembly(_summary: &AssemblySummary, node_count: usize) -> Self {
+    fn from_assembly(
+        _summary: &AssemblySummary,
+        node_count: usize,
+        solver_mesh: Option<&runmat_meshing_core::SolverMeshArtifact>,
+    ) -> Self {
+        if let Some(mesh) = solver_mesh.and_then(ThermalMeshTopology::derive) {
+            let dims = mesh.coordinate_counts();
+            return Self {
+                node_count,
+                dims,
+                spacing: thermal_normalized_axis_spacing(dims),
+                active_dimension_count: mesh.active_dimension_count(),
+                characteristic_length_m: mesh.characteristic_length_m(),
+                basis: ThermalRecoveryBasis::SolverMesh,
+                solver_mesh: Some(mesh),
+            };
+        }
         let component_scale = node_count.max(1);
         let prefer_volume = node_count >= 27;
         let prefer_surface = node_count >= 9;
@@ -617,7 +632,50 @@ impl ThermalRecoveryTopology {
             active_dimension_count,
             characteristic_length_m,
             basis: ThermalRecoveryBasis::InferredLattice,
+            solver_mesh: None,
         }
+    }
+
+    fn element_count(&self) -> usize {
+        self.solver_mesh
+            .as_ref()
+            .map(|mesh| mesh.elements().len())
+            .unwrap_or_else(|| thermal_element_node_sets(self).len())
+    }
+
+    fn boundary_face_count(&self) -> usize {
+        self.solver_mesh
+            .as_ref()
+            .map(ThermalMeshTopology::boundary_face_count)
+            .unwrap_or(BOUNDARY_HEAT_FLUX_COMPONENT_COUNT)
+    }
+
+    fn normalized_coordinate(&self, index: usize, axis: usize) -> f64 {
+        if let Some(mesh) = &self.solver_mesh {
+            mesh.normalized_coordinate(index, axis)
+        } else if self.dims[axis] <= 1 {
+            0.0
+        } else {
+            self.coords(index)[axis] as f64 / self.dims[axis].saturating_sub(1).max(1) as f64
+        }
+    }
+
+    fn diffusion_laplacian(&self, values: &[f64], index: usize) -> f64 {
+        if let Some(mesh) = &self.solver_mesh {
+            return mesh.graph_laplacian(values, index);
+        }
+        let center = values[index];
+        let left = if index == 0 {
+            center
+        } else {
+            values[index - 1]
+        };
+        let right = if index + 1 >= values.len() {
+            center
+        } else {
+            values[index + 1]
+        };
+        left + right - 2.0 * center
     }
 
     fn coords(&self, index: usize) -> [usize; VECTOR_COMPONENT_COUNT] {
@@ -684,6 +742,9 @@ fn thermal_axis_derivative(
     index: usize,
     axis: usize,
 ) -> f64 {
+    if let Some(mesh) = &topology.solver_mesh {
+        return mesh.gradient(temperatures, index)[axis];
+    }
     if topology.dims[axis] <= 1 {
         return 0.0;
     }
@@ -825,6 +886,9 @@ fn average_nodal_scalar(snapshot: &[f64], element_nodes: &[usize]) -> f64 {
 }
 
 fn thermal_element_node_sets(topology: &ThermalRecoveryTopology) -> Vec<Vec<usize>> {
+    if let Some(mesh) = &topology.solver_mesh {
+        return mesh.elements();
+    }
     let x_cells = topology.dims[0].saturating_sub(1).max(1);
     let y_cells = topology.dims[1].saturating_sub(1).max(1);
     let z_cells = topology.dims[2].saturating_sub(1).max(1);
@@ -873,6 +937,14 @@ fn recover_boundary_heat_flux_snapshots(
 
 fn thermal_boundary_face_fluxes(heat_flux: &[f64], topology: &ThermalRecoveryTopology) -> Vec<f64> {
     let mut boundary = vec![0.0; BOUNDARY_HEAT_FLUX_COMPONENT_COUNT];
+    if let Some(mesh) = &topology.solver_mesh {
+        for axis in 0..VECTOR_COMPONENT_COUNT {
+            let [min_face, max_face] = mesh.boundary_axis_flux(heat_flux, axis);
+            boundary[axis * 2] = -min_face;
+            boundary[axis * 2 + 1] = max_face;
+        }
+        return boundary;
+    }
     for axis in 0..VECTOR_COMPONENT_COUNT {
         if topology.dims[axis] <= 1 {
             continue;
@@ -1103,11 +1175,12 @@ fn thermal_slab_linear_profile_rms_ratio(
     let node_count = final_snapshot.len();
     let mut x_values = Vec::with_capacity(node_count);
     for index in 0..node_count {
-        let coords = topology.coords(index);
-        let x = if topology.dims[0] <= 1 {
+        let x = if topology.solver_mesh.is_some() {
+            topology.normalized_coordinate(index, 0)
+        } else if topology.dims[0] <= 1 {
             index as f64 / node_count.saturating_sub(1).max(1) as f64
         } else {
-            coords[0] as f64 / topology.dims[0].saturating_sub(1).max(1) as f64
+            topology.normalized_coordinate(index, 0)
         };
         x_values.push(x);
     }
@@ -1152,6 +1225,25 @@ fn thermal_slab_monotonic_edge_fraction(
     }
     let mut checked_edges = 0usize;
     let mut monotonic_edges = 0usize;
+    if let Some(mesh) = &topology.solver_mesh {
+        for [left, right] in mesh.edges() {
+            let (upstream, downstream) =
+                if mesh.normalized_coordinate(left, 0) <= mesh.normalized_coordinate(right, 0) {
+                    (left, right)
+                } else {
+                    (right, left)
+                };
+            checked_edges += 1;
+            if final_snapshot[downstream] + 1.0e-9 >= final_snapshot[upstream] {
+                monotonic_edges += 1;
+            }
+        }
+        return if checked_edges == 0 {
+            1.0
+        } else {
+            monotonic_edges as f64 / checked_edges as f64
+        };
+    }
     for index in 0..final_snapshot.len() {
         let coords = topology.coords(index);
         for axis in 0..VECTOR_COMPONENT_COUNT {
