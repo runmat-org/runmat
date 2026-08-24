@@ -4283,7 +4283,10 @@ fn fixture_requires_solver_mesh(spec: &FixtureSpec) -> bool {
         && spec.expect_run_error.is_none()
         && (matches!(
             spec.run_kind,
-            AnalysisRunKind::Thermal | AnalysisRunKind::Electromagnetic
+            AnalysisRunKind::Thermal
+                | AnalysisRunKind::Cht
+                | AnalysisRunKind::Fsi
+                | AnalysisRunKind::Electromagnetic
         ) || spec.id.starts_with("electro_thermal_joule_"))
 }
 

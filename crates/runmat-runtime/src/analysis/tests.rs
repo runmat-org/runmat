@@ -7511,6 +7511,18 @@ fn analysis_run_cfd_projects_the_canonical_solver_mesh_into_flow_topology() {
 }
 
 #[test]
+fn canonical_boundary_faces_define_complete_tetrahedral_interface_connectivity() {
+    let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let topology = CfdDomainTopology::from_solver_mesh(&mesh);
+
+    let edges = mesh_boundary_face_adjacencies(&topology, 4);
+
+    assert_eq!(edges.len(), 6);
+    assert!(edges.contains(&(0, 1)));
+    assert!(edges.contains(&(2, 3)));
+}
+
+#[test]
 fn analysis_run_cfd_rejects_partial_authored_boundary_conditions() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
