@@ -13,6 +13,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -251,7 +253,123 @@ jobs:
             body += details.join('\n');
             body += `\n**Totals**: ${totalPassed} passed, ${totalFailed} failed`;
             console.log(body);
-  
+
+  meshing-release-evidence:
+    name: Meshing release evidence
+    needs: [validate-release-state]
+    runs-on: ["self-hosted", "linux", "GCP"]
+    timeout-minutes: 180
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      RUST_BACKTRACE: 1
+      RUST_TEST_THREADS: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref_name }}
+
+      - name: Isolate Cargo build artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          target_dir="${RUNNER_TEMP}/runmat-meshing-release-${GITHUB_RUN_ID}"
+          echo "CARGO_TARGET_DIR=${target_dir}" >> "${GITHUB_ENV}"
+          echo "EVIDENCE_DIR=${GITHUB_WORKSPACE}/target/runmat-meshing-release-evidence" >> "${GITHUB_ENV}"
+
+      - name: Validate Rust toolchain
+        shell: bash
+        env:
+          RUST_TOOLCHAIN: 1.90.0-x86_64-unknown-linux-gnu
+        run: |
+          set -euo pipefail
+          cargo_home="${CARGO_HOME:-${HOME}/.cargo}"
+          rustup_home="${RUSTUP_HOME:-${HOME}/.rustup}"
+          rustup="${cargo_home}/bin/rustup"
+          cargo="${cargo_home}/bin/cargo"
+          test -x "${rustup}"
+          test -x "${cargo}"
+          {
+            echo "CARGO_HOME=${cargo_home}"
+            echo "RUSTUP_HOME=${rustup_home}"
+            echo "RUSTUP_TOOLCHAIN=${RUST_TOOLCHAIN}"
+          } >> "${GITHUB_ENV}"
+          echo "${cargo_home}/bin" >> "${GITHUB_PATH}"
+          "${rustup}" which --toolchain "${RUST_TOOLCHAIN}" cargo >/dev/null
+          "${cargo}" --version
+
+      - name: Ensure pinned Linux OpenCASCADE
+        shell: bash
+        env:
+          RUNMAT_VCPKG_REF: 2026.06.01
+          RUNMAT_VCPKG_TRIPLET: x64-linux-runmat-dynamic-release
+        run: infra/scripts/ensure-linux-vcpkg-occt.sh
+
+      - name: Validate governed meshing evidence catalogs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/meshing/validate_corpus.py
+          python3 scripts/meshing/validate_conformance.py
+          python3 scripts/meshing/validate_differential.py
+          python3 scripts/meshing/validate_reliability.py
+          python3 scripts/meshing/validate_release_evidence.py
+          python3 -m unittest discover -s scripts/meshing/tests -p 'test_*.py'
+
+      - name: Run meshing contract and algorithm conformance
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${EVIDENCE_DIR}"
+          set -o pipefail
+          cargo test \
+            -p runmat-meshing-core \
+            -p runmat-meshing-size \
+            -p runmat-meshing-curve \
+            -p runmat-meshing-surface \
+            -p runmat-meshing-tetrahedron \
+            -p runmat-meshing-execution \
+            --all-targets 2>&1 | tee "${EVIDENCE_DIR}/algorithm-conformance.log"
+
+      - name: Run serial, local, durable, remote, and differential conformance
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -o pipefail
+          cargo test -p runmat-execution-runner-native --all-features \
+            --test occt_exact_meshing \
+            --test meshing_process_conformance \
+            2>&1 | tee "${EVIDENCE_DIR}/execution-conformance.log"
+
+      - name: Build the production native meshing verifier
+        run: cargo build --release -p runmat --example meshing-verification --no-default-features --features occt-native
+
+      - name: Gate stable meshing performance and resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/meshing/performance.py \
+            --binary "${CARGO_TARGET_DIR}/release/examples/meshing-verification" \
+            --profile stable \
+            --samples 15 \
+            --report "${EVIDENCE_DIR}/performance-linux-x86_64.json"
+
+      - name: Attest meshing release evidence
+        if: github.event_name == 'push'
+        uses: actions/attest@v4
+        with:
+          subject-path: target/runmat-meshing-release-evidence/*
+
+      - name: Upload mandatory meshing release evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meshing-release-evidence-${{ github.run_id }}
+          path: target/runmat-meshing-release-evidence/*
+          if-no-files-found: error
+
   build-release:
     if: github.event_name == 'push'
     needs: [validate-release-state]
@@ -625,7 +743,7 @@ jobs:
   create-release:
     if: github.event_name == 'push'
     name: Create Release
-    needs: [build-and-test, build-release]
+    needs: [build-and-test, meshing-release-evidence, build-release]
     environment: Production
     runs-on: ubuntu-latest
     steps:
