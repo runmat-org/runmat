@@ -259,6 +259,28 @@ jobs:
           set -o pipefail
           cargo test --all-targets --all-features 2>&1 | tee test.log
 
+      - name: Build native meshing performance verifier
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        run: cargo build --release -p runmat --example meshing-verification --no-default-features --features occt-native
+
+      - name: Gate native meshing resource smoke SLO
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        shell: bash
+        run: |
+          python3 scripts/meshing/performance.py \
+            --binary "${CARGO_TARGET_DIR}/release/examples/meshing-verification" \
+            --profile smoke \
+            --samples 3 \
+            --report "target/runmat-meshing-verification/performance-${MATRIX_NAME}.json"
+
+      - name: Upload native meshing performance evidence
+        if: always() && github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        uses: actions/upload-artifact@v4
+        with:
+          name: meshing-performance-${{ matrix.name }}
+          path: target/runmat-meshing-verification/performance-${{ matrix.name }}.json
+          if-no-files-found: error
+
       - name: Upload analysis benchmark artifacts
         if: always() && ((github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/heads/release/'))) || (github.event_name == 'pull_request' && failure()))
         uses: actions/upload-artifact@v4
