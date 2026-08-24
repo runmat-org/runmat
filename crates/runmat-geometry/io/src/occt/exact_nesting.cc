@@ -1,5 +1,5 @@
 #include "runmat-geometry-io/src/occt/ffi.rs.h"
-#include "runmat-geometry-io/src/occt/exact_nesting.hxx"
+#include "exact_nesting.hxx"
 
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <BRep_Builder.hxx>

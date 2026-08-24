@@ -1,7 +1,7 @@
 #include "runmat-geometry-io/src/occt/ffi.rs.h"
-#include "runmat-geometry-io/src/occt/exact_assembly.hxx"
-#include "runmat-geometry-io/src/occt/exact_healing.hxx"
-#include "runmat-geometry-io/src/occt/exact_xcaf_healing.hxx"
+#include "exact_assembly.hxx"
+#include "exact_healing.hxx"
+#include "exact_xcaf_healing.hxx"
 
 #include <BRep_Builder.hxx>
 #include <BRepAdaptor_Curve.hxx>

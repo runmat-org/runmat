@@ -389,7 +389,7 @@ pub(crate) mod bridge {
     }
 
     unsafe extern "C++" {
-        include!("runmat-geometry-io/src/occt/occt_bridge.hxx");
+        include!("src/occt/occt_bridge.hxx");
 
         fn import_cad_bytes(
             path: &str,

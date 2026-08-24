@@ -1,6 +1,6 @@
 #pragma once
 
-#include "runmat-geometry-io/src/occt/exact_healing.hxx"
+#include "exact_healing.hxx"
 
 #include <TDF_Label.hxx>
 #include <XCAFDoc_ShapeTool.hxx>

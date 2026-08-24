@@ -112,6 +112,12 @@ impl WgpuProvider {
         let mut instance_desc = wgpu::InstanceDescriptor::default();
         #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
         {
+            // D3D12 is the native presentation backend used by RunMat Desktop.
+            // Keeping compute and presentation on this one backend is required
+            // for provider-owned buffers to remain WGPU-resident through draw.
+            // Advanced users can still opt into another backend explicitly.
+            instance_desc.backends =
+                wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::DX12);
             instance_desc.dx12_shader_compiler = wgpu::util::dx12_shader_compiler_from_env()
                 .unwrap_or(wgpu::Dx12Compiler::Dxc {
                     dxil_path: None,
