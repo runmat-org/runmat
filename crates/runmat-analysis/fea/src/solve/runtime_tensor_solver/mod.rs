@@ -4,7 +4,7 @@ use runmat_accelerate_api::{provider, GpuTensorHandle, HostTensorView};
 use crate::{
     assembly::AssemblySummary,
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
-    operator::{csr_stiffness, dense_stiffness},
+    operator::{csr_stiffness, dense_stiffness, CsrMatrix},
     solve::{linear::LinearSolveResult, preconditioner::SpdPreconditionerKind},
 };
 
@@ -13,7 +13,7 @@ mod preconditioner_impl;
 
 use operator_impl::{
     apply_k_device, apply_k_host_from_prepared, dot_handle, linear_shift_indices,
-    DeviceOperatorContext,
+    normalize_csr_constraints, CsrDeviceOperatorContext, DeviceOperatorContext,
 };
 use preconditioner_impl::{
     apply_preconditioner_device, build_ilu0_factors, PreconditionerDeviceContext,
@@ -26,6 +26,7 @@ pub struct RuntimeTensorPreparedLinearSystem {
     pub(crate) diag: Vec<f64>,
     pub(crate) upper_left: Vec<f64>,
     pub(crate) upper_right: Vec<f64>,
+    pub(crate) stiffness_csr: Option<CsrMatrix>,
     pub(crate) inv_diag: Vec<f64>,
     pub(crate) ilu_l_subdiag: Vec<f64>,
     pub(crate) ilu_upper_superdiag: Vec<f64>,
@@ -89,10 +90,7 @@ pub fn prepare_runtime_tensor_linear_system(
     summary: &AssemblySummary,
 ) -> Option<RuntimeTensorPreparedLinearSystem> {
     let n = summary.dof_count;
-    if n == 0
-        || dense_stiffness(&summary.operator).is_some()
-        || csr_stiffness(&summary.operator).is_some()
-    {
+    if n == 0 || dense_stiffness(&summary.operator).is_some() {
         return None;
     }
 
@@ -138,6 +136,9 @@ pub fn prepare_runtime_tensor_linear_system(
         diag,
         upper_left,
         upper_right,
+        stiffness_csr: csr_stiffness(&summary.operator)
+            .cloned()
+            .and_then(|csr| normalize_csr_constraints(csr, &summary.operator.constrained)),
         inv_diag,
         ilu_l_subdiag,
         ilu_upper_superdiag,
@@ -232,6 +233,13 @@ fn solve_runtime_tensor_linear_system_internal(
                 }
             }
             (diag, upper_left, upper_right)
+        });
+    let stiffness_csr = prepared
+        .and_then(|value| value.stiffness_csr.clone())
+        .or_else(|| {
+            csr_stiffness(&summary.operator)
+                .cloned()
+                .and_then(|csr| normalize_csr_constraints(csr, &summary.operator.constrained))
         });
     let (constrained_mask, unconstrained_mask) = prepared
         .map(|value| {
@@ -331,6 +339,16 @@ fn solve_runtime_tensor_linear_system_internal(
             shape,
         })
         .ok()?;
+    let stiffness_csr_values_h = stiffness_csr.as_ref().map(|csr| {
+        provider.upload(&HostTensorView {
+            data: &csr.values,
+            shape: &[csr.values.len()],
+        })
+    });
+    let stiffness_csr_values_h = match stiffness_csr_values_h {
+        Some(result) => Some(result.ok()?),
+        None => None,
+    };
     let device_operator = DeviceOperatorContext {
         provider,
         diag: &diag_h,
@@ -341,6 +359,10 @@ fn solve_runtime_tensor_linear_system_internal(
         prev_indices: &prev_indices,
         next_indices: &next_indices,
         shape,
+        csr: stiffness_csr
+            .as_ref()
+            .zip(stiffness_csr_values_h.as_ref())
+            .map(|(matrix, values)| CsrDeviceOperatorContext { matrix, values }),
     };
 
     let mut r = if initial_guess.is_some() {
@@ -395,6 +417,7 @@ fn solve_runtime_tensor_linear_system_internal(
                     &diag,
                     &upper_left,
                     &upper_right,
+                    stiffness_csr.as_ref(),
                     &constrained_mask,
                     &unconstrained_mask,
                     &p_host.data,
@@ -500,6 +523,9 @@ fn solve_runtime_tensor_linear_system_internal(
     let _ = provider.free(&upper_right_h);
     let _ = provider.free(&constrained_mask_h);
     let _ = provider.free(&unconstrained_mask_h);
+    if let Some(handle) = stiffness_csr_values_h.as_ref() {
+        let _ = provider.free(handle);
+    }
     let _ = provider.free(&rhs_h);
     workspace.release(provider);
 

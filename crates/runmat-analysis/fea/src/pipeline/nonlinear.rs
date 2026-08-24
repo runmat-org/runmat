@@ -281,6 +281,7 @@ pub fn run_nonlinear_with_options(
         &nonlinear.load_factors,
         &nonlinear.residual_norms,
         summary.dof_count,
+        options.solver_mesh.as_ref(),
     );
     run.diagnostics.extend(thermo_mechanical_fields.diagnostics);
     run.diagnostics.extend(electro_thermal_fields.diagnostics);

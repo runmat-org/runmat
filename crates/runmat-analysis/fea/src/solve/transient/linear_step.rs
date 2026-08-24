@@ -3,6 +3,7 @@ use std::time::Instant;
 
 use crate::{
     assembly::AssemblySummary,
+    operator::apply_k,
     solve::{
         preconditioner::SpdPreconditionerKind,
         runtime_tensor_solver::{
@@ -211,6 +212,30 @@ fn build_implicit_summary(summary: &AssemblySummary, rhs: &[f64], dt: f64) -> As
         implicit.operator.stiffness_upper.fill(0.0);
         return implicit;
     }
+    if let Some(csr) = implicit.operator.stiffness_csr.as_mut() {
+        for row in 0..implicit.operator.dof_count {
+            let constrained = implicit.operator.constrained[row];
+            let start = csr.row_offsets[row];
+            let end = csr.row_offsets[row + 1];
+            for entry in start..end {
+                let column = csr.column_indices[entry];
+                csr.values[entry] = if constrained {
+                    if column == row {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                } else {
+                    dt * csr.values[entry]
+                        + if column == row {
+                            summary.operator.mass_diag[row]
+                        } else {
+                            0.0
+                        }
+                };
+            }
+        }
+    }
     for i in 0..implicit.operator.dof_count {
         if implicit.operator.constrained[i] {
             implicit.operator.stiffness_diag[i] = 1.0;
@@ -230,6 +255,7 @@ fn build_implicit_summary(summary: &AssemblySummary, rhs: &[f64], dt: f64) -> As
 }
 
 fn apply_implicit_operator(summary: &AssemblySummary, x: &[f64], dt: f64) -> Vec<f64> {
+    let stiffness = apply_k(&summary.operator, x);
     let mut y = vec![0.0; x.len()];
     for i in 0..x.len() {
         if summary.operator.constrained[i] {
@@ -237,15 +263,7 @@ fn apply_implicit_operator(summary: &AssemblySummary, x: &[f64], dt: f64) -> Vec
             continue;
         }
 
-        let mut stiffness_value = summary.operator.stiffness_diag[i] * x[i];
-        if i > 0 && !summary.operator.constrained[i - 1] {
-            stiffness_value -= summary.operator.stiffness_upper[i - 1] * x[i - 1];
-        }
-        if i + 1 < x.len() && !summary.operator.constrained[i + 1] {
-            stiffness_value -= summary.operator.stiffness_upper[i] * x[i + 1];
-        }
-
-        y[i] = summary.operator.mass_diag[i] * x[i] + dt * stiffness_value;
+        y[i] = summary.operator.mass_diag[i] * x[i] + dt * stiffness[i];
     }
     y
 }
@@ -260,20 +278,5 @@ pub(super) fn strain_energy(summary: &AssemblySummary, x: &[f64]) -> f64 {
 }
 
 fn apply_stiffness(summary: &AssemblySummary, x: &[f64]) -> Vec<f64> {
-    let mut y = vec![0.0; x.len()];
-    for i in 0..x.len() {
-        if summary.operator.constrained[i] {
-            y[i] = x[i];
-            continue;
-        }
-        let mut stiffness_value = summary.operator.stiffness_diag[i] * x[i];
-        if i > 0 && !summary.operator.constrained[i - 1] {
-            stiffness_value -= summary.operator.stiffness_upper[i - 1] * x[i - 1];
-        }
-        if i + 1 < x.len() && !summary.operator.constrained[i + 1] {
-            stiffness_value -= summary.operator.stiffness_upper[i] * x[i + 1];
-        }
-        y[i] = stiffness_value;
-    }
-    y
+    apply_k(&summary.operator, x)
 }

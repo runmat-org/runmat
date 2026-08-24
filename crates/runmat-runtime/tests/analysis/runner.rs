@@ -4281,10 +4281,30 @@ fn write_fixture_solver_mesh_artifact(
 fn fixture_requires_solver_mesh(spec: &FixtureSpec) -> bool {
     spec.expect_validate_error.is_none()
         && spec.expect_run_error.is_none()
-        && matches!(
+        && (matches!(
             spec.run_kind,
             AnalysisRunKind::Thermal | AnalysisRunKind::Electromagnetic
-        )
+        ) || spec.id.starts_with("electro_thermal_joule_"))
+}
+
+fn configure_mesh_backed_electro_thermal_model(spec: &FixtureSpec, model: &mut AnalysisModel) {
+    if !spec.id.starts_with("electro_thermal_joule_") {
+        return;
+    }
+    model.loads = vec![runmat_analysis_core::LoadCase {
+        load_id: format!("{}_force", spec.id),
+        region_id: "fixture_force_face".to_owned(),
+        kind: runmat_analysis_core::LoadKind::Force {
+            fx: 0.0,
+            fy: -100.0,
+            fz: 0.0,
+        },
+    }];
+    model.boundary_conditions = vec![runmat_analysis_core::BoundaryCondition {
+        bc_id: format!("{}_fixed", spec.id),
+        region_id: "fixture_fixed_face".to_owned(),
+        kind: runmat_analysis_core::BoundaryConditionKind::Fixed,
+    }];
 }
 
 pub(super) fn run_fixture(
@@ -4293,6 +4313,7 @@ pub(super) fn run_fixture(
 ) -> FixtureRunRecord {
     let mut model = (spec.model)();
     configure_model_for_fixture(spec.id, &mut model);
+    configure_mesh_backed_electro_thermal_model(spec, &mut model);
     let fixture_store_root = filesystem_root.map(|root| root.join(spec.id));
     let filesystem_root = fixture_store_root.as_ref();
     if let Some(root) = filesystem_root {

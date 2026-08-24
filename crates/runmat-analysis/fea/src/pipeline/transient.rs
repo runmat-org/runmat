@@ -305,6 +305,7 @@ pub fn run_transient_with_options(
         &normalized_time_factors(&transient.time_points_s, displacement_snapshots.len()),
         &residual_norm_values,
         summary.dof_count,
+        options.solver_mesh.as_ref(),
     );
     run.diagnostics.extend(thermo_mechanical_fields.diagnostics);
     run.diagnostics.extend(electro_thermal_fields.diagnostics);
