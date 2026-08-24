@@ -241,19 +241,39 @@ pub fn run_electromagnetic_with_options(
                     aligned_source_count += 1;
                 }
                 let gain = regional_source_gain(&region, &material_stats, coil_source);
-                let (start, end) = region_span_for_index(region_index, region_count, node_count);
-                for local_idx in 0..(end - start) {
-                    let local_x = if end - start <= 1 {
-                        0.5
-                    } else {
-                        local_idx as f64 / (end - start - 1) as f64
-                    };
-                    let mode = (std::f64::consts::PI * local_x).sin();
-                    let magnitude =
-                        source_scale * amplitude_scale * domain.applied_current_a * gain * mode;
-                    let node_index = start + local_idx;
-                    source_profile_real[node_index] += magnitude * source_phase_rad.cos();
-                    source_profile_imag[node_index] += magnitude * source_phase_rad.sin();
+                let mesh_nodes = solver_mesh
+                    .map(|mesh| {
+                        solver_mesh_topology::boundary_node_indices(
+                            mesh,
+                            std::iter::once(load.region_id.as_str()),
+                        )
+                    })
+                    .unwrap_or_default();
+                if mesh_nodes.is_empty() {
+                    let (start, end) =
+                        region_span_for_index(region_index, region_count, node_count);
+                    for local_idx in 0..(end - start) {
+                        let local_x = if end - start <= 1 {
+                            0.5
+                        } else {
+                            local_idx as f64 / (end - start - 1) as f64
+                        };
+                        let mode = (std::f64::consts::PI * local_x).sin();
+                        let magnitude =
+                            source_scale * amplitude_scale * domain.applied_current_a * gain * mode;
+                        let node_index = start + local_idx;
+                        source_profile_real[node_index] += magnitude * source_phase_rad.cos();
+                        source_profile_imag[node_index] += magnitude * source_phase_rad.sin();
+                    }
+                } else {
+                    for (local_idx, node_index) in mesh_nodes.iter().copied().enumerate() {
+                        let local_x = (local_idx as f64 + 0.5) / mesh_nodes.len() as f64;
+                        let mode = (std::f64::consts::PI * local_x).sin();
+                        let magnitude =
+                            source_scale * amplitude_scale * domain.applied_current_a * gain * mode;
+                        source_profile_real[node_index] += magnitude * source_phase_rad.cos();
+                        source_profile_imag[node_index] += magnitude * source_phase_rad.sin();
+                    }
                 }
             }
         } else {
@@ -427,24 +447,29 @@ pub fn run_electromagnetic_with_options(
             boundary_penalty_diag[node_index] += penalty_base * scale;
         }
     };
-    for region_index in &ground_region_indices {
-        let (start, end) = region_span_for_index(*region_index, region_count, node_count);
-        if start < end {
-            add_boundary_penalty(start, ground_penalty_scale);
-            add_boundary_penalty(start.saturating_add(1), 0.5 * ground_penalty_scale);
-            let tail = end.saturating_sub(1);
-            add_boundary_penalty(tail, ground_penalty_scale);
-            add_boundary_penalty(tail.saturating_sub(1), 0.5 * ground_penalty_scale);
+    if solver_mesh.is_none() {
+        // The line reference model represents both boundary types through penalty terms.
+        // Canonical Maxwell meshes enforce vector-potential ground strongly on tangential
+        // edge DOFs, while magnetic insulation is the natural boundary condition.
+        for region_index in &ground_region_indices {
+            let (start, end) = region_span_for_index(*region_index, region_count, node_count);
+            if start < end {
+                add_boundary_penalty(start, ground_penalty_scale);
+                add_boundary_penalty(start.saturating_add(1), 0.5 * ground_penalty_scale);
+                let tail = end.saturating_sub(1);
+                add_boundary_penalty(tail, ground_penalty_scale);
+                add_boundary_penalty(tail.saturating_sub(1), 0.5 * ground_penalty_scale);
+            }
         }
-    }
-    for region_index in &insulation_region_indices {
-        let (start, end) = region_span_for_index(*region_index, region_count, node_count);
-        if start < end {
-            add_boundary_penalty(start, insulation_penalty_scale);
-            add_boundary_penalty(start.saturating_add(1), 0.5 * insulation_penalty_scale);
-            let tail = end.saturating_sub(1);
-            add_boundary_penalty(tail, insulation_penalty_scale);
-            add_boundary_penalty(tail.saturating_sub(1), 0.5 * insulation_penalty_scale);
+        for region_index in &insulation_region_indices {
+            let (start, end) = region_span_for_index(*region_index, region_count, node_count);
+            if start < end {
+                add_boundary_penalty(start, insulation_penalty_scale);
+                add_boundary_penalty(start.saturating_add(1), 0.5 * insulation_penalty_scale);
+                let tail = end.saturating_sub(1);
+                add_boundary_penalty(tail, insulation_penalty_scale);
+                add_boundary_penalty(tail.saturating_sub(1), 0.5 * insulation_penalty_scale);
+            }
         }
     }
     for (diag, penalty) in stiffness_diag.iter_mut().zip(boundary_penalty_diag.iter()) {
@@ -453,7 +478,22 @@ pub fn run_electromagnetic_with_options(
 
     let mut constrained = vec![false; node_count];
     let mut expected_ground_anchor_nodes = 0usize;
-    if !ground_region_indices.is_empty() {
+    if let Some(mesh) = solver_mesh {
+        let ground_selector_ids = ground_region_indices.iter().filter_map(|region_index| {
+            coefficient_profile
+                .region_coefficients
+                .get(*region_index)
+                .map(|region| region.region_id.as_str())
+        });
+        let boundary_nodes = solver_mesh_topology::boundary_node_indices(mesh, ground_selector_ids);
+        expected_ground_anchor_nodes = boundary_nodes.len();
+        for node_index in boundary_nodes {
+            constrained[node_index] = true;
+        }
+        if expected_ground_anchor_nodes == 0 && node_count > 0 {
+            constrained[0] = true;
+        }
+    } else if !ground_region_indices.is_empty() {
         for region_index in &ground_region_indices {
             let (start, end) = region_span_for_index(*region_index, region_count, node_count);
             if start < node_count {
@@ -466,38 +506,47 @@ pub fn run_electromagnetic_with_options(
             }
         }
     }
-    let mut anchor_count = if electromagnetic_boundary_count == 0 {
-        2
-    } else {
-        ((node_count as f64) * (0.05 + 0.25 * boundary_anchor_ratio))
-            .round()
-            .clamp(2.0, (node_count as f64) * 0.6) as usize
-    };
-    if vector_potential_ground_count > 0 {
-        anchor_count = anchor_count.max(2 + vector_potential_ground_count);
-    }
-    anchor_count = anchor_count.min(node_count);
-    if anchor_count >= node_count {
-        constrained.fill(true);
-    } else {
-        let step =
-            ((node_count - 1) as f64 / (anchor_count.saturating_sub(1).max(1)) as f64).max(1.0);
-        for idx in 0..anchor_count {
-            let dof = ((idx as f64) * step).round() as usize;
-            constrained[dof.min(node_count - 1)] = true;
+    if solver_mesh.is_none() {
+        let mut anchor_count = if electromagnetic_boundary_count == 0 {
+            2
+        } else {
+            ((node_count as f64) * (0.05 + 0.25 * boundary_anchor_ratio))
+                .round()
+                .clamp(2.0, (node_count as f64) * 0.6) as usize
+        };
+        if vector_potential_ground_count > 0 {
+            anchor_count = anchor_count.max(2 + vector_potential_ground_count);
         }
-        constrained[0] = true;
-        constrained[node_count - 1] = true;
+        anchor_count = anchor_count.min(node_count);
+        if anchor_count >= node_count {
+            constrained.fill(true);
+        } else {
+            let step =
+                ((node_count - 1) as f64 / (anchor_count.saturating_sub(1).max(1)) as f64).max(1.0);
+            for idx in 0..anchor_count {
+                let dof = ((idx as f64) * step).round() as usize;
+                constrained[dof.min(node_count - 1)] = true;
+            }
+            constrained[0] = true;
+            constrained[node_count - 1] = true;
+        }
     }
-    let actual_ground_anchor_nodes = ground_region_indices
-        .iter()
-        .map(|region_index| {
-            let (start, end) = region_span_for_index(*region_index, region_count, node_count);
-            (start..end)
-                .filter(|node_index| constrained[*node_index])
-                .count()
-        })
-        .sum::<usize>();
+    let actual_ground_anchor_nodes = if solver_mesh.is_some() {
+        constrained
+            .iter()
+            .filter(|is_constrained| **is_constrained)
+            .count()
+    } else {
+        ground_region_indices
+            .iter()
+            .map(|region_index| {
+                let (start, end) = region_span_for_index(*region_index, region_count, node_count);
+                (start..end)
+                    .filter(|node_index| constrained[*node_index])
+                    .count()
+            })
+            .sum::<usize>()
+    };
     let ground_anchor_effectiveness_ratio = if expected_ground_anchor_nodes == 0 {
         0.0
     } else {
@@ -506,9 +555,6 @@ pub fn run_electromagnetic_with_options(
     let mut rhs_real = vec![0.0_f64; node_count];
     let mut rhs_imag = vec![0.0_f64; node_count];
     for i in 0..node_count {
-        if constrained[i] {
-            continue;
-        }
         let conductivity_scale = (node_sigma[i].max(1.0e-9)
             / material_stats.conductivity_mean.max(1.0e-9))
         .clamp(0.2, 5.0);
@@ -517,6 +563,18 @@ pub fn run_electromagnetic_with_options(
             / (1.0 + omega * effective_permittivity_i);
         rhs_imag[i] = source_distribution_imag[i] * source_drive_scale * conductivity_scale
             / (1.0 + omega * effective_permittivity_i);
+    }
+    // Edge-basis source projection must happen before essential edge constraints are
+    // applied. A source value at a boundary node contributes to every incident edge, and
+    // only the edges tangential to a grounded boundary are constrained. Clearing nodal
+    // values here would also erase valid source terms on interior-normal edges.
+    let edge_nodal_rhs_real = rhs_real.clone();
+    let edge_nodal_rhs_imag = rhs_imag.clone();
+    for node_index in 0..node_count {
+        if constrained[node_index] {
+            rhs_real[node_index] = 0.0;
+            rhs_imag[node_index] = 0.0;
+        }
     }
 
     summary.dof_count = node_count;
@@ -533,8 +591,6 @@ pub fn run_electromagnetic_with_options(
         rhs: rhs_real.clone(),
     };
 
-    let base_rhs_real = rhs_real;
-    let base_rhs_imag = rhs_imag;
     let maxwell_topology =
         MaxwellEdgeTopology::from_solver_mesh_or_line(solver_mesh, node_count, h, &constrained);
     let edge_operator = maxwell_topology.assemble_curl_curl_operator(CurlCurlAssemblyInputs {
@@ -548,8 +604,8 @@ pub fn run_electromagnetic_with_options(
     });
     let edge_coupling_terms =
         maxwell_topology.edge_average_terms(&conductivity_coupling_terms, 1.0e-9);
-    let edge_rhs_real = maxwell_topology.edge_source_terms(&base_rhs_real);
-    let edge_rhs_imag = maxwell_topology.edge_source_terms(&base_rhs_imag);
+    let edge_rhs_real = maxwell_topology.edge_source_terms(&edge_nodal_rhs_real);
+    let edge_rhs_imag = maxwell_topology.edge_source_terms(&edge_nodal_rhs_imag);
     let backend_kind = if backend == ComputeBackend::Gpu {
         LinearAlgebraBackendKind::RuntimeTensor
     } else {
@@ -574,8 +630,12 @@ pub fn run_electromagnetic_with_options(
         .node_potential_from_edge_line_integrals(&edge_vector_potential_real, node_count);
     let vector_potential_imag = maxwell_topology
         .node_potential_from_edge_line_integrals(&edge_vector_potential_imag, node_count);
-    let gauge_anchor_residual_ratio = maxwell_topology
-        .gauge_anchor_residual_ratio(&vector_potential_real, &vector_potential_imag);
+    let gauge_anchor_residual_ratio = maxwell_topology.gauge_anchor_residual_ratio(
+        &edge_vector_potential_real,
+        &edge_vector_potential_imag,
+        &vector_potential_real,
+        &vector_potential_imag,
+    );
     let gauge_penalty_ratio = boundary_penalty_diag.iter().sum::<f64>()
         / summary
             .operator
@@ -857,22 +917,56 @@ pub fn run_electromagnetic_with_options(
     let boundary_penalty_conditioning_contribution = gauge_penalty_ratio;
     let mut region_source_energy = vec![0.0_f64; region_count];
     let mut region_field_energy = vec![0.0_f64; region_count];
-    for i in 0..node_count {
-        let region_index = ((i * region_count) / node_count).min(region_count - 1);
-        region_source_energy[region_index] += (source_distribution_real[i]
-            * source_distribution_real[i]
-            + source_distribution_imag[i] * source_distribution_imag[i])
-            .sqrt();
-        region_field_energy[region_index] += vector_potential[i].abs();
+    if let Some(mesh) = solver_mesh {
+        for (region_index, region) in coefficient_profile.region_coefficients.iter().enumerate() {
+            let selected_nodes = solver_mesh_topology::boundary_node_indices(
+                mesh,
+                std::iter::once(region.region_id.as_str()),
+            )
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>();
+            for (edge_index, edge) in maxwell_topology.edges.iter().enumerate() {
+                if selected_nodes.contains(&edge.from_node)
+                    || selected_nodes.contains(&edge.to_node)
+                {
+                    region_source_energy[region_index] += (edge_rhs_real[edge_index]
+                        * edge_rhs_real[edge_index]
+                        + edge_rhs_imag[edge_index] * edge_rhs_imag[edge_index])
+                        .sqrt();
+                    region_field_energy[region_index] += (edge_vector_potential_real[edge_index]
+                        * edge_vector_potential_real[edge_index]
+                        + edge_vector_potential_imag[edge_index]
+                            * edge_vector_potential_imag[edge_index])
+                        .sqrt();
+                }
+            }
+        }
+    } else {
+        for i in 0..node_count {
+            let region_index = ((i * region_count) / node_count).min(region_count - 1);
+            region_source_energy[region_index] += (source_distribution_real[i]
+                * source_distribution_real[i]
+                + source_distribution_imag[i] * source_distribution_imag[i])
+                .sqrt();
+            region_field_energy[region_index] += vector_potential[i].abs();
+        }
     }
-    let source_total = region_source_energy.iter().sum::<f64>().max(1.0e-9);
-    let field_total = region_field_energy.iter().sum::<f64>().max(1.0e-9);
-    let l1_mismatch = region_source_energy
-        .iter()
-        .zip(region_field_energy.iter())
-        .map(|(source, field)| (source / source_total - field / field_total).abs())
-        .sum::<f64>();
-    let source_region_energy_consistency_ratio = (1.0 - 0.5 * l1_mismatch).clamp(0.0, 1.0);
+    let source_total = region_source_energy.iter().sum::<f64>();
+    let field_total = region_field_energy.iter().sum::<f64>();
+    let source_region_energy_consistency_ratio = if source_total.is_finite()
+        && field_total.is_finite()
+        && source_total > 0.0
+        && field_total > 0.0
+    {
+        let l1_mismatch = region_source_energy
+            .iter()
+            .zip(region_field_energy.iter())
+            .map(|(source, field)| (source / source_total - field / field_total).abs())
+            .sum::<f64>();
+        (1.0 - 0.5 * l1_mismatch).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
     let mean_dispersive_conductivity =
         dispersive_conductivity_terms.iter().sum::<f64>() / node_count.max(1) as f64;
     let mean_phase_attenuated_conductivity =
@@ -2003,8 +2097,16 @@ fn solve_harmonic_block_system(
         }
     }
     let b_norm = block_dot(&b, &b).sqrt().max(1.0e-9);
-    let mut x = vec![0.0_f64; size];
-    let mut r = b.clone();
+    // Start from the block-Jacobi approximation. A zero initial vector can trigger an
+    // immediate BiCGSTAB shadow-residual breakdown for symmetric mesh-edge source layouts,
+    // incorrectly returning a zero field despite a nonzero right-hand side.
+    let mut x = apply_block_jacobi_preconditioner(operator, coupling_terms, &b);
+    let initial_applied = apply_harmonic_block_operator(operator, coupling_terms, &x);
+    let mut r = b
+        .iter()
+        .zip(initial_applied)
+        .map(|(rhs, applied)| rhs - applied)
+        .collect::<Vec<_>>();
     let r_hat = r.clone();
     let mut p = vec![0.0_f64; size];
     let mut v = vec![0.0_f64; size];
@@ -2178,8 +2280,11 @@ impl MaxwellEdgeTopology {
                         to_node: edge.to_node,
                         orientation: 1.0,
                         length: edge.length_m,
+                        // A tangential edge is grounded only when the complete edge lies on
+                        // the grounded boundary. Constraining every edge incident to one
+                        // grounded node would incorrectly eliminate interior field DOFs.
                         constrained: constrained.get(edge.from_node).copied().unwrap_or(false)
-                            || constrained.get(edge.to_node).copied().unwrap_or(false),
+                            && constrained.get(edge.to_node).copied().unwrap_or(false),
                     })
                     .collect(),
                 elements: topology
@@ -2260,10 +2365,11 @@ impl MaxwellEdgeTopology {
     }
 
     fn representable_incidence_pair_count(&self) -> usize {
-        self.elements
-            .iter()
-            .map(|element| element.representable_pair_count())
-            .sum()
+        if self.elements.is_empty() {
+            0
+        } else {
+            self.incidence_pair_count()
+        }
     }
 
     fn incidence_operator_pair_coverage_ratio(&self) -> f64 {
@@ -2313,6 +2419,8 @@ impl MaxwellEdgeTopology {
         let edge_count = self.edge_count();
         let mut stiffness_diag = vec![0.0_f64; edge_count];
         let mut stiffness_upper = vec![0.0_f64; edge_count.saturating_sub(1)];
+        let mut stiffness_dense =
+            (!self.elements.is_empty()).then(|| vec![0.0_f64; edge_count * edge_count]);
         let mut mass_diag = vec![1.0_f64; edge_count];
         let mut damping_diag = vec![0.0_f64; edge_count];
         let constrained = self
@@ -2351,29 +2459,34 @@ impl MaxwellEdgeTopology {
             for element in &self.elements {
                 for (left_index, right_index, orientation_product) in element.edge_pairs() {
                     let coupling = 0.20
-                        * orientation_product.abs()
+                        * orientation_product
                         * harmonic_mean(stiffness_diag[left_index], stiffness_diag[right_index])
                             .max(1.0e-12);
-                    let lower = left_index.min(right_index);
-                    let upper = left_index.max(right_index);
-                    if upper == lower + 1 {
-                        stiffness_upper[lower] = stiffness_upper[lower].max(coupling);
-                    } else {
-                        stiffness_diag[lower] += 0.5 * coupling;
-                        stiffness_diag[upper] += 0.5 * coupling;
-                    }
+                    stiffness_diag[left_index] += coupling.abs();
+                    stiffness_diag[right_index] += coupling.abs();
+                    let dense = stiffness_dense
+                        .as_mut()
+                        .expect("mesh incidence allocates a dense edge operator");
+                    dense[left_index * edge_count + right_index] -= coupling;
+                    dense[right_index * edge_count + left_index] -= coupling;
                 }
             }
         }
-        for (index, coupling) in stiffness_upper.iter().copied().enumerate() {
-            stiffness_diag[index] += coupling.abs();
-            stiffness_diag[index + 1] += coupling.abs();
+        if let Some(dense) = stiffness_dense.as_mut() {
+            for (index, diagonal) in stiffness_diag.iter().copied().enumerate() {
+                dense[index * edge_count + index] = diagonal;
+            }
+        } else {
+            for (index, coupling) in stiffness_upper.iter().copied().enumerate() {
+                stiffness_diag[index] += coupling.abs();
+                stiffness_diag[index + 1] += coupling.abs();
+            }
         }
 
         OperatorSystem {
             dof_count: edge_count,
             constrained,
-            stiffness_dense: None,
+            stiffness_dense,
             stiffness_csr: None,
             stiffness_diag,
             stiffness_upper,
@@ -2553,25 +2666,46 @@ impl MaxwellEdgeTopology {
         curl
     }
 
-    fn gauge_anchor_residual_ratio(&self, real: &[f64], imag: &[f64]) -> f64 {
-        let mut anchor_energy = 0.0_f64;
-        let mut total_energy = 0.0_f64;
-        for node_index in 0..real.len().max(imag.len()) {
-            let real_value = real.get(node_index).copied().unwrap_or(0.0);
-            let imag_value = imag.get(node_index).copied().unwrap_or(0.0);
-            let energy = real_value * real_value + imag_value * imag_value;
-            total_energy += energy;
-            if self.gauge_anchor_nodes.binary_search(&node_index).is_ok() {
-                anchor_energy += energy;
-            }
+    fn gauge_anchor_residual_ratio(
+        &self,
+        edge_real: &[f64],
+        edge_imag: &[f64],
+        nodal_real: &[f64],
+        nodal_imag: &[f64],
+    ) -> f64 {
+        if self.basis == MaxwellEdgeTopologyBasis::SolverMeshEdgeCurlConforming {
+            return energy_fraction(edge_real, edge_imag, |edge_index| {
+                self.edges
+                    .get(edge_index)
+                    .is_some_and(|edge| edge.constrained)
+            });
         }
-        if total_energy <= 1.0e-18 {
-            0.0
-        } else {
-            (anchor_energy / total_energy).sqrt()
+        energy_fraction(nodal_real, nodal_imag, |node_index| {
+            self.gauge_anchor_nodes.binary_search(&node_index).is_ok()
+        })
+    }
+}
+
+fn energy_fraction(real: &[f64], imag: &[f64], mut included: impl FnMut(usize) -> bool) -> f64 {
+    let mut anchor_energy = 0.0_f64;
+    let mut total_energy = 0.0_f64;
+    for node_index in 0..real.len().max(imag.len()) {
+        let real_value = real.get(node_index).copied().unwrap_or(0.0);
+        let imag_value = imag.get(node_index).copied().unwrap_or(0.0);
+        let energy = real_value * real_value + imag_value * imag_value;
+        total_energy += energy;
+        if included(node_index) {
+            anchor_energy += energy;
         }
     }
+    if total_energy <= 1.0e-18 {
+        0.0
+    } else {
+        (anchor_energy / total_energy).sqrt()
+    }
+}
 
+impl MaxwellEdgeTopology {
     #[cfg(test)]
     fn edge_curl_curl_residual_metrics(
         &self,
@@ -2752,13 +2886,6 @@ impl MaxwellElementIncidence {
             ));
         }
         pairs
-    }
-
-    fn representable_pair_count(&self) -> usize {
-        self.edge_pairs()
-            .into_iter()
-            .filter(|(left, right, _)| left.abs_diff(*right) == 1)
-            .count()
     }
 }
 
@@ -3217,12 +3344,48 @@ mod tests {
     }
 
     #[test]
+    fn solver_mesh_maxwell_operator_represents_all_incidence_pairs() {
+        let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(
+            runmat_meshing_core::ElementOrder::Tet4,
+        );
+        let topology =
+            MaxwellEdgeTopology::from_solver_mesh_or_line(Some(&mesh), 4, 0.25, &[false; 4]);
+        let nodal_operator = OperatorSystem {
+            dof_count: 4,
+            constrained: vec![false; 4],
+            stiffness_dense: None,
+            stiffness_csr: None,
+            stiffness_diag: vec![10.0; 4],
+            stiffness_upper: vec![1.0; 3],
+            mass_diag: vec![1.0; 4],
+            damping_diag: vec![0.0; 4],
+            rhs: vec![0.0; 4],
+        };
+
+        let operator = topology.assemble_curl_curl_operator(super::CurlCurlAssemblyInputs {
+            nodal_operator: &nodal_operator,
+            node_mu_r: &[1.0; 4],
+            node_eps_r: &[2.0; 4],
+            boundary_penalty_diag: &[0.0; 4],
+            mu0: 4.0e-7 * std::f64::consts::PI,
+            epsilon0: 8.854_187_812_8e-12,
+            omega: 2.0 * std::f64::consts::PI * 60.0,
+        });
+
+        assert_eq!(topology.incidence_operator_pair_coverage_ratio(), 1.0);
+        assert_eq!(
+            operator.stiffness_dense.as_ref().map(Vec::len),
+            Some(topology.edge_count() * topology.edge_count())
+        );
+    }
+
+    #[test]
     fn maxwell_edge_topology_reports_zero_gauge_residual_when_anchors_are_zero() {
         let topology = MaxwellEdgeTopology::line_graph(5, 0.25, &[true, false, false, false, true]);
         let real = vec![0.0, 0.5, 1.0, 0.5, 0.0];
         let imag = vec![0.0, 0.2, 0.4, 0.2, 0.0];
 
-        let residual = topology.gauge_anchor_residual_ratio(&real, &imag);
+        let residual = topology.gauge_anchor_residual_ratio(&[], &[], &real, &imag);
 
         assert!(residual <= 1.0e-12);
     }

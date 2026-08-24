@@ -13,6 +13,11 @@ use runmat_analysis_core::{AnalysisFieldValues, AnalysisModel, ReferenceFrame};
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::UnitSystem;
+use runmat_meshing_core::{
+    solver_volume_element_identity, CanonicalMeshingContract, ElementOrder, FieldTopologyLocation,
+    MeshNeighbor, PersistentEntityId, PersistentEntityKind, SolverMeshArtifact, SolverMeshNode,
+    SolverVolumeElement, StableDigest,
+};
 use runmat_runtime::analysis::{
     analysis_create_model_op, analysis_results_by_run_id_op, analysis_results_op,
     analysis_run_acoustic_with_options_op, analysis_run_cfd_with_options_op,
