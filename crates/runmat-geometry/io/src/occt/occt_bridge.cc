@@ -290,16 +290,24 @@ CadDocument read_step_shape(const std::string& path,
 
 CadDocument read_iges_shape(const std::string& path,
                             std::istream& stream,
+                            const std::string& materialized_path,
                             const OcctImportOptions& options) {
   check_cancelled(options);
   IGESCAFControl_Reader reader;
   reader.SetNameMode(Standard_True);
   reader.SetColorMode(Standard_True);
   reader.SetLayerMode(Standard_True);
-  IFSelect_ReturnStatus status = reader.ReadStream(path.c_str(), stream);
+  // OCCT 7.8 exposes the inherited stream API for IGES but does not implement IGES stream
+  // loading. Rust provides a securely created, content-identical temporary file until the
+  // pinned kernel has native IGES stream support. The path never enters geometry identity.
+  IFSelect_ReturnStatus status = materialized_path.empty()
+                                     ? reader.ReadStream(path.c_str(), stream)
+                                     : reader.ReadFile(materialized_path.c_str());
   check_cancelled(options);
   if (status != IFSelect_RetDone) {
-    throw std::runtime_error("OCCT IGES reader did not return IFSelect_RetDone");
+    throw std::runtime_error(
+        "OCCT IGES reader did not return IFSelect_RetDone (status " +
+        std::to_string(static_cast<int>(status)) + ")");
   }
   Handle(TDocStd_Document) document = new_xcaf_document();
   RunmatCancelProgressIndicator transfer_progress(options);
@@ -328,6 +336,7 @@ CadDocument read_brep_shape(std::istream& stream, const OcctImportOptions& optio
 
 CadDocument read_shape(const std::string& path,
                        rust::Slice<const std::uint8_t> bytes,
+                       const std::string& materialized_path,
                        OcctCadFormat format,
                        const OcctImportOptions& options) {
   std::string payload = bytes_to_string(bytes);
@@ -336,7 +345,7 @@ CadDocument read_shape(const std::string& path,
     case OcctCadFormat::Step:
       return read_step_shape(path, stream, options);
     case OcctCadFormat::Iges:
-      return read_iges_shape(path, stream, options);
+      return read_iges_shape(path, stream, materialized_path, options);
     case OcctCadFormat::Brep:
       return read_brep_shape(stream, options);
   }
@@ -896,11 +905,14 @@ void append_face_mesh(OcctImportPayload& result,
 
 OcctImportPayload import_cad_bytes(rust::Str path,
                                    rust::Slice<const std::uint8_t> bytes,
+                                   rust::Str materialized_path,
                                    OcctCadFormat format,
                                    OcctImportOptions options) {
   const std::string path_string = str_from_rust(path);
+  const std::string materialized_path_string = str_from_rust(materialized_path);
   check_cancelled(options);
-  CadDocument document = read_shape(path_string, bytes, format, options);
+  CadDocument document =
+      read_shape(path_string, bytes, materialized_path_string, format, options);
   check_cancelled(options);
 
   IMeshTools_Parameters mesh_parameters = mesh_parameters_from_options(options);
@@ -968,11 +980,14 @@ OcctImportPayload import_cad_bytes(rust::Str path,
 OcctExactShapePayload import_exact_cad_bytes(
     rust::Str path,
     rust::Slice<const std::uint8_t> bytes,
+    rust::Str materialized_path,
     OcctCadFormat format,
     OcctImportOptions options) {
   const std::string path_string = str_from_rust(path);
+  const std::string materialized_path_string = str_from_rust(materialized_path);
   check_cancelled(options);
-  CadDocument document = read_shape(path_string, bytes, format, options);
+  CadDocument document =
+      read_shape(path_string, bytes, materialized_path_string, format, options);
   check_cancelled(options);
 
   // Polygonal data is a derived display cache. Removing it before serialization ensures the
@@ -1262,14 +1277,17 @@ OcctExactShapePayload import_exact_cad_bytes(
 OcctPreviewSessionStartPayload start_cad_preview_session(
     rust::Str path,
     rust::Slice<const std::uint8_t> bytes,
+    rust::Str materialized_path,
     OcctCadFormat format,
     OcctImportOptions options) {
   const std::string path_string = str_from_rust(path);
+  const std::string materialized_path_string = str_from_rust(materialized_path);
   check_cancelled(options);
   auto session = std::make_unique<CadPreviewSession>();
   session->path = path_string;
   session->format = format;
-  session->document = read_shape(path_string, bytes, format, options);
+  session->document =
+      read_shape(path_string, bytes, materialized_path_string, format, options);
   session->mesh_parameters = mesh_parameters_from_options(options);
   check_cancelled(options);
 
