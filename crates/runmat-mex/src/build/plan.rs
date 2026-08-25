@@ -141,18 +141,24 @@ fn push_definitions(
     prefix: &str,
     arguments: &mut Vec<String>,
 ) {
+    arguments.push(format!("{prefix}MATLAB_MEX_FILE=1"));
     match build.api {
         MexApi::R2017b => {
             arguments.push(format!("{prefix}MEX_DOUBLE_HANDLE=1"));
+            arguments.push(format!("{prefix}TARGET_API_VERSION=700"));
         }
         MexApi::R2018a => {
             arguments.push(format!("{prefix}RUNMAT_MX_INTERLEAVED_COMPLEX=1"));
+            arguments.push(format!("{prefix}TARGET_API_VERSION=800"));
         }
         MexApi::CompatibleArrayDims => {
             arguments.push(format!("{prefix}RUNMAT_MX_COMPATIBLE_ARRAY_DIMS=1"));
             arguments.push(format!("{prefix}MX_COMPAT_32=1"));
+            arguments.push(format!("{prefix}TARGET_API_VERSION=700"));
         }
-        MexApi::LargeArrayDims => {}
+        MexApi::LargeArrayDims => {
+            arguments.push(format!("{prefix}TARGET_API_VERSION=700"));
+        }
     }
     arguments.push(format!(
         "{prefix}RUNMAT_MEX_FUNCTION_NAME=\"{function_name}\""
@@ -229,17 +235,21 @@ mod tests {
         };
 
         let default = definitions(MexApi::R2017b);
+        assert!(default.contains(&"-DMATLAB_MEX_FILE=1".to_string()));
         assert!(default.contains(&"-DMEX_DOUBLE_HANDLE=1".to_string()));
+        assert!(default.contains(&"-DTARGET_API_VERSION=700".to_string()));
         assert!(!default
             .iter()
             .any(|argument| argument.contains("INTERLEAVED")));
 
         let interleaved = definitions(MexApi::R2018a);
         assert!(interleaved.contains(&"-DRUNMAT_MX_INTERLEAVED_COMPLEX=1".to_string()));
+        assert!(interleaved.contains(&"-DTARGET_API_VERSION=800".to_string()));
 
         let compatible = definitions(MexApi::CompatibleArrayDims);
         assert!(compatible.contains(&"-DRUNMAT_MX_COMPATIBLE_ARRAY_DIMS=1".to_string()));
         assert!(compatible.contains(&"-DMX_COMPAT_32=1".to_string()));
+        assert!(compatible.contains(&"-DTARGET_API_VERSION=700".to_string()));
     }
 
     #[test]

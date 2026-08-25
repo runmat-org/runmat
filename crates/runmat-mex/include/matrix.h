@@ -3,6 +3,10 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
+#ifndef __cplusplus
+#include <stdbool.h>
+#endif
 
 #if defined(_WIN32)
 #if defined(RUNMAT_MEX_INTERNAL)
@@ -45,6 +49,20 @@ typedef int32_t mxInt32;
 typedef uint32_t mxUint32;
 typedef int64_t mxInt64;
 typedef uint64_t mxUint64;
+
+/* Fixed-width scalar spellings supported by the C MEX compatibility SDK. */
+typedef int8_t int8_T;
+typedef uint8_t uint8_T;
+typedef int16_t int16_T;
+typedef uint16_t uint16_T;
+typedef int32_t int32_T;
+typedef uint32_t uint32_T;
+typedef int64_t int64_T;
+typedef uint64_t uint64_T;
+typedef float real32_T;
+typedef double real64_T;
+typedef double real_T;
+typedef uint8_t boolean_T;
 
 typedef struct mxArray_tag mxArray;
 
