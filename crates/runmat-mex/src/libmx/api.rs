@@ -1,8 +1,9 @@
 use std::ffi::c_void;
 
-use runmat_value::NumericDType;
+use runmat_value::NumericStorage;
 
-use crate::{MxApiMode, MxArena, MxArenaError, MxArray, MxClassId};
+use crate::mxarray::MxArrayData;
+use crate::{MxApiMode, MxArena, MxArenaError, MxArray, MxClassId, MxSparse, MxSparseValues};
 
 #[derive(Debug)]
 pub struct MxApi {
@@ -34,6 +35,18 @@ impl MxApi {
         self.arena.allocate(value)
     }
 
+    pub fn make_persistent(&mut self, value: *mut MxArray) -> Result<(), String> {
+        self.arena
+            .get_mut(value)
+            .map_err(|error| error.to_string())?
+            .make_persistent();
+        Ok(())
+    }
+
+    pub fn finish_call(&mut self) {
+        self.arena.retain_persistent();
+    }
+
     pub fn create_numeric(
         &mut self,
         class_id: MxClassId,
@@ -61,6 +74,59 @@ impl MxApi {
     pub fn create_logical(&mut self, shape: Vec<usize>) -> Result<*mut MxArray, String> {
         let len = checked_numel(&shape)?;
         Ok(self.arena.allocate(MxArray::logical(vec![0; len], shape)?))
+    }
+
+    pub fn create_char(&mut self, shape: Vec<usize>) -> Result<*mut MxArray, String> {
+        let len = checked_numel(&shape)?;
+        Ok(self
+            .arena
+            .allocate(MxArray::character(vec![0; len], shape)?))
+    }
+
+    pub fn create_string(&mut self, value: &str) -> Result<*mut MxArray, String> {
+        let values = value.encode_utf16().collect::<Vec<_>>();
+        let shape = vec![1, values.len()];
+        Ok(self.arena.allocate(MxArray::character(values, shape)?))
+    }
+
+    pub fn create_cell(&mut self, shape: Vec<usize>) -> Result<*mut MxArray, String> {
+        let len = checked_numel(&shape)?;
+        Ok(self.arena.allocate(MxArray::cell(vec![None; len], shape)?))
+    }
+
+    pub fn create_sparse(
+        &mut self,
+        rows: usize,
+        cols: usize,
+        nzmax: usize,
+        logical: bool,
+    ) -> Result<*mut MxArray, String> {
+        let values = if logical {
+            MxSparseValues::Logical(vec![0; nzmax])
+        } else {
+            MxSparseValues::Numeric(NumericStorage::F64(vec![0.0; nzmax]))
+        };
+        Ok(self.arena.allocate(MxArray::sparse(MxSparse {
+            rows,
+            cols,
+            col_ptrs: vec![0; cols.saturating_add(1)],
+            row_indices: vec![0; nzmax],
+            values,
+            nzmax,
+        })?))
+    }
+
+    pub fn create_struct(
+        &mut self,
+        shape: Vec<usize>,
+        fields: Vec<String>,
+    ) -> Result<*mut MxArray, String> {
+        let value_count = checked_numel(&shape)?
+            .checked_mul(fields.len())
+            .ok_or_else(|| "struct field storage exceeds platform limits".to_string())?;
+        Ok(self
+            .arena
+            .allocate(MxArray::structure(fields, vec![None; value_count], shape)?))
     }
 
     pub fn duplicate(&mut self, source: *const MxArray) -> Result<*mut MxArray, MxArenaError> {
@@ -95,20 +161,26 @@ impl MxApi {
         self.arena.get(value).map(MxArray::is_complex)
     }
 
+    pub fn is_sparse(&self, value: *const MxArray) -> Result<bool, MxArenaError> {
+        self.arena
+            .get(value)
+            .map(|value| matches!(value.data(), MxArrayData::Sparse(_)))
+    }
+
     pub fn data_pointer(
         &mut self,
         value: *mut MxArray,
-        expected: Option<NumericDType>,
+        expected: Option<MxClassId>,
     ) -> Result<*mut c_void, String> {
         let value = self
             .arena
             .get_mut(value)
             .map_err(|error| error.to_string())?;
         if let Some(expected) = expected {
-            if value.class_id().numeric_dtype() != Some(expected) {
+            if value.class_id() != expected {
                 return Err(format!(
                     "requested {} data from {} mxArray",
-                    expected.class_name(),
+                    class_name(expected),
                     class_name(value.class_id())
                 ));
             }
@@ -125,6 +197,281 @@ impl MxApi {
             return Err("mxGetPi is unavailable in interleaved-complex mode".into());
         }
         Ok(value.imaginary_pointer())
+    }
+
+    /// Copy an adopted C data buffer into the array's owned storage.
+    ///
+    /// # Safety
+    ///
+    /// `source` must reference at least the byte length reported for the
+    /// selected real/interleaved or imaginary component and must not overlap
+    /// the array's current storage.
+    pub unsafe fn replace_data(
+        &mut self,
+        value: *mut MxArray,
+        source: *const c_void,
+        imaginary: bool,
+    ) -> Result<(), String> {
+        let value = self
+            .arena
+            .get_mut(value)
+            .map_err(|error| error.to_string())?;
+        let byte_len = if imaginary {
+            value.imaginary_byte_len()
+        } else {
+            value.data_byte_len()
+        }
+        .ok_or_else(|| "mxArray does not expose replaceable data storage".to_string())?;
+        if byte_len > 0 && source.is_null() {
+            return Err("replacement data pointer is null".into());
+        }
+        let destination = if imaginary {
+            value.imaginary_pointer()
+        } else {
+            value.data_pointer()
+        };
+        if byte_len > 0 && destination.is_null() {
+            return Err("mxArray data storage is unavailable".into());
+        }
+        // SAFETY: the caller transfers a buffer with the exact byte size of
+        // this already-allocated mxArray. Source and destination do not overlap.
+        unsafe { std::ptr::copy_nonoverlapping(source.cast::<u8>(), destination.cast(), byte_len) };
+        Ok(())
+    }
+
+    /// Copy an adopted C sparse-index buffer into owned CSC storage.
+    ///
+    /// # Safety
+    ///
+    /// `source` must reference at least `nzmax` row indices or `n + 1`
+    /// column pointers, according to `columns`, and must not overlap the
+    /// array's current index storage.
+    pub unsafe fn replace_sparse_indices(
+        &mut self,
+        value: *mut MxArray,
+        source: *const usize,
+        columns: bool,
+    ) -> Result<(), String> {
+        let value = self
+            .arena
+            .get_mut(value)
+            .map_err(|error| error.to_string())?;
+        let MxArrayData::Sparse(value) = value.data_mut() else {
+            return Err("mxArray is not sparse".into());
+        };
+        let destination = if columns {
+            &mut value.col_ptrs
+        } else {
+            &mut value.row_indices
+        };
+        if !destination.is_empty() && source.is_null() {
+            return Err("replacement sparse-index pointer is null".into());
+        }
+        // SAFETY: the caller transfers at least the fixed index capacity
+        // reported by this sparse array; the vectors retain Rust ownership.
+        unsafe {
+            std::ptr::copy_nonoverlapping(source, destination.as_mut_ptr(), destination.len())
+        };
+        Ok(())
+    }
+
+    pub fn get_cell(&self, value: *const MxArray, index: usize) -> Result<*mut MxArray, String> {
+        let value = self.arena.get(value).map_err(|error| error.to_string())?;
+        let MxArrayData::Cell(values) = value.data() else {
+            return Err("mxArray is not a cell array".into());
+        };
+        let value = values
+            .get(index)
+            .ok_or_else(|| "cell index exceeds array bounds".to_string())?;
+        Ok(value
+            .as_deref()
+            .map(|value: &MxArray| std::ptr::from_ref(value).cast_mut())
+            .unwrap_or(std::ptr::null_mut()))
+    }
+
+    pub fn set_cell(
+        &mut self,
+        value: *mut MxArray,
+        index: usize,
+        child: *mut MxArray,
+    ) -> Result<(), String> {
+        {
+            let value = self.arena.get(value).map_err(|error| error.to_string())?;
+            let MxArrayData::Cell(values) = value.data() else {
+                return Err("mxArray is not a cell array".into());
+            };
+            if index >= values.len() {
+                return Err("cell index exceeds array bounds".into());
+            }
+        }
+        let child = if child.is_null() {
+            None
+        } else {
+            Some(self.arena.take(child).map_err(|error| error.to_string())?)
+        };
+        let value = self
+            .arena
+            .get_mut(value)
+            .map_err(|error| error.to_string())?;
+        let MxArrayData::Cell(values) = value.data_mut() else {
+            unreachable!("validated cell array")
+        };
+        values[index] = child;
+        Ok(())
+    }
+
+    pub fn field_names(&self, value: *const MxArray) -> Result<&[String], String> {
+        let value = self.arena.get(value).map_err(|error| error.to_string())?;
+        let MxArrayData::Struct { fields, .. } = value.data() else {
+            return Err("mxArray is not a struct array".into());
+        };
+        Ok(fields)
+    }
+
+    pub fn add_field(&mut self, value: *mut MxArray, field: String) -> Result<usize, String> {
+        if field.is_empty() {
+            return Err("struct field names must be non-empty".into());
+        }
+        let value = self
+            .arena
+            .get_mut(value)
+            .map_err(|error| error.to_string())?;
+        let numel = value.numel();
+        let MxArrayData::Struct { fields, values } = value.data_mut() else {
+            return Err("mxArray is not a struct array".into());
+        };
+        if fields.iter().any(|existing| existing == &field) {
+            return Err(format!("struct field '{field}' already exists"));
+        }
+        let index = fields.len();
+        fields.push(field);
+        values.extend((0..numel).map(|_| None));
+        Ok(index)
+    }
+
+    pub fn remove_field(&mut self, value: *mut MxArray, field: usize) -> Result<(), String> {
+        let value = self
+            .arena
+            .get_mut(value)
+            .map_err(|error| error.to_string())?;
+        let numel = value.numel();
+        let MxArrayData::Struct { fields, values } = value.data_mut() else {
+            return Err("mxArray is not a struct array".into());
+        };
+        if field >= fields.len() {
+            return Err("struct field number exceeds array bounds".into());
+        }
+        fields.remove(field);
+        let start = field * numel;
+        values.drain(start..start + numel);
+        Ok(())
+    }
+
+    pub fn get_field(
+        &self,
+        value: *const MxArray,
+        element: usize,
+        field: usize,
+    ) -> Result<*mut MxArray, String> {
+        let value = self.arena.get(value).map_err(|error| error.to_string())?;
+        let numel = value.numel();
+        let MxArrayData::Struct { fields, values } = value.data() else {
+            return Err("mxArray is not a struct array".into());
+        };
+        if element >= numel || field >= fields.len() {
+            return Err("struct field index exceeds array bounds".into());
+        }
+        Ok(values[field * numel + element]
+            .as_deref()
+            .map(|value: &MxArray| std::ptr::from_ref(value).cast_mut())
+            .unwrap_or(std::ptr::null_mut()))
+    }
+
+    pub fn set_field(
+        &mut self,
+        value: *mut MxArray,
+        element: usize,
+        field: usize,
+        child: *mut MxArray,
+    ) -> Result<(), String> {
+        let numel = {
+            let value = self.arena.get(value).map_err(|error| error.to_string())?;
+            let MxArrayData::Struct { fields, .. } = value.data() else {
+                return Err("mxArray is not a struct array".into());
+            };
+            if element >= value.numel() || field >= fields.len() {
+                return Err("struct field index exceeds array bounds".into());
+            }
+            value.numel()
+        };
+        let child = if child.is_null() {
+            None
+        } else {
+            Some(self.arena.take(child).map_err(|error| error.to_string())?)
+        };
+        let value = self
+            .arena
+            .get_mut(value)
+            .map_err(|error| error.to_string())?;
+        let MxArrayData::Struct { values, .. } = value.data_mut() else {
+            unreachable!("validated struct array")
+        };
+        values[field * numel + element] = child;
+        Ok(())
+    }
+
+    pub fn sparse_indices(
+        &mut self,
+        value: *mut MxArray,
+    ) -> Result<(*mut usize, *mut usize, usize), String> {
+        let value = self
+            .arena
+            .get_mut(value)
+            .map_err(|error| error.to_string())?;
+        let MxArrayData::Sparse(value) = value.data_mut() else {
+            return Err("mxArray is not sparse".into());
+        };
+        Ok((
+            value.row_indices.as_mut_ptr(),
+            value.col_ptrs.as_mut_ptr(),
+            value.nzmax,
+        ))
+    }
+
+    pub fn set_nzmax(&mut self, value: *mut MxArray, nzmax: usize) -> Result<(), String> {
+        let value = self
+            .arena
+            .get_mut(value)
+            .map_err(|error| error.to_string())?;
+        let MxArrayData::Sparse(value) = value.data_mut() else {
+            return Err("mxArray is not sparse".into());
+        };
+        let nnz = value.col_ptrs.last().copied().unwrap_or(0);
+        if nzmax < nnz {
+            return Err(format!("nzmax {nzmax} is smaller than current nnz {nnz}"));
+        }
+        value.row_indices.resize(nzmax, 0);
+        match &mut value.values {
+            MxSparseValues::Numeric(values) => resize_numeric(values, nzmax),
+            MxSparseValues::Logical(values) => values.resize(nzmax, 0),
+        }
+        value.nzmax = nzmax;
+        Ok(())
+    }
+}
+
+fn resize_numeric(values: &mut NumericStorage, len: usize) {
+    match values {
+        NumericStorage::F64(values) => values.resize(len, 0.0),
+        NumericStorage::F32(values) => values.resize(len, 0.0),
+        NumericStorage::I8(values) => values.resize(len, 0),
+        NumericStorage::I16(values) => values.resize(len, 0),
+        NumericStorage::I32(values) => values.resize(len, 0),
+        NumericStorage::I64(values) => values.resize(len, 0),
+        NumericStorage::U8(values) => values.resize(len, 0),
+        NumericStorage::U16(values) => values.resize(len, 0),
+        NumericStorage::U32(values) => values.resize(len, 0),
+        NumericStorage::U64(values) => values.resize(len, 0),
     }
 }
 

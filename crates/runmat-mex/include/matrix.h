@@ -5,9 +5,19 @@
 #include <stdint.h>
 
 #if defined(_WIN32)
+#if defined(RUNMAT_MEX_INTERNAL)
+#define RUNMAT_MEX_EXPORT
+#else
 #define RUNMAT_MEX_EXPORT __declspec(dllexport)
+#endif
+#define RUNMAT_MEX_LOCAL
+#else
+#if defined(RUNMAT_MEX_INTERNAL)
+#define RUNMAT_MEX_EXPORT __attribute__((visibility("hidden")))
 #else
 #define RUNMAT_MEX_EXPORT __attribute__((visibility("default")))
+#endif
+#define RUNMAT_MEX_LOCAL __attribute__((visibility("hidden")))
 #endif
 
 #ifdef __cplusplus

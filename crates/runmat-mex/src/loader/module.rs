@@ -1,14 +1,25 @@
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 
 use libloading::Library;
+use parking_lot::ReentrantMutex;
 use runmat_value::Value;
 use thiserror::Error;
 
-use crate::{value_from_mx, value_to_mx, MexCallState, MexHostApiV1, MxApiMode, MxArray};
+use crate::{
+    value_from_mx, value_to_mx, MexCallState, MexHostApiV1, MexHostServices, MxApiMode, MxArray,
+    UnavailableMexHostServices,
+};
 
 type BindHost = unsafe extern "C" fn(*const MexHostApiV1) -> i32;
 type InvokeMex = unsafe extern "C" fn(i32, *mut *mut MxArray, i32, *const *const MxArray) -> i32;
+type IsLocked = unsafe extern "C" fn() -> i32;
+type Unload = unsafe extern "C" fn();
+
+/// Legacy C MEX code can contain process-global C runtime state. Serialize
+/// module loading, invocation, and unloading across sessions while allowing
+/// same-thread callback reentry.
+static MEX_PROCESS_GATE: LazyLock<ReentrantMutex<()>> = LazyLock::new(|| ReentrantMutex::new(()));
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MexInvocation {
@@ -47,11 +58,14 @@ pub struct MexModule {
     _library: Library,
     bind: BindHost,
     invoke: InvokeMex,
-    invocation: Mutex<()>,
+    is_locked: IsLocked,
+    unload: Unload,
+    state: Mutex<Option<MexCallState>>,
 }
 
 impl MexModule {
     pub fn load(path: &Path) -> Result<Self, MexLoadError> {
+        let _process_guard = MEX_PROCESS_GATE.lock();
         // SAFETY: the library remains owned by `Self`; all resolved function
         // pointers are copied only after their exact C signatures are checked.
         let library = unsafe { Library::new(path) }.map_err(|source| MexLoadError::Load {
@@ -75,11 +89,28 @@ impl MexModule {
                     source,
                 }
             })?;
+        // SAFETY: lifecycle symbols are emitted by the same private shim.
+        let is_locked =
+            *unsafe { library.get::<IsLocked>(b"runmatMexIsLocked\0") }.map_err(|source| {
+                MexLoadError::Symbol {
+                    symbol: "runmatMexIsLocked",
+                    source,
+                }
+            })?;
+        // SAFETY: lifecycle symbols are emitted by the same private shim.
+        let unload = *unsafe { library.get::<Unload>(b"runmatMexUnload\0") }.map_err(|source| {
+            MexLoadError::Symbol {
+                symbol: "runmatMexUnload",
+                source,
+            }
+        })?;
         Ok(Self {
             _library: library,
             bind,
             invoke,
-            invocation: Mutex::new(()),
+            is_locked,
+            unload,
+            state: Mutex::new(None),
         })
     }
 
@@ -89,8 +120,32 @@ impl MexModule {
         output_count: usize,
         mode: MxApiMode,
     ) -> Result<MexInvocation, MexLoadError> {
-        let _guard = self.invocation.lock().map_err(|_| MexLoadError::Poisoned)?;
-        let mut state = MexCallState::new(mode);
+        self.invoke_with_services(
+            inputs,
+            output_count,
+            mode,
+            std::rc::Rc::new(UnavailableMexHostServices),
+        )
+    }
+
+    pub fn invoke_with_services(
+        &self,
+        inputs: &[Value],
+        output_count: usize,
+        mode: MxApiMode,
+        services: std::rc::Rc<dyn MexHostServices>,
+    ) -> Result<MexInvocation, MexLoadError> {
+        let _process_guard = MEX_PROCESS_GATE.lock();
+        let mut state_slot = self.state.lock().map_err(|_| MexLoadError::Poisoned)?;
+        let state =
+            state_slot.get_or_insert_with(|| MexCallState::with_services(mode, services.clone()));
+        if state.mx.mode() != mode {
+            return Err(MexLoadError::Input(
+                "a loaded MEX module cannot switch complex API mode".into(),
+            ));
+        }
+        state.set_services(services);
+        state.begin_call();
         let mut input_pointers = Vec::with_capacity(inputs.len());
         for input in inputs {
             let value =
@@ -116,10 +171,11 @@ impl MexModule {
             }
         };
         if status != 0 || state.error.is_some() {
-            let error = state.error.unwrap_or(crate::MexDiagnostic {
+            let error = state.error.clone().unwrap_or(crate::MexDiagnostic {
                 identifier: None,
                 message: format!("gateway returned status {status}"),
             });
+            state.finish_call();
             return Err(MexLoadError::Invocation {
                 identifier: error
                     .identifier
@@ -128,7 +184,7 @@ impl MexModule {
                 message: error.message,
             });
         }
-        let outputs = outputs
+        let converted_outputs = outputs
             .into_iter()
             .enumerate()
             .map(|(index, pointer)| {
@@ -139,11 +195,60 @@ impl MexModule {
                     .map_err(|_| MexLoadError::MissingOutput(index))?;
                 value_from_mx(value).map_err(|error| MexLoadError::Output(error.message))
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, _>>();
+        let warnings = std::mem::take(&mut state.warnings);
+        let console = std::mem::take(&mut state.console);
+        state.finish_call();
         Ok(MexInvocation {
-            outputs,
-            warnings: state.warnings,
-            console: state.console,
+            outputs: converted_outputs?,
+            warnings,
+            console,
         })
+    }
+
+    pub fn is_locked(&self) -> bool {
+        // SAFETY: the no-argument shim query has no memory preconditions.
+        unsafe { (self.is_locked)() != 0 }
+    }
+
+    pub fn clear(&self) -> Result<bool, MexLoadError> {
+        let _process_guard = MEX_PROCESS_GATE.lock();
+        let mut state = self.state.lock().map_err(|_| MexLoadError::Poisoned)?;
+        if self.is_locked() {
+            return Ok(false);
+        }
+        if let Some(call_state) = state.as_mut() {
+            let api = call_state.host_api();
+            // SAFETY: at-exit runs synchronously while this state and API live.
+            unsafe {
+                let _ = (self.bind)(&api);
+                (self.unload)();
+            }
+        } else {
+            // SAFETY: no state exists, so no registered callback can access it.
+            unsafe { (self.unload)() };
+        }
+        *state = None;
+        Ok(true)
+    }
+}
+
+impl Drop for MexModule {
+    fn drop(&mut self) {
+        let _process_guard = MEX_PROCESS_GATE.lock();
+        if let Ok(mut state) = self.state.lock() {
+            if let Some(call_state) = state.as_mut() {
+                let api = call_state.host_api();
+                // SAFETY: forced shutdown runs the exit hook synchronously
+                // while the module, state, and API remain alive.
+                unsafe {
+                    let _ = (self.bind)(&api);
+                    (self.unload)();
+                }
+                return;
+            }
+        }
+        // SAFETY: there is no accessible state for an exit callback here.
+        unsafe { (self.unload)() };
     }
 }

@@ -44,6 +44,7 @@ impl MxArena {
         self.arrays
             .get(&(pointer as usize))
             .map(Box::as_ref)
+            .or_else(|| self.arrays.values().find_map(|value| value.find(pointer)))
             .ok_or(MxArenaError::UnknownArray)
     }
 
@@ -51,9 +52,17 @@ impl MxArena {
         if pointer.is_null() {
             return Err(MxArenaError::NullArray);
         }
+        let key = pointer as usize;
+        if self.arrays.contains_key(&key) {
+            return self
+                .arrays
+                .get_mut(&key)
+                .map(Box::as_mut)
+                .ok_or(MxArenaError::UnknownArray);
+        }
         self.arrays
-            .get_mut(&(pointer as usize))
-            .map(Box::as_mut)
+            .values_mut()
+            .find_map(|value| value.find_mut(pointer))
             .ok_or(MxArenaError::UnknownArray)
     }
 
@@ -61,18 +70,19 @@ impl MxArena {
         if pointer.is_null() {
             return Ok(());
         }
-        self.arrays
-            .remove(&(pointer as usize))
-            .map(drop)
-            .ok_or(MxArenaError::UnknownArray)
+        self.take(pointer).map(drop)
     }
 
     pub fn take(&mut self, pointer: *mut MxArray) -> Result<Box<MxArray>, MxArenaError> {
         if pointer.is_null() {
             return Err(MxArenaError::NullArray);
         }
+        if let Some(value) = self.arrays.remove(&(pointer as usize)) {
+            return Ok(value);
+        }
         self.arrays
-            .remove(&(pointer as usize))
+            .values_mut()
+            .find_map(|value| value.take_descendant(pointer))
             .ok_or(MxArenaError::UnknownArray)
     }
 
@@ -82,6 +92,19 @@ impl MxArena {
 
     pub fn is_empty(&self) -> bool {
         self.arrays.is_empty()
+    }
+
+    pub fn retain_persistent(&mut self) {
+        let arrays = std::mem::take(&mut self.arrays);
+        let mut retained = BTreeMap::new();
+        for (pointer, mut value) in arrays {
+            if value.is_persistent() {
+                retained.insert(pointer, value);
+            } else {
+                value.drain_persistent_descendants(&mut retained);
+            }
+        }
+        self.arrays = retained;
     }
 }
 
