@@ -227,11 +227,12 @@ mod tests {
     #[test]
     fn artifact_identity_is_exact_deterministic_and_admissible() {
         let target = MexTarget::current().unwrap();
+        let compiler_family = crate::build::compiler_family(&crate::build::default_c_compiler());
         let first = MexArtifactManifest::from_module(
             "fixture",
             target.clone(),
             MexApi::R2017b,
-            CCompilerFamily::GnuLike,
+            compiler_family,
             b"module bytes",
         )
         .unwrap();
@@ -239,7 +240,7 @@ mod tests {
             "fixture",
             target,
             MexApi::R2017b,
-            CCompilerFamily::GnuLike,
+            compiler_family,
             b"module bytes",
         )
         .unwrap();

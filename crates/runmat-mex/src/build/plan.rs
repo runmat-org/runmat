@@ -230,26 +230,31 @@ mod tests {
                 .unwrap()
                 .arguments
                 .into_iter()
-                .filter(|argument| argument.starts_with("-D"))
+                .filter_map(|argument| {
+                    argument
+                        .strip_prefix("-D")
+                        .or_else(|| argument.strip_prefix("/D"))
+                        .map(str::to_owned)
+                })
                 .collect::<Vec<_>>()
         };
 
         let default = definitions(MexApi::R2017b);
-        assert!(default.contains(&"-DMATLAB_MEX_FILE=1".to_string()));
-        assert!(default.contains(&"-DMEX_DOUBLE_HANDLE=1".to_string()));
-        assert!(default.contains(&"-DTARGET_API_VERSION=700".to_string()));
+        assert!(default.contains(&"MATLAB_MEX_FILE=1".to_string()));
+        assert!(default.contains(&"MEX_DOUBLE_HANDLE=1".to_string()));
+        assert!(default.contains(&"TARGET_API_VERSION=700".to_string()));
         assert!(!default
             .iter()
             .any(|argument| argument.contains("INTERLEAVED")));
 
         let interleaved = definitions(MexApi::R2018a);
-        assert!(interleaved.contains(&"-DRUNMAT_MX_INTERLEAVED_COMPLEX=1".to_string()));
-        assert!(interleaved.contains(&"-DTARGET_API_VERSION=800".to_string()));
+        assert!(interleaved.contains(&"RUNMAT_MX_INTERLEAVED_COMPLEX=1".to_string()));
+        assert!(interleaved.contains(&"TARGET_API_VERSION=800".to_string()));
 
         let compatible = definitions(MexApi::CompatibleArrayDims);
-        assert!(compatible.contains(&"-DRUNMAT_MX_COMPATIBLE_ARRAY_DIMS=1".to_string()));
-        assert!(compatible.contains(&"-DMX_COMPAT_32=1".to_string()));
-        assert!(compatible.contains(&"-DTARGET_API_VERSION=700".to_string()));
+        assert!(compatible.contains(&"RUNMAT_MX_COMPATIBLE_ARRAY_DIMS=1".to_string()));
+        assert!(compatible.contains(&"MX_COMPAT_32=1".to_string()));
+        assert!(compatible.contains(&"TARGET_API_VERSION=700".to_string()));
     }
 
     #[test]
