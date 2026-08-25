@@ -2,17 +2,13 @@ use runmat_value::{NumericDType, NumericScalar, NumericStorage};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(C)]
-pub struct MxComplex64 {
-    pub real: f64,
-    pub imag: f64,
+pub struct MxComplex<T> {
+    pub real: T,
+    pub imag: T,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[repr(C)]
-pub struct MxComplex32 {
-    pub real: f32,
-    pub imag: f32,
-}
+pub type MxComplex64 = MxComplex<f64>;
+pub type MxComplex32 = MxComplex<f32>;
 
 /// Interleaved-complex storage is kept separate from RunMat's canonical
 /// storage because its C layout is part of the `-R2018a` compatibility API.
@@ -20,14 +16,14 @@ pub struct MxComplex32 {
 pub enum MxInterleavedStorage {
     F64(Vec<MxComplex64>),
     F32(Vec<MxComplex32>),
-    I8(Vec<(i8, i8)>),
-    I16(Vec<(i16, i16)>),
-    I32(Vec<(i32, i32)>),
-    I64(Vec<(i64, i64)>),
-    U8(Vec<(u8, u8)>),
-    U16(Vec<(u16, u16)>),
-    U32(Vec<(u32, u32)>),
-    U64(Vec<(u64, u64)>),
+    I8(Vec<MxComplex<i8>>),
+    I16(Vec<MxComplex<i16>>),
+    I32(Vec<MxComplex<i32>>),
+    I64(Vec<MxComplex<i64>>),
+    U8(Vec<MxComplex<u8>>),
+    U16(Vec<MxComplex<u16>>),
+    U32(Vec<MxComplex<u32>>),
+    U64(Vec<MxComplex<u64>>),
 }
 
 impl MxInterleavedStorage {
@@ -47,14 +43,14 @@ impl MxInterleavedStorage {
                 };
                 len
             ]),
-            NumericDType::I8 => Self::I8(vec![(0, 0); len]),
-            NumericDType::I16 => Self::I16(vec![(0, 0); len]),
-            NumericDType::I32 => Self::I32(vec![(0, 0); len]),
-            NumericDType::I64 => Self::I64(vec![(0, 0); len]),
-            NumericDType::U8 => Self::U8(vec![(0, 0); len]),
-            NumericDType::U16 => Self::U16(vec![(0, 0); len]),
-            NumericDType::U32 => Self::U32(vec![(0, 0); len]),
-            NumericDType::U64 => Self::U64(vec![(0, 0); len]),
+            NumericDType::I8 => Self::I8(vec![MxComplex { real: 0, imag: 0 }; len]),
+            NumericDType::I16 => Self::I16(vec![MxComplex { real: 0, imag: 0 }; len]),
+            NumericDType::I32 => Self::I32(vec![MxComplex { real: 0, imag: 0 }; len]),
+            NumericDType::I64 => Self::I64(vec![MxComplex { real: 0, imag: 0 }; len]),
+            NumericDType::U8 => Self::U8(vec![MxComplex { real: 0, imag: 0 }; len]),
+            NumericDType::U16 => Self::U16(vec![MxComplex { real: 0, imag: 0 }; len]),
+            NumericDType::U32 => Self::U32(vec![MxComplex { real: 0, imag: 0 }; len]),
+            NumericDType::U64 => Self::U64(vec![MxComplex { real: 0, imag: 0 }; len]),
         }
     }
 
@@ -95,7 +91,8 @@ impl MxInterleavedStorage {
     pub fn components(&self) -> (NumericStorage, NumericStorage) {
         macro_rules! split {
             ($values:expr, $variant:ident) => {{
-                let (real, imag) = $values.iter().copied().unzip();
+                let real = $values.iter().map(|value| value.real).collect();
+                let imag = $values.iter().map(|value| value.imag).collect();
                 (
                     NumericStorage::$variant(real),
                     NumericStorage::$variant(imag),
@@ -153,7 +150,10 @@ impl MxInterleavedStorage {
                 let ($real, $imag) = (real, imag) else {
                     return Err("complex component class mismatch".into());
                 };
-                *destination = ($real_value, $imag_value);
+                *destination = MxComplex {
+                    real: $real_value,
+                    imag: $imag_value,
+                };
                 Ok(())
             }};
         }
