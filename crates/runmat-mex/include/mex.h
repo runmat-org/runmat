@@ -10,7 +10,8 @@ extern "C" {
 
 typedef void (*mexExitFcn)(void);
 
-void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]);
+RUNMAT_MEX_LOCAL void mexFunction(int nlhs, mxArray *plhs[], int nrhs,
+                                  const mxArray *prhs[]);
 
 RUNMAT_MEX_EXPORT int mexAtExit(mexExitFcn function);
 RUNMAT_MEX_EXPORT void mexLock(void);

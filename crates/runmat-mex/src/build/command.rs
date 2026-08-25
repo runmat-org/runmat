@@ -99,6 +99,18 @@ impl MexBuild {
         if self.interleaved_complex {
             arguments.push("-DRUNMAT_MX_INTERLEAVED_COMPLEX=1".into());
         }
+        let function_name = self
+            .output_name
+            .chars()
+            .map(|character| {
+                if character.is_ascii_alphanumeric() || character == '_' {
+                    character
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>();
+        arguments.push(format!("-DRUNMAT_MEX_FUNCTION_NAME=\"{function_name}\""));
         arguments.push(self.source.display().to_string());
         arguments.push(shim.display().to_string());
         arguments.push("-o".into());

@@ -6914,6 +6914,7 @@ name = "runmat-mex"
 version = "0.6.2"
 dependencies = [
  "libloading 0.8.9",
+ "parking_lot",
  "runmat-value",
  "tempfile",
  "thiserror 1.0.69",

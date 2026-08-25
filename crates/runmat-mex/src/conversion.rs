@@ -154,7 +154,7 @@ fn char_to_mx(value: &CharArray) -> Result<MxArray, MxConversionError> {
 
 fn sparse_to_mx(value: &SparseTensor) -> Result<MxArray, MxConversionError> {
     let values = if value.is_logical() {
-        MxSparseValues::Logical
+        MxSparseValues::Logical(vec![1; value.nnz()])
     } else {
         let dtype = value
             .numeric_dtype()
@@ -178,6 +178,7 @@ fn sparse_to_mx(value: &SparseTensor) -> Result<MxArray, MxConversionError> {
         col_ptrs: value.col_ptrs.clone(),
         row_indices: value.row_indices.clone(),
         values,
+        nzmax: value.nnz(),
     })
     .map_err(MxConversionError::new)
 }
@@ -375,34 +376,37 @@ fn struct_from_mx(
 }
 
 fn sparse_from_mx(value: &MxSparse) -> Result<Value, MxConversionError> {
+    let nnz = value.col_ptrs.last().copied().unwrap_or(0);
+    if nnz > value.nzmax {
+        return Err(MxConversionError::new(
+            "sparse column pointers exceed allocated nzmax",
+        ));
+    }
+    let row_indices = value.row_indices[..nnz].to_vec();
     let result = match &value.values {
-        MxSparseValues::Logical => SparseTensor::new_logical(
-            value.rows,
-            value.cols,
-            value.col_ptrs.clone(),
-            value.row_indices.clone(),
-        ),
+        MxSparseValues::Logical(_) => {
+            SparseTensor::new_logical(value.rows, value.cols, value.col_ptrs.clone(), row_indices)
+        }
         MxSparseValues::Numeric(NumericStorage::F64(values)) => SparseTensor::new(
             value.rows,
             value.cols,
             value.col_ptrs.clone(),
-            value.row_indices.clone(),
-            values.clone(),
+            row_indices,
+            values[..nnz].to_vec(),
         ),
         MxSparseValues::Numeric(NumericStorage::F32(values)) => SparseTensor::new_f32(
             value.rows,
             value.cols,
             value.col_ptrs.clone(),
-            value.row_indices.clone(),
-            values.clone(),
+            row_indices,
+            values[..nnz].to_vec(),
         ),
         MxSparseValues::Numeric(values) => SparseTensor::new_integer(
             value.rows,
             value.cols,
             value.col_ptrs.clone(),
-            value.row_indices.clone(),
-            values
-                .clone()
+            row_indices,
+            truncate_numeric(values, nnz)
                 .into_integer_storage()
                 .map_err(|_| MxConversionError::new("sparse numeric class is not integer"))?,
         ),
@@ -410,6 +414,21 @@ fn sparse_from_mx(value: &MxSparse) -> Result<Value, MxConversionError> {
     result
         .map(Value::SparseTensor)
         .map_err(MxConversionError::new)
+}
+
+fn truncate_numeric(values: &NumericStorage, len: usize) -> NumericStorage {
+    match values {
+        NumericStorage::F64(values) => NumericStorage::F64(values[..len].to_vec()),
+        NumericStorage::F32(values) => NumericStorage::F32(values[..len].to_vec()),
+        NumericStorage::I8(values) => NumericStorage::I8(values[..len].to_vec()),
+        NumericStorage::I16(values) => NumericStorage::I16(values[..len].to_vec()),
+        NumericStorage::I32(values) => NumericStorage::I32(values[..len].to_vec()),
+        NumericStorage::I64(values) => NumericStorage::I64(values[..len].to_vec()),
+        NumericStorage::U8(values) => NumericStorage::U8(values[..len].to_vec()),
+        NumericStorage::U16(values) => NumericStorage::U16(values[..len].to_vec()),
+        NumericStorage::U32(values) => NumericStorage::U32(values[..len].to_vec()),
+        NumericStorage::U64(values) => NumericStorage::U64(values[..len].to_vec()),
+    }
 }
 
 fn value_kind(value: &Value) -> &'static str {

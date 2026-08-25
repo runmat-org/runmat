@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::ffi::c_void;
 
 use runmat_value::{NumericDType, NumericStorage};
@@ -24,7 +25,7 @@ pub struct MxInterleaved {
 #[derive(Debug, Clone, PartialEq)]
 pub enum MxSparseValues {
     Numeric(NumericStorage),
-    Logical,
+    Logical(Vec<u8>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -34,6 +35,7 @@ pub struct MxSparse {
     pub col_ptrs: Vec<usize>,
     pub row_indices: Vec<usize>,
     pub values: MxSparseValues,
+    pub nzmax: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -182,24 +184,29 @@ impl MxArray {
     pub fn sparse(value: MxSparse) -> Result<Self, String> {
         if value.col_ptrs.len() != value.cols.saturating_add(1)
             || value.col_ptrs.first().copied() != Some(0)
-            || value.col_ptrs.last().copied() != Some(value.row_indices.len())
+            || value.col_ptrs.last().copied().unwrap_or(usize::MAX) > value.nzmax
         {
             return Err("invalid sparse column pointers".into());
         }
         let value_count = match &value.values {
             MxSparseValues::Numeric(values) => values.len(),
-            MxSparseValues::Logical => value.row_indices.len(),
+            MxSparseValues::Logical(values) => values.len(),
         };
-        if value_count != value.row_indices.len()
-            || value.row_indices.iter().any(|row| *row >= value.rows)
+        if value_count != value.nzmax || value.row_indices.len() != value.nzmax {
+            return Err("sparse storage length does not match nzmax".into());
+        }
+        let nnz = value.col_ptrs.last().copied().unwrap_or(0);
+        if value.row_indices[..nnz]
+            .iter()
+            .any(|row| *row >= value.rows)
         {
-            return Err("invalid sparse row/value storage".into());
+            return Err("invalid sparse row storage".into());
         }
         let class_id = match &value.values {
             MxSparseValues::Numeric(values) => {
                 MxClassId::from_numeric_dtype(values.numeric_dtype())
             }
-            MxSparseValues::Logical => MxClassId::Logical,
+            MxSparseValues::Logical(_) => MxClassId::Logical,
         };
         Ok(Self {
             class_id,
@@ -262,7 +269,7 @@ impl MxArray {
             MxArrayData::Char(values) => values.as_mut_ptr().cast(),
             MxArrayData::Sparse(value) => match &mut value.values {
                 MxSparseValues::Numeric(values) => numeric_pointer(values),
-                MxSparseValues::Logical => std::ptr::null_mut(),
+                MxSparseValues::Logical(values) => values.as_mut_ptr().cast(),
             },
             MxArrayData::Cell(_) | MxArrayData::Struct { .. } => std::ptr::null_mut(),
         }
@@ -274,6 +281,101 @@ impl MxArray {
                 imag: Some(values), ..
             }) => numeric_pointer(values),
             _ => std::ptr::null_mut(),
+        }
+    }
+
+    pub fn data_byte_len(&self) -> Option<usize> {
+        match &self.data {
+            MxArrayData::Numeric(value) => value.real.checked_byte_len(),
+            MxArrayData::Interleaved(value) => value
+                .values
+                .len()
+                .checked_mul(value.values.dtype().byte_size())?
+                .checked_mul(2),
+            MxArrayData::Logical(values) => Some(values.len()),
+            MxArrayData::Char(values) => values.len().checked_mul(std::mem::size_of::<u16>()),
+            MxArrayData::Sparse(value) => match &value.values {
+                MxSparseValues::Numeric(values) => values.checked_byte_len(),
+                MxSparseValues::Logical(values) => Some(values.len()),
+            },
+            MxArrayData::Cell(_) | MxArrayData::Struct { .. } => None,
+        }
+    }
+
+    pub fn imaginary_byte_len(&self) -> Option<usize> {
+        match &self.data {
+            MxArrayData::Numeric(MxNumeric {
+                imag: Some(values), ..
+            }) => values.checked_byte_len(),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn find(&self, pointer: *const Self) -> Option<&Self> {
+        if std::ptr::eq(self, pointer) {
+            return Some(self);
+        }
+        match &self.data {
+            MxArrayData::Cell(values) | MxArrayData::Struct { values, .. } => values
+                .iter()
+                .filter_map(Option::as_deref)
+                .find_map(|value| value.find(pointer)),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn find_mut(&mut self, pointer: *mut Self) -> Option<&mut Self> {
+        if std::ptr::eq(self, pointer) {
+            return Some(self);
+        }
+        match &mut self.data {
+            MxArrayData::Cell(values) | MxArrayData::Struct { values, .. } => values
+                .iter_mut()
+                .filter_map(Option::as_deref_mut)
+                .find_map(|value| value.find_mut(pointer)),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn take_descendant(&mut self, pointer: *mut Self) -> Option<Box<Self>> {
+        let values = match &mut self.data {
+            MxArrayData::Cell(values) | MxArrayData::Struct { values, .. } => values,
+            _ => return None,
+        };
+        for slot in values {
+            if slot
+                .as_deref()
+                .is_some_and(|value| std::ptr::eq(value, pointer))
+            {
+                return slot.take();
+            }
+            if let Some(value) = slot.as_deref_mut() {
+                if let Some(found) = value.take_descendant(pointer) {
+                    return Some(found);
+                }
+            }
+        }
+        None
+    }
+
+    pub(crate) fn drain_persistent_descendants(
+        &mut self,
+        retained: &mut BTreeMap<usize, Box<Self>>,
+    ) {
+        let values = match &mut self.data {
+            MxArrayData::Cell(values) | MxArrayData::Struct { values, .. } => values,
+            _ => return,
+        };
+        for slot in values {
+            let Some(mut child) = slot.take() else {
+                continue;
+            };
+            if child.is_persistent() {
+                let pointer = std::ptr::from_mut(child.as_mut()) as usize;
+                retained.insert(pointer, child);
+            } else {
+                child.drain_persistent_descendants(retained);
+            }
         }
     }
 }
