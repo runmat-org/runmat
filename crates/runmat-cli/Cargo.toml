@@ -52,6 +52,7 @@ openssl-sys = { version = "0.9.109", optional = true }
 
 # RunMat crates
 runmat-core = { version = "=0.6.2", path = "../runmat-core" }
+runmat-mex = { workspace = true }
 runmat-aot = { workspace = true }
 runmat-native-codegen = { workspace = true, features = ["compiler"] }
 runmat-execution = { workspace = true }

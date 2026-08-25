@@ -8,6 +8,7 @@ pub mod config;
 pub mod fea;
 pub mod gc;
 pub mod job;
+pub mod mex;
 pub mod package;
 pub mod repl;
 pub mod script;
