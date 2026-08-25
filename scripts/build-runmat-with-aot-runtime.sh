@@ -89,6 +89,11 @@ done
 pack_command+=(-p runmat-aot --bin runmat-aot-pack --)
 "${pack_command[@]}" "${pack_args[@]}"
 
+final_build=(cargo build -p runmat --profile "$profile")
+for build_argument in "${build_args[@]-}"; do
+  [[ -n "$build_argument" ]] || continue
+  final_build+=("$build_argument")
+done
 RUNMAT_AOT_RUNTIME_ARCHIVE="$build_root/runtime-archive.payload" \
 RUNMAT_AOT_RUNTIME_MANIFEST="$build_root/runtime-archive.json" \
-  cargo build -p runmat --profile "$profile" "${build_args[@]}"
+  "${final_build[@]}"

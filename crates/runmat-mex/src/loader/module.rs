@@ -197,64 +197,58 @@ impl MexModule {
         }
         state.set_services(services);
         state.begin_call();
-        let mut input_pointers = Vec::with_capacity(inputs.len());
-        for input in inputs {
-            let value =
-                value_to_mx(input, mode).map_err(|error| MexLoadError::Input(error.message))?;
-            input_pointers.push(state.mx.allocate(value).cast_const());
-        }
-        let mut outputs = vec![std::ptr::null_mut(); output_count];
-        let api = state.host_api();
-        // SAFETY: the API and call arena live through this synchronous call;
-        // input/output arrays have the exact lengths passed to the module.
-        let status = unsafe {
-            if (self.bind)(&api) != 0 {
-                1
-            } else {
-                let status = (self.invoke)(
-                    i32::try_from(outputs.len()).unwrap_or(i32::MAX),
-                    outputs.as_mut_ptr(),
-                    i32::try_from(input_pointers.len()).unwrap_or(i32::MAX),
-                    input_pointers.as_ptr(),
-                );
-                let _ = (self.bind)(std::ptr::null());
-                status
+        let result = (|| {
+            let mut input_pointers = Vec::with_capacity(inputs.len());
+            for input in inputs {
+                let value =
+                    value_to_mx(input, mode).map_err(|error| MexLoadError::Input(error.message))?;
+                input_pointers.push(state.mx.allocate(value).cast_const());
             }
-        };
-        if status != 0 || state.error.is_some() {
-            let error = state.error.clone().unwrap_or(crate::MexDiagnostic {
-                identifier: None,
-                message: format!("gateway returned status {status}"),
-            });
-            state.finish_call();
-            return Err(MexLoadError::Invocation {
-                identifier: error
-                    .identifier
-                    .map(|value| format!(" ({value})"))
-                    .unwrap_or_default(),
-                message: error.message,
-            });
-        }
-        let converted_outputs = outputs
-            .into_iter()
-            .enumerate()
-            .map(|(index, pointer)| {
-                let value = state
-                    .mx
-                    .arena()
-                    .get(pointer)
-                    .map_err(|_| MexLoadError::MissingOutput(index))?;
-                value_from_mx(value).map_err(|error| MexLoadError::Output(error.message))
+            let mut outputs = vec![std::ptr::null_mut(); output_count];
+            let api = state.host_api();
+            // SAFETY: the API and call arena live through this synchronous call;
+            // input/output arrays have the exact lengths passed to the module.
+            let status = unsafe {
+                if (self.bind)(&api) != 0 {
+                    1
+                } else {
+                    let status = (self.invoke)(
+                        i32::try_from(outputs.len()).unwrap_or(i32::MAX),
+                        outputs.as_mut_ptr(),
+                        i32::try_from(input_pointers.len()).unwrap_or(i32::MAX),
+                        input_pointers.as_ptr(),
+                    );
+                    let _ = (self.bind)(std::ptr::null());
+                    status
+                }
+            };
+            if status != 0 || state.error.is_some() {
+                let error = state.error.clone().unwrap_or(crate::MexDiagnostic {
+                    identifier: None,
+                    message: format!("gateway returned status {status}"),
+                });
+                return Err(invocation_error(error));
+            }
+            let outputs = outputs
+                .into_iter()
+                .enumerate()
+                .map(|(index, pointer)| {
+                    let value = state
+                        .mx
+                        .arena()
+                        .get(pointer)
+                        .map_err(|_| MexLoadError::MissingOutput(index))?;
+                    value_from_mx(value).map_err(|error| MexLoadError::Output(error.message))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(MexInvocation {
+                outputs,
+                warnings: std::mem::take(&mut state.warnings),
+                console: std::mem::take(&mut state.console),
             })
-            .collect::<Result<Vec<_>, _>>();
-        let warnings = std::mem::take(&mut state.warnings);
-        let console = std::mem::take(&mut state.console);
+        })();
         state.finish_call();
-        Ok(MexInvocation {
-            outputs: converted_outputs?,
-            warnings,
-            console,
-        })
+        result
     }
 
     pub fn is_locked(&self) -> bool {
@@ -263,6 +257,13 @@ impl MexModule {
     }
 
     pub fn clear(&self) -> Result<bool, MexLoadError> {
+        self.clear_with_services(std::rc::Rc::new(UnavailableMexHostServices))
+    }
+
+    pub fn clear_with_services(
+        &self,
+        services: std::rc::Rc<dyn MexHostServices>,
+    ) -> Result<bool, MexLoadError> {
         let _process_guard = MEX_PROCESS_GATE.lock();
         let mut state = match self.state.try_lock() {
             Ok(state) => state,
@@ -272,19 +273,67 @@ impl MexModule {
         if self.is_locked() {
             return Ok(false);
         }
-        if let Some(call_state) = state.as_mut() {
+        let lifecycle_error = if let Some(call_state) = state.as_mut() {
+            call_state.set_services(services);
             let api = call_state.host_api();
             // SAFETY: at-exit runs synchronously while this state and API live.
             unsafe {
                 let _ = (self.bind)(&api);
                 (self.unload)();
             }
+            call_state.error.take()
         } else {
             // SAFETY: no state exists, so no registered callback can access it.
             unsafe { (self.unload)() };
-        }
+            None
+        };
         *state = None;
-        Ok(true)
+        lifecycle_error.map_or(Ok(true), |error| Err(invocation_error(error)))
+    }
+
+    /// Force final lifecycle teardown when the owning session exits.
+    ///
+    /// `mexLock` prevents an interactive `clear`, but cannot extend native
+    /// state beyond its owning session. The supplied services remain valid
+    /// while registered `mexAtExit` callbacks run.
+    pub fn shutdown_with_services(
+        &self,
+        services: std::rc::Rc<dyn MexHostServices>,
+    ) -> Result<(), MexLoadError> {
+        let _process_guard = MEX_PROCESS_GATE.lock();
+        let mut state = match self.state.try_lock() {
+            Ok(state) => state,
+            Err(std::sync::TryLockError::WouldBlock) => return Err(MexLoadError::ReentrantModule),
+            Err(std::sync::TryLockError::Poisoned(_)) => return Err(MexLoadError::Poisoned),
+        };
+        let lifecycle_error = if let Some(call_state) = state.as_mut() {
+            call_state.set_services(services);
+            let api = call_state.host_api();
+            // SAFETY: teardown and registered at-exit callbacks run
+            // synchronously while the state and host API remain alive.
+            unsafe {
+                let _ = (self.bind)(&api);
+                (self.unload)();
+            }
+            call_state.error.take()
+        } else {
+            // SAFETY: no state exists, so no registered callback can reach a
+            // host allocation owned by this loader.
+            unsafe { (self.unload)() };
+            None
+        };
+        *state = None;
+        lifecycle_error.map_or(Ok(()), |error| Err(invocation_error(error)))
+    }
+}
+
+fn invocation_error(error: crate::MexDiagnostic) -> MexLoadError {
+    MexLoadError::Invocation {
+        identifier: error
+            .identifier
+            .map(|value| format!(" ({value})"))
+            .unwrap_or_default(),
+        message: error.message,
     }
 }
 

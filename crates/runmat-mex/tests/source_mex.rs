@@ -484,3 +484,183 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         )))
     );
 }
+
+#[test]
+fn completed_gateway_does_not_retain_its_invocation_host() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("host_lifetime.c");
+    fs::write(
+        &source,
+        r#"
+#include "mex.h"
+void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
+    (void)nlhs; (void)plhs; (void)nrhs; (void)prhs;
+}
+"#,
+    )
+    .unwrap();
+    let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+    let module = MexModule::load(&artifact.module).unwrap();
+    let host = Rc::new(FixtureHost::default());
+    let weak = Rc::downgrade(&host);
+    module
+        .invoke_with_services(&[], 0, module.api_mode(), host.clone())
+        .unwrap();
+    drop(host);
+
+    assert!(weak.upgrade().is_none());
+}
+
+#[test]
+fn forced_shutdown_runs_at_exit_with_the_originating_host_services_alive() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("at_exit_fixture.c");
+    fs::write(
+        &source,
+        r#"
+#include "mex.h"
+static void record_exit(void) {
+    mxArray *value = mxCreateDoubleScalar(99.0);
+    if (mexPutVariable("base", "exit_seen", value) != 0) {
+        mexErrMsgTxt("at-exit workspace callback failed");
+    }
+    mxDestroyArray(value);
+}
+
+void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
+    (void)nlhs; (void)plhs; (void)nrhs; (void)prhs;
+    if (mexAtExit(record_exit) != 0) mexErrMsgTxt("could not register at-exit callback");
+    mexLock();
+}
+"#,
+    )
+    .unwrap();
+    let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+    let host = Rc::new(FixtureHost::default());
+    let module = MexModule::load(&artifact.module).unwrap();
+    module
+        .invoke_with_services(&[], 0, module.api_mode(), host.clone())
+        .unwrap();
+    assert!(module.is_locked());
+    module.shutdown_with_services(host.clone()).unwrap();
+
+    assert_eq!(
+        host.workspace.lock().unwrap().get("exit_seen"),
+        Some(&Value::Num(99.0))
+    );
+}
+
+#[test]
+fn at_exit_error_is_reported_without_crossing_the_c_abi() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("at_exit_error.c");
+    fs::write(
+        &source,
+        r#"
+#include "mex.h"
+static void fail_exit(void) {
+    mexErrMsgIdAndTxt("Fixture:AtExit", "expected teardown failure");
+}
+void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
+    (void)nlhs; (void)plhs; (void)nrhs; (void)prhs;
+    mexAtExit(fail_exit);
+}
+"#,
+    )
+    .unwrap();
+    let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+    let module = MexModule::load(&artifact.module).unwrap();
+    let host = Rc::new(FixtureHost::default());
+    module
+        .invoke_with_services(&[], 0, module.api_mode(), host.clone())
+        .unwrap();
+    let error = module
+        .shutdown_with_services(host)
+        .expect_err("at-exit failure must reach the host");
+
+    assert!(matches!(
+        error,
+        MexLoadError::Invocation { identifier, message }
+            if identifier.contains("Fixture:AtExit") && message == "expected teardown failure"
+    ));
+}
+
+#[derive(Default)]
+struct ReentrantHost {
+    module: std::cell::RefCell<Option<std::rc::Weak<MexModule>>>,
+}
+
+impl MexHostServices for ReentrantHost {
+    fn eval(&self, _command: &str) -> Result<(), MexDiagnostic> {
+        unreachable!("reentrancy fixture does not evaluate source")
+    }
+
+    fn call(
+        &self,
+        function: &str,
+        _arguments: Vec<Value>,
+        _requested_outputs: usize,
+    ) -> Result<Vec<Value>, MexDiagnostic> {
+        assert_eq!(function, "recursive_entry");
+        let module = self
+            .module
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .upgrade()
+            .expect("fixture module is alive");
+        let error = module
+            .invoke(&[], 0, module.api_mode())
+            .expect_err("same-module recursive entry must fail");
+        Err(MexDiagnostic {
+            identifier: Some("RunMat:MEX:ReentrantInvocation".into()),
+            message: error.to_string(),
+        })
+    }
+
+    fn get_variable(&self, _workspace: &str, _name: &str) -> Result<Option<Value>, MexDiagnostic> {
+        unreachable!("reentrancy fixture does not read workspace state")
+    }
+
+    fn put_variable(
+        &self,
+        _workspace: &str,
+        _name: &str,
+        _value: Value,
+    ) -> Result<(), MexDiagnostic> {
+        unreachable!("reentrancy fixture does not write workspace state")
+    }
+}
+
+#[test]
+fn same_module_callback_reentry_fails_without_deadlocking() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("reentrant_fixture.c");
+    fs::write(
+        &source,
+        r#"
+#include "mex.h"
+void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
+    (void)nlhs; (void)plhs; (void)nrhs; (void)prhs;
+    if (mexCallMATLAB(0, NULL, 0, NULL, "recursive_entry") != 0) {
+        mexErrMsgTxt("recursive callback rejected");
+    }
+}
+"#,
+    )
+    .unwrap();
+    let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+    let module = Rc::new(MexModule::load(&artifact.module).unwrap());
+    let host = Rc::new(ReentrantHost::default());
+    *host.module.borrow_mut() = Some(Rc::downgrade(&module));
+    let error = module
+        .invoke_with_services(&[], 0, module.api_mode(), host)
+        .expect_err("recursive gateway must fail");
+
+    assert!(matches!(
+        error,
+        MexLoadError::Invocation { identifier, message }
+            if identifier.contains("RunMat:MEX:ReentrantInvocation")
+                && message.contains("recursive invocation of the same C MEX module")
+    ));
+}

@@ -42,7 +42,7 @@ impl RunMatSession {
             next_semantic_function_id: 0,
             dynamic_function_cache: Arc::new(Mutex::new(HashMap::new())),
             #[cfg(not(target_arch = "wasm32"))]
-            mex_modules: std::rc::Rc::new(std::cell::RefCell::new(HashMap::new())),
+            mex_runtime: std::rc::Rc::new(runmat_runtime::foreign::MexRuntimeSession::new()),
             #[cfg(not(target_arch = "wasm32"))]
             generic_native_cache: crate::generic_native::GenericNativeCache::default(),
             #[cfg(not(target_arch = "wasm32"))]

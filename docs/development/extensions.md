@@ -28,6 +28,10 @@ Each successful build writes a canonical `.runmat.json` manifest beside the plat
 
 Loaded modules belong to the current session. `clear mex`, `clear functions`, `clear all`, and named `clear` requests unload eligible modules and run registered `mexAtExit` handlers. A locked or currently executing module stays loaded. Native MEX loading is not available in a browser/WASM runtime; capability checks report that boundary before native execution.
 
+Calls made through `mexCallMATLAB`, `mexEvalString`, and the workspace APIs re-enter the exact RunMat session and active workspace that invoked the gateway. A callback may invoke other functions, including other MEX modules. Recursive entry into the same C MEX module is rejected with a structured error instead of deadlocking its persistent state. Cancellation is checked before RunMat enters native code and again when a gateway calls back into RunMat. An in-process C gateway cannot be preempted safely while it is executing; timeout and crash containment belong to the isolated extension-host policy.
+
+`mexLock` blocks interactive clearing, but it does not extend a module beyond its owning session. Session and standalone-program shutdown force final teardown and run `mexAtExit` with valid callback services. Invocation-only workspace frames are released after each gateway call rather than being retained by persistent native state.
+
 ## Native and browser products
 
 Executable and package products carry a deterministic interoperability manifest. Native hosts validate the manifest against registered adapter versions, capabilities, and artifact identities before execution.

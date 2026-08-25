@@ -54,8 +54,6 @@ mod config;
 mod dynamic;
 mod executable;
 mod init;
-#[cfg(not(target_arch = "wasm32"))]
-mod mex;
 mod project;
 mod run;
 mod workspace;
@@ -83,8 +81,7 @@ pub struct RunMatSession {
     dynamic_function_cache: Arc<Mutex<HashMap<PathBuf, DynamicFunctionCacheEntry>>>,
     /// Loaded C MEX modules and their persistent state, scoped to this session.
     #[cfg(not(target_arch = "wasm32"))]
-    mex_modules:
-        std::rc::Rc<std::cell::RefCell<HashMap<PathBuf, std::rc::Rc<runmat_mex::MexModule>>>>,
+    mex_runtime: std::rc::Rc<runmat_runtime::foreign::MexRuntimeSession>,
     /// Session-scoped production native entry publication and invalidation.
     #[cfg(not(target_arch = "wasm32"))]
     generic_native_cache: crate::generic_native::GenericNativeCache,
@@ -203,6 +200,10 @@ impl Drop for ActiveExecutionGuard {
 
 impl Drop for RunMatSession {
     fn drop(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Err(error) = self.mex_runtime.shutdown(self.runtime_context.clone()) {
+            tracing::warn!(%error, "could not finish MEX lifecycle during session shutdown");
+        }
         self.runtime_context
             .execution()
             .drain_scope(runmat_execution::CancellationReason::Shutdown);

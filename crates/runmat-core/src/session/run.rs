@@ -49,24 +49,28 @@ fn discover_source_catalog(
 }
 
 async fn load_dynamic_function(
+    runtime: runmat_runtime::context::RuntimeContext,
     name: String,
     args: Vec<Value>,
     requested_outputs: usize,
     phase: runmat_runtime::user_functions::DynamicFunctionLoadPhase,
     environment: DynamicFunctionEnvironment,
 ) -> Option<Result<Value, RuntimeError>> {
+    #[cfg(target_arch = "wasm32")]
+    let _ = &runtime;
     let DynamicFunctionEnvironment {
         compat,
         top_level_await_enabled,
         cache,
         project_handoff,
         #[cfg(not(target_arch = "wasm32"))]
-        mex_modules,
+        mex_runtime,
     } = environment;
     #[cfg(not(target_arch = "wasm32"))]
     if phase == runmat_runtime::user_functions::DynamicFunctionLoadPhase::BeforeSemantic {
-        if let Some(result) =
-            super::mex::load_and_call(&name, args.clone(), requested_outputs, mex_modules).await
+        if let Some(result) = mex_runtime
+            .load_and_call(&name, args.clone(), requested_outputs, runtime)
+            .await
         {
             return Some(result);
         }
@@ -299,9 +303,7 @@ struct DynamicFunctionEnvironment {
     cache: Arc<Mutex<HashMap<std::path::PathBuf, DynamicFunctionCacheEntry>>>,
     project_handoff: Option<runmat_package::FrozenProjectHandoff>,
     #[cfg(not(target_arch = "wasm32"))]
-    mex_modules: std::rc::Rc<
-        std::cell::RefCell<HashMap<std::path::PathBuf, std::rc::Rc<runmat_mex::MexModule>>>,
-    >,
+    mex_runtime: std::rc::Rc<runmat_runtime::foreign::MexRuntimeSession>,
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -337,12 +339,13 @@ impl RunMatSession {
             cache: Arc::clone(&self.dynamic_function_cache),
             project_handoff: self.project_handoff.clone(),
             #[cfg(not(target_arch = "wasm32"))]
-            mex_modules: std::rc::Rc::clone(&self.mex_modules),
+            mex_runtime: std::rc::Rc::clone(&self.mex_runtime),
         };
         let loader: std::rc::Rc<runmat_runtime::user_functions::DynamicFunctionLoader> =
-            std::rc::Rc::new(move |name, args, requested_outputs, phase| {
+            std::rc::Rc::new(move |runtime, name, args, requested_outputs, phase| {
                 let environment = dynamic_environment.clone();
                 Box::pin(load_dynamic_function(
+                    runtime,
                     name,
                     args,
                     requested_outputs,
@@ -354,9 +357,11 @@ impl RunMatSession {
             .set_dynamic_function_loader(Some(loader));
         let dynamic_function_cache = Arc::clone(&self.dynamic_function_cache);
         #[cfg(not(target_arch = "wasm32"))]
-        let mex_modules = std::rc::Rc::clone(&self.mex_modules);
+        let mex_runtime = std::rc::Rc::clone(&self.mex_runtime);
         let clearer: std::rc::Rc<runmat_runtime::user_functions::DynamicFunctionClearer> =
-            std::rc::Rc::new(move |request| {
+            std::rc::Rc::new(move |runtime, request| {
+                #[cfg(target_arch = "wasm32")]
+                let _ = &runtime;
                 if !matches!(
                     request,
                     runmat_runtime::user_functions::DynamicFunctionClearRequest::NativeExtensions
@@ -377,7 +382,7 @@ impl RunMatSession {
                     }
                 }
                 #[cfg(not(target_arch = "wasm32"))]
-                super::mex::clear_modules(&mex_modules, &request)?;
+                mex_runtime.clear(&request, runtime)?;
                 Ok(())
             });
         self.runtime_context
