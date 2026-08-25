@@ -7118,13 +7118,17 @@ dependencies = [
 name = "runmat-process-host"
 version = "0.6.2"
 dependencies = [
+ "hmac 0.12.1",
  "libc",
+ "rand 0.8.6",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "windows-sys 0.59.0",
+ "zeroize",
 ]
 
 [[package]]
