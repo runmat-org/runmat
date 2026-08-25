@@ -160,6 +160,54 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
 }
 
 #[test]
+fn c_gateway_compatibility_definitions_and_scalar_spellings_are_available() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("compatibility_surface.c");
+    fs::write(
+        &source,
+        r#"
+#include "mex.h"
+
+#ifndef MATLAB_MEX_FILE
+#error "MEX builds must define MATLAB_MEX_FILE"
+#endif
+
+#if MEX_INFORMATION_VERSION != 1
+#error "unexpected MEX information version"
+#endif
+
+#if TARGET_API_VERSION != 700
+#error "the default API pin must select the separate-complex compatibility surface"
+#endif
+
+void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
+    (void)nrhs; (void)prhs;
+    if (nlhs != 1) mexErrMsgTxt("expected one output");
+
+    bool enabled = true;
+    int8_T *value = (int8_T *)malloc(sizeof(int8_T));
+    if (value == NULL) mexErrMsgTxt("allocation failed");
+    *value = 7;
+    boolean_T flag = enabled ? 1 : 0;
+    real32_T single_value = 0.5f;
+    real64_T result = (real64_T)(*value + flag + abs(-3)) + single_value;
+    printf("compatibility surface\n");
+    plhs[0] = mxCreateDoubleScalar((real_T)result);
+    free(value);
+}
+"#,
+    )
+    .unwrap();
+
+    let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+    let module = MexModule::load(&artifact.module).unwrap();
+    let result = module.invoke(&[], 1, module.api_mode()).unwrap();
+
+    assert_eq!(result.outputs, vec![Value::Num(11.5)]);
+    assert_eq!(result.console, "compatibility surface\n");
+}
+
+#[test]
 fn independently_compiled_gateway_loads_and_preserves_typed_input() {
     let directory = tempfile::tempdir().unwrap();
     let source = directory.path().join("add_one.c");

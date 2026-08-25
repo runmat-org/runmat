@@ -3,6 +3,9 @@
 
 #include "matrix.h"
 #include <stdarg.h>
+#include <stdio.h>
+
+#define MEX_INFORMATION_VERSION 1
 
 #ifdef __cplusplus
 extern "C" {
@@ -28,6 +31,7 @@ RUNMAT_MEX_EXPORT void mexWarnMsgTxt(const char *message);
 RUNMAT_MEX_EXPORT void mexWarnMsgIdAndTxt(const char *identifier,
                                          const char *format, ...);
 RUNMAT_MEX_EXPORT int mexPrintf(const char *format, ...);
+#define printf mexPrintf
 RUNMAT_MEX_EXPORT int mexEvalString(const char *command);
 RUNMAT_MEX_EXPORT mxArray *mexEvalStringWithTrap(const char *command);
 RUNMAT_MEX_EXPORT int mexCallMATLAB(int nlhs, mxArray *plhs[], int nrhs,
