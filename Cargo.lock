@@ -6910,6 +6910,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-mex"
+version = "0.6.2"
+dependencies = [
+ "runmat-value",
+ "tempfile",
+]
+
+[[package]]
 name = "runmat-mir"
 version = "0.6.2"
 dependencies = [
