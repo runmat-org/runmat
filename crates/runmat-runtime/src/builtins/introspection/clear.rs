@@ -84,20 +84,48 @@ async fn clear_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         collect_clear_targets(arg, &mut names)?;
     }
 
-    if names.is_empty() || names.iter().any(|name| name.eq_ignore_ascii_case("all")) {
-        cleanup_workspace_values(workspace::snapshot()).await?;
-        workspace::clear().map_err(clear_error)?;
-    } else {
-        for name in names {
-            if let Some(value) = workspace::lookup(&name) {
-                crate::builtins::introspection::on_cleanup::run_cleanup_for_workspace_value(&value)
-                    .await?;
-            }
+    for name in names {
+        if name.is_empty() {
+            continue;
+        }
+        if let Some(value) = workspace::lookup(&name) {
+            crate::builtins::introspection::on_cleanup::run_cleanup_for_workspace_value(&value)
+                .await?;
             workspace::remove(&name).map_err(clear_error)?;
+            continue;
+        }
+        match name.to_ascii_lowercase().as_str() {
+            "all" => {
+                cleanup_workspace_values(workspace::snapshot()).await?;
+                workspace::clear().map_err(clear_error)?;
+                clear_dynamic_functions(crate::user_functions::DynamicFunctionClearRequest::All)?;
+            }
+            "variables" => {
+                cleanup_workspace_values(workspace::snapshot()).await?;
+                workspace::clear().map_err(clear_error)?;
+            }
+            "functions" => {
+                clear_dynamic_functions(crate::user_functions::DynamicFunctionClearRequest::All)?
+            }
+            "mex" => clear_dynamic_functions(
+                crate::user_functions::DynamicFunctionClearRequest::NativeExtensions,
+            )?,
+            _ => clear_dynamic_functions(
+                crate::user_functions::DynamicFunctionClearRequest::Named(name),
+            )?,
         }
     }
 
     Ok(empty_return_value())
+}
+
+fn clear_dynamic_functions(
+    request: crate::user_functions::DynamicFunctionClearRequest,
+) -> BuiltinResult<()> {
+    match crate::user_functions::try_clear_dynamic_functions(request) {
+        Some(result) => result,
+        None => Ok(()),
+    }
 }
 
 async fn cleanup_workspace_values(snapshot: Option<Vec<(String, Value)>>) -> BuiltinResult<()> {
@@ -267,6 +295,55 @@ mod tests {
         clear_builtin(vec![Value::from("all")]).expect("clear");
         let snapshot = crate::workspace::snapshot().unwrap_or_default();
         assert!(snapshot.is_empty());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn variable_name_takes_precedence_over_clear_keyword() {
+        let (_workspace_guard, _clear_guard) = test_guard();
+        ensure_test_resolver();
+        set_workspace(&[("all", Value::Num(1.0)), ("kept", Value::Num(2.0))]);
+        let requests = std::rc::Rc::new(RefCell::new(Vec::new()));
+        let context = crate::context::RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let observed = std::rc::Rc::clone(&requests);
+        context.set_dynamic_function_clearer(Some(std::rc::Rc::new(move |request| {
+            observed.borrow_mut().push(request);
+            Ok(())
+        })));
+        let _context = crate::context::RuntimeContextGuard::enter(context);
+
+        clear_builtin(vec![Value::from("all")]).expect("clear variable named all");
+
+        assert!(requests.borrow().is_empty());
+        let snapshot = crate::workspace::snapshot().unwrap_or_default();
+        assert_eq!(snapshot, vec![("kept".into(), Value::Num(2.0))]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn clear_mex_routes_only_to_native_extensions() {
+        let (_workspace_guard, _clear_guard) = test_guard();
+        ensure_test_resolver();
+        set_workspace(&[]);
+        let requests = std::rc::Rc::new(RefCell::new(Vec::new()));
+        let context = crate::context::RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let observed = std::rc::Rc::clone(&requests);
+        context.set_dynamic_function_clearer(Some(std::rc::Rc::new(move |request| {
+            observed.borrow_mut().push(request);
+            Ok(())
+        })));
+        let _context = crate::context::RuntimeContextGuard::enter(context);
+
+        clear_builtin(vec![Value::from("mex")]).expect("clear mex");
+
+        assert_eq!(
+            requests.borrow().as_slice(),
+            &[crate::user_functions::DynamicFunctionClearRequest::NativeExtensions]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

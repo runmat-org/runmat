@@ -41,6 +41,15 @@ pub type DynamicFunctionLoader =
     dyn Fn(String, Vec<Value>, usize, DynamicFunctionLoadPhase) -> DynamicFunctionLoadFuture;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DynamicFunctionClearRequest {
+    All,
+    NativeExtensions,
+    Named(String),
+}
+
+pub type DynamicFunctionClearer = dyn Fn(DynamicFunctionClearRequest) -> Result<(), RuntimeError>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceFunctionInfo {
     pub source_id: SourceId,
     pub name: String,
@@ -461,6 +470,18 @@ pub async fn try_load_and_call_dynamic_function(
         .dynamic_loader
         .clone()?;
     loader(name, args, requested_outputs, phase).await
+}
+
+pub fn try_clear_dynamic_functions(
+    request: DynamicFunctionClearRequest,
+) -> Option<Result<(), RuntimeError>> {
+    let clearer = crate::context::legacy::active()?
+        .state()
+        .call
+        .borrow()
+        .dynamic_clearer
+        .clone()?;
+    Some(clearer(request))
 }
 
 fn source_functions_in_catalog(

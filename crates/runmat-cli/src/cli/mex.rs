@@ -15,12 +15,30 @@ pub struct MexArgs {
     /// C compiler driver (defaults to CC, cc, or cl.exe)
     #[arg(long)]
     pub compiler: Option<PathBuf>,
-    /// Build against the separate-complex Matrix API
-    #[arg(long = "R2017b", conflicts_with = "interleaved_complex")]
-    pub separate_complex: bool,
-    /// Build against the interleaved-complex Matrix API (the default)
-    #[arg(long = "R2018a", conflicts_with = "separate_complex")]
-    pub interleaved_complex: bool,
+    /// Use the R2017b separate-complex, large-array API (the default)
+    #[arg(
+        long = "R2017b",
+        conflicts_with_all = ["r2018a", "large_array_dims", "compatible_array_dims"]
+    )]
+    pub r2017b: bool,
+    /// Use the R2018a interleaved-complex, large-array API
+    #[arg(
+        long = "R2018a",
+        conflicts_with_all = ["r2017b", "large_array_dims", "compatible_array_dims"]
+    )]
+    pub r2018a: bool,
+    /// Use the legacy separate-complex, large-array API spelling
+    #[arg(
+        long = "largeArrayDims",
+        conflicts_with_all = ["r2017b", "r2018a", "compatible_array_dims"]
+    )]
+    pub large_array_dims: bool,
+    /// Use the separate-complex API with 32-bit array dimensions
+    #[arg(
+        long = "compatibleArrayDims",
+        conflicts_with_all = ["r2017b", "r2018a", "large_array_dims"]
+    )]
+    pub compatible_array_dims: bool,
     /// Add a C header search directory
     #[arg(short = 'I', value_name = "DIRECTORY")]
     pub include_directories: Vec<PathBuf>,
@@ -61,7 +79,7 @@ mod tests {
         let Some(Commands::Mex(args)) = cli.command else {
             panic!("expected mex command");
         };
-        assert!(args.separate_complex);
+        assert!(args.r2017b);
         assert_eq!(args.include_directories, [PathBuf::from("vendor/include")]);
         assert_eq!(args.definitions, ["FEATURE=1"]);
         assert_eq!(args.output.as_deref(), Some("native_add"));

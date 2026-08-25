@@ -1,11 +1,66 @@
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use runmat_mex::{MexDiagnostic, MexHostServices, MexModule, MxApiMode};
+use runmat_mex::{MexDiagnostic, MexHostServices, MexModule};
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_value::Value;
 
 use super::*;
+
+pub(super) fn clear_modules(
+    modules: &std::cell::RefCell<HashMap<PathBuf, Rc<MexModule>>>,
+    request: &runmat_runtime::user_functions::DynamicFunctionClearRequest,
+) -> Result<(), RuntimeError> {
+    let mut first_error = None;
+    modules.borrow_mut().retain(|path, module| {
+        let selected = match request {
+            runmat_runtime::user_functions::DynamicFunctionClearRequest::All
+            | runmat_runtime::user_functions::DynamicFunctionClearRequest::NativeExtensions => true,
+            runmat_runtime::user_functions::DynamicFunctionClearRequest::Named(name) => {
+                path_matches_clear_name(path, name)
+            }
+        };
+        if !selected {
+            return true;
+        }
+        match module.clear() {
+            Ok(cleared) => !cleared,
+            Err(error) => {
+                if first_error.is_none() {
+                    first_error = Some(runtime_error(
+                        "MexClear",
+                        format!("Could not clear MEX function '{}': {error}", path.display()),
+                    ));
+                }
+                true
+            }
+        }
+    });
+    match first_error {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
+}
+
+pub(super) fn path_matches_clear_name(path: &std::path::Path, name: &str) -> bool {
+    let normalized = name.replace(['/', '\\'], std::path::MAIN_SEPARATOR_STR);
+    let requested = std::path::Path::new(&normalized);
+    let requested = requested.with_extension("");
+    if requested.components().count() > 1 {
+        return path.with_extension("").ends_with(requested);
+    }
+    let Some(candidate) = path.file_stem().and_then(|stem| stem.to_str()) else {
+        return false;
+    };
+    let Some(requested) = requested.file_name().and_then(|stem| stem.to_str()) else {
+        return false;
+    };
+    if cfg!(target_os = "windows") {
+        candidate.eq_ignore_ascii_case(requested)
+    } else {
+        candidate == requested
+    }
+}
 
 pub(super) async fn load_and_call(
     name: &str,
@@ -55,7 +110,7 @@ pub(super) async fn load_and_call(
     let result = module.invoke_with_services(
         &arguments,
         requested_outputs,
-        MxApiMode::InterleavedComplex,
+        module.api_mode(),
         Rc::new(RuntimeMexHostServices),
     );
     Some(match result {
