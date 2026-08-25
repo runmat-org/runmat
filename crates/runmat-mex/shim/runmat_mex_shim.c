@@ -361,6 +361,19 @@ mxArray *mxCreateNumericMatrix(mwSize m, mwSize n, mxClassID classid,
     return mxCreateNumericArray(2, dims, classid, complexity);
 }
 
+mxArray *mxCreateUninitNumericArray(mwSize ndim, const mwSize *dims,
+                                    mxClassID classid,
+                                    mxComplexity complexity) {
+    /* RunMat zero-initializes this safe compatibility allocation. C code may
+       still treat every element as writable, which is the public contract. */
+    return mxCreateNumericArray(ndim, dims, classid, complexity);
+}
+
+mxArray *mxCreateUninitNumericMatrix(mwSize m, mwSize n, mxClassID classid,
+                                     mxComplexity complexity) {
+    return mxCreateNumericMatrix(m, n, classid, complexity);
+}
+
 mxArray *mxCreateDoubleMatrix(mwSize m, mwSize n, mxComplexity complexity) {
     return mxCreateNumericMatrix(m, n, mxDOUBLE_CLASS, complexity);
 }
@@ -476,6 +489,35 @@ mxArray *mxCreateString(const char *value) {
     return array;
 }
 
+mxArray *mxCreateCharMatrixFromStrings(mwSize m, const char **strings) {
+    if (strings == NULL && m != 0) {
+        runmat_raise("RunMat:MEX:InvalidString", "string array pointer is null");
+    }
+    mxArray **rows = (mxArray **)calloc((size_t)m, sizeof(mxArray *));
+    if (rows == NULL && m != 0) {
+        runmat_raise("RunMat:MEX:Allocation", "could not allocate string rows");
+    }
+    mwSize columns = 0;
+    for (mwSize row = 0; row < m; ++row) {
+        rows[row] = mxCreateString(strings[row]);
+        mwSize length = mxGetNumberOfElements(rows[row]);
+        if (length > columns) columns = length;
+    }
+    mxArray *matrix = mxCreateCharArray(2, (mwSize[2]){m, columns});
+    mxChar *destination = mxGetChars(matrix);
+    for (mwSize index = 0; index < m * columns; ++index) destination[index] = ' ';
+    for (mwSize row = 0; row < m; ++row) {
+        const mxChar *source = mxGetChars(rows[row]);
+        mwSize length = mxGetNumberOfElements(rows[row]);
+        for (mwSize column = 0; column < length; ++column) {
+            destination[row + column * m] = source[column];
+        }
+        mxDestroyArray(rows[row]);
+    }
+    free(rows);
+    return matrix;
+}
+
 mxArray *mxCreateCellArray(mwSize ndim, const mwSize *dims) {
     runmat_require_host();
     size_t *owned = NULL;
@@ -568,6 +610,26 @@ mwSize mxGetNumberOfElements(const mxArray *array) {
     runmat_require_host();
     return runmat_public_size(
         runmat_host->number_of_elements(runmat_host->host, array));
+}
+
+mwIndex mxCalcSingleSubscript(const mxArray *array, mwSize nsubs,
+                              const mwIndex *subscripts) {
+    if (subscripts == NULL && nsubs != 0) {
+        runmat_raise("RunMat:MEX:Subscript", "subscript pointer is null");
+    }
+    mwSize ndim = mxGetNumberOfDimensions(array);
+    const mwSize *dims = mxGetDimensions(array);
+    mwIndex offset = 0;
+    mwIndex stride = 1;
+    for (mwSize dimension = 0; dimension < nsubs; ++dimension) {
+        mwSize extent = dimension < ndim ? dims[dimension] : 1;
+        if (subscripts[dimension] >= extent) {
+            runmat_raise("RunMat:MEX:Subscript", "subscript exceeds array bounds");
+        }
+        offset += subscripts[dimension] * stride;
+        stride *= extent;
+    }
+    return offset;
 }
 
 mwSize mxGetM(const mxArray *array) {
@@ -666,6 +728,15 @@ void mxSetPi(mxArray *array, double *data) {
     mxFree(data);
 }
 
+void *mxGetImagData(const mxArray *array) { return mxGetPi(array); }
+void mxSetImagData(mxArray *array, void *data) {
+    runmat_require_host();
+    if (runmat_host->replace_imaginary_data(runmat_host->host, array, data) != 0) {
+        runmat_raise("RunMat:MEX:Data", "could not replace imaginary mxArray data");
+    }
+    mxFree(data);
+}
+
 #define RUNMAT_TYPED_GETTER(name, type, class_id)                              \
     type *name(const mxArray *array) {                                         \
         runmat_require_host();                                                 \
@@ -686,6 +757,19 @@ RUNMAT_TYPED_GETTER(mxGetUint64s, mxUint64, mxUINT64_CLASS)
 RUNMAT_TYPED_GETTER(mxGetLogicals, mxLogical, mxLOGICAL_CLASS)
 RUNMAT_TYPED_GETTER(mxGetChars, mxChar, mxCHAR_CLASS)
 
+#define RUNMAT_TYPED_SETTER(name, type)                                       \
+    void name(mxArray *array, type *data) { mxSetData(array, data); }
+RUNMAT_TYPED_SETTER(mxSetDoubles, mxDouble)
+RUNMAT_TYPED_SETTER(mxSetSingles, mxSingle)
+RUNMAT_TYPED_SETTER(mxSetInt8s, mxInt8)
+RUNMAT_TYPED_SETTER(mxSetUint8s, mxUint8)
+RUNMAT_TYPED_SETTER(mxSetInt16s, mxInt16)
+RUNMAT_TYPED_SETTER(mxSetUint16s, mxUint16)
+RUNMAT_TYPED_SETTER(mxSetInt32s, mxInt32)
+RUNMAT_TYPED_SETTER(mxSetUint32s, mxUint32)
+RUNMAT_TYPED_SETTER(mxSetInt64s, mxInt64)
+RUNMAT_TYPED_SETTER(mxSetUint64s, mxUint64)
+
 mxComplexDouble *mxGetComplexDoubles(const mxArray *array) {
     return (mxComplexDouble *)mxGetData(array);
 }
@@ -693,6 +777,30 @@ mxComplexDouble *mxGetComplexDoubles(const mxArray *array) {
 mxComplexSingle *mxGetComplexSingles(const mxArray *array) {
     return (mxComplexSingle *)mxGetData(array);
 }
+
+#define RUNMAT_COMPLEX_GETTER(name, type)                                     \
+    type *name(const mxArray *array) { return (type *)mxGetData(array); }
+RUNMAT_COMPLEX_GETTER(mxGetComplexInt8s, mxComplexInt8)
+RUNMAT_COMPLEX_GETTER(mxGetComplexUint8s, mxComplexUint8)
+RUNMAT_COMPLEX_GETTER(mxGetComplexInt16s, mxComplexInt16)
+RUNMAT_COMPLEX_GETTER(mxGetComplexUint16s, mxComplexUint16)
+RUNMAT_COMPLEX_GETTER(mxGetComplexInt32s, mxComplexInt32)
+RUNMAT_COMPLEX_GETTER(mxGetComplexUint32s, mxComplexUint32)
+RUNMAT_COMPLEX_GETTER(mxGetComplexInt64s, mxComplexInt64)
+RUNMAT_COMPLEX_GETTER(mxGetComplexUint64s, mxComplexUint64)
+
+#define RUNMAT_COMPLEX_SETTER(name, type)                                     \
+    void name(mxArray *array, type *data) { mxSetData(array, data); }
+RUNMAT_COMPLEX_SETTER(mxSetComplexDoubles, mxComplexDouble)
+RUNMAT_COMPLEX_SETTER(mxSetComplexSingles, mxComplexSingle)
+RUNMAT_COMPLEX_SETTER(mxSetComplexInt8s, mxComplexInt8)
+RUNMAT_COMPLEX_SETTER(mxSetComplexUint8s, mxComplexUint8)
+RUNMAT_COMPLEX_SETTER(mxSetComplexInt16s, mxComplexInt16)
+RUNMAT_COMPLEX_SETTER(mxSetComplexUint16s, mxComplexUint16)
+RUNMAT_COMPLEX_SETTER(mxSetComplexInt32s, mxComplexInt32)
+RUNMAT_COMPLEX_SETTER(mxSetComplexUint32s, mxComplexUint32)
+RUNMAT_COMPLEX_SETTER(mxSetComplexInt64s, mxComplexInt64)
+RUNMAT_COMPLEX_SETTER(mxSetComplexUint64s, mxComplexUint64)
 
 int mxIsComplex(const mxArray *array) {
     runmat_require_host();
@@ -740,7 +848,16 @@ int mxIsEmpty(const mxArray *array) {
     return mxGetNumberOfElements(array) == 0;
 }
 
+int mxIsScalar(const mxArray *array) {
+    return mxGetNumberOfElements(array) == 1;
+}
+
+int mxIsFromGlobalWS(const mxArray *array) { return mexIsGlobal(array); }
+
 const char *mxGetClassName(const mxArray *array) {
+    runmat_require_host();
+    const char *host_name = runmat_host->class_name(runmat_host->host, array);
+    if (host_name != NULL) return host_name;
     switch (mxGetClassID(array)) {
     case mxCELL_CLASS: return "cell";
     case mxSTRUCT_CLASS: return "struct";
@@ -760,6 +877,27 @@ const char *mxGetClassName(const mxArray *array) {
     case mxOPAQUE_CLASS: return "opaque";
     case mxOBJECT_CLASS: return "object";
     default: return "unknown";
+    }
+}
+
+int mxSetClassName(mxArray *array, const char *classname) {
+    runmat_require_host();
+    return runmat_host->set_class_name(runmat_host->host, array, classname);
+}
+
+mxArray *mxGetProperty(const mxArray *array, mwIndex index,
+                       const char *propertyname) {
+    runmat_require_host();
+    return runmat_host->get_property(runmat_host->host, array, (size_t)index,
+                                     propertyname);
+}
+
+void mxSetProperty(mxArray *array, mwIndex index, const char *propertyname,
+                   mxArray *value) {
+    runmat_require_host();
+    if (runmat_host->set_property(runmat_host->host, array, (size_t)index,
+                                  propertyname, value) != 0) {
+        runmat_raise("RunMat:MEX:Object", "could not set object property");
     }
 }
 
@@ -1043,6 +1181,22 @@ char *mxArrayToString(const mxArray *array) {
     return value;
 }
 
+char *mxArrayToUTF8String(const mxArray *array) {
+    return mxArrayToString(array);
+}
+
+int mxMakeArrayComplex(mxArray *array) {
+    if (array == NULL || !mxIsNumeric(array)) return 0;
+    runmat_require_host();
+    return runmat_host->make_complex(runmat_host->host, array) == 0;
+}
+
+int mxMakeArrayReal(mxArray *array) {
+    if (array == NULL || !mxIsNumeric(array)) return 0;
+    runmat_require_host();
+    return runmat_host->make_real(runmat_host->host, array) == 0;
+}
+
 void mexErrMsgTxt(const char *message) { runmat_raise(NULL, message); }
 
 void mexErrMsgIdAndTxt(const char *identifier, const char *format, ...) {
@@ -1155,6 +1309,31 @@ int mexPutVariable(const char *workspace, const char *name,
 int mexIsGlobal(const mxArray *array) {
     runmat_require_host();
     return runmat_host->is_global(runmat_host->host, array);
+}
+
+mxArray *mexGet(double handle, const char *property) {
+    mxArray *arguments[2] = {mxCreateDoubleScalar(handle), mxCreateString(property)};
+    mxArray *output = NULL;
+    mxArray *error = mexCallMATLABWithTrap(1, &output, 2, arguments, "get");
+    mxDestroyArray(arguments[0]);
+    mxDestroyArray(arguments[1]);
+    if (error != NULL) {
+        mxDestroyArray(error);
+        return NULL;
+    }
+    return output;
+}
+
+int mexSet(double handle, const char *property, mxArray *value) {
+    mxArray *arguments[3] = {mxCreateDoubleScalar(handle), mxCreateString(property), value};
+    mxArray *error = mexCallMATLABWithTrap(0, NULL, 3, arguments, "set");
+    mxDestroyArray(arguments[0]);
+    mxDestroyArray(arguments[1]);
+    if (error != NULL) {
+        mxDestroyArray(error);
+        return 1;
+    }
+    return 0;
 }
 
 void *mxMalloc(mwSize size) {

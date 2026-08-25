@@ -6,6 +6,7 @@
 
 pub mod arena;
 pub mod build;
+pub mod compatibility;
 pub mod conversion;
 pub mod host;
 pub mod libmx;
@@ -19,6 +20,7 @@ pub use build::{
     MexBuildError, MexBuildInvocation, MexBuildOutput, MexBuildPlan, MexTarget, MEX_ADAPTER_ID,
     MEX_ADAPTER_VERSION, MEX_ARTIFACT_SCHEMA_VERSION, MEX_EXTENSIONS,
 };
+pub use compatibility::{MexApiAvailability, MexApiSymbol, C_MATRIX_API, C_MEX_API};
 pub use conversion::{value_from_mx, value_to_mx, MxConversionError};
 pub use host::{
     MexCallState, MexDiagnostic, MexHostApiV1, MexHostServices, UnavailableMexHostServices,

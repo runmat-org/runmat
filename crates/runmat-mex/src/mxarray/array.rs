@@ -50,6 +50,12 @@ pub enum MxArrayData {
         /// Field-major values: `field * numel + element`.
         values: Vec<Option<Box<MxArray>>>,
     },
+    Object {
+        class_name: String,
+        /// Property-major values: `property * numel + element`.
+        properties: Vec<String>,
+        values: Vec<Option<Box<MxArray>>>,
+    },
     Sparse(MxSparse),
 }
 
@@ -181,6 +187,42 @@ impl MxArray {
         })
     }
 
+    pub fn object(
+        class_name: String,
+        properties: Vec<String>,
+        values: Vec<Option<Box<Self>>>,
+        shape: Vec<usize>,
+    ) -> Result<Self, String> {
+        if class_name.is_empty() {
+            return Err("object class name must be non-empty".into());
+        }
+        if properties.iter().any(|property| property.is_empty()) {
+            return Err("object property names must be non-empty".into());
+        }
+        let numel = checked_numel(&shape)?;
+        let expected = properties
+            .len()
+            .checked_mul(numel)
+            .ok_or_else(|| "object property storage exceeds platform limits".to_string())?;
+        if values.len() != expected {
+            return Err(format!(
+                "object property storage length {} does not match {} properties x {numel} elements",
+                values.len(),
+                properties.len()
+            ));
+        }
+        Ok(Self {
+            class_id: MxClassId::Object,
+            shape,
+            data: MxArrayData::Object {
+                class_name,
+                properties,
+                values,
+            },
+            persistent: false,
+        })
+    }
+
     pub fn sparse(value: MxSparse) -> Result<Self, String> {
         if value.col_ptrs.len() != value.cols.saturating_add(1)
             || value.col_ptrs.first().copied() != Some(0)
@@ -218,6 +260,17 @@ impl MxArray {
 
     pub const fn class_id(&self) -> MxClassId {
         self.class_id
+    }
+
+    pub fn class_name(&self) -> &str {
+        match &self.data {
+            MxArrayData::Object { class_name, .. } => class_name,
+            _ => super::super::libmx::class_name(self.class_id),
+        }
+    }
+
+    pub(crate) fn set_class_id(&mut self, class_id: MxClassId) {
+        self.class_id = class_id;
     }
 
     pub fn shape(&self) -> &[usize] {
@@ -271,7 +324,9 @@ impl MxArray {
                 MxSparseValues::Numeric(values) => numeric_pointer(values),
                 MxSparseValues::Logical(values) => values.as_mut_ptr().cast(),
             },
-            MxArrayData::Cell(_) | MxArrayData::Struct { .. } => std::ptr::null_mut(),
+            MxArrayData::Cell(_) | MxArrayData::Struct { .. } | MxArrayData::Object { .. } => {
+                std::ptr::null_mut()
+            }
         }
     }
 
@@ -298,7 +353,7 @@ impl MxArray {
                 MxSparseValues::Numeric(values) => values.checked_byte_len(),
                 MxSparseValues::Logical(values) => Some(values.len()),
             },
-            MxArrayData::Cell(_) | MxArrayData::Struct { .. } => None,
+            MxArrayData::Cell(_) | MxArrayData::Struct { .. } | MxArrayData::Object { .. } => None,
         }
     }
 
@@ -316,7 +371,9 @@ impl MxArray {
             return Some(self);
         }
         match &self.data {
-            MxArrayData::Cell(values) | MxArrayData::Struct { values, .. } => values
+            MxArrayData::Cell(values)
+            | MxArrayData::Struct { values, .. }
+            | MxArrayData::Object { values, .. } => values
                 .iter()
                 .filter_map(Option::as_deref)
                 .find_map(|value| value.find(pointer)),
@@ -329,7 +386,9 @@ impl MxArray {
             return Some(self);
         }
         match &mut self.data {
-            MxArrayData::Cell(values) | MxArrayData::Struct { values, .. } => values
+            MxArrayData::Cell(values)
+            | MxArrayData::Struct { values, .. }
+            | MxArrayData::Object { values, .. } => values
                 .iter_mut()
                 .filter_map(Option::as_deref_mut)
                 .find_map(|value| value.find_mut(pointer)),
@@ -339,7 +398,9 @@ impl MxArray {
 
     pub(crate) fn take_descendant(&mut self, pointer: *mut Self) -> Option<Box<Self>> {
         let values = match &mut self.data {
-            MxArrayData::Cell(values) | MxArrayData::Struct { values, .. } => values,
+            MxArrayData::Cell(values)
+            | MxArrayData::Struct { values, .. }
+            | MxArrayData::Object { values, .. } => values,
             _ => return None,
         };
         for slot in values {
