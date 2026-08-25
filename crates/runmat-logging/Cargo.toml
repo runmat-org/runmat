@@ -24,9 +24,17 @@ default = []
 otlp = [
     "opentelemetry",
     "opentelemetry_sdk",
+    "opentelemetry-http",
     "opentelemetry-otlp",
+    "reqwest",
     "tracing-opentelemetry",
 ]
+
+[dependencies.reqwest]
+version = "0.11"
+default-features = false
+features = ["rustls-tls"]
+optional = true
 
 [dependencies.opentelemetry]
 version = "0.21"
@@ -41,7 +49,12 @@ features = ["rt-tokio"]
 [dependencies.opentelemetry-otlp]
 version = "0.14"
 optional = true
-features = ["http-proto", "reqwest-client"]
+features = ["http-proto"]
+
+[dependencies.opentelemetry-http]
+version = "0.10"
+optional = true
+features = ["reqwest"]
 
 [dependencies.tracing-opentelemetry]
 version = "0.22"

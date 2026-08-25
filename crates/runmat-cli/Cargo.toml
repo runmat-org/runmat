@@ -79,6 +79,7 @@ runmat-package-cache-native = { workspace = true }
 runmat-time = { version = "=0.6.2", path = "../runmat-time" }
 runmat-filesystem = { version = "=0.6.2", path = "../runmat-filesystem" }
 runmat-telemetry = { version = "=0.6.2", path = "../runmat-telemetry" }
+runmat-logging = { workspace = true, features = ["otlp"] }
 runmat-static-analysis = { version = "=0.6.2", path = "../runmat-static-analysis" }
 runmat-server-client = { workspace = true }
 runmat-node-agent = { workspace = true }

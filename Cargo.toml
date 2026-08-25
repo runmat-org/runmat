@@ -120,6 +120,7 @@ runmat-jit = { version = "=0.6.2", path = "crates/runmat-jit" }
 runmat-vm = { version = "=0.6.2", path = "crates/runmat-vm" }
 runmat-async = { version = "=0.6.2", path = "crates/runmat-async" }
 runmat-telemetry = { version = "=0.6.2", path = "crates/runmat-telemetry" }
+runmat-logging = { version = "=0.6.2", path = "crates/runmat-logging" }
 runmat-core = { version = "=0.6.2", path = "crates/runmat-core", default-features = false }
 runmat-plot = { version = "=0.6.2", path = "crates/runmat-plot", default-features = false }
 runmat-macros = { version = "=0.6.2", path = "crates/runmat-macros" }

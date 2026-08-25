@@ -59,13 +59,21 @@ pub fn mesh_exact_geometry(
     mut config: NativeExecutionConfig,
     mut job: NativeExactMeshingJob<'_>,
 ) -> Result<NativeExactMeshingResult, NativeExactMeshingJobError> {
-    let prepared_geometry = prepare_exact_geometry_admission(
-        job.source_name,
-        job.source_bytes,
-        &job.import_options,
-        &GeometryImportContext::new(),
-        job.inventory_limits,
-    )?;
+    let prepared_geometry = {
+        let span = tracing::info_span!(
+            "meshing.geometry_admission",
+            source_name = job.source_name,
+            source_bytes = job.source_bytes.len(),
+        );
+        let _entered = span.enter();
+        prepare_exact_geometry_admission(
+            job.source_name,
+            job.source_bytes,
+            &job.import_options,
+            &GeometryImportContext::new(),
+            job.inventory_limits,
+        )?
+    };
     let admitted_tolerance = prepared_geometry.document().tolerance;
     if !same_requested_tolerance(&job.request.tolerance, &admitted_tolerance) {
         return Err(NativeExactMeshingJobError::ToleranceMismatch);
@@ -74,35 +82,44 @@ pub fn mesh_exact_geometry(
     job.evidence.platform.exact_kernel_abi =
         prepared_geometry.document().source.kernel_version.clone();
     let source_face_ids = prepared_geometry.source_face_ids().clone();
-    config.enable_exact_meshing(
-        prepared_geometry.document(),
-        &job.request,
-        job.capability_cohort.as_deref(),
-    )?;
-    let session = NativeProgramSession::new(config)?;
-    let access = session_artifact_access(&session);
-    let geometry = admit_prepared_exact_geometry(
-        &session,
-        prepared_geometry,
-        access.clone(),
-        job.inventory_limits,
-    )?;
+    let (session, access, geometry) = {
+        let span = tracing::info_span!("meshing.native_session");
+        let _entered = span.enter();
+        config.enable_exact_meshing(
+            prepared_geometry.document(),
+            &job.request,
+            job.capability_cohort.as_deref(),
+        )?;
+        let session = NativeProgramSession::new(config)?;
+        let access = session_artifact_access(&session);
+        let geometry = admit_prepared_exact_geometry(
+            &session,
+            prepared_geometry,
+            access.clone(),
+            job.inventory_limits,
+        )?;
+        (session, access, geometry)
+    };
 
     let mut executor = NativeExactMeshingExecutor::new(&session, job.execution)?;
-    let dag_result = execute_exact_meshing_dag(
-        ExactMeshingDagRun {
-            geometry: &geometry,
-            request: job.request,
-            artifact_access: access,
-            capability_cohort: job.capability_cohort,
-            program_revision: job.program_revision,
-            preferred_edges_per_partition: job.preferred_edges_per_partition,
-            preferred_faces_per_partition: job.preferred_faces_per_partition,
-            inventory_limits: job.inventory_limits,
-            evidence: job.evidence,
-        },
-        &mut executor,
-    )?;
+    let dag_result = {
+        let span = tracing::info_span!("meshing.exact_dag");
+        let _entered = span.enter();
+        execute_exact_meshing_dag(
+            ExactMeshingDagRun {
+                geometry: &geometry,
+                request: job.request,
+                artifact_access: access,
+                capability_cohort: job.capability_cohort,
+                program_revision: job.program_revision,
+                preferred_edges_per_partition: job.preferred_edges_per_partition,
+                preferred_faces_per_partition: job.preferred_faces_per_partition,
+                inventory_limits: job.inventory_limits,
+                evidence: job.evidence,
+            },
+            &mut executor,
+        )?
+    };
     Ok(NativeExactMeshingResult {
         dag_result,
         source_face_ids,

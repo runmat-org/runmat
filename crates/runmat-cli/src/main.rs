@@ -7,6 +7,7 @@ async fn main() -> ExitCode {
     let args = std::env::args_os().collect::<Vec<_>>();
     match runmat_process_host::HiddenModeRegistry::standard().detect(args.clone()) {
         Ok(Some(runmat_process_host::HiddenMode::TestWorker)) => {
+            let _otel = runmat::observability::init_from_env();
             return match runmat::commands::test::worker::run_stdio().await {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(error) => {
@@ -16,6 +17,7 @@ async fn main() -> ExitCode {
             };
         }
         Ok(Some(runmat_process_host::HiddenMode::ExecutionWorker)) => {
+            let _otel = runmat::observability::init_from_env();
             let result = if std::env::var_os("RUNMAT_EXECUTION_WORKER_REMOTE").is_some() {
                 runmat_execution_runner_native::run_remote_worker_from_env().await
             } else {
@@ -30,6 +32,7 @@ async fn main() -> ExitCode {
             };
         }
         Ok(Some(runmat_process_host::HiddenMode::MeshingWorker)) => {
+            let _otel = runmat::observability::init_from_env();
             let result = match std::env::var_os(
                 runmat_execution_runner_native::NATIVE_OBJECT_STORE_ROOT_ENV,
             ) {
@@ -58,6 +61,7 @@ async fn main() -> ExitCode {
             };
         }
         Ok(Some(runmat_process_host::HiddenMode::ExecutionDriver)) => {
+            let _otel = runmat::observability::init_from_env();
             if std::env::var_os("RUNMAT_EXECUTION_DRIVER_LEASE_ID").is_some() {
                 return match runmat_execution_runner_native::run_remote_driver_from_env().await {
                     Ok(()) => ExitCode::SUCCESS,
@@ -70,6 +74,7 @@ async fn main() -> ExitCode {
             return runmat::commands::batch::run_driver().await;
         }
         Ok(Some(runmat_process_host::HiddenMode::LocalSupervisor)) => {
+            let _otel = runmat::observability::init_from_env();
             return match runmat_execution_runner_native::supervisor::LocalSupervisorConfig::for_current_executable(
             ) {
                 Ok(config) => {

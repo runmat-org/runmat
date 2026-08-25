@@ -8,7 +8,7 @@ use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::cache::{CacheExport, CacheImport};
 use runmat_execution_artifact::{ArtifactResult, LogicalObject};
 use runmat_execution_runner::AttemptSuccess;
-use runmat_meshing_core::StableDigest;
+use runmat_meshing_core::{CanonicalMeshingContract, MeshingProgress, StableDigest};
 use runmat_meshing_execution::{
     build_task_submission, ExactMeshingDagExecutor, MeshingExecutionContext,
     MeshingStageExecutionError, MeshingTaskEffectPolicy, PlannedMeshingStage,
@@ -115,15 +115,71 @@ impl<'a> NativeExactMeshingExecutor<'a> {
     fn wait_for_task(
         &mut self,
         task: NativeProgramTask,
+        stage: &PlannedMeshingStage,
     ) -> Result<AttemptSuccess, MeshingStageExecutionError> {
+        let workload = &stage.host().workload;
+        let stage_span = tracing::info_span!(
+            "meshing.stage",
+            stage = ?workload.stage,
+            partition_index = workload.partition.partition_index,
+            partition_count = workload.partition.partition_count,
+        );
+        let _entered = stage_span.enter();
+        tracing::info!(
+            event_code = "meshing.stage.started",
+            "meshing stage started"
+        );
         loop {
-            self.progress.extend(task.drain_progress());
+            self.record_progress(task.drain_progress());
             if let Some(result) = task.try_result() {
-                self.progress.extend(task.drain_progress());
-                return result.map_err(MeshingStageExecutionError::new);
+                self.record_progress(task.drain_progress());
+                return match result {
+                    Ok(success) => {
+                        tracing::info!(
+                            event_code = "meshing.stage.completed",
+                            outcome = "success",
+                            "meshing stage completed"
+                        );
+                        Ok(success)
+                    }
+                    Err(error) => {
+                        tracing::error!(
+                            event_code = "meshing.stage.completed",
+                            outcome = "failure",
+                            error = %error,
+                            "meshing stage failed"
+                        );
+                        Err(MeshingStageExecutionError::new(error))
+                    }
+                };
             }
             std::thread::sleep(self.policy.poll_interval);
         }
+    }
+
+    fn record_progress(&mut self, records: Vec<ProgramProgress>) {
+        for record in &records {
+            if let Ok(progress) = MeshingProgress::canonical_decode(&record.payload) {
+                let checkpoint = tracing::info_span!(
+                    "meshing.progress",
+                    stage = ?progress.stage,
+                    partition_index = progress.partition_index,
+                    sequence = progress.sequence,
+                    completed_work = progress.completed_work,
+                    estimated_work = progress.estimated_work,
+                    elapsed_time_ms = progress.elapsed_time_ms,
+                    consumed_search_work = progress.consumed_search_work,
+                    peak_memory_bytes = progress.peak_memory_bytes,
+                    entity_counts = ?progress.entity_counts,
+                );
+                let _entered = checkpoint.enter();
+                tracing::info!(
+                    event_code = "meshing.stage.progress",
+                    "meshing stage progress"
+                );
+            }
+        }
+        self.progress.extend(records);
     }
 }
 
@@ -146,7 +202,7 @@ impl ExactMeshingDagExecutor for NativeExactMeshingExecutor<'_> {
         revision: ProgramRevision,
     ) -> Result<AttemptSuccess, MeshingStageExecutionError> {
         let task = self.submit_stage(stage, revision)?;
-        self.wait_for_task(task)
+        self.wait_for_task(task, stage)
     }
 
     fn execute_stages(
@@ -160,7 +216,8 @@ impl ExactMeshingDagExecutor for NativeExactMeshingExecutor<'_> {
             .collect::<Result<Vec<_>, _>>()?;
         tasks
             .into_iter()
-            .map(|task| self.wait_for_task(task))
+            .zip(stages)
+            .map(|(task, stage)| self.wait_for_task(task, stage))
             .collect()
     }
 }

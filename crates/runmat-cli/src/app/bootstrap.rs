@@ -43,6 +43,7 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
         .filter_level(log_level)
         .format(format_log_record)
         .init();
+    let _otel = crate::observability::init_from_env();
 
     info!("RunMat v{} starting", env!("CARGO_PKG_VERSION"));
     debug!("Configuration loaded: {config:?}");
