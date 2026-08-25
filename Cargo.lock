@@ -4049,6 +4049,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 
 [[package]]
+name = "libffi"
+version = "5.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a8d526bc07aa02e6826944ec446ecd8d228bd97b1cbd21e5bc5e3407a09a585"
+dependencies = [
+ "libc",
+ "libffi-sys",
+]
+
+[[package]]
+name = "libffi-sys"
+version = "4.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54d39d034f5ea2662814789448722078d01cc9431a2a09ff15e55f0df7120bae"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "libflate"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6979,6 +6998,22 @@ dependencies = [
  "runmat-types",
  "runmat-value",
  "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "runmat-native-ffi"
+version = "0.6.2"
+dependencies = [
+ "libffi",
+ "libloading 0.8.9",
+ "runmat-types",
+ "runmat-value",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "target-lexicon",
+ "tempfile",
  "thiserror 1.0.69",
 ]
 
