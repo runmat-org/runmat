@@ -49,6 +49,7 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
         let ports = runtime.service_ports().clone().with_builtin(builtins);
         runtime = runtime.with_service_ports(ports);
     }
+    let _mex_guard = crate::mex::install(&runtime);
     let mut entrypoints = BTreeMap::new();
     for function in &assembly.functions {
         // SAFETY: the generated resolver has the exact declared C ABI. It

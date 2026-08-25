@@ -8372,31 +8372,43 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
     )
     .expect("write main source");
 
-    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd = push_cwd(tmp.path());
     let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
-    let outcome = execute_path_request(&mut session, &source_name).expect("exec succeeds");
-
-    assert!(
-        outcome_has_named_upsert(
-            &outcome,
-            "result",
-            &runmat_value::Value::Int(runmat_value::IntValue::U64(42)),
-        ),
-        "C MEX should take precedence over a same-name MATLAB function and retain uint64 storage; diagnostics={:?}, upserts={:?}",
-        outcome.diagnostics,
-        outcome.workspace_delta.upserts
-    );
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "doubled",
-        &runmat_value::Value::Int(runmat_value::IntValue::U64(82)),
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "from_mex",
-        &runmat_value::Value::Int(runmat_value::IntValue::U64(42)),
-    ));
+    for enable_jit in [false, true] {
+        let mut session = RunMatSession::with_options(enable_jit, false).expect("session init");
+        let repetitions = if enable_jit { 24 } else { 1 };
+        for _ in 0..repetitions {
+            let outcome = execute_path_request(&mut session, &source_name).expect("exec succeeds");
+            assert!(
+                outcome_has_named_upsert(
+                    &outcome,
+                    "result",
+                    &runmat_value::Value::Int(runmat_value::IntValue::U64(42)),
+                ),
+                "C MEX should take precedence over a same-name MATLAB function and retain uint64 storage; diagnostics={:?}, upserts={:?}",
+                outcome.diagnostics,
+                outcome.workspace_delta.upserts
+            );
+            assert!(outcome_has_named_upsert(
+                &outcome,
+                "doubled",
+                &runmat_value::Value::Int(runmat_value::IntValue::U64(82)),
+            ));
+            assert!(outcome_has_named_upsert(
+                &outcome,
+                "from_mex",
+                &runmat_value::Value::Int(runmat_value::IntValue::U64(42)),
+            ));
+        }
+        #[cfg(feature = "jit")]
+        if enable_jit {
+            assert!(
+                session.stats().jit_compiled > 0,
+                "MEX call site never crossed into native execution: {:?}",
+                session.stats()
+            );
+        }
+    }
 }
 
 #[test]

@@ -37,8 +37,13 @@ pub enum DynamicFunctionLoadPhase {
     AfterSemantic,
 }
 
-pub type DynamicFunctionLoader =
-    dyn Fn(String, Vec<Value>, usize, DynamicFunctionLoadPhase) -> DynamicFunctionLoadFuture;
+pub type DynamicFunctionLoader = dyn Fn(
+    crate::context::RuntimeContext,
+    String,
+    Vec<Value>,
+    usize,
+    DynamicFunctionLoadPhase,
+) -> DynamicFunctionLoadFuture;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DynamicFunctionClearRequest {
@@ -47,7 +52,8 @@ pub enum DynamicFunctionClearRequest {
     Named(String),
 }
 
-pub type DynamicFunctionClearer = dyn Fn(DynamicFunctionClearRequest) -> Result<(), RuntimeError>;
+pub type DynamicFunctionClearer =
+    dyn Fn(crate::context::RuntimeContext, DynamicFunctionClearRequest) -> Result<(), RuntimeError>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceFunctionInfo {
@@ -463,25 +469,17 @@ pub async fn try_load_and_call_dynamic_function(
     requested_outputs: usize,
     phase: DynamicFunctionLoadPhase,
 ) -> Option<Result<Value, RuntimeError>> {
-    let loader = crate::context::legacy::active()?
-        .state()
-        .call
-        .borrow()
-        .dynamic_loader
-        .clone()?;
-    loader(name, args, requested_outputs, phase).await
+    let context = crate::context::legacy::active()?;
+    let loader = context.state().call.borrow().dynamic_loader.clone()?;
+    loader(context, name, args, requested_outputs, phase).await
 }
 
 pub fn try_clear_dynamic_functions(
     request: DynamicFunctionClearRequest,
 ) -> Option<Result<(), RuntimeError>> {
-    let clearer = crate::context::legacy::active()?
-        .state()
-        .call
-        .borrow()
-        .dynamic_clearer
-        .clone()?;
-    Some(clearer(request))
+    let context = crate::context::legacy::active()?;
+    let clearer = context.state().call.borrow().dynamic_clearer.clone()?;
+    Some(clearer(context, request))
 }
 
 fn source_functions_in_catalog(

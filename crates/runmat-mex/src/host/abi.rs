@@ -114,7 +114,11 @@ impl MexCallState {
 
     pub fn finish_call(&mut self) {
         self.mx.finish_call();
+        self.error = None;
+        self.warnings.clear();
+        self.console.clear();
         self.field_name_cache.clear();
+        self.services = Rc::new(super::UnavailableMexHostServices);
     }
 
     fn fail(&mut self, message: impl Into<String>) {

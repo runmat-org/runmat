@@ -15,6 +15,17 @@ impl RunMatSession {
         runmat_package::FrozenProjectHandoffError,
     > {
         handoff.validate()?;
+        #[cfg(not(target_arch = "wasm32"))]
+        self.mex_runtime
+            .clear(
+                &runmat_runtime::user_functions::DynamicFunctionClearRequest::NativeExtensions,
+                self.runtime_context.clone(),
+            )
+            .map_err(|error| {
+                runmat_package::FrozenProjectHandoffError::Revision(format!(
+                    "could not clear loaded MEX modules before installing project: {error}"
+                ))
+            })?;
         let revision = handoff.revision();
         let program_revision = runmat_execution::ProgramRevision::new(
             runmat_execution::Digest::from_bytes(*revision.graph_digest.bytes()),
@@ -38,8 +49,6 @@ impl RunMatSession {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
             .clear();
-        #[cfg(not(target_arch = "wasm32"))]
-        self.mex_modules.borrow_mut().clear();
         Ok(revision)
     }
 
@@ -57,7 +66,12 @@ impl RunMatSession {
             .unwrap_or_else(|poison| poison.into_inner())
             .clear();
         #[cfg(not(target_arch = "wasm32"))]
-        self.mex_modules.borrow_mut().clear();
+        if let Err(error) = self.mex_runtime.clear(
+            &runmat_runtime::user_functions::DynamicFunctionClearRequest::NativeExtensions,
+            self.runtime_context.clone(),
+        ) {
+            tracing::warn!(%error, "could not clear loaded MEX modules while clearing project");
+        }
     }
 
     /// Return the revision currently installed at the session boundary.

@@ -3,6 +3,7 @@
 mod builtin;
 mod execute;
 mod input;
+mod mex;
 mod output;
 mod program;
 

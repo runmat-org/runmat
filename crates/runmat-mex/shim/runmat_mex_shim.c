@@ -302,7 +302,12 @@ RUNMAT_MEX_HOST_EXPORT void runmatMexUnload(void) {
     if (runmat_exit_function != NULL) {
         mexExitFcn function = runmat_exit_function;
         runmat_exit_function = NULL;
-        function();
+        jmp_buf target;
+        runmat_error_target = &target;
+        if (setjmp(target) == 0) {
+            function();
+        }
+        runmat_error_target = NULL;
     }
     runmat_lock_count = 0;
     (void)runmat_cleanup_sparse_index_proxies(0);
