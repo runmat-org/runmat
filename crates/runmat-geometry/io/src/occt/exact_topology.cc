@@ -1,7 +1,7 @@
 #include "runmat-geometry-io/src/occt/ffi.rs.h"
-#include "runmat-geometry-io/src/occt/exact_identity.hxx"
-#include "runmat-geometry-io/src/occt/exact_nesting.hxx"
-#include "runmat-geometry-io/src/occt/exact_topology.hxx"
+#include "exact_identity.hxx"
+#include "exact_nesting.hxx"
+#include "exact_topology.hxx"
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>

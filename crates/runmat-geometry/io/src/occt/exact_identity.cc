@@ -1,5 +1,5 @@
 #include "runmat-geometry-io/src/occt/ffi.rs.h"
-#include "runmat-geometry-io/src/occt/exact_identity.hxx"
+#include "exact_identity.hxx"
 
 #include <BRepTools.hxx>
 #include <Message_ProgressIndicator.hxx>
