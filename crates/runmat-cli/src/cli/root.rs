@@ -12,7 +12,7 @@ use crate::cli::value_types::{
 };
 use crate::cli::ColorMode;
 use crate::cli::TestArgs;
-use crate::cli::{BatchCommand, ClusterCommand, JobCommand, PackageCommand};
+use crate::cli::{BatchCommand, ClusterCommand, JobCommand, MexArgs, PackageCommand};
 
 #[derive(Parser, Clone)]
 #[command(
@@ -268,6 +268,8 @@ pub enum Commands {
         #[arg(short, long)]
         force: bool,
     },
+    /// Build C sources into a platform-native MEX module
+    Mex(MexArgs),
     /// Check a MATLAB script or FEA document without running it
     Check {
         /// .m or .fea file to check

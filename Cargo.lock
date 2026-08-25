@@ -6202,6 +6202,7 @@ dependencies = [
  "runmat-filesystem",
  "runmat-gc",
  "runmat-hir",
+ "runmat-mex",
  "runmat-mir",
  "runmat-native-codegen",
  "runmat-node-agent",
