@@ -129,10 +129,10 @@ impl MexBuild {
     }
 
     pub fn compile(&self) -> Result<MexBuildOutput, MexBuildError> {
-        let plan = self.plan()?;
-        if !plan.target.is_current() {
+        let initial_plan = self.plan()?;
+        if !initial_plan.target.is_current() {
             return Err(MexBuildError::CrossCompilationUnavailable {
-                triple: plan.target.triple.clone(),
+                triple: initial_plan.target.triple.clone(),
             });
         }
         std::fs::create_dir_all(&self.output_directory).map_err(|source| {
@@ -141,6 +141,24 @@ impl MexBuild {
                 source,
             }
         })?;
+        let object_directory = if compiler_family(&self.compiler) == super::CCompilerFamily::Msvc {
+            Some(
+                tempfile::Builder::new()
+                    .prefix(".runmat-mex-objects-")
+                    .tempdir_in(&self.output_directory)
+                    .map_err(|source| MexBuildError::CreateOutputDirectory {
+                        directory: self.output_directory.clone(),
+                        source,
+                    })?,
+            )
+        } else {
+            None
+        };
+        let plan = if let Some(directory) = object_directory.as_ref() {
+            MexBuildPlan::for_build_with_msvc_object_directory(self, Some(directory.path()))?
+        } else {
+            initial_plan
+        };
         let output = Command::new(&plan.compiler)
             .args(&plan.arguments)
             .output()
