@@ -20,11 +20,12 @@ use runmat_runtime::analysis::{
     AnalysisMeshingOutput, AnalysisMeshingProvider, AnalysisMeshingRequest,
 };
 
-use crate::cli::MeshElementOrderArg;
+use crate::cli::{MeshElementOrderArg, MeshSourceUnitsArg};
 use crate::presentation;
 
 pub struct MeshCommand {
     pub source: PathBuf,
+    pub source_units: MeshSourceUnitsArg,
     pub output: Option<PathBuf>,
     pub evidence: Option<PathBuf>,
     pub target_size_m: f64,
@@ -66,7 +67,11 @@ pub fn execute(command: MeshCommand) -> Result<()> {
     settings.resources.maximum_elements = command.maximum_elements;
     let generated = generate_native_mesh(NativeMeshRequest {
         source: command.source.clone(),
-        source_units: UnitSystem::Meter,
+        source_units: match command.source_units {
+            MeshSourceUnitsArg::Meter => UnitSystem::Meter,
+            MeshSourceUnitsArg::Millimeter => UnitSystem::Millimeter,
+            MeshSourceUnitsArg::Inch => UnitSystem::Inch,
+        },
         settings,
     })?;
     let result = &generated.dag_result;

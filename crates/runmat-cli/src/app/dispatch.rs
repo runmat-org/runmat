@@ -59,6 +59,7 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeCon
         }
         Commands::Mesh {
             source,
+            source_units,
             output,
             evidence,
             target_size,
@@ -70,6 +71,7 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeCon
             json,
         } => mesh::execute(mesh::MeshCommand {
             source,
+            source_units,
             output,
             evidence,
             target_size_m: target_size,

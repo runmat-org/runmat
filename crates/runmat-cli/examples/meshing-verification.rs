@@ -4,7 +4,7 @@
 mod allocation_observer;
 
 use clap::{Parser, ValueEnum};
-use runmat::cli::MeshElementOrderArg;
+use runmat::cli::{MeshElementOrderArg, MeshSourceUnitsArg};
 use runmat::commands::mesh::MeshCommand;
 use std::io::Write;
 use std::path::PathBuf;
@@ -19,6 +19,8 @@ enum ElementOrderArgument {
 #[derive(Debug, Parser)]
 struct Arguments {
     source: PathBuf,
+    #[arg(long, value_enum, default_value_t = MeshSourceUnitsArg::Meter)]
+    source_units: MeshSourceUnitsArg,
     #[arg(long)]
     output: PathBuf,
     #[arg(long)]
@@ -57,6 +59,7 @@ async fn main() -> ExitCode {
     let arguments = Arguments::parse_from(args);
     let command = MeshCommand {
         source: arguments.source,
+        source_units: arguments.source_units,
         output: Some(arguments.output),
         evidence: Some(arguments.evidence),
         target_size_m: arguments.target_size,

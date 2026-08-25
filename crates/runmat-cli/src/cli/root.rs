@@ -9,7 +9,7 @@ use crate::cli::parse::{parse_bool_env, parse_figure_size, parse_log_level_env};
 use crate::cli::remote::{FsCommand, OrgCommand, ProjectCommand, RemoteCommand};
 use crate::cli::value_types::{
     AotOptLevel, AotPolicy, CaptureFiguresMode, FigureSize, GcPreset, LogLevel,
-    MeshElementOrderArg, OptLevel,
+    MeshElementOrderArg, MeshSourceUnitsArg, OptLevel,
 };
 use crate::cli::ColorMode;
 use crate::cli::TestArgs;
@@ -244,6 +244,9 @@ pub enum Commands {
     Mesh {
         /// STEP, IGES, or B-rep source geometry
         source: PathBuf,
+        /// Coordinate units used by source geometry that does not declare its units
+        #[arg(long, value_enum, default_value = "meter")]
+        source_units: MeshSourceUnitsArg,
         /// Canonical solver-mesh output path
         #[arg(short, long)]
         output: Option<PathBuf>,
@@ -480,7 +483,9 @@ pub enum ConfigCommand {
 #[cfg(test)]
 mod tests {
     use super::{Cli, Commands};
-    use crate::cli::{AotPolicy, BatchCommand, ClusterCommand, ClusterStateArg};
+    use crate::cli::{
+        AotPolicy, BatchCommand, ClusterCommand, ClusterStateArg, MeshSourceUnitsArg,
+    };
     use clap::Parser;
 
     #[test]
@@ -517,6 +522,25 @@ mod tests {
             Err(error) => error,
         };
         assert!(error.to_string().contains("--material"));
+    }
+
+    #[test]
+    fn mesh_accepts_explicit_source_units() {
+        let cli = Cli::try_parse_from([
+            "runmat",
+            "mesh",
+            "part.step",
+            "--source-units",
+            "millimeter",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Mesh {
+                source_units: MeshSourceUnitsArg::Millimeter,
+                ..
+            })
+        ));
     }
 
     #[test]
