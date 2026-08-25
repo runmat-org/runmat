@@ -69,20 +69,6 @@ cargo run -p runmat --features occt-native -- mesh \
 The large target size keeps this small fixture quick. Use dimensions appropriate to your own model
 in production.
 
-The repository also includes a unitless millimetre-scale STEP model. Declare its source units while
-keeping target size and deviation in SI metres:
-
-```sh
-target/release/runmat mesh \
-  crates/runmat-geometry/io/tests/fixtures/nist_seeker_table_acis.step \
-  --source-units millimeter \
-  --target-size 0.1 \
-  --deviation 0.001 \
-  --output /tmp/runmat-seeker-table.mesh.cbor \
-  --evidence /tmp/runmat-seeker-table.evidence.cbor \
-  --json
-```
-
 ## Geometry Admission
 
 The exact CAD representation is the authority for meshing. RunMat imports the B-rep topology and
@@ -99,10 +85,8 @@ binds:
 Display tessellation remains a revision-keyed cache for rendering and selection. Exact curve,
 surface, and volume meshing operate on the B-rep and its evaluators.
 
-The `runmat mesh` command defaults source coordinates to metres. Use `--source-units millimeter` or
-`--source-units inch` when a source does not declare its own coordinate units. A `.fea` study
-declares source units in its geometry block. RunMat normalizes imported geometry before deriving its
-revision:
+The `runmat mesh` command interprets source coordinates as metres. A `.fea` study declares source
+units explicitly, and RunMat normalizes the imported geometry before deriving its revision:
 
 ```yaml
 geometry:
@@ -125,7 +109,6 @@ does not substitute a bounding box or display tessellation for the exact CAD mod
 
 | Option | Meaning | Default |
 | --- | --- | --- |
-| `--source-units meter\|millimeter\|inch` | Coordinate units for a source that does not declare units | `meter` |
 | `--target-size <metres>` | Global target edge length used to construct the metric field | `0.01` |
 | `--deviation <metres>` | Maximum curve and surface chordal deviation | `0.0001` |
 | `--element-order tet4\|tet10` | Linear or quadratic tetrahedra | `tet4` |
@@ -324,19 +307,6 @@ runmat mesh bracket.step --target-size 0.005 --json
 
 Partitioning is automatic. Do not split CAD faces or bodies by hand; manual sharding can destroy
 shared-edge identity and constrained-volume correctness.
-
-For long local runs, point the CLI at an OTLP HTTP collector to observe admission, session setup,
-stage duration, partition identity, and monotone progress without changing mesh identity:
-
-```sh
-RUNMAT_OTEL_ENDPOINT=http://127.0.0.1:4318 \
-  runmat mesh bracket.step --target-size 0.005 --json
-```
-
-The endpoint is the OTLP HTTP base URL; RunMat appends `/v1/traces`. Progress spans include
-completed and estimated work, elapsed stage time, search work, peak memory, and entity counters.
-Native workers export out of band, so framed execution stdout remains reserved for the worker
-protocol.
 
 ### Remote execution
 
