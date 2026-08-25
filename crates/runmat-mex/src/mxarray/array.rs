@@ -1,3 +1,5 @@
+use std::ffi::c_void;
+
 use runmat_value::{NumericDType, NumericStorage};
 
 use super::{MxClassId, MxInterleavedStorage};
@@ -240,6 +242,69 @@ impl MxArray {
 
     pub fn data_mut(&mut self) -> &mut MxArrayData {
         &mut self.data
+    }
+
+    pub fn dimensions_pointer(&self) -> *const usize {
+        self.shape.as_ptr()
+    }
+
+    pub fn set_shape(&mut self, shape: Vec<usize>) -> Result<(), String> {
+        validate_shape(self.numel(), &shape)?;
+        self.shape = shape;
+        Ok(())
+    }
+
+    pub fn data_pointer(&mut self) -> *mut c_void {
+        match &mut self.data {
+            MxArrayData::Numeric(value) => numeric_pointer(&mut value.real),
+            MxArrayData::Interleaved(value) => interleaved_pointer(&mut value.values),
+            MxArrayData::Logical(values) => values.as_mut_ptr().cast(),
+            MxArrayData::Char(values) => values.as_mut_ptr().cast(),
+            MxArrayData::Sparse(value) => match &mut value.values {
+                MxSparseValues::Numeric(values) => numeric_pointer(values),
+                MxSparseValues::Logical => std::ptr::null_mut(),
+            },
+            MxArrayData::Cell(_) | MxArrayData::Struct { .. } => std::ptr::null_mut(),
+        }
+    }
+
+    pub fn imaginary_pointer(&mut self) -> *mut c_void {
+        match &mut self.data {
+            MxArrayData::Numeric(MxNumeric {
+                imag: Some(values), ..
+            }) => numeric_pointer(values),
+            _ => std::ptr::null_mut(),
+        }
+    }
+}
+
+fn numeric_pointer(values: &mut NumericStorage) -> *mut c_void {
+    match values {
+        NumericStorage::F64(values) => values.as_mut_ptr().cast(),
+        NumericStorage::F32(values) => values.as_mut_ptr().cast(),
+        NumericStorage::I8(values) => values.as_mut_ptr().cast(),
+        NumericStorage::I16(values) => values.as_mut_ptr().cast(),
+        NumericStorage::I32(values) => values.as_mut_ptr().cast(),
+        NumericStorage::I64(values) => values.as_mut_ptr().cast(),
+        NumericStorage::U8(values) => values.as_mut_ptr().cast(),
+        NumericStorage::U16(values) => values.as_mut_ptr().cast(),
+        NumericStorage::U32(values) => values.as_mut_ptr().cast(),
+        NumericStorage::U64(values) => values.as_mut_ptr().cast(),
+    }
+}
+
+fn interleaved_pointer(values: &mut MxInterleavedStorage) -> *mut c_void {
+    match values {
+        MxInterleavedStorage::F64(values) => values.as_mut_ptr().cast(),
+        MxInterleavedStorage::F32(values) => values.as_mut_ptr().cast(),
+        MxInterleavedStorage::I8(values) => values.as_mut_ptr().cast(),
+        MxInterleavedStorage::I16(values) => values.as_mut_ptr().cast(),
+        MxInterleavedStorage::I32(values) => values.as_mut_ptr().cast(),
+        MxInterleavedStorage::I64(values) => values.as_mut_ptr().cast(),
+        MxInterleavedStorage::U8(values) => values.as_mut_ptr().cast(),
+        MxInterleavedStorage::U16(values) => values.as_mut_ptr().cast(),
+        MxInterleavedStorage::U32(values) => values.as_mut_ptr().cast(),
+        MxInterleavedStorage::U64(values) => values.as_mut_ptr().cast(),
     }
 }
 

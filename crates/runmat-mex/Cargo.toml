@@ -10,6 +10,10 @@ repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
 runmat-value = { workspace = true }
+thiserror = { workspace = true }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+libloading = "0.8.9"
 
 [dev-dependencies]
 tempfile = "3.12"
