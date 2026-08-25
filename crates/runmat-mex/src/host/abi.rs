@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use crate::{value_from_mx, value_to_mx, MexHostServices, MxApi, MxApiMode, MxArray, MxClassId};
 
-pub const MEX_HOST_ABI_VERSION: u32 = 1;
+pub const MEX_HOST_ABI_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MexDiagnostic {
@@ -60,6 +60,7 @@ impl MexCallState {
             duplicate_array,
             destroy_array,
             class_id,
+            class_name,
             number_of_dimensions,
             dimensions,
             number_of_elements,
@@ -68,6 +69,8 @@ impl MexCallState {
             imaginary_data,
             replace_data,
             replace_imaginary_data,
+            make_complex,
+            make_real,
             is_complex,
             is_sparse,
             get_cell,
@@ -79,6 +82,9 @@ impl MexCallState {
             remove_field,
             get_field,
             set_field,
+            set_class_name,
+            get_property,
+            set_property,
             sparse_row_indices,
             sparse_column_pointers,
             sparse_nzmax,
@@ -143,6 +149,7 @@ pub struct MexHostApiV1 {
     pub duplicate_array: unsafe extern "C" fn(*mut c_void, *const MxArray) -> *mut MxArray,
     pub destroy_array: unsafe extern "C" fn(*mut c_void, *mut MxArray) -> i32,
     pub class_id: unsafe extern "C" fn(*mut c_void, *const MxArray) -> i32,
+    pub class_name: unsafe extern "C" fn(*mut c_void, *const MxArray) -> *const c_char,
     pub number_of_dimensions: unsafe extern "C" fn(*mut c_void, *const MxArray) -> usize,
     pub dimensions: unsafe extern "C" fn(*mut c_void, *const MxArray) -> *const usize,
     pub number_of_elements: unsafe extern "C" fn(*mut c_void, *const MxArray) -> usize,
@@ -152,6 +159,8 @@ pub struct MexHostApiV1 {
     pub replace_data: unsafe extern "C" fn(*mut c_void, *mut MxArray, *const c_void) -> i32,
     pub replace_imaginary_data:
         unsafe extern "C" fn(*mut c_void, *mut MxArray, *const c_void) -> i32,
+    pub make_complex: unsafe extern "C" fn(*mut c_void, *mut MxArray) -> i32,
+    pub make_real: unsafe extern "C" fn(*mut c_void, *mut MxArray) -> i32,
     pub is_complex: unsafe extern "C" fn(*mut c_void, *const MxArray) -> i32,
     pub is_sparse: unsafe extern "C" fn(*mut c_void, *const MxArray) -> i32,
     pub get_cell: unsafe extern "C" fn(*mut c_void, *const MxArray, usize) -> *mut MxArray,
@@ -163,6 +172,11 @@ pub struct MexHostApiV1 {
     pub remove_field: unsafe extern "C" fn(*mut c_void, *mut MxArray, i32) -> i32,
     pub get_field: unsafe extern "C" fn(*mut c_void, *const MxArray, usize, i32) -> *mut MxArray,
     pub set_field: unsafe extern "C" fn(*mut c_void, *mut MxArray, usize, i32, *mut MxArray) -> i32,
+    pub set_class_name: unsafe extern "C" fn(*mut c_void, *mut MxArray, *const c_char) -> i32,
+    pub get_property:
+        unsafe extern "C" fn(*mut c_void, *const MxArray, usize, *const c_char) -> *mut MxArray,
+    pub set_property:
+        unsafe extern "C" fn(*mut c_void, *mut MxArray, usize, *const c_char, *mut MxArray) -> i32,
     pub sparse_row_indices: unsafe extern "C" fn(*mut c_void, *mut MxArray) -> *mut usize,
     pub sparse_column_pointers: unsafe extern "C" fn(*mut c_void, *mut MxArray) -> *mut usize,
     pub sparse_nzmax: unsafe extern "C" fn(*mut c_void, *mut MxArray) -> usize,
@@ -410,6 +424,29 @@ unsafe extern "C" fn class_id(host: *mut c_void, value: *const MxArray) -> i32 {
     state.mx.class_id(value).unwrap_or(MxClassId::Unknown) as i32
 }
 
+unsafe extern "C" fn class_name(host: *mut c_void, value: *const MxArray) -> *const c_char {
+    let Some(state) = (unsafe { state(host) }) else {
+        return std::ptr::null();
+    };
+    let name = match state.mx.arena().get(value) {
+        Ok(value) => value.class_name(),
+        Err(error) => {
+            state.fail(error.to_string());
+            return std::ptr::null();
+        }
+    };
+    let Ok(name) = CString::new(name) else {
+        state.fail("mxArray class name contains a null byte");
+        return std::ptr::null();
+    };
+    state.field_name_cache.push(name);
+    state
+        .field_name_cache
+        .last()
+        .map(|name| name.as_ptr())
+        .unwrap_or(std::ptr::null())
+}
+
 unsafe extern "C" fn number_of_dimensions(host: *mut c_void, value: *const MxArray) -> usize {
     unsafe { state(host) }
         .and_then(|state| state.mx.shape(value).ok().map(<[usize]>::len))
@@ -495,6 +532,32 @@ unsafe extern "C" fn replace_imaginary_data(
     source: *const c_void,
 ) -> i32 {
     replace_data_component(host, value, source, true)
+}
+
+unsafe extern "C" fn make_complex(host: *mut c_void, value: *mut MxArray) -> i32 {
+    let Some(state) = (unsafe { state(host) }) else {
+        return 1;
+    };
+    match state.mx.make_complex(value) {
+        Ok(()) => 0,
+        Err(error) => {
+            state.fail(error);
+            1
+        }
+    }
+}
+
+unsafe extern "C" fn make_real(host: *mut c_void, value: *mut MxArray) -> i32 {
+    let Some(state) = (unsafe { state(host) }) else {
+        return 1;
+    };
+    match state.mx.make_real(value) {
+        Ok(()) => 0,
+        Err(error) => {
+            state.fail(error);
+            1
+        }
+    }
 }
 
 fn replace_data_component(
@@ -686,6 +749,72 @@ unsafe extern "C" fn set_field(
         return 1;
     };
     match state.mx.set_field(value, element, field, child) {
+        Ok(()) => 0,
+        Err(error) => {
+            state.fail(error);
+            1
+        }
+    }
+}
+
+unsafe extern "C" fn set_class_name(
+    host: *mut c_void,
+    value: *mut MxArray,
+    class_name: *const c_char,
+) -> i32 {
+    let Some(state) = (unsafe { state(host) }) else {
+        return 1;
+    };
+    let Some(class_name) = c_string(class_name) else {
+        state.fail("object class name is null");
+        return 1;
+    };
+    match state.mx.set_class_name(value, class_name) {
+        Ok(()) => 0,
+        Err(error) => {
+            state.fail(error);
+            1
+        }
+    }
+}
+
+unsafe extern "C" fn get_property(
+    host: *mut c_void,
+    value: *const MxArray,
+    index: usize,
+    property_name: *const c_char,
+) -> *mut MxArray {
+    let Some(state) = (unsafe { state(host) }) else {
+        return std::ptr::null_mut();
+    };
+    let Some(property_name) = c_string(property_name) else {
+        state.fail("object property name is null");
+        return std::ptr::null_mut();
+    };
+    match state.mx.get_property(value, index, &property_name) {
+        Ok(value) => value,
+        Err(error) => {
+            state.fail(error);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+unsafe extern "C" fn set_property(
+    host: *mut c_void,
+    value: *mut MxArray,
+    index: usize,
+    property_name: *const c_char,
+    child: *mut MxArray,
+) -> i32 {
+    let Some(state) = (unsafe { state(host) }) else {
+        return 1;
+    };
+    let Some(property_name) = c_string(property_name) else {
+        state.fail("object property name is null");
+        return 1;
+    };
+    match state.mx.set_property(value, index, &property_name, child) {
         Ok(()) => 0,
         Err(error) => {
             state.fail(error);

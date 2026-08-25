@@ -11,6 +11,95 @@ use runmat_mex::{
 use runmat_value::Value;
 
 #[test]
+fn documented_matrix_api_helpers_preserve_types_objects_and_ownership() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("matrix_api.c");
+    fs::write(
+        &source,
+        r#"
+#include "mex.h"
+#include <string.h>
+
+void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
+    (void)nrhs; (void)prhs;
+    if (nlhs != 4) mexErrMsgTxt("expected four outputs");
+
+    mwSize dims[3] = {2, 3, 4};
+    mxArray *indices = mxCreateUninitNumericArray(3, dims, mxUINT64_CLASS, mxREAL);
+    mxUint64 *owned = (mxUint64 *)mxCalloc(24, sizeof(mxUint64));
+    owned[23] = UINT64_MAX;
+    mxSetUint64s(indices, owned);
+    mwIndex subs[3] = {1, 2, 3};
+    if (!mxIsScalar(mxCreateDoubleScalar(1.0)) ||
+        mxCalcSingleSubscript(indices, 3, subs) != 23 ||
+        mxGetUint64s(indices)[23] != UINT64_MAX) {
+        mexErrMsgTxt("typed storage or subscript helper failed");
+    }
+    plhs[0] = indices;
+
+    const char *rows[2] = {"wide", "µ"};
+    plhs[1] = mxCreateCharMatrixFromStrings(2, rows);
+    char *utf8 = mxArrayToUTF8String(mxCreateString("RunMat ✓"));
+    if (utf8 == NULL || strcmp(utf8, "RunMat ✓") != 0) {
+        mexErrMsgTxt("UTF-8 conversion failed");
+    }
+    mxFree(utf8);
+
+    const char *properties[1] = {"value"};
+    mxArray *object = mxCreateStructMatrix(1, 1, 1, properties);
+    mxSetField(object, 0, "value", mxCreateDoubleScalar(7.0));
+    if (mxSetClassName(object, "FixtureObject") != 0 ||
+        !mxIsClass(object, "FixtureObject") ||
+        mxGetScalar(mxGetProperty(object, 0, "value")) != 7.0) {
+        mexErrMsgTxt("object property conversion failed");
+    }
+    mxSetProperty(object, 0, "value", mxCreateDoubleScalar(9.0));
+    plhs[2] = object;
+
+    mxArray *complex_value = mxCreateNumericMatrix(1, 1, mxDOUBLE_CLASS, mxREAL);
+    mxGetDoubles(complex_value)[0] = 2.0;
+    if (mxMakeArrayComplex(complex_value) == 0) mexErrMsgTxt("make complex failed");
+#if defined(MX_HAS_INTERLEAVED_COMPLEX)
+    mxGetComplexDoubles(complex_value)[0].imag = 5.0;
+#else
+    mxGetPi(complex_value)[0] = 5.0;
+#endif
+    plhs[3] = complex_value;
+}
+"#,
+    )
+    .unwrap();
+
+    for api in [MexApi::R2017b, MexApi::R2018a] {
+        let artifact = MexBuild::new(&source, directory.path())
+            .api(api)
+            .output_name(format!("matrix_api_{api:?}"))
+            .compile()
+            .unwrap();
+        let module = MexModule::load(&artifact.module).unwrap();
+        let result = module.invoke(&[], 4, module.api_mode()).unwrap();
+        let Value::Tensor(indices) = &result.outputs[0] else {
+            panic!("typed N-D result must remain a tensor");
+        };
+        assert_eq!(indices.shape, vec![2, 3, 4]);
+        assert_eq!(
+            indices.numeric_value_at(23),
+            Some(runmat_value::NumericScalar::U64(u64::MAX))
+        );
+        let Value::CharArray(rows) = &result.outputs[1] else {
+            panic!("character matrix must remain a character array");
+        };
+        assert_eq!(rows.shape(), &[2, 4]);
+        let Value::Object(object) = &result.outputs[2] else {
+            panic!("classed struct must become a RunMat object");
+        };
+        assert_eq!(object.class_name, "FixtureObject");
+        assert_eq!(object.properties.get("value"), Some(&Value::Num(9.0)));
+        assert_eq!(result.outputs[3], Value::Complex(2.0, 5.0));
+    }
+}
+
+#[test]
 fn api_pins_control_dimension_width_and_complex_layout() {
     let directory = tempfile::tempdir().unwrap();
     let source = directory.path().join("api_pin.c");

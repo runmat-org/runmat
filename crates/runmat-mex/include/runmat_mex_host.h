@@ -13,7 +13,7 @@
 extern "C" {
 #endif
 
-#define RUNMAT_MEX_HOST_ABI_VERSION 1u
+#define RUNMAT_MEX_HOST_ABI_VERSION 2u
 
 typedef struct RunMatMexHostApiV1 {
     uint32_t abi_version;
@@ -31,6 +31,7 @@ typedef struct RunMatMexHostApiV1 {
     mxArray *(*duplicate_array)(void *host, const mxArray *array);
     int (*destroy_array)(void *host, mxArray *array);
     mxClassID (*class_id)(void *host, const mxArray *array);
+    const char *(*class_name)(void *host, const mxArray *array);
     size_t (*number_of_dimensions)(void *host, const mxArray *array);
     const size_t *(*dimensions)(void *host, const mxArray *array);
     size_t (*number_of_elements)(void *host, const mxArray *array);
@@ -41,6 +42,8 @@ typedef struct RunMatMexHostApiV1 {
     int (*replace_data)(void *host, mxArray *array, const void *data);
     int (*replace_imaginary_data)(void *host, mxArray *array,
                                   const void *data);
+    int (*make_complex)(void *host, mxArray *array);
+    int (*make_real)(void *host, mxArray *array);
     int (*is_complex)(void *host, const mxArray *array);
     int (*is_sparse)(void *host, const mxArray *array);
     mxArray *(*get_cell)(void *host, const mxArray *array, size_t index);
@@ -56,6 +59,11 @@ typedef struct RunMatMexHostApiV1 {
                           int fieldnum);
     int (*set_field)(void *host, mxArray *array, size_t index, int fieldnum,
                      mxArray *value);
+    int (*set_class_name)(void *host, mxArray *array, const char *class_name);
+    mxArray *(*get_property)(void *host, const mxArray *array, size_t index,
+                             const char *property_name);
+    int (*set_property)(void *host, mxArray *array, size_t index,
+                        const char *property_name, mxArray *value);
     size_t *(*sparse_row_indices)(void *host, mxArray *array);
     size_t *(*sparse_column_pointers)(void *host, mxArray *array);
     size_t (*sparse_nzmax)(void *host, mxArray *array);

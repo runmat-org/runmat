@@ -7,8 +7,8 @@ use crate::{MxApiMode, MxArena, MxArenaError, MxArray, MxClassId, MxSparse, MxSp
 
 #[derive(Debug)]
 pub struct MxApi {
-    mode: MxApiMode,
-    arena: MxArena,
+    pub(super) mode: MxApiMode,
+    pub(super) arena: MxArena,
 }
 
 impl MxApi {

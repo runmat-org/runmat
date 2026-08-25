@@ -2,7 +2,8 @@ use std::fmt;
 
 use runmat_value::{
     CellArray, CharArray, ComplexStorage, ComplexTensor, IntegerComplexStorage, IntegerStorage,
-    LogicalArray, NumericScalar, NumericStorage, SparseTensor, StructValue, Tensor, Value,
+    LogicalArray, NumericScalar, NumericStorage, ObjectArray, ObjectInstance, SparseTensor,
+    StructValue, Tensor, Value,
 };
 
 use crate::mxarray::{
@@ -64,6 +65,21 @@ pub fn value_to_mx(value: &Value, mode: MxApiMode) -> Result<MxArray, MxConversi
         Value::SparseTensor(value) => sparse_to_mx(value),
         Value::Cell(value) => cell_to_mx(value, mode),
         Value::Struct(value) => struct_to_mx(value, mode),
+        Value::Object(value) => object_to_mx(&value.class_name, &[value], vec![1, 1], mode),
+        Value::ObjectArray(value) => {
+            let objects = value
+                .data()
+                .iter()
+                .map(|element| match element {
+                    Value::Object(object) => Ok(object),
+                    Value::HandleObject(_) => Err(MxConversionError::new(
+                        "handle objects cannot cross the C Matrix API by value",
+                    )),
+                    _ => unreachable!("ObjectArray validates its elements"),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            object_to_mx(value.class_name(), &objects, value.shape().to_vec(), mode)
+        }
         other => Err(MxConversionError::new(format!(
             "{} values do not have a C Matrix API representation",
             value_kind(other)
@@ -90,6 +106,11 @@ pub fn value_from_mx(value: &MxArray) -> Result<Value, MxConversionError> {
         MxArrayData::Char(values) => char_from_mx(values, value.shape()),
         MxArrayData::Cell(values) => cell_from_mx(values, value.shape()),
         MxArrayData::Struct { fields, values } => struct_from_mx(fields, values, value.shape()),
+        MxArrayData::Object {
+            class_name,
+            properties,
+            values,
+        } => object_from_mx(class_name, properties, values, value.shape()),
         MxArrayData::Sparse(value) => sparse_from_mx(value),
     }
 }
@@ -228,6 +249,39 @@ fn struct_to_mx(value: &StructValue, mode: MxApiMode) -> Result<MxArray, MxConve
         })
         .collect::<Result<Vec<_>, _>>()?;
     MxArray::structure(fields, values, vec![1, 1]).map_err(MxConversionError::new)
+}
+
+fn object_to_mx(
+    class_name: &str,
+    objects: &[&ObjectInstance],
+    shape: Vec<usize>,
+    mode: MxApiMode,
+) -> Result<MxArray, MxConversionError> {
+    if objects.iter().any(|object| object.class_name != class_name) {
+        return Err(MxConversionError::new(
+            "C Matrix object arrays must contain one concrete class",
+        ));
+    }
+    let mut properties = objects
+        .iter()
+        .flat_map(|object| object.properties.keys().cloned())
+        .collect::<Vec<_>>();
+    properties.sort();
+    properties.dedup();
+    let mut values = Vec::with_capacity(properties.len() * objects.len());
+    for property in &properties {
+        for object in objects {
+            values.push(
+                object
+                    .properties
+                    .get(property)
+                    .map(|value| value_to_mx(value, mode).map(Box::new))
+                    .transpose()?,
+            );
+        }
+    }
+    MxArray::object(class_name.to_string(), properties, values, shape)
+        .map_err(MxConversionError::new)
 }
 
 fn uniform_struct_fields(values: &[Value]) -> Option<Vec<String>> {
@@ -375,6 +429,33 @@ fn struct_from_mx(
         .map_err(MxConversionError::new)
 }
 
+fn object_from_mx(
+    class_name: &str,
+    properties: &[String],
+    values: &[Option<Box<MxArray>>],
+    shape: &[usize],
+) -> Result<Value, MxConversionError> {
+    let numel = shape.iter().product::<usize>();
+    let mut objects = Vec::with_capacity(numel);
+    for element in 0..numel {
+        let mut object = ObjectInstance::new(class_name.to_string());
+        for (property_index, property) in properties.iter().enumerate() {
+            if let Some(value) = values[property_index * numel + element].as_deref() {
+                object
+                    .properties
+                    .insert(property.clone(), value_from_mx(value)?);
+            }
+        }
+        objects.push(object);
+    }
+    if numel == 1 {
+        return Ok(Value::Object(objects.pop().expect("one object element")));
+    }
+    ObjectArray::from_objects(class_name, objects, shape.to_vec())
+        .map(Value::ObjectArray)
+        .map_err(MxConversionError::new)
+}
+
 fn sparse_from_mx(value: &MxSparse) -> Result<Value, MxConversionError> {
     let nnz = value.col_ptrs.last().copied().unwrap_or(0);
     if nnz > value.nzmax {
@@ -436,7 +517,7 @@ fn value_kind(value: &Value) -> &'static str {
         Value::StringArray(_) => "string array",
         Value::Symbolic(_) | Value::SymbolicArray(_) => "symbolic",
         Value::GpuTensor(_) => "GPU-resident",
-        Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_) => "object",
+        Value::HandleObject(_) => "handle object",
         Value::Listener(_) => "listener",
         Value::OutputList(_) => "output-list",
         Value::FunctionHandle(_)

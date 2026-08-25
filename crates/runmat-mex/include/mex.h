@@ -43,6 +43,9 @@ RUNMAT_MEX_EXPORT const mxArray *mexGetVariablePtr(const char *workspace,
 RUNMAT_MEX_EXPORT int mexPutVariable(const char *workspace, const char *name,
                                      const mxArray *value);
 RUNMAT_MEX_EXPORT int mexIsGlobal(const mxArray *array);
+RUNMAT_MEX_EXPORT mxArray *mexGet(double handle, const char *property);
+RUNMAT_MEX_EXPORT int mexSet(double handle, const char *property,
+                             mxArray *value);
 
 #ifdef __cplusplus
 }
