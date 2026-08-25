@@ -22,6 +22,8 @@ runmat mex --R2018a -o native_gateway gateway.c support.c
 
 The default is the `-R2017b` separate-complex, large-array API. `-R2018a` selects the interleaved-complex API. The legacy `-largeArrayDims` and `-compatibleArrayDims` selections are also supported; the latter exposes 32-bit `mwSize` and `mwIndex` while RunMat checks and translates values at its private native-width host boundary. These four API selections are mutually exclusive.
 
+Each successful build writes a canonical `.runmat.json` manifest beside the platform MEX module. The manifest binds the module name and bytes to its target triple, Matrix API selection, compiler family, embedded SDK revision, and RunMat MEX host ABI. Its content identity can be carried in executable and package interop manifests for capability admission and cache validation. Moving a module does not change its identity, while changing the module or its compatibility contract does.
+
 Loaded modules belong to the current session. `clear mex`, `clear functions`, `clear all`, and named `clear` requests unload eligible modules and run registered `mexAtExit` handlers. A locked or currently executing module stays loaded. Native MEX loading is not available in a browser/WASM runtime; capability checks report that boundary before native execution.
 
 ## Native and browser products

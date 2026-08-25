@@ -14277,7 +14277,9 @@ fn portable_product_preserves_and_validates_explicit_interop_contract() {
         adapters: vec![runmat_types::ForeignAdapterRequirement {
             adapter: "native-test".into(),
             minimum_version: 1,
-            capabilities: runmat_types::CapabilitySet::default(),
+            capabilities: runmat_types::CapabilitySet(std::collections::BTreeSet::from([
+                runmat_types::CapabilityRequirement::NativeCode,
+            ])),
             artifact_identities: vec!["native-test:fixture".into()],
         }],
     };
@@ -14289,6 +14291,16 @@ fn portable_product_preserves_and_validates_explicit_interop_contract() {
         .portable_envelope_for_with_interop(None, interop.clone())
         .expect("deterministic explicit interop product");
     assert_eq!(first.manifest.interop, interop);
+    assert!(first
+        .manifest
+        .capabilities
+        .0
+        .contains(&runmat_types::CapabilityRequirement::ForeignRuntime));
+    assert!(first
+        .manifest
+        .capabilities
+        .0
+        .contains(&runmat_types::CapabilityRequirement::NativeCode));
     assert_eq!(
         first.canonical_bytes().unwrap(),
         second.canonical_bytes().unwrap()

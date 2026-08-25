@@ -369,7 +369,9 @@ impl RunMatSession {
                             cache.clear();
                         }
                         runmat_runtime::user_functions::DynamicFunctionClearRequest::Named(name) => {
-                            cache.retain(|path, _| !super::mex::path_matches_clear_name(path, name));
+                            cache.retain(|path, _| {
+                                !super::dynamic::path_matches_clear_name(path, name)
+                            });
                         }
                         runmat_runtime::user_functions::DynamicFunctionClearRequest::NativeExtensions => {}
                     }

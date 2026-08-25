@@ -17,7 +17,7 @@ pub(super) fn clear_modules(
             runmat_runtime::user_functions::DynamicFunctionClearRequest::All
             | runmat_runtime::user_functions::DynamicFunctionClearRequest::NativeExtensions => true,
             runmat_runtime::user_functions::DynamicFunctionClearRequest::Named(name) => {
-                path_matches_clear_name(path, name)
+                super::dynamic::path_matches_clear_name(path, name)
             }
         };
         if !selected {
@@ -39,26 +39,6 @@ pub(super) fn clear_modules(
     match first_error {
         Some(error) => Err(error),
         None => Ok(()),
-    }
-}
-
-pub(super) fn path_matches_clear_name(path: &std::path::Path, name: &str) -> bool {
-    let normalized = name.replace(['/', '\\'], std::path::MAIN_SEPARATOR_STR);
-    let requested = std::path::Path::new(&normalized);
-    let requested = requested.with_extension("");
-    if requested.components().count() > 1 {
-        return path.with_extension("").ends_with(requested);
-    }
-    let Some(candidate) = path.file_stem().and_then(|stem| stem.to_str()) else {
-        return false;
-    };
-    let Some(requested) = requested.file_name().and_then(|stem| stem.to_str()) else {
-        return false;
-    };
-    if cfg!(target_os = "windows") {
-        candidate.eq_ignore_ascii_case(requested)
-    } else {
-        candidate == requested
     }
 }
 

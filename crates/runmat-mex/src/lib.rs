@@ -15,8 +15,9 @@ pub mod mxarray;
 
 pub use arena::{MxArena, MxArenaError};
 pub use build::{
-    mex_suffix, MexApi, MexArgumentError, MexBuild, MexBuildError, MexBuildInvocation,
-    MexBuildOutput, MexBuildPlan, MEX_EXTENSIONS,
+    mex_suffix, MexApi, MexArgumentError, MexArtifactIdentity, MexArtifactManifest, MexBuild,
+    MexBuildError, MexBuildInvocation, MexBuildOutput, MexBuildPlan, MexTarget, MEX_ADAPTER_ID,
+    MEX_ADAPTER_VERSION, MEX_ARTIFACT_SCHEMA_VERSION, MEX_EXTENSIONS,
 };
 pub use conversion::{value_from_mx, value_to_mx, MxConversionError};
 pub use host::{

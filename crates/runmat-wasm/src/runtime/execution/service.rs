@@ -181,7 +181,7 @@ impl BrowserExecutionService {
                     )
                     .await
                 }
-                None => Ok(runmat_vm::execute_program_request(program).await),
+                None => Ok(super::execute_local_program(program).await),
             };
             if let Some(service) = weak.upgrade() {
                 service.finish_attempt(attempt, response);

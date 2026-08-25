@@ -6,6 +6,15 @@ pub(super) enum CCompilerFamily {
     Msvc,
 }
 
+impl CCompilerFamily {
+    pub(super) const fn as_str(self) -> &'static str {
+        match self {
+            Self::GnuLike => "gnu-like",
+            Self::Msvc => "msvc",
+        }
+    }
+}
+
 pub(super) fn default_c_compiler() -> PathBuf {
     std::env::var_os("CC")
         .map(PathBuf::from)
