@@ -27,15 +27,13 @@ async fn clear_policy_exposes_only_explicit_environment() {
     assert_eq!(output, "yes:unset");
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[tokio::test]
 async fn platform_runtime_policy_preserves_loader_state_without_application_state() {
     #[cfg(target_os = "linux")]
     let loader_name = "LD_LIBRARY_PATH";
     #[cfg(target_os = "macos")]
     let loader_name = "DYLD_LIBRARY_PATH";
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-    return;
-
     let Some(expected) = std::env::var_os(loader_name) else {
         // Developer machines with no dynamic-loader override still exercise
         // the allowlist itself in the crate unit tests. CI and native SDK
