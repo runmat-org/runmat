@@ -96,13 +96,23 @@ impl ExecutableUnit {
         let entrypoint_function = u32::try_from(entrypoint_function.0)
             .map(runmat_types::ProgramFunctionId)
             .map_err(|_| "entrypoint identity exceeds the portable schema".to_string())?;
-        let capabilities = runmat_types::CapabilitySet(
+        let mut capabilities = runmat_types::CapabilitySet(
             self.analysis()
                 .functions
                 .iter()
                 .flat_map(|function| function.capabilities.0.iter().copied())
                 .collect(),
         );
+        for adapter in &interop.adapters {
+            capabilities
+                .0
+                .extend(adapter.capabilities.0.iter().copied());
+        }
+        if !interop.foreign_types.is_empty() || !interop.adapters.is_empty() {
+            capabilities
+                .0
+                .insert(runmat_types::CapabilityRequirement::ForeignRuntime);
+        }
         let manifest = runmat_execution::ExecutableUnitManifest {
             schema_version: runmat_execution::EXECUTABLE_UNIT_SCHEMA_VERSION,
             identity: runmat_execution::ExecutableIdentity {

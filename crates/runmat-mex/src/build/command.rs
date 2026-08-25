@@ -1,14 +1,15 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use super::{MexBuildError, MexBuildPlan};
+use super::{compiler_family, MexArtifactManifest, MexBuildError, MexBuildPlan, MexTarget};
 
 /// C Matrix API selected for a MEX build.
 ///
 /// The release pins select the complex representation as well as the array
 /// dimension API. The legacy spellings remain distinct because MATLAB treats
 /// all four choices as mutually exclusive command-line API selections.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum MexApi {
     /// Separate-complex, large-array API (MATLAB's current default).
     #[default]
@@ -38,12 +39,15 @@ pub struct MexBuild {
     pub(super) definitions: Vec<String>,
     pub(super) compiler_arguments: Vec<String>,
     pub(super) linker_arguments: Vec<String>,
+    pub(super) target: MexTarget,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MexBuildOutput {
     pub module: PathBuf,
+    pub manifest: PathBuf,
     pub command: Vec<String>,
+    pub artifact: MexArtifactManifest,
 }
 
 impl MexBuild {
@@ -54,6 +58,13 @@ impl MexBuild {
             .and_then(|value| value.to_str())
             .unwrap_or("module")
             .to_string();
+        let target = MexTarget::current().unwrap_or_else(|_| MexTarget {
+            triple: target_lexicon::HOST.to_string(),
+            architecture: std::env::consts::ARCH.to_string(),
+            operating_system: std::env::consts::OS.to_string(),
+            pointer_width: usize::BITS as u16,
+            suffix: String::new(),
+        });
         Self {
             compiler: super::default_c_compiler(),
             sources: vec![source],
@@ -64,6 +75,7 @@ impl MexBuild {
             definitions: Vec::new(),
             compiler_arguments: Vec::new(),
             linker_arguments: Vec::new(),
+            target,
         }
     }
 
@@ -107,12 +119,22 @@ impl MexBuild {
         self
     }
 
+    pub fn target(mut self, target: MexTarget) -> Self {
+        self.target = target;
+        self
+    }
+
     pub fn plan(&self) -> Result<MexBuildPlan, MexBuildError> {
         MexBuildPlan::for_build(self)
     }
 
     pub fn compile(&self) -> Result<MexBuildOutput, MexBuildError> {
         let plan = self.plan()?;
+        if !plan.target.is_current() {
+            return Err(MexBuildError::CrossCompilationUnavailable {
+                triple: plan.target.triple.clone(),
+            });
+        }
         std::fs::create_dir_all(&self.output_directory).map_err(|source| {
             MexBuildError::CreateOutputDirectory {
                 directory: self.output_directory.clone(),
@@ -138,9 +160,51 @@ impl MexBuild {
                 diagnostics,
             });
         }
+        let module_bytes =
+            std::fs::read(&plan.module).map_err(|source| MexBuildError::ReadCompiledModule {
+                module: plan.module.clone(),
+                source,
+            })?;
+        let artifact = MexArtifactManifest::from_module(
+            &self.output_name,
+            plan.target.clone(),
+            self.api,
+            compiler_family(&plan.compiler),
+            &module_bytes,
+        )?;
+        let manifest = MexArtifactManifest::path_for_module(&plan.module);
+        publish_manifest(&manifest, &artifact.canonical_bytes()?)?;
         Ok(MexBuildOutput {
             module: plan.module,
+            manifest,
             command,
+            artifact,
         })
     }
+}
+
+fn publish_manifest(path: &std::path::Path, bytes: &[u8]) -> Result<(), MexBuildError> {
+    use std::io::Write as _;
+
+    let parent = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(|source| {
+        MexBuildError::WriteArtifactManifest {
+            path: path.to_path_buf(),
+            source,
+        }
+    })?;
+    temporary
+        .write_all(bytes)
+        .and_then(|_| temporary.as_file_mut().sync_all())
+        .map_err(|source| MexBuildError::WriteArtifactManifest {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    temporary
+        .persist(path)
+        .map_err(|error| MexBuildError::WriteArtifactManifest {
+            path: path.to_path_buf(),
+            source: error.error,
+        })?;
+    Ok(())
 }

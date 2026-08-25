@@ -89,7 +89,7 @@ impl ExecutableUnitManifest {
                 "every parallel construct must name a declared region contract",
             ));
         }
-        if !self.interop.foreign_types.is_empty()
+        if (!self.interop.foreign_types.is_empty() || !self.interop.adapters.is_empty())
             && !self
                 .capabilities
                 .0
@@ -98,6 +98,17 @@ impl ExecutableUnitManifest {
             return Err(ContractError::invalid(
                 "executable.capabilities",
                 "foreign requirements need the foreign-runtime capability",
+            ));
+        }
+        if self
+            .interop
+            .adapters
+            .iter()
+            .any(|adapter| !adapter.capabilities.0.is_subset(&self.capabilities.0))
+        {
+            return Err(ContractError::invalid(
+                "executable.capabilities",
+                "foreign adapter capabilities must be declared by the executable",
             ));
         }
         if (!self.parallel.parfor_regions.is_empty() || !self.parallel.spmd_regions.is_empty())
@@ -144,6 +155,32 @@ impl ExecutableUnitManifest {
             support.validate_section(section)?;
         }
         Ok(())
+    }
+
+    /// Validate the complete executable capability contract against one host.
+    ///
+    /// Product frontends use this before decoding or invoking executable
+    /// payloads, so an unavailable native/foreign/parallel requirement cannot
+    /// turn into a late missing-symbol or dynamic-dispatch failure.
+    pub fn validate_capabilities_for(
+        &self,
+        available: &CapabilitySet,
+    ) -> Result<(), ContractError> {
+        self.validate()?;
+        let missing = self
+            .capabilities
+            .0
+            .difference(&available.0)
+            .copied()
+            .collect::<Vec<_>>();
+        if missing.is_empty() {
+            Ok(())
+        } else {
+            Err(ContractError::invalid(
+                "executable.capabilities",
+                format!("host does not provide required capabilities: {missing:?}"),
+            ))
+        }
     }
 
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, ContractError> {

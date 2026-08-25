@@ -1,24 +1,26 @@
 use std::path::{Path, PathBuf};
 
-use super::{compiler_family, mex_suffix, sdk, CCompilerFamily, MexApi, MexBuild, MexBuildError};
+use super::{compiler_family, sdk, CCompilerFamily, MexApi, MexBuild, MexBuildError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MexBuildPlan {
     pub compiler: PathBuf,
     pub arguments: Vec<String>,
     pub module: PathBuf,
+    pub target: super::MexTarget,
 }
 
 impl MexBuildPlan {
     pub(super) fn for_build(build: &MexBuild) -> Result<Self, MexBuildError> {
-        let suffix = mex_suffix().ok_or(MexBuildError::UnsupportedTarget)?;
         validate(build)?;
+        build.target.validate()?;
+        let family = compiler_family(&build.compiler);
+        build.target.validate_compiler(family)?;
         let module = build
             .output_directory
-            .join(format!("{}.{}", build.output_name, suffix));
+            .join(format!("{}.{}", build.output_name, build.target.suffix));
         let function_name = c_identifier(&build.output_name);
         let sdk = sdk::prepare()?;
-        let family = compiler_family(&build.compiler);
         let arguments = match family {
             CCompilerFamily::GnuLike => gnu_arguments(
                 build,
@@ -39,6 +41,7 @@ impl MexBuildPlan {
             compiler: build.compiler.clone(),
             arguments,
             module,
+            target: build.target.clone(),
         })
     }
 
@@ -177,6 +180,7 @@ fn c_identifier(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::MexTarget;
 
     #[test]
     fn msvc_plan_uses_native_driver_spelling() {
@@ -184,6 +188,13 @@ mod tests {
         let source = temporary.path().join("demo.c");
         std::fs::write(&source, "void mexFunction(void) {}").unwrap();
         let build = MexBuild::new(&source, temporary.path())
+            .target(MexTarget {
+                triple: "x86_64-pc-windows-msvc".into(),
+                architecture: "x86_64".into(),
+                operating_system: "windows".into(),
+                pointer_width: 64,
+                suffix: "mexw64".into(),
+            })
             .compiler("cl.exe")
             .include_directory("vendor/include")
             .define("FEATURE=1")
@@ -229,5 +240,27 @@ mod tests {
         let compatible = definitions(MexApi::CompatibleArrayDims);
         assert!(compatible.contains(&"-DRUNMAT_MX_COMPATIBLE_ARRAY_DIMS=1".to_string()));
         assert!(compatible.contains(&"-DMX_COMPAT_32=1".to_string()));
+    }
+
+    #[test]
+    fn target_rejects_an_incompatible_compiler_family_before_launch() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = temporary.path().join("demo.c");
+        std::fs::write(&source, "void mexFunction(void) {}").unwrap();
+        let target = MexTarget::current().unwrap();
+        let incompatible_compiler = if target.operating_system == "windows" {
+            "cc"
+        } else {
+            "cl.exe"
+        };
+
+        let error = MexBuild::new(&source, temporary.path())
+            .compiler(incompatible_compiler)
+            .plan()
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            MexBuildError::UnsupportedCompilerForTarget { .. }
+        ));
     }
 }

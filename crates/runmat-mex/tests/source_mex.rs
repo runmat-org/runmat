@@ -91,6 +91,27 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
     )
     .unwrap();
     let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+    assert!(artifact.manifest.is_file());
+    assert_eq!(
+        runmat_mex::MexArtifactManifest::from_canonical_bytes(
+            &fs::read(&artifact.manifest).unwrap()
+        )
+        .unwrap(),
+        artifact.artifact
+    );
+    artifact
+        .artifact
+        .validate_module(&fs::read(&artifact.module).unwrap())
+        .unwrap();
+    let rebuilt = MexBuild::new(&source, directory.path()).compile().unwrap();
+    assert_eq!(rebuilt.manifest, artifact.manifest);
+    assert_eq!(
+        runmat_mex::MexArtifactManifest::from_canonical_bytes(
+            &fs::read(&rebuilt.manifest).unwrap()
+        )
+        .unwrap(),
+        rebuilt.artifact
+    );
     let module = MexModule::load(&artifact.module).unwrap();
     let result = module
         .invoke(
@@ -108,6 +129,37 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         ))]
     );
     assert_eq!(result.console, "typed fixture\n");
+}
+
+#[test]
+fn loader_rejects_a_module_that_no_longer_matches_its_artifact_identity() {
+    use std::io::Write as _;
+
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("tamper.c");
+    fs::write(
+        &source,
+        r#"
+#include "mex.h"
+void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
+    (void)nlhs; (void)plhs; (void)nrhs; (void)prhs;
+}
+"#,
+    )
+    .unwrap();
+    let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+    fs::OpenOptions::new()
+        .append(true)
+        .open(&artifact.module)
+        .unwrap()
+        .write_all(b"tampered")
+        .unwrap();
+
+    let error = match MexModule::load(&artifact.module) {
+        Ok(_) => panic!("loader admitted a module that did not match its manifest"),
+        Err(error) => error,
+    };
+    assert!(matches!(error, MexLoadError::ArtifactManifest { .. }));
 }
 
 #[test]

@@ -263,6 +263,18 @@ fn versions_capabilities_digests_and_cache_inputs_are_enforced() {
         .remove(&CapabilityRequirement::ForeignRuntime);
     assert!(missing_capability.validate().is_err());
 
+    let available = CapabilitySet(BTreeSet::from([
+        CapabilityRequirement::ForeignRuntime,
+        CapabilityRequirement::ParallelRuntime,
+        CapabilityRequirement::DistributedRuntime,
+    ]));
+    baseline.validate_capabilities_for(&available).unwrap();
+    let unavailable = CapabilitySet(BTreeSet::from([
+        CapabilityRequirement::ParallelRuntime,
+        CapabilityRequirement::DistributedRuntime,
+    ]));
+    assert!(baseline.validate_capabilities_for(&unavailable).is_err());
+
     let mut tampered = baseline;
     tampered.optional_sections[0].payload.push(0);
     assert!(tampered.validate().is_err());

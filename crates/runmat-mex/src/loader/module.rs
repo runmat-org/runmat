@@ -7,8 +7,8 @@ use runmat_value::Value;
 use thiserror::Error;
 
 use crate::{
-    value_from_mx, value_to_mx, MexCallState, MexHostApiV1, MexHostServices, MxApiMode, MxArray,
-    UnavailableMexHostServices,
+    value_from_mx, value_to_mx, MexArtifactManifest, MexCallState, MexHostApiV1, MexHostServices,
+    MxApiMode, MxArray, UnavailableMexHostServices,
 };
 
 type BindHost = unsafe extern "C" fn(*const MexHostApiV1) -> i32;
@@ -31,6 +31,20 @@ pub struct MexInvocation {
 
 #[derive(Debug, Error)]
 pub enum MexLoadError {
+    #[error("failed to read MEX artifact manifest {path}: {source}")]
+    ArtifactManifestRead {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("MEX artifact manifest {path} is invalid or does not match its module: {message}")]
+    ArtifactManifest { path: String, message: String },
+    #[error("failed to read MEX module {path} for artifact admission: {source}")]
+    ModuleRead {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("failed to load MEX module {path}: {source}")]
     Load {
         path: String,
@@ -70,6 +84,7 @@ pub struct MexModule {
 impl MexModule {
     pub fn load(path: &Path) -> Result<Self, MexLoadError> {
         let _process_guard = MEX_PROCESS_GATE.lock();
+        admit_artifact(path)?;
         // SAFETY: the library remains owned by `Self`; all resolved function
         // pointers are copied only after their exact C signatures are checked.
         let library = unsafe { Library::new(path) }.map_err(|source| MexLoadError::Load {
@@ -271,6 +286,31 @@ impl MexModule {
         *state = None;
         Ok(true)
     }
+}
+
+fn admit_artifact(path: &Path) -> Result<(), MexLoadError> {
+    let manifest_path = MexArtifactManifest::path_for_module(path);
+    let manifest_bytes =
+        std::fs::read(&manifest_path).map_err(|source| MexLoadError::ArtifactManifestRead {
+            path: manifest_path.display().to_string(),
+            source,
+        })?;
+    let manifest = MexArtifactManifest::from_canonical_bytes(&manifest_bytes).map_err(|error| {
+        MexLoadError::ArtifactManifest {
+            path: manifest_path.display().to_string(),
+            message: error.to_string(),
+        }
+    })?;
+    let module = std::fs::read(path).map_err(|source| MexLoadError::ModuleRead {
+        path: path.display().to_string(),
+        source,
+    })?;
+    manifest
+        .validate_current_module(&module)
+        .map_err(|error| MexLoadError::ArtifactManifest {
+            path: manifest_path.display().to_string(),
+            message: error.to_string(),
+        })
 }
 
 impl Drop for MexModule {

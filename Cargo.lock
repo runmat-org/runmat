@@ -6918,7 +6918,12 @@ version = "0.6.2"
 dependencies = [
  "libloading 0.8.9",
  "parking_lot",
+ "runmat-types",
  "runmat-value",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "target-lexicon",
  "tempfile",
  "thiserror 1.0.69",
 ]
@@ -7438,6 +7443,7 @@ dependencies = [
  "runmat-test-runner",
  "runmat-test-runner-execution",
  "runmat-thread-local",
+ "runmat-types",
  "runmat-value",
  "runmat-vm",
  "serde",

@@ -3,6 +3,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use sha2::{Digest as _, Sha256};
+
 use super::MexBuildError;
 
 const FILES: [(&str, &[u8]); 4] = [
@@ -77,6 +79,25 @@ fn content_fingerprint() -> u64 {
         .fold(FNV_OFFSET, |hash, byte| {
             (hash ^ u64::from(*byte)).wrapping_mul(FNV_PRIME)
         })
+}
+
+pub(super) fn content_digest() -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"runmat-mex-sdk-v1\0");
+    for (path, contents) in FILES {
+        hasher.update((path.len() as u64).to_le_bytes());
+        hasher.update(path.as_bytes());
+        hasher.update((contents.len() as u64).to_le_bytes());
+        hasher.update(contents);
+    }
+    let digest = hasher.finalize();
+    let mut encoded = String::with_capacity(71);
+    encoded.push_str("sha256:");
+    for byte in digest {
+        use std::fmt::Write as _;
+        write!(&mut encoded, "{byte:02x}").expect("writing to a string cannot fail");
+    }
+    encoded
 }
 
 #[cfg(test)]
