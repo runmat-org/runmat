@@ -19,6 +19,7 @@ pub struct MeshingGeometryEvaluationControl<'a> {
     cancellation: &'a dyn MeshingCancellationSignal,
     started: Instant,
     last_checkpoint_at: Arc<Mutex<Instant>>,
+    last_checkpoint_search_work: Arc<AtomicU64>,
     maximum_wall_time_ms: u64,
     maximum_checkpoint_latency_ms: u64,
     maximum_allocation_bytes: u64,
@@ -34,6 +35,7 @@ impl<'a> MeshingGeometryEvaluationControl<'a> {
         cancellation: &'a dyn MeshingCancellationSignal,
         started: Instant,
         last_checkpoint_at: Arc<Mutex<Instant>>,
+        last_checkpoint_search_work: Arc<AtomicU64>,
         resources: &MeshingResourceBudget,
         policy: &CancellationPolicy,
     ) -> Self {
@@ -41,6 +43,7 @@ impl<'a> MeshingGeometryEvaluationControl<'a> {
             cancellation,
             started,
             last_checkpoint_at,
+            last_checkpoint_search_work,
             maximum_wall_time_ms: resources.maximum_wall_time_ms,
             maximum_checkpoint_latency_ms: policy.maximum_checkpoint_latency_ms,
             maximum_allocation_bytes: resources.maximum_memory_bytes,
@@ -105,6 +108,8 @@ impl GeometryEvaluationControl for MeshingGeometryEvaluationControl<'_> {
             ));
         }
         *previous = now;
+        self.last_checkpoint_search_work
+            .store(self.search_work.load(Ordering::Relaxed), Ordering::Relaxed);
         Ok(())
     }
 
@@ -141,7 +146,22 @@ impl GeometryEvaluationControl for MeshingGeometryEvaluationControl<'_> {
 
 impl MeshingCancellationSignal for MeshingGeometryEvaluationControl<'_> {
     fn is_cancelled(&self) -> bool {
-        self.cancellation.is_cancelled()
+        if self.cancellation.is_cancelled() {
+            return true;
+        }
+        let now = Instant::now();
+        if let Ok(mut previous) = self.last_checkpoint_at.lock() {
+            // Algorithmic cancellation probes are mandatory checkpoints too.
+            // Renew the enclosing stage deadline only when the probe itself
+            // arrived within policy; a late probe leaves the old timestamp in
+            // place so the next fallible checkpoint reports the violation.
+            if elapsed_millis(*previous, now) <= self.maximum_checkpoint_latency_ms {
+                *previous = now;
+                self.last_checkpoint_search_work
+                    .store(self.search_work.load(Ordering::Relaxed), Ordering::Relaxed);
+            }
+        }
+        false
     }
 }
 

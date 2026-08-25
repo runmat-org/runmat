@@ -174,10 +174,10 @@ pub fn validate_exact_face_geometry_in_parameterization(
         if !same_vector(actual.unit_normal, expected_normal)
             || !same_measure(actual.physical_area_m2, physical_area_m2)
             || !same_vector(actual.metric_edge_lengths, metric_edges)
-            || !same_measure(actual.minimum_metric_angle_rad, minimum_angle)
+            || !same_angle(actual.minimum_metric_angle_rad, minimum_angle)
             || !same_measure(actual.physical_aspect_ratio, aspect)
             || !same_measure(actual.chordal_deviation_m, chordal)
-            || !same_measure(actual.normal_deviation_rad, normal_deviation)
+            || !same_angle(actual.normal_deviation_rad, normal_deviation)
         {
             return Err(invalid(
                 &geometry.source_face_id,
@@ -194,7 +194,7 @@ pub fn validate_exact_face_geometry_in_parameterization(
     if !same_measure(
         geometry.maximum_metric_edge_length,
         maximum_metric_edge_length,
-    ) || !same_measure(geometry.minimum_metric_angle_rad, minimum_metric_angle_rad)
+    ) || !same_angle(geometry.minimum_metric_angle_rad, minimum_metric_angle_rad)
         || !same_measure(
             geometry.maximum_physical_aspect_ratio,
             maximum_physical_aspect_ratio,
@@ -203,7 +203,7 @@ pub fn validate_exact_face_geometry_in_parameterization(
             geometry.maximum_chordal_deviation_m,
             maximum_chordal_deviation_m,
         )
-        || !same_measure(
+        || !same_angle(
             geometry.maximum_normal_deviation_rad,
             maximum_normal_deviation_rad,
         )
@@ -357,4 +357,25 @@ fn same_measure(actual: f64, expected: f64) -> bool {
         && expected.is_finite()
         && (actual - expected).abs()
             <= 64.0 * f64::EPSILON * actual.abs().max(expected.abs()).max(1.0)
+}
+
+fn same_angle(actual: f64, expected: f64) -> bool {
+    actual.is_finite()
+        && expected.is_finite()
+        && (0.0..=std::f64::consts::PI).contains(&actual)
+        && (0.0..=std::f64::consts::PI).contains(&expected)
+        && same_measure(actual.cos(), expected.cos())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{same_angle, same_measure};
+
+    #[test]
+    fn angle_evidence_compares_the_stable_cosine_invariant() {
+        assert!(!same_measure(1.0e-8, 1.1e-8));
+        assert!(same_angle(1.0e-8, 1.1e-8));
+        assert!(!same_angle(0.1, 0.2));
+        assert!(!same_angle(-f64::EPSILON, 0.0));
+    }
 }

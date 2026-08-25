@@ -5,9 +5,9 @@ use runmat_meshing_core::{
 };
 use runmat_meshing_curve::{decode_shared_curve_mesh, SHARED_CURVE_MESH_SCHEMA_VERSION};
 use runmat_meshing_surface::{
-    encode_exact_face_partition_result, mesh_exact_face_partition, ExactFaceJoinOptions,
-    ExactFacePartitionContext, ExactFacePartitionOptions, ExactFacePartitionOutcome,
-    ExactSurfaceJoinOptions, EXACT_FACE_PARTITION_RESULT_SCHEMA_VERSION,
+    encode_exact_face_partition_result, mesh_exact_face_partition, ExactFaceDelaunayOptions,
+    ExactFaceJoinOptions, ExactFacePartitionContext, ExactFacePartitionOptions,
+    ExactFacePartitionOutcome, ExactSurfaceJoinOptions, EXACT_FACE_PARTITION_RESULT_SCHEMA_VERSION,
 };
 
 pub(crate) mod error;
@@ -227,6 +227,12 @@ fn surface_options(host: &crate::MeshingHostWorkload) -> ExactFacePartitionOptio
     let maximum_elements = usize::try_from(resources.maximum_elements).unwrap_or(usize::MAX);
     let maximum_iterations = resources.maximum_iterations.min(u64::from(u32::MAX)) as u32;
     let maximum_depth = resources.maximum_recursion_depth.min(16) as u8;
+    let cancellation_check_interval = host
+        .resolved_request
+        .cancellation
+        .maximum_work_units_between_checks
+        .min(ExactFaceDelaunayOptions::default().cancellation_check_interval)
+        .max(1);
     ExactFacePartitionOptions {
         charts: runmat_meshing_surface::ExactFaceChartOptions {
             maximum_charts_per_face: resources.maximum_recursion_depth.min(u32::from(u16::MAX))
@@ -238,10 +244,7 @@ fn surface_options(host: &crate::MeshingHostWorkload) -> ExactFacePartitionOptio
             maximum_predicate_evaluations: resources.maximum_search_work,
             maximum_edge_flips: resources.maximum_search_work,
             maximum_cavity_retriangulations: resources.maximum_iterations,
-            cancellation_check_interval: host
-                .resolved_request
-                .cancellation
-                .maximum_work_units_between_checks,
+            cancellation_check_interval,
         },
         refinement: runmat_meshing_surface::ExactFaceRefinementOptions {
             maximum_interior_insertions: maximum_iterations,

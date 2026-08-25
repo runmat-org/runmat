@@ -298,7 +298,37 @@ impl std::fmt::Display for MeshingFailure {
         if let Some(detail) = self.detail() {
             write!(formatter, ": {detail}")?;
         }
+        for achieved in &self.achieved_values {
+            if matches!(achieved.value, MeshingDiagnosticValue::Text(_)) {
+                continue;
+            }
+            write!(
+                formatter,
+                "; achieved {}={}",
+                achieved.name,
+                diagnostic_value(&achieved.value)
+            )?;
+            if let Some(required) = self
+                .request_values
+                .iter()
+                .find(|required| required.name == achieved.name)
+            {
+                write!(formatter, " (limit {})", diagnostic_value(&required.value))?;
+            }
+        }
         write!(formatter, "; remediation: {}", self.remediation)
+    }
+}
+
+fn diagnostic_value(value: &MeshingDiagnosticValue) -> String {
+    match value {
+        MeshingDiagnosticValue::Count(value) => value.to_string(),
+        MeshingDiagnosticValue::Integer(value) => value.to_string(),
+        MeshingDiagnosticValue::Scalar(value) => value.to_string(),
+        MeshingDiagnosticValue::Text(value) => value.clone(),
+        MeshingDiagnosticValue::Interval { minimum, maximum } => {
+            format!("[{minimum}, {maximum}]")
+        }
     }
 }
 

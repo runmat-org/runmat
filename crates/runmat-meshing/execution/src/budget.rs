@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -45,6 +46,7 @@ pub struct MeshingStageControl<'a> {
     progress: &'a mut dyn MeshingProgressSink,
     started: Instant,
     last_checkpoint_at: Arc<Mutex<Instant>>,
+    last_checkpoint_search_work: Arc<AtomicU64>,
     last: MeshingStageCheckpoint,
     last_progress: Option<MeshingProgress>,
     sequence: u64,
@@ -75,6 +77,7 @@ impl<'a> MeshingStageControl<'a> {
             progress,
             started: now,
             last_checkpoint_at: Arc::new(Mutex::new(now)),
+            last_checkpoint_search_work: Arc::new(AtomicU64::new(0)),
             last: MeshingStageCheckpoint::default(),
             last_progress: None,
             sequence: 0,
@@ -90,6 +93,7 @@ impl<'a> MeshingStageControl<'a> {
             self.cancellation,
             self.started,
             Arc::clone(&self.last_checkpoint_at),
+            Arc::clone(&self.last_checkpoint_search_work),
             &self.request.resources,
             &self.request.cancellation,
         )
@@ -125,14 +129,17 @@ impl<'a> MeshingStageControl<'a> {
                 None,
             )
         })?;
-        if elapsed_millis(last_checkpoint_at, now)
-            > self.request.cancellation.maximum_checkpoint_latency_ms
-        {
+        let checkpoint_latency_ms = elapsed_millis(last_checkpoint_at, now);
+        if checkpoint_latency_ms > self.request.cancellation.maximum_checkpoint_latency_ms {
             return Err(failure(
                 self.stage,
                 MeshingFailureCategory::InternalInvariantViolation,
                 "reduce algorithm work between mandatory cancellation checkpoints",
-                None,
+                Some((
+                    "checkpoint_latency_ms",
+                    checkpoint_latency_ms,
+                    self.request.cancellation.maximum_checkpoint_latency_ms,
+                )),
             ));
         }
         Ok(())
@@ -192,15 +199,33 @@ impl<'a> MeshingStageControl<'a> {
             ));
         }
         self.validate_monotone(&checkpoint)?;
-        let work_since_check = checkpoint.search_work - self.last.search_work;
+        let work_since_check = checkpoint.search_work.saturating_sub(
+            self.last_checkpoint_search_work
+                .load(Ordering::Relaxed)
+                .max(self.last.search_work),
+        );
         if work_since_check > self.request.cancellation.maximum_work_units_between_checks
             || checkpoint_latency_ms > self.request.cancellation.maximum_checkpoint_latency_ms
         {
+            let diagnostic =
+                if work_since_check > self.request.cancellation.maximum_work_units_between_checks {
+                    (
+                        "work_units_between_checks",
+                        work_since_check,
+                        self.request.cancellation.maximum_work_units_between_checks,
+                    )
+                } else {
+                    (
+                        "checkpoint_latency_ms",
+                        checkpoint_latency_ms,
+                        self.request.cancellation.maximum_checkpoint_latency_ms,
+                    )
+                };
             return Err(failure(
                 self.stage,
                 MeshingFailureCategory::InternalInvariantViolation,
                 "reduce algorithm work between mandatory cancellation checkpoints",
-                None,
+                Some(diagnostic),
             ));
         }
         self.enforce_budget(&checkpoint, elapsed_ms)?;
@@ -246,6 +271,8 @@ impl<'a> MeshingStageControl<'a> {
         }
         self.progress.record(&progress);
         self.last = checkpoint;
+        self.last_checkpoint_search_work
+            .store(self.last.search_work, Ordering::Relaxed);
         self.last_progress = Some(progress);
         *last_checkpoint_at = now;
         Ok(())

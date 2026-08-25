@@ -921,7 +921,38 @@ fn exact_geometry_checkpoints_renew_the_enclosing_stage_deadline() {
     std::thread::sleep(std::time::Duration::from_millis(600));
     stage.geometry_evaluation_control().checkpoint().unwrap();
     std::thread::sleep(std::time::Duration::from_millis(600));
+    assert!(!stage.geometry_evaluation_control().is_cancelled());
+    std::thread::sleep(std::time::Duration::from_millis(600));
     stage.guard().unwrap();
+}
+
+#[test]
+fn exact_geometry_checkpoints_publish_search_work_to_the_enclosing_stage() {
+    let mut bounded = request();
+    bounded.cancellation.maximum_work_units_between_checks = 2;
+    let mut progress = Progress::default();
+    let mut stage = MeshingStageControl::new(
+        MeshingStageKind::SurfaceMesh,
+        0,
+        &bounded,
+        &NeverCancelled,
+        &mut progress,
+    )
+    .unwrap();
+    stage.checkpoint(MeshingStageCheckpoint::default()).unwrap();
+    {
+        let geometry = stage.geometry_evaluation_control();
+        geometry.consume_search_work(2).unwrap();
+        geometry.checkpoint().unwrap();
+        geometry.consume_search_work(2).unwrap();
+        assert!(!geometry.is_cancelled());
+    }
+    stage
+        .checkpoint(MeshingStageCheckpoint {
+            search_work: 4,
+            ..MeshingStageCheckpoint::default()
+        })
+        .unwrap();
 }
 
 #[test]
