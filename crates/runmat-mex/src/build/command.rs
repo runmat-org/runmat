@@ -6,12 +6,12 @@ use super::{compiler_family, MexArtifactManifest, MexBuildError, MexBuildPlan, M
 /// C Matrix API selected for a MEX build.
 ///
 /// The release pins select the complex representation as well as the array
-/// dimension API. The legacy spellings remain distinct because MATLAB treats
-/// all four choices as mutually exclusive command-line API selections.
+/// dimension API. The legacy spellings remain distinct because the four
+/// choices are mutually exclusive command-line API selections.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MexApi {
-    /// Separate-complex, large-array API (MATLAB's current default).
+    /// Separate-complex, large-array API.
     #[default]
     R2017b,
     /// Interleaved-complex, large-array API.
