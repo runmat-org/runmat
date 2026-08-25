@@ -38,6 +38,8 @@ impl RunMatSession {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
             .clear();
+        #[cfg(not(target_arch = "wasm32"))]
+        self.mex_modules.borrow_mut().clear();
         Ok(revision)
     }
 
@@ -54,6 +56,8 @@ impl RunMatSession {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
             .clear();
+        #[cfg(not(target_arch = "wasm32"))]
+        self.mex_modules.borrow_mut().clear();
     }
 
     /// Return the revision currently installed at the session boundary.

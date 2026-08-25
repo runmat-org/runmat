@@ -18,6 +18,7 @@ pub mod finance;
 pub mod geometry;
 pub mod graph;
 pub mod image;
+pub mod interop;
 pub mod introspection;
 pub mod io;
 pub mod logical;

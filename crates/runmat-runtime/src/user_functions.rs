@@ -25,8 +25,20 @@ pub type LexicalFunctionFuture =
 pub type LexicalFunctionInvoker =
     dyn Fn(crate::call::lexical::LexicalCall) -> LexicalFunctionFuture;
 pub type FunctionResolver = dyn Fn(&str) -> Option<usize> + Send + Sync;
+
+/// The point in callable resolution at which a session-backed loader runs.
+///
+/// Native callable artifacts such as MEX modules have language-defined
+/// precedence over source functions. Ordinary dynamically discovered source
+/// files are consulted only after the analyzed semantic registry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DynamicFunctionLoadPhase {
+    BeforeSemantic,
+    AfterSemantic,
+}
+
 pub type DynamicFunctionLoader =
-    dyn Fn(String, Vec<Value>, usize) -> DynamicFunctionLoadFuture + Send + Sync;
+    dyn Fn(String, Vec<Value>, usize, DynamicFunctionLoadPhase) -> DynamicFunctionLoadFuture;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceFunctionInfo {
@@ -440,6 +452,7 @@ pub async fn try_load_and_call_dynamic_function(
     name: String,
     args: Vec<Value>,
     requested_outputs: usize,
+    phase: DynamicFunctionLoadPhase,
 ) -> Option<Result<Value, RuntimeError>> {
     let loader = crate::context::legacy::active()?
         .state()
@@ -447,7 +460,7 @@ pub async fn try_load_and_call_dynamic_function(
         .borrow()
         .dynamic_loader
         .clone()?;
-    loader(name, args, requested_outputs).await
+    loader(name, args, requested_outputs, phase).await
 }
 
 fn source_functions_in_catalog(
@@ -492,6 +505,23 @@ pub async fn try_call_semantic_descriptor(
         // not generic semantic name resolution.
         return None;
     }
+    if matches!(
+        identity,
+        CallableIdentity::DynamicName(_)
+            | CallableIdentity::Imported(_)
+            | CallableIdentity::ExternalName(_)
+    ) {
+        if let Some(result) = try_load_and_call_dynamic_function(
+            name.clone(),
+            args.clone(),
+            requested_outputs,
+            DynamicFunctionLoadPhase::BeforeSemantic,
+        )
+        .await
+        {
+            return Some(result);
+        }
+    }
     if let Some(result) = try_call_semantic_function_by_name(&name, &args, requested_outputs).await
     {
         return Some(result);
@@ -502,7 +532,13 @@ pub async fn try_call_semantic_descriptor(
             | CallableIdentity::Imported(_)
             | CallableIdentity::ExternalName(_)
     ) {
-        return try_load_and_call_dynamic_function(name, args, requested_outputs).await;
+        return try_load_and_call_dynamic_function(
+            name,
+            args,
+            requested_outputs,
+            DynamicFunctionLoadPhase::AfterSemantic,
+        )
+        .await;
     }
     None
 }

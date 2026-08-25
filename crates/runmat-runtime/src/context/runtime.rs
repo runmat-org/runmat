@@ -115,7 +115,7 @@ impl RuntimeContext {
 
     pub fn set_dynamic_function_loader(
         &self,
-        loader: Option<Arc<crate::user_functions::DynamicFunctionLoader>>,
+        loader: Option<Rc<crate::user_functions::DynamicFunctionLoader>>,
     ) {
         self.state.call.borrow_mut().dynamic_loader = loader;
     }

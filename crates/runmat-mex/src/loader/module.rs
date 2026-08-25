@@ -52,6 +52,8 @@ pub enum MexLoadError {
     Output(String),
     #[error("MEX module invocation lock is poisoned")]
     Poisoned,
+    #[error("recursive invocation of the same C MEX module is not supported")]
+    ReentrantModule,
 }
 
 pub struct MexModule {
@@ -136,7 +138,11 @@ impl MexModule {
         services: std::rc::Rc<dyn MexHostServices>,
     ) -> Result<MexInvocation, MexLoadError> {
         let _process_guard = MEX_PROCESS_GATE.lock();
-        let mut state_slot = self.state.lock().map_err(|_| MexLoadError::Poisoned)?;
+        let mut state_slot = match self.state.try_lock() {
+            Ok(state) => state,
+            Err(std::sync::TryLockError::WouldBlock) => return Err(MexLoadError::ReentrantModule),
+            Err(std::sync::TryLockError::Poisoned(_)) => return Err(MexLoadError::Poisoned),
+        };
         let state =
             state_slot.get_or_insert_with(|| MexCallState::with_services(mode, services.clone()));
         if state.mx.mode() != mode {
