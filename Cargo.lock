@@ -6555,6 +6555,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-extension-abi"
+version = "0.6.2"
+
+[[package]]
 name = "runmat-filesystem"
 version = "0.6.2"
 dependencies = [
