@@ -7,7 +7,7 @@ mod suffix;
 mod toolchain;
 
 pub use arguments::{MexArgumentError, MexBuildInvocation};
-pub use command::{MexBuild, MexBuildOutput};
+pub use command::{MexApi, MexBuild, MexBuildOutput};
 pub use error::MexBuildError;
 pub use plan::MexBuildPlan;
 pub use suffix::{mex_suffix, MEX_EXTENSIONS};

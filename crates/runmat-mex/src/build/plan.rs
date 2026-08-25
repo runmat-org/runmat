@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use super::{compiler_family, mex_suffix, sdk, CCompilerFamily, MexBuild, MexBuildError};
+use super::{compiler_family, mex_suffix, sdk, CCompilerFamily, MexApi, MexBuild, MexBuildError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MexBuildPlan {
@@ -138,8 +138,18 @@ fn push_definitions(
     prefix: &str,
     arguments: &mut Vec<String>,
 ) {
-    if build.interleaved_complex {
-        arguments.push(format!("{prefix}RUNMAT_MX_INTERLEAVED_COMPLEX=1"));
+    match build.api {
+        MexApi::R2017b => {
+            arguments.push(format!("{prefix}MEX_DOUBLE_HANDLE=1"));
+        }
+        MexApi::R2018a => {
+            arguments.push(format!("{prefix}RUNMAT_MX_INTERLEAVED_COMPLEX=1"));
+        }
+        MexApi::CompatibleArrayDims => {
+            arguments.push(format!("{prefix}RUNMAT_MX_COMPATIBLE_ARRAY_DIMS=1"));
+            arguments.push(format!("{prefix}MX_COMPAT_32=1"));
+        }
+        MexApi::LargeArrayDims => {}
     }
     arguments.push(format!(
         "{prefix}RUNMAT_MEX_FUNCTION_NAME=\"{function_name}\""
@@ -188,5 +198,36 @@ mod tests {
             .arguments
             .iter()
             .any(|argument| argument.starts_with("/OUT:")));
+    }
+
+    #[test]
+    fn api_pins_emit_distinct_preprocessor_contracts() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = temporary.path().join("demo.c");
+        std::fs::write(&source, "void mexFunction(void) {}").unwrap();
+
+        let definitions = |api| {
+            MexBuild::new(&source, temporary.path())
+                .api(api)
+                .plan()
+                .unwrap()
+                .arguments
+                .into_iter()
+                .filter(|argument| argument.starts_with("-D"))
+                .collect::<Vec<_>>()
+        };
+
+        let default = definitions(MexApi::R2017b);
+        assert!(default.contains(&"-DMEX_DOUBLE_HANDLE=1".to_string()));
+        assert!(!default
+            .iter()
+            .any(|argument| argument.contains("INTERLEAVED")));
+
+        let interleaved = definitions(MexApi::R2018a);
+        assert!(interleaved.contains(&"-DRUNMAT_MX_INTERLEAVED_COMPLEX=1".to_string()));
+
+        let compatible = definitions(MexApi::CompatibleArrayDims);
+        assert!(compatible.contains(&"-DRUNMAT_MX_COMPATIBLE_ARRAY_DIMS=1".to_string()));
+        assert!(compatible.contains(&"-DMX_COMPAT_32=1".to_string()));
     }
 }

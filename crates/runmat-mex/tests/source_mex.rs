@@ -5,8 +5,70 @@ use std::fs;
 use std::rc::Rc;
 use std::sync::Mutex;
 
-use runmat_mex::{MexBuild, MexDiagnostic, MexHostServices, MexLoadError, MexModule, MxApiMode};
+use runmat_mex::{
+    MexApi, MexBuild, MexDiagnostic, MexHostServices, MexLoadError, MexModule, MxApiMode,
+};
 use runmat_value::Value;
+
+#[test]
+fn api_pins_control_dimension_width_and_complex_layout() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("api_pin.c");
+    fs::write(
+        &source,
+        r#"
+#include "mex.h"
+
+void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
+    (void)nrhs; (void)prhs;
+    if (nlhs != 1) mexErrMsgTxt("expected one output");
+    mwSize dims[2] = {1, 2};
+    plhs[0] = mxCreateDoubleMatrix(dims[0], dims[1], mxREAL);
+    double *values = mxGetDoubles(plhs[0]);
+    values[0] = (double)sizeof(mwSize);
+    values[1] = (double)mxGetN(plhs[0]);
+}
+"#,
+    )
+    .unwrap();
+
+    for (api, expected_width, expected_mode) in [
+        (
+            MexApi::R2017b,
+            std::mem::size_of::<usize>(),
+            MxApiMode::SeparateComplex,
+        ),
+        (
+            MexApi::R2018a,
+            std::mem::size_of::<usize>(),
+            MxApiMode::InterleavedComplex,
+        ),
+        (
+            MexApi::LargeArrayDims,
+            std::mem::size_of::<usize>(),
+            MxApiMode::SeparateComplex,
+        ),
+        (
+            MexApi::CompatibleArrayDims,
+            std::mem::size_of::<i32>(),
+            MxApiMode::SeparateComplex,
+        ),
+    ] {
+        let output_name = format!("api_{api:?}");
+        let artifact = MexBuild::new(&source, directory.path())
+            .api(api)
+            .output_name(output_name)
+            .compile()
+            .unwrap();
+        let module = MexModule::load(&artifact.module).unwrap();
+        assert_eq!(module.api_mode(), expected_mode);
+        let result = module.invoke(&[], 1, module.api_mode()).unwrap();
+        let Value::Tensor(tensor) = &result.outputs[0] else {
+            panic!("API fixture must return a matrix");
+        };
+        assert_eq!(tensor.materialize_f64(), vec![expected_width as f64, 2.0]);
+    }
+}
 
 #[test]
 fn independently_compiled_gateway_loads_and_preserves_typed_input() {
@@ -36,7 +98,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
                 9_007_199_254_740_993,
             ))],
             1,
-            MxApiMode::InterleavedComplex,
+            module.api_mode(),
         )
         .unwrap();
     assert_eq!(
@@ -65,9 +127,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
     .unwrap();
     let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
     let module = MexModule::load(&artifact.module).unwrap();
-    let error = module
-        .invoke(&[], 0, MxApiMode::InterleavedComplex)
-        .unwrap_err();
+    let error = module.invoke(&[], 0, module.api_mode()).unwrap_err();
     assert!(matches!(
         error,
         MexLoadError::Invocation { identifier, message }
@@ -101,9 +161,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
     .unwrap();
     let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
     let module = MexModule::load(&artifact.module).unwrap();
-    let result = module
-        .invoke(&[], 2, MxApiMode::InterleavedComplex)
-        .unwrap();
+    let result = module.invoke(&[], 2, module.api_mode()).unwrap();
     let Value::Cell(cell) = &result.outputs[0] else {
         panic!("first output must be a cell array");
     };
@@ -136,17 +194,21 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
 "#,
     )
     .unwrap();
-    let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
-    let module = MexModule::load(&artifact.module).unwrap();
-    let result = module
-        .invoke(&[], 1, MxApiMode::InterleavedComplex)
-        .unwrap();
-    let Value::SparseTensor(value) = &result.outputs[0] else {
-        panic!("output must be sparse");
-    };
-    assert_eq!(value.col_ptrs, vec![0, 1, 2]);
-    assert_eq!(value.row_indices, vec![1, 0]);
-    assert_eq!(value.nnz(), 2);
+    for api in [MexApi::R2017b, MexApi::CompatibleArrayDims] {
+        let artifact = MexBuild::new(&source, directory.path())
+            .api(api)
+            .output_name(format!("sparse_{api:?}"))
+            .compile()
+            .unwrap();
+        let module = MexModule::load(&artifact.module).unwrap();
+        let result = module.invoke(&[], 1, module.api_mode()).unwrap();
+        let Value::SparseTensor(value) = &result.outputs[0] else {
+            panic!("output must be sparse");
+        };
+        assert_eq!(value.col_ptrs, vec![0, 1, 2]);
+        assert_eq!(value.row_indices, vec![1, 0]);
+        assert_eq!(value.nnz(), 2);
+    }
 }
 
 #[test]
@@ -174,18 +236,14 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
     .unwrap();
     let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
     let module = MexModule::load(&artifact.module).unwrap();
-    let first = module
-        .invoke(&[], 1, MxApiMode::InterleavedComplex)
-        .unwrap();
-    let second = module
-        .invoke(&[], 1, MxApiMode::InterleavedComplex)
-        .unwrap();
+    let first = module.invoke(&[], 1, module.api_mode()).unwrap();
+    let second = module.invoke(&[], 1, module.api_mode()).unwrap();
     assert_eq!(first.outputs, vec![Value::Num(1.0)]);
     assert_eq!(second.outputs, vec![Value::Num(2.0)]);
     assert!(module.is_locked());
     assert!(!module.clear().unwrap());
     module
-        .invoke(&[Value::Num(0.0)], 0, MxApiMode::InterleavedComplex)
+        .invoke(&[Value::Num(0.0)], 0, module.api_mode())
         .unwrap();
     assert!(module.clear().unwrap());
 }
@@ -270,7 +328,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         .invoke_with_services(
             &[Value::Num(8.0)],
             2,
-            MxApiMode::InterleavedComplex,
+            module.api_mode(),
             Rc::new(FixtureHost::default()),
         )
         .unwrap();

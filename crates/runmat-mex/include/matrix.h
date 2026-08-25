@@ -24,9 +24,15 @@
 extern "C" {
 #endif
 
+#if defined(RUNMAT_MX_COMPATIBLE_ARRAY_DIMS)
+typedef int mwSize;
+typedef int mwIndex;
+typedef int mwSignedIndex;
+#else
 typedef size_t mwSize;
 typedef size_t mwIndex;
 typedef ptrdiff_t mwSignedIndex;
+#endif
 typedef uint16_t mxChar;
 typedef uint8_t mxLogical;
 typedef double mxDouble;

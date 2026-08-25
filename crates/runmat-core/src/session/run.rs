@@ -352,6 +352,34 @@ impl RunMatSession {
             });
         self.runtime_context
             .set_dynamic_function_loader(Some(loader));
+        let dynamic_function_cache = Arc::clone(&self.dynamic_function_cache);
+        #[cfg(not(target_arch = "wasm32"))]
+        let mex_modules = std::rc::Rc::clone(&self.mex_modules);
+        let clearer: std::rc::Rc<runmat_runtime::user_functions::DynamicFunctionClearer> =
+            std::rc::Rc::new(move |request| {
+                if !matches!(
+                    request,
+                    runmat_runtime::user_functions::DynamicFunctionClearRequest::NativeExtensions
+                ) {
+                    let mut cache = dynamic_function_cache
+                        .lock()
+                        .unwrap_or_else(|poison| poison.into_inner());
+                    match &request {
+                        runmat_runtime::user_functions::DynamicFunctionClearRequest::All => {
+                            cache.clear();
+                        }
+                        runmat_runtime::user_functions::DynamicFunctionClearRequest::Named(name) => {
+                            cache.retain(|path, _| !super::mex::path_matches_clear_name(path, name));
+                        }
+                        runmat_runtime::user_functions::DynamicFunctionClearRequest::NativeExtensions => {}
+                    }
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                super::mex::clear_modules(&mex_modules, &request)?;
+                Ok(())
+            });
+        self.runtime_context
+            .set_dynamic_function_clearer(Some(clearer));
         let source_lookup_name = self
             .current_source_fullpath_name()
             .unwrap_or_else(|| self.current_source_name());

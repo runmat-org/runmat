@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
-use super::{MexBuild, MexBuildOutput};
+use super::{MexApi, MexBuild, MexBuildOutput};
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum MexArgumentError {
@@ -14,6 +14,8 @@ pub enum MexArgumentError {
     UnsupportedOption(String),
     #[error("mex: -setup is not interactive; set CC or pass --compiler to select a toolchain")]
     SetupUnsupported,
+    #[error("mex: API options {first} and {second} cannot be combined")]
+    ConflictingApiOptions { first: String, second: String },
 }
 
 #[derive(Debug, Clone)]
@@ -28,7 +30,7 @@ impl MexBuildInvocation {
         let mut output_name = None;
         let mut output_directory = working_directory.to_path_buf();
         let mut compiler = None;
-        let mut interleaved_complex = true;
+        let mut api = None;
         let mut include_directories = Vec::new();
         let mut definitions = Vec::new();
         let mut compiler_arguments = Vec::new();
@@ -39,9 +41,12 @@ impl MexBuildInvocation {
             let argument = &arguments[index];
             match argument.as_str() {
                 "-setup" => return Err(MexArgumentError::SetupUnsupported),
-                "-R2017b" => interleaved_complex = false,
-                "-R2018a" | "-largeArrayDims" => interleaved_complex = true,
-                "-compatibleArrayDims" => interleaved_complex = false,
+                "-R2017b" => select_api(&mut api, MexApi::R2017b, argument)?,
+                "-R2018a" => select_api(&mut api, MexApi::R2018a, argument)?,
+                "-largeArrayDims" => select_api(&mut api, MexApi::LargeArrayDims, argument)?,
+                "-compatibleArrayDims" => {
+                    select_api(&mut api, MexApi::CompatibleArrayDims, argument)?
+                }
                 "-v" | "-verbose" => verbose = true,
                 "-silent" => verbose = false,
                 "-output" | "-o" => {
@@ -89,7 +94,7 @@ impl MexBuildInvocation {
         let mut sources = sources.into_iter();
         let first = sources.next().ok_or(MexArgumentError::MissingSource)?;
         let mut build =
-            MexBuild::new(first, output_directory).interleaved_complex(interleaved_complex);
+            MexBuild::new(first, output_directory).api(api.map(|(api, _)| api).unwrap_or_default());
         for source in sources {
             build = build.source(source);
         }
@@ -117,6 +122,21 @@ impl MexBuildInvocation {
     pub fn compile(&self) -> Result<MexBuildOutput, super::MexBuildError> {
         self.build.compile()
     }
+}
+
+fn select_api(
+    selected: &mut Option<(MexApi, String)>,
+    api: MexApi,
+    spelling: &str,
+) -> Result<(), MexArgumentError> {
+    if let Some((_, first)) = selected {
+        return Err(MexArgumentError::ConflictingApiOptions {
+            first: first.clone(),
+            second: spelling.to_string(),
+        });
+    }
+    *selected = Some((api, spelling.to_string()));
+    Ok(())
 }
 
 fn next_value(
@@ -178,5 +198,18 @@ mod tests {
             "native_gateway.{}",
             super::super::mex_suffix().unwrap()
         )));
+    }
+
+    #[test]
+    fn release_api_pins_are_mutually_exclusive() {
+        let arguments = vec!["-R2017b".into(), "-R2018a".into(), "gateway.c".into()];
+        let error = MexBuildInvocation::parse(&arguments, Path::new(".")).unwrap_err();
+        assert_eq!(
+            error,
+            MexArgumentError::ConflictingApiOptions {
+                first: "-R2017b".into(),
+                second: "-R2018a".into(),
+            }
+        );
     }
 }

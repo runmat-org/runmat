@@ -2,6 +2,7 @@
 #include "runmat_mex_host.h"
 #include "mex.h"
 
+#include <limits.h>
 #include <math.h>
 #include <setjmp.h>
 #include <stdio.h>
@@ -20,6 +21,153 @@ typedef struct RunMatMexAllocation {
 } RunMatMexAllocation;
 
 static RunMatMexAllocation *runmat_allocations = NULL;
+static void runmat_raise(const char *identifier, const char *message);
+
+#if defined(RUNMAT_MX_COMPATIBLE_ARRAY_DIMS)
+typedef struct RunMatSparseIndexProxy {
+    mxArray *array;
+    mwIndex *indices;
+    size_t count;
+    int columns;
+    struct RunMatSparseIndexProxy *next;
+} RunMatSparseIndexProxy;
+
+static RunMatSparseIndexProxy *runmat_sparse_index_proxies = NULL;
+#endif
+
+static const size_t *runmat_host_dimensions(mwSize ndim, const mwSize *dims,
+                                            size_t **owned) {
+    *owned = NULL;
+    if (ndim != 0 && dims == NULL) {
+        runmat_raise("RunMat:MEX:Dimensions", "invalid array dimensions");
+    }
+#if defined(RUNMAT_MX_COMPATIBLE_ARRAY_DIMS)
+    if (ndim < 0) {
+        runmat_raise("RunMat:MEX:Dimensions", "invalid array dimension count");
+    }
+    if (ndim == 0) {
+        return NULL;
+    }
+    *owned = (size_t *)malloc((size_t)ndim * sizeof(size_t));
+    if (*owned == NULL) {
+        runmat_raise("RunMat:MEX:Allocation", "could not convert array dimensions");
+    }
+    for (mwSize index = 0; index < ndim; ++index) {
+        if (dims[index] < 0) {
+            free(*owned);
+            *owned = NULL;
+            runmat_raise("RunMat:MEX:Dimensions", "array dimensions must be nonnegative");
+        }
+        (*owned)[index] = (size_t)dims[index];
+    }
+    return *owned;
+#else
+    return (const size_t *)dims;
+#endif
+}
+
+static mwSize runmat_public_size(size_t value) {
+#if defined(RUNMAT_MX_COMPATIBLE_ARRAY_DIMS)
+    if (value > (size_t)INT_MAX) {
+        runmat_raise("RunMat:MEX:Dimensions",
+                     "array size exceeds the -compatibleArrayDims API limit");
+    }
+#endif
+    return (mwSize)value;
+}
+
+#if defined(RUNMAT_MX_COMPATIBLE_ARRAY_DIMS)
+static mwIndex *runmat_sparse_index_proxy(mxArray *array, int columns) {
+    for (RunMatSparseIndexProxy *proxy = runmat_sparse_index_proxies;
+         proxy != NULL; proxy = proxy->next) {
+        if (proxy->array == array && proxy->columns == columns) {
+            return proxy->indices;
+        }
+    }
+    size_t count;
+    size_t *host_indices;
+    if (columns) {
+        const size_t *dims = runmat_host->dimensions(runmat_host->host, array);
+        size_t ndim = runmat_host->number_of_dimensions(runmat_host->host, array);
+        count = (ndim < 2 ? 1 : dims[1]) + 1;
+        host_indices = runmat_host->sparse_column_pointers(runmat_host->host,
+                                                           array);
+    } else {
+        count = runmat_host->sparse_nzmax(runmat_host->host, array);
+        host_indices = runmat_host->sparse_row_indices(runmat_host->host, array);
+    }
+    mwIndex *indices = (mwIndex *)mxMalloc(count * sizeof(mwIndex));
+    if (indices == NULL && count != 0) {
+        runmat_raise("RunMat:MEX:Allocation", "could not expose sparse indices");
+    }
+    for (size_t index = 0; index < count; ++index) {
+        indices[index] = runmat_public_size(host_indices[index]);
+    }
+    RunMatSparseIndexProxy *proxy =
+        (RunMatSparseIndexProxy *)malloc(sizeof(RunMatSparseIndexProxy));
+    if (proxy == NULL) {
+        runmat_raise("RunMat:MEX:Allocation", "could not track sparse indices");
+    }
+    proxy->array = array;
+    proxy->indices = indices;
+    proxy->count = count;
+    proxy->columns = columns;
+    proxy->next = runmat_sparse_index_proxies;
+    runmat_sparse_index_proxies = proxy;
+    return indices;
+}
+
+static void runmat_drop_sparse_index_proxy(mxArray *array, int columns) {
+    RunMatSparseIndexProxy **slot = &runmat_sparse_index_proxies;
+    while (*slot != NULL) {
+        RunMatSparseIndexProxy *proxy = *slot;
+        if (proxy->array == array && proxy->columns == columns) {
+            *slot = proxy->next;
+            free(proxy);
+        } else {
+            slot = &proxy->next;
+        }
+    }
+}
+
+static int runmat_cleanup_sparse_index_proxies(int flush) {
+    int status = 0;
+    while (runmat_sparse_index_proxies != NULL) {
+        RunMatSparseIndexProxy *proxy = runmat_sparse_index_proxies;
+        runmat_sparse_index_proxies = proxy->next;
+        if (flush) {
+            size_t *indices =
+                (size_t *)malloc(proxy->count * sizeof(size_t));
+            if (indices == NULL && proxy->count != 0) {
+                status = 1;
+            } else {
+                for (size_t index = 0; index < proxy->count; ++index) {
+                    if (proxy->indices[index] < 0) {
+                        status = 1;
+                        break;
+                    }
+                    indices[index] = (size_t)proxy->indices[index];
+                }
+                if (status == 0) {
+                    status = proxy->columns
+                                 ? runmat_host->replace_sparse_column_pointers(
+                                       runmat_host->host, proxy->array, indices)
+                                 : runmat_host->replace_sparse_row_indices(
+                                       runmat_host->host, proxy->array, indices);
+                }
+                free(indices);
+            }
+        }
+        free(proxy);
+    }
+    return status;
+}
+#else
+static int runmat_cleanup_sparse_index_proxies(int flush) {
+    (void)flush;
+    return 0;
+}
+#endif
 
 #ifndef RUNMAT_MEX_FUNCTION_NAME
 #define RUNMAT_MEX_FUNCTION_NAME "mexFunction"
@@ -123,11 +271,16 @@ RUNMAT_MEX_HOST_EXPORT int runmatMexInvoke(int nlhs, mxArray *plhs[], int nrhs,
     runmat_error_target = &target;
     if (setjmp(target) != 0) {
         runmat_error_target = NULL;
+        (void)runmat_cleanup_sparse_index_proxies(0);
         runmat_cleanup_memory(0);
         return 1;
     }
     mexFunction(nlhs, plhs, nrhs, prhs);
     runmat_error_target = NULL;
+    if (runmat_cleanup_sparse_index_proxies(1) != 0) {
+        runmat_host->set_error(runmat_host->host, "RunMat:MEX:Sparse",
+                               "could not synchronize 32-bit sparse indices");
+    }
     int failed = runmat_host->has_error(runmat_host->host) ? 1 : 0;
     runmat_cleanup_memory(0);
     return failed;
@@ -137,6 +290,14 @@ RUNMAT_MEX_HOST_EXPORT int runmatMexIsLocked(void) {
     return runmat_lock_count != 0;
 }
 
+RUNMAT_MEX_HOST_EXPORT int runmatMexApiMode(void) {
+#if defined(RUNMAT_MX_INTERLEAVED_COMPLEX)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
 RUNMAT_MEX_HOST_EXPORT void runmatMexUnload(void) {
     if (runmat_exit_function != NULL) {
         mexExitFcn function = runmat_exit_function;
@@ -144,6 +305,7 @@ RUNMAT_MEX_HOST_EXPORT void runmatMexUnload(void) {
         function();
     }
     runmat_lock_count = 0;
+    (void)runmat_cleanup_sparse_index_proxies(0);
     runmat_cleanup_memory(1);
     runmat_error_target = NULL;
     runmat_host = NULL;
@@ -185,8 +347,12 @@ const char *mexFunctionName(void) { return RUNMAT_MEX_FUNCTION_NAME; }
 mxArray *mxCreateNumericArray(mwSize ndim, const mwSize *dims,
                               mxClassID classid, mxComplexity complexity) {
     runmat_require_host();
-    return runmat_host->create_numeric(runmat_host->host, ndim, dims, classid,
-                                       complexity);
+    size_t *owned = NULL;
+    const size_t *host_dims = runmat_host_dimensions(ndim, dims, &owned);
+    mxArray *array = runmat_host->create_numeric(
+        runmat_host->host, (size_t)ndim, host_dims, classid, complexity);
+    free(owned);
+    return array;
 }
 
 mxArray *mxCreateNumericMatrix(mwSize m, mwSize n, mxClassID classid,
@@ -206,7 +372,12 @@ mxArray *mxCreateDoubleScalar(double value) {
 
 mxArray *mxCreateLogicalArray(mwSize ndim, const mwSize *dims) {
     runmat_require_host();
-    return runmat_host->create_logical(runmat_host->host, ndim, dims);
+    size_t *owned = NULL;
+    const size_t *host_dims = runmat_host_dimensions(ndim, dims, &owned);
+    mxArray *array = runmat_host->create_logical(runmat_host->host,
+                                                 (size_t)ndim, host_dims);
+    free(owned);
+    return array;
 }
 
 mxArray *mxCreateLogicalMatrix(mwSize m, mwSize n) {
@@ -225,7 +396,12 @@ mxArray *mxCreateLogicalScalar(mxLogical value) {
 
 mxArray *mxCreateCharArray(mwSize ndim, const mwSize *dims) {
     runmat_require_host();
-    return runmat_host->create_char(runmat_host->host, ndim, dims);
+    size_t *owned = NULL;
+    const size_t *host_dims = runmat_host_dimensions(ndim, dims, &owned);
+    mxArray *array = runmat_host->create_char(runmat_host->host, (size_t)ndim,
+                                              host_dims);
+    free(owned);
+    return array;
 }
 
 mxArray *mxCreateString(const char *value) {
@@ -302,7 +478,12 @@ mxArray *mxCreateString(const char *value) {
 
 mxArray *mxCreateCellArray(mwSize ndim, const mwSize *dims) {
     runmat_require_host();
-    return runmat_host->create_cell(runmat_host->host, ndim, dims);
+    size_t *owned = NULL;
+    const size_t *host_dims = runmat_host_dimensions(ndim, dims, &owned);
+    mxArray *array = runmat_host->create_cell(runmat_host->host, (size_t)ndim,
+                                              host_dims);
+    free(owned);
+    return array;
 }
 
 mxArray *mxCreateCellMatrix(mwSize m, mwSize n) {
@@ -313,8 +494,12 @@ mxArray *mxCreateCellMatrix(mwSize m, mwSize n) {
 mxArray *mxCreateStructArray(mwSize ndim, const mwSize *dims, int nfields,
                              const char **fieldnames) {
     runmat_require_host();
-    return runmat_host->create_struct(runmat_host->host, ndim, dims, nfields,
-                                      fieldnames);
+    size_t *owned = NULL;
+    const size_t *host_dims = runmat_host_dimensions(ndim, dims, &owned);
+    mxArray *array = runmat_host->create_struct(
+        runmat_host->host, (size_t)ndim, host_dims, nfields, fieldnames);
+    free(owned);
+    return array;
 }
 
 mxArray *mxCreateStructMatrix(mwSize m, mwSize n, int nfields,
@@ -357,17 +542,32 @@ mxClassID mxGetClassID(const mxArray *array) {
 
 mwSize mxGetNumberOfDimensions(const mxArray *array) {
     runmat_require_host();
-    return runmat_host->number_of_dimensions(runmat_host->host, array);
+    return runmat_public_size(
+        runmat_host->number_of_dimensions(runmat_host->host, array));
 }
 
 const mwSize *mxGetDimensions(const mxArray *array) {
     runmat_require_host();
-    return runmat_host->dimensions(runmat_host->host, array);
+    const size_t *dims = runmat_host->dimensions(runmat_host->host, array);
+#if defined(RUNMAT_MX_COMPATIBLE_ARRAY_DIMS)
+    size_t ndim = runmat_host->number_of_dimensions(runmat_host->host, array);
+    mwSize *public_dims = (mwSize *)mxMalloc(ndim * sizeof(mwSize));
+    if (public_dims == NULL && ndim != 0) {
+        runmat_raise("RunMat:MEX:Allocation", "could not expose array dimensions");
+    }
+    for (size_t index = 0; index < ndim; ++index) {
+        public_dims[index] = runmat_public_size(dims[index]);
+    }
+    return public_dims;
+#else
+    return (const mwSize *)dims;
+#endif
 }
 
 mwSize mxGetNumberOfElements(const mxArray *array) {
     runmat_require_host();
-    return runmat_host->number_of_elements(runmat_host->host, array);
+    return runmat_public_size(
+        runmat_host->number_of_elements(runmat_host->host, array));
 }
 
 mwSize mxGetM(const mxArray *array) {
@@ -390,7 +590,12 @@ mwSize mxGetN(const mxArray *array) {
 
 int mxSetDimensions(mxArray *array, const mwSize *dims, mwSize ndim) {
     runmat_require_host();
-    return runmat_host->set_dimensions(runmat_host->host, array, ndim, dims);
+    size_t *owned = NULL;
+    const size_t *host_dims = runmat_host_dimensions(ndim, dims, &owned);
+    int status = runmat_host->set_dimensions(runmat_host->host, array,
+                                             (size_t)ndim, host_dims);
+    free(owned);
+    return status;
 }
 
 void mxSetM(mxArray *array, mwSize m) {
@@ -650,14 +855,22 @@ int mxIsClass(const mxArray *array, const char *classname) {
 
 mwIndex *mxGetIr(const mxArray *array) {
     runmat_require_host();
+#if defined(RUNMAT_MX_COMPATIBLE_ARRAY_DIMS)
+    return runmat_sparse_index_proxy((mxArray *)array, 0);
+#else
     return runmat_host->sparse_row_indices(runmat_host->host,
                                            (mxArray *)array);
+#endif
 }
 
 mwIndex *mxGetJc(const mxArray *array) {
     runmat_require_host();
+#if defined(RUNMAT_MX_COMPATIBLE_ARRAY_DIMS)
+    return runmat_sparse_index_proxy((mxArray *)array, 1);
+#else
     return runmat_host->sparse_column_pointers(runmat_host->host,
                                                (mxArray *)array);
+#endif
 }
 
 mwSize mxGetNzmax(const mxArray *array) {
@@ -674,8 +887,22 @@ void mxSetNzmax(mxArray *array, mwSize nzmax) {
 
 void mxSetIr(mxArray *array, mwIndex *ir) {
     runmat_require_host();
-    if (runmat_host->replace_sparse_row_indices(runmat_host->host, array, ir) !=
-        0) {
+#if defined(RUNMAT_MX_COMPATIBLE_ARRAY_DIMS)
+    runmat_drop_sparse_index_proxy(array, 0);
+    size_t count = runmat_host->sparse_nzmax(runmat_host->host, array);
+    size_t *indices = (size_t *)malloc(count * sizeof(size_t));
+    if (indices == NULL && count != 0) {
+        runmat_raise("RunMat:MEX:Allocation", "could not replace sparse row indices");
+    }
+    for (size_t index = 0; index < count; ++index) indices[index] = (size_t)ir[index];
+    int status = runmat_host->replace_sparse_row_indices(runmat_host->host, array,
+                                                         indices);
+    free(indices);
+#else
+    int status = runmat_host->replace_sparse_row_indices(runmat_host->host, array,
+                                                         ir);
+#endif
+    if (status != 0) {
         runmat_raise("RunMat:MEX:Sparse", "could not replace sparse row indices");
     }
     mxFree(ir);
@@ -683,8 +910,24 @@ void mxSetIr(mxArray *array, mwIndex *ir) {
 
 void mxSetJc(mxArray *array, mwIndex *jc) {
     runmat_require_host();
-    if (runmat_host->replace_sparse_column_pointers(runmat_host->host, array,
-                                                     jc) != 0) {
+#if defined(RUNMAT_MX_COMPATIBLE_ARRAY_DIMS)
+    runmat_drop_sparse_index_proxy(array, 1);
+    const size_t *dims = runmat_host->dimensions(runmat_host->host, array);
+    size_t ndim = runmat_host->number_of_dimensions(runmat_host->host, array);
+    size_t count = (ndim < 2 ? 1 : dims[1]) + 1;
+    size_t *indices = (size_t *)malloc(count * sizeof(size_t));
+    if (indices == NULL && count != 0) {
+        runmat_raise("RunMat:MEX:Allocation", "could not replace sparse column pointers");
+    }
+    for (size_t index = 0; index < count; ++index) indices[index] = (size_t)jc[index];
+    int status = runmat_host->replace_sparse_column_pointers(
+        runmat_host->host, array, indices);
+    free(indices);
+#else
+    int status = runmat_host->replace_sparse_column_pointers(runmat_host->host,
+                                                              array, jc);
+#endif
+    if (status != 0) {
         runmat_raise("RunMat:MEX:Sparse",
                      "could not replace sparse column pointers");
     }

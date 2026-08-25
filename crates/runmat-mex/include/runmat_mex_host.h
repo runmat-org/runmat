@@ -18,24 +18,24 @@ extern "C" {
 typedef struct RunMatMexHostApiV1 {
     uint32_t abi_version;
     void *host;
-    mxArray *(*create_numeric)(void *host, mwSize ndim, const mwSize *dims,
+    mxArray *(*create_numeric)(void *host, size_t ndim, const size_t *dims,
                                mxClassID classid, mxComplexity complexity);
     mxArray *(*create_double_scalar)(void *host, double value);
-    mxArray *(*create_logical)(void *host, mwSize ndim, const mwSize *dims);
-    mxArray *(*create_char)(void *host, mwSize ndim, const mwSize *dims);
-    mxArray *(*create_cell)(void *host, mwSize ndim, const mwSize *dims);
-    mxArray *(*create_struct)(void *host, mwSize ndim, const mwSize *dims,
+    mxArray *(*create_logical)(void *host, size_t ndim, const size_t *dims);
+    mxArray *(*create_char)(void *host, size_t ndim, const size_t *dims);
+    mxArray *(*create_cell)(void *host, size_t ndim, const size_t *dims);
+    mxArray *(*create_struct)(void *host, size_t ndim, const size_t *dims,
                               int nfields, const char **fieldnames);
-    mxArray *(*create_sparse)(void *host, mwSize m, mwSize n, mwSize nzmax,
+    mxArray *(*create_sparse)(void *host, size_t m, size_t n, size_t nzmax,
                               int logical);
     mxArray *(*duplicate_array)(void *host, const mxArray *array);
     int (*destroy_array)(void *host, mxArray *array);
     mxClassID (*class_id)(void *host, const mxArray *array);
-    mwSize (*number_of_dimensions)(void *host, const mxArray *array);
-    const mwSize *(*dimensions)(void *host, const mxArray *array);
-    mwSize (*number_of_elements)(void *host, const mxArray *array);
-    int (*set_dimensions)(void *host, mxArray *array, mwSize ndim,
-                          const mwSize *dims);
+    size_t (*number_of_dimensions)(void *host, const mxArray *array);
+    const size_t *(*dimensions)(void *host, const mxArray *array);
+    size_t (*number_of_elements)(void *host, const mxArray *array);
+    int (*set_dimensions)(void *host, mxArray *array, size_t ndim,
+                          const size_t *dims);
     void *(*data)(void *host, mxArray *array, mxClassID expected_class);
     void *(*imaginary_data)(void *host, mxArray *array);
     int (*replace_data)(void *host, mxArray *array, const void *data);
@@ -43,8 +43,8 @@ typedef struct RunMatMexHostApiV1 {
                                   const void *data);
     int (*is_complex)(void *host, const mxArray *array);
     int (*is_sparse)(void *host, const mxArray *array);
-    mxArray *(*get_cell)(void *host, const mxArray *array, mwIndex index);
-    int (*set_cell)(void *host, mxArray *array, mwIndex index,
+    mxArray *(*get_cell)(void *host, const mxArray *array, size_t index);
+    int (*set_cell)(void *host, mxArray *array, size_t index,
                     mxArray *value);
     int (*number_of_fields)(void *host, const mxArray *array);
     const char *(*field_name)(void *host, const mxArray *array, int fieldnum);
@@ -52,18 +52,18 @@ typedef struct RunMatMexHostApiV1 {
                         const char *fieldname);
     int (*add_field)(void *host, mxArray *array, const char *fieldname);
     int (*remove_field)(void *host, mxArray *array, int fieldnum);
-    mxArray *(*get_field)(void *host, const mxArray *array, mwIndex index,
+    mxArray *(*get_field)(void *host, const mxArray *array, size_t index,
                           int fieldnum);
-    int (*set_field)(void *host, mxArray *array, mwIndex index, int fieldnum,
+    int (*set_field)(void *host, mxArray *array, size_t index, int fieldnum,
                      mxArray *value);
-    mwIndex *(*sparse_row_indices)(void *host, mxArray *array);
-    mwIndex *(*sparse_column_pointers)(void *host, mxArray *array);
-    mwSize (*sparse_nzmax)(void *host, mxArray *array);
-    int (*set_sparse_nzmax)(void *host, mxArray *array, mwSize nzmax);
+    size_t *(*sparse_row_indices)(void *host, mxArray *array);
+    size_t *(*sparse_column_pointers)(void *host, mxArray *array);
+    size_t (*sparse_nzmax)(void *host, mxArray *array);
+    int (*set_sparse_nzmax)(void *host, mxArray *array, size_t nzmax);
     int (*replace_sparse_row_indices)(void *host, mxArray *array,
-                                      const mwIndex *indices);
+                                      const size_t *indices);
     int (*replace_sparse_column_pointers)(void *host, mxArray *array,
-                                          const mwIndex *indices);
+                                          const size_t *indices);
     int (*make_array_persistent)(void *host, mxArray *array);
     int (*eval)(void *host, const char *command);
     int (*call)(void *host, const char *function_name, int nlhs,
@@ -86,6 +86,7 @@ RUNMAT_MEX_HOST_EXPORT int runmatMexBindHost(const RunMatMexHostApiV1 *api);
 RUNMAT_MEX_HOST_EXPORT int runmatMexInvoke(int nlhs, mxArray *plhs[], int nrhs,
                                           const mxArray *prhs[]);
 RUNMAT_MEX_HOST_EXPORT int runmatMexIsLocked(void);
+RUNMAT_MEX_HOST_EXPORT int runmatMexApiMode(void);
 RUNMAT_MEX_HOST_EXPORT void runmatMexUnload(void);
 
 #ifdef __cplusplus

@@ -9,8 +9,10 @@ pub fn execute(args: MexArgs) -> Result<()> {
         output,
         out_dir,
         compiler,
-        separate_complex,
-        interleaved_complex: _,
+        r2017b: _,
+        r2018a,
+        large_array_dims,
+        compatible_array_dims,
         include_directories,
         definitions,
         compiler_argument,
@@ -18,8 +20,16 @@ pub fn execute(args: MexArgs) -> Result<()> {
         verbose,
     } = args;
     let first = sources.remove(0);
-    let mut build =
-        runmat_mex::MexBuild::new(first, out_dir).interleaved_complex(!separate_complex);
+    let api = if r2018a {
+        runmat_mex::MexApi::R2018a
+    } else if large_array_dims {
+        runmat_mex::MexApi::LargeArrayDims
+    } else if compatible_array_dims {
+        runmat_mex::MexApi::CompatibleArrayDims
+    } else {
+        runmat_mex::MexApi::R2017b
+    };
+    let mut build = runmat_mex::MexBuild::new(first, out_dir).api(api);
     for source in sources {
         build = build.source(source);
     }

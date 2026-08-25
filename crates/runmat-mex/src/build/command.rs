@@ -3,13 +3,37 @@ use std::process::Command;
 
 use super::{MexBuildError, MexBuildPlan};
 
+/// C Matrix API selected for a MEX build.
+///
+/// The release pins select the complex representation as well as the array
+/// dimension API. The legacy spellings remain distinct because MATLAB treats
+/// all four choices as mutually exclusive command-line API selections.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum MexApi {
+    /// Separate-complex, large-array API (MATLAB's current default).
+    #[default]
+    R2017b,
+    /// Interleaved-complex, large-array API.
+    R2018a,
+    /// Legacy spelling for the separate-complex, large-array API.
+    LargeArrayDims,
+    /// Separate-complex compatibility API with 32-bit array dimensions.
+    CompatibleArrayDims,
+}
+
+impl MexApi {
+    pub fn uses_interleaved_complex(self) -> bool {
+        matches!(self, Self::R2018a)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MexBuild {
     pub(super) compiler: PathBuf,
     pub(super) sources: Vec<PathBuf>,
     pub(super) output_directory: PathBuf,
     pub(super) output_name: String,
-    pub(super) interleaved_complex: bool,
+    pub(super) api: MexApi,
     pub(super) include_directories: Vec<PathBuf>,
     pub(super) definitions: Vec<String>,
     pub(super) compiler_arguments: Vec<String>,
@@ -35,7 +59,7 @@ impl MexBuild {
             sources: vec![source],
             output_directory: output_directory.into(),
             output_name,
-            interleaved_complex: true,
+            api: MexApi::default(),
             include_directories: Vec::new(),
             definitions: Vec::new(),
             compiler_arguments: Vec::new(),
@@ -58,8 +82,8 @@ impl MexBuild {
         self
     }
 
-    pub fn interleaved_complex(mut self, enabled: bool) -> Self {
-        self.interleaved_complex = enabled;
+    pub fn api(mut self, api: MexApi) -> Self {
+        self.api = api;
         self
     }
 

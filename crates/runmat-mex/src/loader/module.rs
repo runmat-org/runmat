@@ -14,6 +14,7 @@ use crate::{
 type BindHost = unsafe extern "C" fn(*const MexHostApiV1) -> i32;
 type InvokeMex = unsafe extern "C" fn(i32, *mut *mut MxArray, i32, *const *const MxArray) -> i32;
 type IsLocked = unsafe extern "C" fn() -> i32;
+type ApiMode = unsafe extern "C" fn() -> i32;
 type Unload = unsafe extern "C" fn();
 
 /// Legacy C MEX code can contain process-global C runtime state. Serialize
@@ -61,6 +62,7 @@ pub struct MexModule {
     bind: BindHost,
     invoke: InvokeMex,
     is_locked: IsLocked,
+    mode: MxApiMode,
     unload: Unload,
     state: Mutex<Option<MexCallState>>,
 }
@@ -99,6 +101,23 @@ impl MexModule {
                     source,
                 }
             })?;
+        let api_mode =
+            *unsafe { library.get::<ApiMode>(b"runmatMexApiMode\0") }.map_err(|source| {
+                MexLoadError::Symbol {
+                    symbol: "runmatMexApiMode",
+                    source,
+                }
+            })?;
+        // SAFETY: the shim returns one of its fixed Matrix API mode tags.
+        let mode = match unsafe { api_mode() } {
+            0 => MxApiMode::SeparateComplex,
+            1 => MxApiMode::InterleavedComplex,
+            _ => {
+                return Err(MexLoadError::Input(
+                    "MEX module reports an unsupported Matrix API mode".into(),
+                ));
+            }
+        };
         // SAFETY: lifecycle symbols are emitted by the same private shim.
         let unload = *unsafe { library.get::<Unload>(b"runmatMexUnload\0") }.map_err(|source| {
             MexLoadError::Symbol {
@@ -111,9 +130,14 @@ impl MexModule {
             bind,
             invoke,
             is_locked,
+            mode,
             unload,
             state: Mutex::new(None),
         })
+    }
+
+    pub fn api_mode(&self) -> MxApiMode {
+        self.mode
     }
 
     pub fn invoke(
@@ -137,6 +161,12 @@ impl MexModule {
         mode: MxApiMode,
         services: std::rc::Rc<dyn MexHostServices>,
     ) -> Result<MexInvocation, MexLoadError> {
+        if mode != self.mode {
+            return Err(MexLoadError::Input(format!(
+                "MEX module was built for {:?}, not {:?}",
+                self.mode, mode
+            )));
+        }
         let _process_guard = MEX_PROCESS_GATE.lock();
         let mut state_slot = match self.state.try_lock() {
             Ok(state) => state,
@@ -219,7 +249,11 @@ impl MexModule {
 
     pub fn clear(&self) -> Result<bool, MexLoadError> {
         let _process_guard = MEX_PROCESS_GATE.lock();
-        let mut state = self.state.lock().map_err(|_| MexLoadError::Poisoned)?;
+        let mut state = match self.state.try_lock() {
+            Ok(state) => state,
+            Err(std::sync::TryLockError::WouldBlock) => return Ok(false),
+            Err(std::sync::TryLockError::Poisoned(_)) => return Err(MexLoadError::Poisoned),
+        };
         if self.is_locked() {
             return Ok(false);
         }
