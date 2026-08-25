@@ -29,3 +29,11 @@ fn ordinary_arguments_do_not_select_a_private_mode() {
         .unwrap();
     assert_eq!(mode, None);
 }
+
+#[test]
+fn registry_reserves_the_single_binary_extension_host_mode() {
+    let mode = HiddenModeRegistry::standard()
+        .detect(args(&["runmat", "--__runmat-extension-host"]))
+        .unwrap();
+    assert_eq!(mode, Some(HiddenMode::ExtensionHost));
+}

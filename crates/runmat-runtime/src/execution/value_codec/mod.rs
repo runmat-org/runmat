@@ -11,8 +11,8 @@ mod tests {
     use crate::execution::RuntimeExecutionServices;
     use runmat_value::{
         CellArray, CharArray, ComplexTensor, ForeignAffinity, ForeignLifetime, ForeignOwnership,
-        ForeignRef, ForeignTypeIdentity, IntValue, IntegerComplexStorage, IntegerStorage,
-        MException, StringArray, StructValue, Tensor, Value,
+        ForeignRef, ForeignResourceKey, ForeignTypeIdentity, IntValue, IntegerComplexStorage,
+        IntegerStorage, MException, StringArray, StructValue, Tensor, Value,
     };
 
     use runmat_execution::value::{InlineValue, ValuePayload};
@@ -202,19 +202,21 @@ mod tests {
 
     #[test]
     fn live_foreign_references_require_a_manifest_adapter() {
-        let reference = ForeignRef {
-            host_identity: "host-a".into(),
-            handle: 17,
-            generation: 2,
-            type_identity: ForeignTypeIdentity {
+        let reference = ForeignRef::detached(
+            ForeignResourceKey {
+                host_identity: "host-a".into(),
+                handle: 17,
+                generation: 2,
+            },
+            ForeignTypeIdentity {
                 family: "java".into(),
                 name: "java.lang.Object".into(),
                 version: 1,
             },
-            ownership: ForeignOwnership::Shared,
-            affinity: ForeignAffinity::OriginProcess,
-            lifetime: ForeignLifetime::Session,
-        };
+            ForeignOwnership::Shared,
+            ForeignAffinity::OriginProcess,
+            ForeignLifetime::Session,
+        );
         let error = encode_inline_value(&Value::Foreign(reference)).unwrap_err();
         assert!(matches!(
             error,

@@ -41,6 +41,7 @@ pub mod context;
 pub mod coverage;
 pub mod data;
 pub mod execution;
+pub mod foreign;
 pub mod indexing;
 pub mod interaction;
 pub mod interrupt;

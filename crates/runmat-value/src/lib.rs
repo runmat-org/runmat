@@ -18,7 +18,7 @@ pub use array::{
 pub use callable::Closure;
 pub use display::{format_number, get_display_format, set_display_format, FormatMode};
 pub use exception::MException;
-pub use foreign::ForeignRef;
+pub use foreign::{ForeignRef, ForeignResourceKey, ForeignResourceRelease};
 pub use numeric::{
     IntValue, IntegerStorage, NumericDType, NumericScalar, NumericStorage, NumericStorageView,
     NumericStorageViewMut,

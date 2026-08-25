@@ -118,7 +118,11 @@ pub struct ForeignCall {
 }
 
 pub trait RuntimeForeignService {
-    fn invoke(&self, call: ForeignCall) -> RuntimeServiceFuture<Result<Value, RuntimeError>>;
+    fn invoke(
+        &self,
+        context: super::RuntimeContext,
+        call: ForeignCall,
+    ) -> RuntimeServiceFuture<Result<Value, RuntimeError>>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
