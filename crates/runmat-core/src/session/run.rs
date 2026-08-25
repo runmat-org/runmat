@@ -52,11 +52,28 @@ async fn load_dynamic_function(
     name: String,
     args: Vec<Value>,
     requested_outputs: usize,
-    compat: CompatMode,
-    top_level_await_enabled: bool,
-    cache: Arc<Mutex<HashMap<std::path::PathBuf, DynamicFunctionCacheEntry>>>,
-    project_handoff: Option<runmat_package::FrozenProjectHandoff>,
+    phase: runmat_runtime::user_functions::DynamicFunctionLoadPhase,
+    environment: DynamicFunctionEnvironment,
 ) -> Option<Result<Value, RuntimeError>> {
+    let DynamicFunctionEnvironment {
+        compat,
+        top_level_await_enabled,
+        cache,
+        project_handoff,
+        #[cfg(not(target_arch = "wasm32"))]
+        mex_modules,
+    } = environment;
+    #[cfg(not(target_arch = "wasm32"))]
+    if phase == runmat_runtime::user_functions::DynamicFunctionLoadPhase::BeforeSemantic {
+        if let Some(result) =
+            super::mex::load_and_call(&name, args.clone(), requested_outputs, mex_modules).await
+        {
+            return Some(result);
+        }
+    }
+    if phase == runmat_runtime::user_functions::DynamicFunctionLoadPhase::BeforeSemantic {
+        return None;
+    }
     let resolve_span = info_span!(
         "runtime.callable.resolve",
         call_kind = "runtime-name",
@@ -275,6 +292,18 @@ async fn load_dynamic_function(
     )
 }
 
+#[derive(Clone)]
+struct DynamicFunctionEnvironment {
+    compat: CompatMode,
+    top_level_await_enabled: bool,
+    cache: Arc<Mutex<HashMap<std::path::PathBuf, DynamicFunctionCacheEntry>>>,
+    project_handoff: Option<runmat_package::FrozenProjectHandoff>,
+    #[cfg(not(target_arch = "wasm32"))]
+    mex_modules: std::rc::Rc<
+        std::cell::RefCell<HashMap<std::path::PathBuf, std::rc::Rc<runmat_mex::MexModule>>>,
+    >,
+}
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 fn discover_known_project_symbols(source_name: Option<&str>) -> HashSet<String> {
     discover_source_catalog(source_name)
@@ -302,22 +331,23 @@ impl RunMatSession {
                 self.project_handoff.clone(),
             ),
         );
-        let dynamic_function_cache = Arc::clone(&self.dynamic_function_cache);
-        let dynamic_function_compat = self.compat_mode;
-        let dynamic_function_top_level_await = self.top_level_await_enabled;
-        let dynamic_project_handoff = self.project_handoff.clone();
-        let loader: Arc<runmat_runtime::user_functions::DynamicFunctionLoader> =
-            Arc::new(move |name, args, requested_outputs| {
-                let cache = Arc::clone(&dynamic_function_cache);
-                let project_handoff = dynamic_project_handoff.clone();
+        let dynamic_environment = DynamicFunctionEnvironment {
+            compat: self.compat_mode,
+            top_level_await_enabled: self.top_level_await_enabled,
+            cache: Arc::clone(&self.dynamic_function_cache),
+            project_handoff: self.project_handoff.clone(),
+            #[cfg(not(target_arch = "wasm32"))]
+            mex_modules: std::rc::Rc::clone(&self.mex_modules),
+        };
+        let loader: std::rc::Rc<runmat_runtime::user_functions::DynamicFunctionLoader> =
+            std::rc::Rc::new(move |name, args, requested_outputs, phase| {
+                let environment = dynamic_environment.clone();
                 Box::pin(load_dynamic_function(
                     name,
                     args,
                     requested_outputs,
-                    dynamic_function_compat,
-                    dynamic_function_top_level_await,
-                    cache,
-                    project_handoff,
+                    phase,
+                    environment,
                 ))
             });
         self.runtime_context

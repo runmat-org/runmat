@@ -15,15 +15,7 @@ use super::fs::expand_user_path;
 use super::path_state::current_path_segments;
 
 /// File extensions that identify compiled MEX binaries.
-pub const MEX_EXTENSIONS: &[&str] = &[
-    ".mexw64",
-    ".mexmaci64",
-    ".mexa64",
-    ".mexglx",
-    ".mexw32",
-    ".mexmaci",
-    ".mex",
-];
+pub use runmat_mex::MEX_EXTENSIONS;
 
 /// File extensions that identify MATLAB P-code artefacts.
 pub const PCODE_EXTENSIONS: &[&str] = &[".p", ".pp"];

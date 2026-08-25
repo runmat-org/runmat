@@ -14,7 +14,7 @@ pub mod loader;
 pub mod mxarray;
 
 pub use arena::{MxArena, MxArenaError};
-pub use build::{mex_suffix, MexBuild, MexBuildError, MexBuildOutput};
+pub use build::{mex_suffix, MexBuild, MexBuildError, MexBuildOutput, MEX_EXTENSIONS};
 pub use conversion::{value_from_mx, value_to_mx, MxConversionError};
 pub use host::{
     MexCallState, MexDiagnostic, MexHostApiV1, MexHostServices, UnavailableMexHostServices,

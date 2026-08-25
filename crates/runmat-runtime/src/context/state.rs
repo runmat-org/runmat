@@ -90,7 +90,7 @@ pub(crate) struct CallState {
     pub external_invoker: Option<std::rc::Rc<crate::user_functions::ExternalFunctionInvoker>>,
     pub lexical_invoker: Option<std::rc::Rc<crate::user_functions::LexicalFunctionInvoker>>,
     pub semantic_resolver: Option<std::sync::Arc<crate::user_functions::FunctionResolver>>,
-    pub dynamic_loader: Option<std::sync::Arc<crate::user_functions::DynamicFunctionLoader>>,
+    pub dynamic_loader: Option<std::rc::Rc<crate::user_functions::DynamicFunctionLoader>>,
     pub source_functions: Option<std::sync::Arc<Vec<crate::user_functions::SourceFunctionInfo>>>,
     pub active_functions: Vec<usize>,
     pub class_access: Option<String>,

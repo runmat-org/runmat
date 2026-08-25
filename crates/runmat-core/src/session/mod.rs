@@ -53,6 +53,8 @@ mod compile;
 mod config;
 mod executable;
 mod init;
+#[cfg(not(target_arch = "wasm32"))]
+mod mex;
 mod project;
 mod run;
 mod workspace;
@@ -78,6 +80,10 @@ pub struct RunMatSession {
     next_semantic_function_id: usize,
     /// Canonically compiled functions discovered through the runtime search path.
     dynamic_function_cache: Arc<Mutex<HashMap<PathBuf, DynamicFunctionCacheEntry>>>,
+    /// Loaded C MEX modules and their persistent state, scoped to this session.
+    #[cfg(not(target_arch = "wasm32"))]
+    mex_modules:
+        std::rc::Rc<std::cell::RefCell<HashMap<PathBuf, std::rc::Rc<runmat_mex::MexModule>>>>,
     /// Session-scoped production native entry publication and invalidation.
     #[cfg(not(target_arch = "wasm32"))]
     generic_native_cache: crate::generic_native::GenericNativeCache,

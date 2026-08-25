@@ -8331,6 +8331,74 @@ fn execute_path_request_resolves_sibling_function_file() {
     );
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn execute_path_request_resolves_and_invokes_platform_c_mex_module() {
+    let _guard = cwd_lock();
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let source = tmp.path().join("native_add.c");
+    std::fs::write(
+        &source,
+        r#"
+#include "mex.h"
+void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
+    if (nlhs != 2 || nrhs != 1 || !mxIsUint64(prhs[0])) {
+        mexErrMsgTxt("native_add expects one uint64 input and two outputs");
+    }
+    plhs[0] = mxCreateNumericMatrix(1, 1, mxUINT64_CLASS, mxREAL);
+    mxGetUint64s(plhs[0])[0] = mxGetUint64s(prhs[0])[0] + 1;
+    mxArray *callback_inputs[2] = {(mxArray *)prhs[0], (mxArray *)prhs[0]};
+    if (mexCallMATLAB(1, &plhs[1], 2, callback_inputs, "plus") != 0) {
+        mexErrMsgTxt("plus callback failed");
+    }
+    if (mexPutVariable("base", "from_mex", plhs[0]) != 0) {
+        mexErrMsgTxt("base workspace update failed");
+    }
+}
+"#,
+    )
+    .expect("write C MEX source");
+    runmat_mex::MexBuild::new(&source, tmp.path())
+        .compile()
+        .expect("compile C MEX fixture");
+    std::fs::write(
+        tmp.path().join("native_add.m"),
+        "function out = native_add(~); out = uint64(7); end",
+    )
+    .expect("write lower-precedence MATLAB function");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "[result, doubled] = native_add(uint64(41));",
+    )
+    .expect("write main source");
+
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let _cwd = push_cwd(tmp.path());
+    let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
+    let outcome = execute_path_request(&mut session, &source_name).expect("exec succeeds");
+
+    assert!(
+        outcome_has_named_upsert(
+            &outcome,
+            "result",
+            &runmat_value::Value::Int(runmat_value::IntValue::U64(42)),
+        ),
+        "C MEX should take precedence over a same-name MATLAB function and retain uint64 storage; diagnostics={:?}, upserts={:?}",
+        outcome.diagnostics,
+        outcome.workspace_delta.upserts
+    );
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "doubled",
+        &runmat_value::Value::Int(runmat_value::IntValue::U64(82)),
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "from_mex",
+        &runmat_value::Value::Int(runmat_value::IntValue::U64(42)),
+    ));
+}
+
 #[test]
 fn execute_path_request_resolves_sibling_function_with_arguments_block_validation() {
     let _guard = cwd_lock();
