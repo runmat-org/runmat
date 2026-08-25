@@ -12,6 +12,13 @@ pub struct MexBuildPlan {
 
 impl MexBuildPlan {
     pub(super) fn for_build(build: &MexBuild) -> Result<Self, MexBuildError> {
+        Self::for_build_with_msvc_object_directory(build, None)
+    }
+
+    pub(super) fn for_build_with_msvc_object_directory(
+        build: &MexBuild,
+        object_directory: Option<&Path>,
+    ) -> Result<Self, MexBuildError> {
         validate(build)?;
         build.target.validate()?;
         let family = compiler_family(&build.compiler);
@@ -35,6 +42,7 @@ impl MexBuildPlan {
                 &function_name,
                 &sdk.include_directory,
                 &sdk.shim,
+                object_directory.unwrap_or(&build.output_directory),
             ),
         };
         Ok(Self {
@@ -114,6 +122,7 @@ fn msvc_arguments(
     function_name: &str,
     sdk_include: &Path,
     shim: &Path,
+    object_directory: &Path,
 ) -> Vec<String> {
     let mut arguments = vec![
         "/nologo".into(),
@@ -121,6 +130,11 @@ fn msvc_arguments(
         "/O2".into(),
         "/std:c11".into(),
         format!("/I{}", sdk_include.display()),
+        format!(
+            "/Fo{}{}",
+            object_directory.display(),
+            std::path::MAIN_SEPARATOR
+        ),
     ];
     for include in &build.include_directories {
         arguments.push(format!("/I{}", include.display()));
@@ -209,6 +223,10 @@ mod tests {
         assert!(plan.arguments.contains(&"/LD".to_string()));
         assert!(plan.arguments.contains(&"/Ivendor/include".to_string()));
         assert!(plan.arguments.contains(&"/DFEATURE=1".to_string()));
+        assert!(plan
+            .arguments
+            .iter()
+            .any(|argument| argument.starts_with("/Fo")));
         assert!(plan.arguments.contains(&"/link".to_string()));
         assert!(plan.arguments.contains(&"vendor.lib".to_string()));
         assert!(plan
