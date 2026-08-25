@@ -62,10 +62,13 @@ async fn main() -> ExitCode {
             };
         }
         Ok(Some(runmat_process_host::HiddenMode::ExtensionHost)) => {
-            eprintln!(
-                "runmat extension host requires the authenticated isolation protocol provided by the native adapter runtime"
-            );
-            return ExitCode::from(2);
+            return match runmat_runtime::foreign::run_mex_extension_host() {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("runmat extension host failed: {error}");
+                    ExitCode::from(2)
+                }
+            };
         }
         Ok(None) => {}
         Err(error) => {

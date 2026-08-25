@@ -281,6 +281,7 @@ fn loader_rejects_a_module_that_no_longer_matches_its_artifact_identity() {
 void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
     (void)nlhs; (void)plhs; (void)nrhs; (void)prhs;
 }
+
 "#,
     )
     .unwrap();
@@ -297,6 +298,33 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         Err(error) => error,
     };
     assert!(matches!(error, MexLoadError::ArtifactManifest { .. }));
+}
+
+#[test]
+fn compatible_isolated_tier_does_not_weaken_exact_manifest_admission() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("compatible.c");
+    fs::write(
+        &source,
+        r#"
+#include "mex.h"
+void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
+    (void)nrhs; (void)prhs;
+    if (nlhs == 1) plhs[0] = mxCreateDoubleScalar(42.0);
+}
+"#,
+    )
+    .unwrap();
+    let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+    fs::remove_file(&artifact.manifest).unwrap();
+
+    assert!(matches!(
+        MexModule::load(&artifact.module),
+        Err(MexLoadError::ArtifactManifestRead { .. })
+    ));
+    let module = MexModule::load_compatible_isolated(&artifact.module).unwrap();
+    let result = module.invoke(&[], 1, module.api_mode()).unwrap();
+    assert_eq!(result.outputs, vec![Value::Num(42.0)]);
 }
 
 #[test]

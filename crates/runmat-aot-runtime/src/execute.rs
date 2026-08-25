@@ -49,7 +49,7 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
         let ports = runtime.service_ports().clone().with_builtin(builtins);
         runtime = runtime.with_service_ports(ports);
     }
-    let _mex_guard = crate::mex::install(&runtime);
+    let mut mex_guard = crate::mex::install(&runtime);
     let mut entrypoints = BTreeMap::new();
     for function in &assembly.functions {
         // SAFETY: the generated resolver has the exact declared C ABI. It
@@ -86,38 +86,47 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
         .map_err(|error| format!("standalone native host initialization failed: {error}"))?,
     );
 
-    let execution = futures::executor::block_on(async {
-        if assembly.executable_identity.entrypoint_kind == ExecutableEntrypointKind::Script {
-            let local_names = function
-                .locals
-                .iter()
-                .filter_map(|local| local.binding.zip(local.name.clone()))
-                .collect();
-            crate::program::invoke_workspace(
-                Rc::clone(&executor),
-                &program,
-                entrypoint,
-                NativeWorkspaceInput {
-                    local_names,
-                    ..NativeWorkspaceInput::default()
-                },
-                requested_outputs,
-                runtime,
-            )
-            .await
-        } else {
-            crate::program::invoke(
-                Rc::clone(&executor),
-                &program,
-                entrypoint,
-                Vec::new(),
-                requested_outputs,
-                runtime,
-            )
-            .await
-        }
-    })
-    .map_err(|error| format!("standalone native execution failed: {error}"))?;
+    let async_runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| format!("standalone async runtime initialization failed: {error}"))?;
+    let (execution, lifecycle) = async_runtime.block_on(async {
+        let execution =
+            if assembly.executable_identity.entrypoint_kind == ExecutableEntrypointKind::Script {
+                let local_names = function
+                    .locals
+                    .iter()
+                    .filter_map(|local| local.binding.zip(local.name.clone()))
+                    .collect();
+                crate::program::invoke_workspace(
+                    Rc::clone(&executor),
+                    &program,
+                    entrypoint,
+                    NativeWorkspaceInput {
+                        local_names,
+                        ..NativeWorkspaceInput::default()
+                    },
+                    requested_outputs,
+                    runtime,
+                )
+                .await
+            } else {
+                crate::program::invoke(
+                    Rc::clone(&executor),
+                    &program,
+                    entrypoint,
+                    Vec::new(),
+                    requested_outputs,
+                    runtime,
+                )
+                .await
+            };
+        let lifecycle = mex_guard.shutdown_gracefully().await;
+        (execution, lifecycle)
+    });
+    let execution =
+        execution.map_err(|error| format!("standalone native execution failed: {error}"))?;
+    lifecycle.map_err(|error| format!("standalone MEX shutdown failed: {error}"))?;
     if let Some(expression) = execution.expression {
         crate::output::value(&expression);
     } else {

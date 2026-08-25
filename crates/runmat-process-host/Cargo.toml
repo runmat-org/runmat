@@ -17,6 +17,7 @@ rand = "0.8"
 hmac = { workspace = true }
 sha2 = { workspace = true }
 zeroize = { workspace = true }
+tempfile = "3.12"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

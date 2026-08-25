@@ -153,6 +153,25 @@ impl RunMatSession {
         runmat_hir::set_error_namespace(&namespace);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn set_mex_config(&mut self, config: &runmat_config::runtime::MexConfig) {
+        let unmanifested = match config.unmanifested {
+            runmat_config::runtime::UnmanifestedMexPolicy::Isolate => {
+                runmat_runtime::foreign::UnmanifestedMexPolicy::Isolate
+            }
+            runmat_config::runtime::UnmanifestedMexPolicy::Deny => {
+                runmat_runtime::foreign::UnmanifestedMexPolicy::Deny
+            }
+        };
+        self.mex_runtime
+            .set_isolation_policy(runmat_runtime::foreign::MexIsolationPolicy {
+                unmanifested,
+                invocation_timeout: config
+                    .timeout_ms
+                    .map(|milliseconds| std::time::Duration::from_millis(milliseconds.get())),
+            });
+    }
+
     /// Configure garbage collector
     pub fn configure_gc(&self, config: GcConfig) -> Result<()> {
         gc_configure(config)
@@ -193,6 +212,16 @@ impl RunMatSession {
             workspace_vars = self.workspace_values.len(),
             "RunMat Session Status"
         );
+    }
+
+    /// Complete foreign-extension lifecycle while the originating runtime
+    /// context and callback services are still available.
+    pub async fn shutdown_foreign_runtime(&mut self) -> Result<(), RuntimeError> {
+        #[cfg(not(target_arch = "wasm32"))]
+        self.mex_runtime
+            .shutdown_gracefully(self.runtime_context.clone())
+            .await?;
+        Ok(())
     }
 
     #[cfg(not(target_arch = "wasm32"))]

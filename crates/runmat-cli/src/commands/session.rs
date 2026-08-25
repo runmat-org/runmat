@@ -24,6 +24,7 @@ pub(crate) fn create_session(
     engine.set_compat_mode(parser_compat(config.language.compat));
     engine.set_callstack_limit(config.runtime.callstack_limit);
     engine.set_error_namespace(resolved_error_namespace(config));
+    engine.set_mex_config(&config.foreign.mex);
     if let Some(client_id) = telemetry_client_id() {
         engine.set_telemetry_client_id(Some(client_id));
     }

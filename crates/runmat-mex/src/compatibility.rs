@@ -87,7 +87,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cataloged_symbols_are_unique_and_present_in_the_public_sdk() {
+    fn cataloged_symbols_are_unique_and_present_in_the_bundled_interface() {
         let matrix = include_str!("../include/matrix.h");
         let mex = include_str!("../include/mex.h");
         let shim = include_str!("../shim/runmat_mex_shim.c");
@@ -105,7 +105,7 @@ mod tests {
             };
             assert!(
                 header.contains(symbol.name),
-                "public header does not declare {}",
+                "bundled interface does not declare {}",
                 symbol.name
             );
             if !matches!(symbol.name, "mexFunction" | "mxAssert" | "mxAssertS") {

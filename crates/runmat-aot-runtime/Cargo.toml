@@ -12,14 +12,15 @@ repository = "https://github.com/runmat-org/runmat"
 crate-type = ["rlib", "staticlib"]
 
 [dependencies]
-futures = "0.3"
 runmat-execution = { workspace = true }
 runmat-native-codegen = { workspace = true, default-features = false }
 runmat-native-executor = { workspace = true }
+runmat-process-host = { workspace = true }
 runmat-runtime = { workspace = true, features = ["plot-core"] }
 runmat-types = { workspace = true }
 runmat-value = { workspace = true }
 serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt", "time"] }
 
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

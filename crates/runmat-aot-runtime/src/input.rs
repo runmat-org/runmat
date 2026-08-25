@@ -93,6 +93,33 @@ impl AotProcessInput {
     }
 }
 
+/// Copy the launcher's C argument vector for private-mode dispatch.
+///
+/// # Safety
+///
+/// A positive `argc` requires `argv` to point to an array of at least `argc`
+/// valid, null-terminated C strings.
+pub unsafe fn copy_process_arguments(
+    argc: i32,
+    argv: *const *const std::ffi::c_char,
+) -> Result<Vec<std::ffi::OsString>, String> {
+    if !(0..=MAX_ARGUMENTS).contains(&argc) || (argc > 0 && argv.is_null()) {
+        return Err("standalone launcher arguments are invalid".into());
+    }
+    let mut arguments = Vec::with_capacity(argc as usize);
+    for index in 0..argc as usize {
+        // SAFETY: the caller guarantees an argv array with at least argc entries.
+        let pointer = unsafe { *argv.add(index) };
+        if pointer.is_null() {
+            return Err("standalone launcher contains a null argument".into());
+        }
+        // SAFETY: every argv entry is guaranteed to be a null-terminated C string.
+        let value = unsafe { std::ffi::CStr::from_ptr(pointer) };
+        arguments.push(value.to_string_lossy().into_owned().into());
+    }
+    Ok(arguments)
+}
+
 unsafe fn copy_bounded(
     pointer: *const u8,
     length: u64,
@@ -113,7 +140,7 @@ unsafe fn copy_bounded(
 
 #[cfg(test)]
 mod tests {
-    use super::{AotProcessInput, LinkedProcessImage};
+    use super::{copy_process_arguments, AotProcessInput, LinkedProcessImage};
 
     #[test]
     fn raw_boundary_rejects_null_and_oversized_payloads_before_reading() {
@@ -149,5 +176,15 @@ mod tests {
             })
         };
         assert!(oversized.is_err());
+    }
+
+    #[test]
+    fn process_arguments_are_copied_before_private_mode_dispatch() {
+        let executable = std::ffi::CString::new("compiled-program").unwrap();
+        let marker = std::ffi::CString::new("--__runmat-extension-host").unwrap();
+        let pointers = [executable.as_ptr(), marker.as_ptr()];
+        let arguments = unsafe { copy_process_arguments(2, pointers.as_ptr()) }.unwrap();
+        assert_eq!(arguments[1], "--__runmat-extension-host");
+        assert!(unsafe { copy_process_arguments(1, std::ptr::null()) }.is_err());
     }
 }

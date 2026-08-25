@@ -11,6 +11,7 @@ use std::sync::Arc;
 pub type UserFunctionFuture = Pin<Box<dyn Future<Output = Result<Value, RuntimeError>>>>;
 pub type DynamicFunctionLoadFuture =
     Pin<Box<dyn Future<Output = Option<Result<Value, RuntimeError>>>>>;
+pub type DynamicFunctionClearFuture = Pin<Box<dyn Future<Output = Result<(), RuntimeError>>>>;
 pub type FunctionInvoker = dyn Fn(usize, &[Value], usize) -> UserFunctionFuture;
 #[derive(Debug, Clone)]
 pub struct ExternalFunctionCall {
@@ -52,8 +53,10 @@ pub enum DynamicFunctionClearRequest {
     Named(String),
 }
 
-pub type DynamicFunctionClearer =
-    dyn Fn(crate::context::RuntimeContext, DynamicFunctionClearRequest) -> Result<(), RuntimeError>;
+pub type DynamicFunctionClearer = dyn Fn(
+    crate::context::RuntimeContext,
+    DynamicFunctionClearRequest,
+) -> DynamicFunctionClearFuture;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceFunctionInfo {
@@ -474,12 +477,12 @@ pub async fn try_load_and_call_dynamic_function(
     loader(context, name, args, requested_outputs, phase).await
 }
 
-pub fn try_clear_dynamic_functions(
+pub async fn try_clear_dynamic_functions(
     request: DynamicFunctionClearRequest,
 ) -> Option<Result<(), RuntimeError>> {
     let context = crate::context::legacy::active()?;
     let clearer = context.state().call.borrow().dynamic_clearer.clone()?;
-    Some(clearer(context, request))
+    Some(clearer(context, request).await)
 }
 
 fn source_functions_in_catalog(

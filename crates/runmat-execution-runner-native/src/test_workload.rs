@@ -61,12 +61,19 @@ async fn execute_test_attempt(
             Arc::new(AtomicBool::new(false)),
         )
         .await
-        .map_err(|error| error.to_string())?;
-    Ok(WorkerExecution {
-        result: execution.result,
-        events: execution.events,
-        coverage: execution.coverage,
-    })
+        .map_err(|error| error.to_string());
+    let shutdown = session
+        .shutdown_foreign_runtime()
+        .await
+        .map_err(|error| format!("failed to shut down test execution session: {error}"));
+    match (execution, shutdown) {
+        (Ok(execution), Ok(())) => Ok(WorkerExecution {
+            result: execution.result,
+            events: execution.events,
+            coverage: execution.coverage,
+        }),
+        (Err(error), _) | (Ok(_), Err(error)) => Err(error),
+    }
 }
 
 #[cfg(test)]

@@ -98,31 +98,39 @@ async fn clear_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             "all" => {
                 cleanup_workspace_values(workspace::snapshot()).await?;
                 workspace::clear().map_err(clear_error)?;
-                clear_dynamic_functions(crate::user_functions::DynamicFunctionClearRequest::All)?;
+                clear_dynamic_functions(crate::user_functions::DynamicFunctionClearRequest::All)
+                    .await?;
             }
             "variables" => {
                 cleanup_workspace_values(workspace::snapshot()).await?;
                 workspace::clear().map_err(clear_error)?;
             }
             "functions" => {
-                clear_dynamic_functions(crate::user_functions::DynamicFunctionClearRequest::All)?
+                clear_dynamic_functions(crate::user_functions::DynamicFunctionClearRequest::All)
+                    .await?
             }
-            "mex" => clear_dynamic_functions(
-                crate::user_functions::DynamicFunctionClearRequest::NativeExtensions,
-            )?,
-            _ => clear_dynamic_functions(
-                crate::user_functions::DynamicFunctionClearRequest::Named(name),
-            )?,
+            "mex" => {
+                clear_dynamic_functions(
+                    crate::user_functions::DynamicFunctionClearRequest::NativeExtensions,
+                )
+                .await?
+            }
+            _ => {
+                clear_dynamic_functions(crate::user_functions::DynamicFunctionClearRequest::Named(
+                    name,
+                ))
+                .await?
+            }
         }
     }
 
     Ok(empty_return_value())
 }
 
-fn clear_dynamic_functions(
+async fn clear_dynamic_functions(
     request: crate::user_functions::DynamicFunctionClearRequest,
 ) -> BuiltinResult<()> {
-    match crate::user_functions::try_clear_dynamic_functions(request) {
+    match crate::user_functions::try_clear_dynamic_functions(request).await {
         Some(result) => result,
         None => Ok(()),
     }
@@ -309,8 +317,11 @@ mod tests {
         ));
         let observed = std::rc::Rc::clone(&requests);
         context.set_dynamic_function_clearer(Some(std::rc::Rc::new(move |_runtime, request| {
-            observed.borrow_mut().push(request);
-            Ok(())
+            let observed = std::rc::Rc::clone(&observed);
+            Box::pin(async move {
+                observed.borrow_mut().push(request);
+                Ok(())
+            })
         })));
         let _context = crate::context::RuntimeContextGuard::enter(context);
 
@@ -333,8 +344,11 @@ mod tests {
         ));
         let observed = std::rc::Rc::clone(&requests);
         context.set_dynamic_function_clearer(Some(std::rc::Rc::new(move |_runtime, request| {
-            observed.borrow_mut().push(request);
-            Ok(())
+            let observed = std::rc::Rc::clone(&observed);
+            Box::pin(async move {
+                observed.borrow_mut().push(request);
+                Ok(())
+            })
         })));
         let _context = crate::context::RuntimeContextGuard::enter(context);
 

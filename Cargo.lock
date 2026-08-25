@@ -6344,14 +6344,15 @@ dependencies = [
 name = "runmat-aot-runtime"
 version = "0.6.2"
 dependencies = [
- "futures",
  "runmat-execution",
  "runmat-native-codegen",
  "runmat-native-executor",
+ "runmat-process-host",
  "runmat-runtime",
  "runmat-types",
  "runmat-value",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -7192,6 +7193,7 @@ dependencies = [
  "runmat-meshing-evidence",
  "runmat-mex",
  "runmat-plot",
+ "runmat-process-host",
  "runmat-test",
  "runmat-thread-local",
  "runmat-time",

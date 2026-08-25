@@ -99,3 +99,37 @@ fn checked_length(header: [u8; 4], limits: FrameLimits) -> ProcessHostResult<usi
     }
     Ok(length)
 }
+
+pub fn read_payload_blocking(
+    reader: &mut impl std::io::Read,
+    limits: FrameLimits,
+) -> ProcessHostResult<Vec<u8>> {
+    limits.validate()?;
+    let mut header = [0_u8; 4];
+    reader.read_exact(&mut header)?;
+    let length = checked_length(header, limits)?;
+    let mut payload = vec![0_u8; length];
+    reader.read_exact(&mut payload)?;
+    Ok(payload)
+}
+
+pub fn write_payload_blocking(
+    writer: &mut impl std::io::Write,
+    payload: &[u8],
+    limits: FrameLimits,
+) -> ProcessHostResult<()> {
+    limits.validate()?;
+    if payload.len() > limits.max_message_bytes as usize {
+        return Err(ProcessHostError::Protocol(format!(
+            "frame is {} bytes; negotiated maximum is {}",
+            payload.len(),
+            limits.max_message_bytes
+        )));
+    }
+    let length = u32::try_from(payload.len())
+        .map_err(|_| ProcessHostError::Protocol("frame length exceeds u32".into()))?;
+    writer.write_all(&length.to_be_bytes())?;
+    writer.write_all(payload)?;
+    writer.flush()?;
+    Ok(())
+}

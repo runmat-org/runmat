@@ -12,6 +12,7 @@ use runmat_core::{
 use runmat_time::Instant;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use crate::cli::{CaptureFiguresMode, Cli, FigureSize};
@@ -153,11 +154,24 @@ async fn execute_script_request(
         HostExecutionPolicy::default(),
         engine.workspace_handle(),
     );
+    let interrupt = engine.interrupt_handle();
+    let signal_task = tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            interrupt.store(true, Ordering::Relaxed);
+        }
+    });
+    tokio::task::yield_now().await;
     let response = engine.execute_request(request).await;
+    signal_task.abort();
     let source_context = response.source_context;
     let outcome = match response.result {
         Ok(outcome) => outcome,
         Err(err) => {
+            if let Err(shutdown_error) = engine.shutdown_foreign_runtime().await {
+                warn!(
+                    "could not finish foreign runtime lifecycle after execution failure: {shutdown_error}"
+                );
+            }
             let failure = err.telemetry_failure_info();
             if let Some(run) = script_run.take() {
                 run.finish(TelemetryRunFinish {
@@ -181,6 +195,10 @@ async fn execute_script_request(
             return Err(AlreadyReportedCliError.into());
         }
     };
+    engine
+        .shutdown_foreign_runtime()
+        .await
+        .context("failed to finish foreign runtime lifecycle")?;
 
     let execution_time = start_time.elapsed();
     emit_execution_streams(&outcome.streams);

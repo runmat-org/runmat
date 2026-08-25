@@ -60,9 +60,17 @@ pub async fn execute_repl(config: &RunMatRuntimeConfig, cli: &Cli) -> Result<()>
             .read_to_string(&mut buffer)
             .context("Failed to read piped input")?;
         if !process_repl_input(&buffer, &mut engine, config).await? {
+            engine
+                .shutdown_foreign_runtime()
+                .await
+                .context("Failed to finish foreign runtime lifecycle")?;
             finalize_repl_session(&engine, session_start, repl_run);
             return Ok(());
         }
+        engine
+            .shutdown_foreign_runtime()
+            .await
+            .context("Failed to finish foreign runtime lifecycle")?;
         finalize_repl_session(&engine, session_start, repl_run);
         return Ok(());
     }
@@ -95,6 +103,10 @@ pub async fn execute_repl(config: &RunMatRuntimeConfig, cli: &Cli) -> Result<()>
         }
     }
 
+    engine
+        .shutdown_foreign_runtime()
+        .await
+        .context("Failed to finish foreign runtime lifecycle")?;
     finalize_repl_session(&engine, session_start, repl_run);
     Ok(())
 }

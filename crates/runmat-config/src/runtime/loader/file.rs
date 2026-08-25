@@ -62,6 +62,7 @@ error_namespace = "RunMat"
 verbose = false
 
 language = { compat = "runmat" }
+foreign = { mex = { unmanifested = "isolate" } }
 logging = { level = "warn", debug = false, file = "" }
 telemetry = { enabled = true, show_payloads = false, http_endpoint = "", udp_endpoint = "udp.telemetry.runmat.com:7846", queue_size = 256, sync_mode = false, drain_mode = "all", drain_timeout_ms = 50, require_ingestion_key = true }
 jit = { enabled = true, threshold = 10, optimization_level = "speed" }

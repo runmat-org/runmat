@@ -19,13 +19,17 @@ pub struct SharedMemoryDescriptor {
     pub name: String,
     pub byte_length: u64,
     pub nonce: [u8; 16],
+    pub sha256: [u8; 32],
 }
 
 impl SharedMemoryDescriptor {
     pub fn validate(&self) -> ProcessHostResult<()> {
-        if self.name.is_empty() {
+        if self.name.len() != 32
+            || !self.name.bytes().all(|byte| byte.is_ascii_hexdigit())
+            || self.name != hex_nonce(self.nonce)
+        {
             return Err(ProcessHostError::Configuration(
-                "shared-memory name must not be empty".into(),
+                "shared-memory name must be the descriptor nonce in hexadecimal".into(),
             ));
         }
         if self.byte_length == 0 {
@@ -35,4 +39,14 @@ impl SharedMemoryDescriptor {
         }
         Ok(())
     }
+}
+
+pub(crate) fn hex_nonce(nonce: [u8; 16]) -> String {
+    use std::fmt::Write as _;
+
+    let mut encoded = String::with_capacity(32);
+    for byte in nonce {
+        write!(&mut encoded, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    encoded
 }

@@ -81,6 +81,15 @@ pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
                     .await?;
                     continue;
                 }
+                if let Some(mut previous) = installed.take() {
+                    previous
+                        .session
+                        .shutdown_foreign_runtime()
+                        .await
+                        .map_err(|error| {
+                            protocol_error("failed to shut down the previous worker session", error)
+                        })?;
+                }
                 let enable_jit = std::env::var("RUNMAT_TEST_JIT").as_deref() != Ok("0");
                 let mut session =
                     RunMatSession::with_options(enable_jit, false).map_err(|error| {
@@ -182,6 +191,14 @@ pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
                 .await?;
             }
             WorkerRequest::Shutdown => {
+                if let Some(mut run) = installed.take() {
+                    run.session
+                        .shutdown_foreign_runtime()
+                        .await
+                        .map_err(|error| {
+                            protocol_error("failed to shut down the worker session", error)
+                        })?;
+                }
                 write_response(&mut output, &WorkerResponse::ShutdownComplete, limits).await?;
                 return Ok(());
             }

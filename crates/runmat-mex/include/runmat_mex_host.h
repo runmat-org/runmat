@@ -91,6 +91,7 @@ typedef struct RunMatMexHostApiV1 {
 } RunMatMexHostApiV1;
 
 RUNMAT_MEX_HOST_EXPORT int runmatMexBindHost(const RunMatMexHostApiV1 *api);
+RUNMAT_MEX_HOST_EXPORT unsigned int runmatMexHostAbiVersion(void);
 RUNMAT_MEX_HOST_EXPORT int runmatMexInvoke(int nlhs, mxArray *plhs[], int nrhs,
                                           const mxArray *prhs[]);
 RUNMAT_MEX_HOST_EXPORT int runmatMexIsLocked(void);

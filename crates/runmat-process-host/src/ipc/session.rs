@@ -1,4 +1,5 @@
 use std::fmt;
+use std::io::{Read, Write};
 
 use hmac::{Hmac, Mac};
 use rand::{rngs::OsRng, RngCore};
@@ -9,7 +10,10 @@ use zeroize::Zeroize;
 
 use crate::{ProcessHostError, ProcessHostResult};
 
-use super::{negotiate_handshake, read_payload, write_payload, FrameLimits, HostHandshake};
+use super::{
+    negotiate_handshake, read_payload, read_payload_blocking, write_payload,
+    write_payload_blocking, FrameLimits, HostHandshake,
+};
 
 pub const INITIAL_SESSION_LIMITS: FrameLimits = FrameLimits {
     max_message_bytes: 64 * 1024,
@@ -181,6 +185,26 @@ pub async fn authenticate_host(
     Ok(AuthenticatedSession { remote, limits })
 }
 
+pub fn authenticate_host_blocking(
+    reader: &mut impl Read,
+    writer: &mut impl Write,
+    local: HostHandshake,
+    secret: &SessionSecret,
+) -> ProcessHostResult<AuthenticatedSession> {
+    let remote: HostHandshake = read_message_blocking(reader, INITIAL_SESSION_LIMITS)?;
+    write_message_blocking(writer, &local, INITIAL_SESSION_LIMITS)?;
+    let limits = negotiate_handshake(&local, &remote)?;
+
+    let request: DriverChallenge = read_message_blocking(reader, limits)?;
+    let challenge = random_challenge();
+    let proof = secret.proof(SessionRole::Host, &local, &request.challenge);
+    write_message_blocking(writer, &HostProof { proof, challenge }, limits)?;
+    let response: DriverProof = read_message_blocking(reader, limits)?;
+    secret.verify(SessionRole::Driver, &remote, &challenge, &response.proof)?;
+
+    Ok(AuthenticatedSession { remote, limits })
+}
+
 async fn write_message<T: Serialize>(
     writer: &mut (impl AsyncWrite + Unpin),
     value: &T,
@@ -206,6 +230,27 @@ fn random_challenge() -> [u8; CHALLENGE_BYTES] {
     let mut challenge = [0_u8; CHALLENGE_BYTES];
     OsRng.fill_bytes(&mut challenge);
     challenge
+}
+
+fn write_message_blocking<T: Serialize>(
+    writer: &mut impl Write,
+    value: &T,
+    limits: FrameLimits,
+) -> ProcessHostResult<()> {
+    let encoded = serde_json::to_vec(value).map_err(|error| {
+        ProcessHostError::Protocol(format!("could not encode IPC record: {error}"))
+    })?;
+    write_payload_blocking(writer, &encoded, limits)
+}
+
+fn read_message_blocking<T: DeserializeOwned>(
+    reader: &mut impl Read,
+    limits: FrameLimits,
+) -> ProcessHostResult<T> {
+    let encoded = read_payload_blocking(reader, limits)?;
+    serde_json::from_slice(&encoded).map_err(|error| {
+        ProcessHostError::Protocol(format!("could not decode IPC record: {error}"))
+    })
 }
 
 fn hex_nibble(byte: u8) -> ProcessHostResult<u8> {
