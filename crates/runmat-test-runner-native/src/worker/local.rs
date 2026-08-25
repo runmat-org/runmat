@@ -145,7 +145,9 @@ enum LocalCommand {
         cancellation: Arc<AtomicBool>,
         result: watch::Sender<Option<Result<WorkerExecution, BackendError>>>,
     },
-    Shutdown,
+    Shutdown {
+        result: tokio::sync::oneshot::Sender<Result<(), BackendError>>,
+    },
 }
 
 impl WorkerBackend for LocalBackend {
@@ -277,7 +279,17 @@ impl WorkerBackend for LocalBackend {
     fn shutdown<'a>(&'a self, session: &'a Self::Session) -> BackendFuture<'a, ()> {
         Box::pin(async move {
             if session.mode == IsolationMode::Session {
-                let _ = session.state.sender.send(LocalCommand::Shutdown);
+                let (result_sender, result) = tokio::sync::oneshot::channel();
+                session
+                    .state
+                    .sender
+                    .send(LocalCommand::Shutdown {
+                        result: result_sender,
+                    })
+                    .map_err(|_| crashed("local test session has exited"))?;
+                return result
+                    .await
+                    .map_err(|_| crashed("local test session exited during shutdown"))?;
             }
             Ok(())
         })
@@ -365,9 +377,18 @@ fn worker_loop(
                     .map_err(|error| rejected(error.to_string()));
                 let _ = result.send(Some(completed));
             }
-            LocalCommand::Shutdown => return,
+            LocalCommand::Shutdown { result } => {
+                let completed = runtime
+                    .block_on(session.shutdown_foreign_runtime())
+                    .map_err(|error| {
+                        crashed(format!("failed to shut down local test session: {error}"))
+                    });
+                let _ = result.send(completed);
+                return;
+            }
         }
     }
+    let _ = runtime.block_on(session.shutdown_foreign_runtime());
 }
 
 fn rejected(message: impl Into<String>) -> BackendError {

@@ -12,6 +12,7 @@ use crate::{
 };
 
 type BindHost = unsafe extern "C" fn(*const MexHostApiV1) -> i32;
+type HostAbiVersion = unsafe extern "C" fn() -> u32;
 type InvokeMex = unsafe extern "C" fn(i32, *mut *mut MxArray, i32, *const *const MxArray) -> i32;
 type IsLocked = unsafe extern "C" fn() -> i32;
 type ApiMode = unsafe extern "C" fn() -> i32;
@@ -57,6 +58,8 @@ pub enum MexLoadError {
         #[source]
         source: libloading::Error,
     },
+    #[error("MEX binary compatibility check failed for {path}: {message}")]
+    BinaryCompatibility { path: String, message: String },
     #[error("MEX input conversion failed: {0}")]
     Input(String),
     #[error("MEX function failed{identifier}: {message}")]
@@ -71,6 +74,39 @@ pub enum MexLoadError {
     ReentrantModule,
 }
 
+impl MexLoadError {
+    /// Return the native dependency named by the platform loader, when the
+    /// loader provided one separately from the module being opened.
+    pub fn missing_dependency(&self) -> Option<String> {
+        let Self::Load { path, source } = self else {
+            return None;
+        };
+        missing_dependency_from_loader_message(path, &source.to_string())
+    }
+}
+
+fn missing_dependency_from_loader_message(module: &str, message: &str) -> Option<String> {
+    if let Some((_, remainder)) = message.split_once("Library not loaded:") {
+        return remainder
+            .lines()
+            .next()
+            .map(str::trim)
+            .filter(|dependency| !dependency.is_empty() && *dependency != module)
+            .map(str::to_owned);
+    }
+    let marker = ": cannot open shared object file";
+    if let Some((dependency, _)) = message.split_once(marker) {
+        let dependency = dependency
+            .rsplit_once(": ")
+            .map_or(dependency, |(_, dependency)| dependency)
+            .trim();
+        if !dependency.is_empty() && dependency != module {
+            return Some(dependency.to_owned());
+        }
+    }
+    None
+}
+
 pub struct MexModule {
     _library: Library,
     bind: BindHost,
@@ -83,16 +119,74 @@ pub struct MexModule {
 
 impl MexModule {
     pub fn load(path: &Path) -> Result<Self, MexLoadError> {
+        Self::load_inner(path, true)
+    }
+
+    /// Load an unmanifested module built for RunMat's compatibility interface.
+    ///
+    /// Callers must keep this module inside an isolated extension host.
+    pub fn load_compatible_isolated(path: &Path) -> Result<Self, MexLoadError> {
+        let expected = crate::mex_suffix().ok_or_else(|| MexLoadError::BinaryCompatibility {
+            path: path.display().to_string(),
+            message: "the current platform does not define a MEX suffix".into(),
+        })?;
+        let actual = path
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default();
+        if actual != expected {
+            return Err(MexLoadError::BinaryCompatibility {
+                path: path.display().to_string(),
+                message: format!("expected platform suffix '.{expected}', found '.{actual}'"),
+            });
+        }
+        Self::load_inner(path, false)
+    }
+
+    fn load_inner(path: &Path, require_manifest: bool) -> Result<Self, MexLoadError> {
         let _process_guard = MEX_PROCESS_GATE.lock();
-        admit_artifact(path)?;
+        if require_manifest {
+            admit_artifact(path)?;
+        }
         // SAFETY: the library remains owned by `Self`; all resolved function
         // pointers are copied only after their exact C signatures are checked.
         let library = unsafe { Library::new(path) }.map_err(|source| MexLoadError::Load {
             path: path.display().to_string(),
             source,
         })?;
+        // SAFETY: this no-argument query is part of RunMat's private module
+        // interface and returns a fixed-width integer.
+        let host_abi_version =
+            unsafe { library.get::<HostAbiVersion>(b"runmatMexHostAbiVersion\0") }.map_err(
+                |source| {
+                    if require_manifest {
+                        MexLoadError::Symbol {
+                            symbol: "runmatMexHostAbiVersion",
+                            source,
+                        }
+                    } else {
+                        MexLoadError::BinaryCompatibility {
+                            path: path.display().to_string(),
+                            message: format!(
+                                "module does not expose RunMat's compatibility interface: {source}"
+                            ),
+                        }
+                    }
+                },
+            )?;
+        // SAFETY: the query has no memory arguments or mutable state contract.
+        let actual_host_abi = unsafe { host_abi_version() };
+        if actual_host_abi != crate::MEX_HOST_ABI_VERSION {
+            return Err(MexLoadError::BinaryCompatibility {
+                path: path.display().to_string(),
+                message: format!(
+                    "module requires private host ABI {actual_host_abi}, but this RunMat executable provides {}",
+                    crate::MEX_HOST_ABI_VERSION
+                ),
+            });
+        }
         // SAFETY: these symbols are supplied by RunMat's compiled C shim and
-        // have signatures fixed by the private host ABI header.
+        // have signatures fixed by RunMat's private host ABI.
         let bind =
             *unsafe { library.get::<BindHost>(b"runmatMexBindHost\0") }.map_err(|source| {
                 MexLoadError::Symbol {
@@ -379,5 +473,48 @@ impl Drop for MexModule {
         }
         // SAFETY: there is no accessible state for an exit callback here.
         unsafe { (self.unload)() };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::missing_dependency_from_loader_message;
+
+    #[test]
+    fn extracts_named_dependencies_from_platform_loader_diagnostics() {
+        assert_eq!(
+            missing_dependency_from_loader_message(
+                "/tmp/module.mexa64",
+                "libhelper.so: cannot open shared object file: No such file or directory",
+            )
+            .as_deref(),
+            Some("libhelper.so")
+        );
+        assert_eq!(
+            missing_dependency_from_loader_message(
+                "/tmp/module.mexmaca64",
+                "dlopen(/tmp/module.mexmaca64): Library not loaded: @rpath/libhelper.dylib\n  Referenced from: /tmp/module.mexmaca64",
+            )
+            .as_deref(),
+            Some("@rpath/libhelper.dylib")
+        );
+    }
+
+    #[test]
+    fn does_not_mislabel_the_requested_module_as_a_dependency() {
+        assert_eq!(
+            missing_dependency_from_loader_message(
+                "/tmp/module.mexa64",
+                "/tmp/module.mexa64: cannot open shared object file: No such file or directory",
+            ),
+            None
+        );
+        assert_eq!(
+            missing_dependency_from_loader_message(
+                "module.mexw64",
+                "The specified module could not be found. (os error 126)",
+            ),
+            None
+        );
     }
 }

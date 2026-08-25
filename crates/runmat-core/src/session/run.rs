@@ -360,30 +360,35 @@ impl RunMatSession {
         let mex_runtime = std::rc::Rc::clone(&self.mex_runtime);
         let clearer: std::rc::Rc<runmat_runtime::user_functions::DynamicFunctionClearer> =
             std::rc::Rc::new(move |runtime, request| {
-                #[cfg(target_arch = "wasm32")]
-                let _ = &runtime;
-                if !matches!(
-                    request,
-                    runmat_runtime::user_functions::DynamicFunctionClearRequest::NativeExtensions
-                ) {
-                    let mut cache = dynamic_function_cache
-                        .lock()
-                        .unwrap_or_else(|poison| poison.into_inner());
-                    match &request {
-                        runmat_runtime::user_functions::DynamicFunctionClearRequest::All => {
-                            cache.clear();
-                        }
-                        runmat_runtime::user_functions::DynamicFunctionClearRequest::Named(name) => {
-                            cache.retain(|path, _| {
-                                !super::dynamic::path_matches_clear_name(path, name)
-                            });
-                        }
-                        runmat_runtime::user_functions::DynamicFunctionClearRequest::NativeExtensions => {}
-                    }
-                }
+                let dynamic_function_cache = Arc::clone(&dynamic_function_cache);
                 #[cfg(not(target_arch = "wasm32"))]
-                mex_runtime.clear(&request, runtime)?;
-                Ok(())
+                let mex_runtime = std::rc::Rc::clone(&mex_runtime);
+                Box::pin(async move {
+                    #[cfg(target_arch = "wasm32")]
+                    let _ = &runtime;
+                    if !matches!(
+                        request,
+                        runmat_runtime::user_functions::DynamicFunctionClearRequest::NativeExtensions
+                    ) {
+                        let mut cache = dynamic_function_cache
+                            .lock()
+                            .unwrap_or_else(|poison| poison.into_inner());
+                        match &request {
+                            runmat_runtime::user_functions::DynamicFunctionClearRequest::All => {
+                                cache.clear();
+                            }
+                            runmat_runtime::user_functions::DynamicFunctionClearRequest::Named(name) => {
+                                cache.retain(|path, _| {
+                                    !super::dynamic::path_matches_clear_name(path, name)
+                                });
+                            }
+                            runmat_runtime::user_functions::DynamicFunctionClearRequest::NativeExtensions => {}
+                        }
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    mex_runtime.clear_gracefully(&request, runtime).await?;
+                    Ok(())
+                })
             });
         self.runtime_context
             .set_dynamic_function_clearer(Some(clearer));

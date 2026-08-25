@@ -178,6 +178,17 @@ All runtime settings are under `[runtime]`. Runtime settings control the behavio
 
 See [MATLAB Language Compatibility](/docs/runtime/matlab-compatibility) for the compatibility modes and [MATLAB Language Extensions](/docs/runtime/getting-started/language-extensions) for the RunMat-only behavior controlled by those modes.
 
+### `[runtime.foreign.mex]`
+
+| Key | Type | Default | Allowed values | Notes |
+| --- | --- | --- | --- | --- |
+| `unmanifested` | string | `"isolate"` | `isolate`, `deny` | Runs supported unmanifested modules in a local extension-host process, or rejects them before startup. |
+| `timeout_ms` | positive integer | unset | — | Terminates an isolated host when an invocation or lifecycle callback exceeds the configured duration. An unset value applies no automatic invocation deadline; clear and shutdown retain a 30-second teardown ceiling. Cancellation also terminates the host. |
+
+Modules with a valid RunMat build manifest retain exact admission and run in the owning session. The `unmanifested` setting applies only to the separately checked binary-compatibility tier; it does not bypass architecture, suffix, or adapter-ABI checks.
+
+The isolated extension host contains crashes and can be terminated on cancellation or timeout, but it is not an operating-system security sandbox. An admitted native module has the extension-host process's permissions. Use `unmanifested = "deny"` when only exact, manifest-bound RunMat artifacts should be allowed.
+
 ### `[runtime.jit]`
 
 
@@ -379,6 +390,10 @@ verbose = false
 
 [runtime.language]
 compat = "runmat"
+
+[runtime.foreign.mex]
+unmanifested = "isolate"
+# timeout_ms = 300000
 
 [runtime.jit]
 enabled = true

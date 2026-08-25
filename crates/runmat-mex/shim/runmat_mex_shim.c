@@ -264,6 +264,10 @@ RUNMAT_MEX_HOST_EXPORT int runmatMexBindHost(const RunMatMexHostApiV1 *api) {
     return 0;
 }
 
+RUNMAT_MEX_HOST_EXPORT unsigned int runmatMexHostAbiVersion(void) {
+    return RUNMAT_MEX_HOST_ABI_VERSION;
+}
+
 RUNMAT_MEX_HOST_EXPORT int runmatMexInvoke(int nlhs, mxArray *plhs[], int nrhs,
                                           const mxArray *prhs[]) {
     runmat_require_host();

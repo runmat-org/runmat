@@ -42,6 +42,25 @@ pub unsafe extern "C" fn runmat_aot_main(
     resume_points_len: u64,
 ) -> i32 {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // SAFETY: the generated launcher forwards the process argument vector
+        // received by its C `main` entrypoint.
+        let arguments = unsafe { input::copy_process_arguments(argc, argv) }?;
+        match runmat_process_host::HiddenModeRegistry::standard()
+            .detect(arguments)
+            .map_err(|error| error.to_string())?
+        {
+            Some(runmat_process_host::HiddenMode::ExtensionHost) => {
+                return runmat_runtime::foreign::run_mex_extension_host()
+                    .map_err(|error| format!("standalone extension host failed: {error}"));
+            }
+            Some(mode) => {
+                return Err(format!(
+                    "standalone executable does not provide private host mode '{}'",
+                    mode.marker()
+                ));
+            }
+            None => {}
+        }
         // SAFETY: validation and bounded copies happen before any payload is
         // decoded or retained. The generated launcher supplies these symbols.
         let linked = input::LinkedProcessImage {
