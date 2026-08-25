@@ -24,12 +24,16 @@ _What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/r
 #### Fixed
 * Fixed `try`/`catch` protection across nested control flow and native execution, preserving exact catch bindings, nested-handler and `rethrow` behavior, normal exits, and canonical exception identifiers without replaying completed work.
 * Fixed native `spawn`/`await` execution so spawned work no longer blocks the awaiting runtime thread, and native suspension resumes at the exact post-`await` site without replaying completed effects.
+* Fixed Windows WGPU initialization to default to Direct3D 12 while preserving explicit backend overrides, allowing compute and native plot presentation to share the same provider-owned GPU device.
+* Fixed native OpenCascade geometry builds on Windows by using portable CXX bridge include paths instead of relying on Unix-style generated-header symlink layouts.
 
 ### Desktop
 
 #### Added
 * Students and instructors can now request complimentary RunMat Academic licenses directly from the product. Approved instructors can set up courses, add instructional staff, and invite students using their granted licenses.
 * Connect RunMat projects to OpenAI ChatGPT and Codex, Anthropic Claude Code and Cowork, or any other MCP-compatible assistant. Connected assistants can synchronize project files, execute RunMat code, and return generated artifacts.
+* Added a native Windows application frame with RunMat-styled drag, minimize, maximize/restore, and close controls, replacing duplicate Windows system chrome without affecting the browser, macOS, or Linux interfaces.
+* Added interactive native Windows plot surfaces backed by the runtime's shared Direct3D 12/WGPU device, keeping presentation GPU-resident and avoiding CPU image readback and IPC transport for rendered frames.
 
 #### Changed
 * Changed organizations to use dedicated project pages with simpler switching and administration, configurable profiles and visibility, and readable organization and project URLs.
@@ -37,6 +41,7 @@ _What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/r
 
 #### Fixed
 * Improved language-server startup, semantic-highlighting recovery, runtime loading, failure handling, and observability so projects recover more reliably when browser workers or background services restart.
+* Fixed Windows native plots so they appear immediately, remain aligned through layout and DPI changes, and receive pointer, wheel, drag, and overlay interaction correctly.
 
 ## [v0.6.1](https://github.com/runmat-org/runmat/compare/v0.6.0...v0.6.1) - July 2026
 
