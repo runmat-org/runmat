@@ -137,17 +137,14 @@ fn pinned_fieldtrip_c_gateways_build_and_execute() {
         .unwrap();
     assert_eq!(determinant_result.outputs, vec![Value::Num(-2.0)]);
 
-    let nansum = build_module(
-        &checkout.source("src/nansum.c"),
-        "fieldtrip_nansum",
+    let process_id = build_module(
+        &checkout.source("src/getpid.c"),
+        "fieldtrip_getpid",
         output.path(),
     );
-    let nansum_result = nansum
-        .invoke(
-            &[tensor(vec![1.0, f64::NAN, 3.0], vec![1, 3])],
-            1,
-            nansum.api_mode(),
-        )
-        .unwrap();
-    assert_eq!(nansum_result.outputs, vec![Value::Num(4.0)]);
+    let process_id_result = process_id.invoke(&[], 1, process_id.api_mode()).unwrap();
+    let Value::Int(process_id) = &process_id_result.outputs[0] else {
+        panic!("getpid must return a fixed-width integer scalar");
+    };
+    assert!(process_id.try_to_u64().is_some_and(|value| value > 0));
 }
