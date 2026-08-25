@@ -240,7 +240,8 @@ mod tests {
     use super::*;
     use runmat_value::{
         ComplexTensor, ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignRef,
-        ForeignTypeIdentity, IntegerStorage, NumericDType, ObjectInstance, Tensor,
+        ForeignResourceKey, ForeignTypeIdentity, IntegerStorage, NumericDType, ObjectInstance,
+        Tensor,
     };
 
     #[test]
@@ -319,19 +320,21 @@ mod tests {
 
     #[test]
     fn foreign_reference_metadata_uses_declared_type_and_scalar_shape() {
-        let value = Value::Foreign(ForeignRef {
-            host_identity: "browser-main".into(),
-            handle: 5,
-            generation: 1,
-            type_identity: ForeignTypeIdentity {
+        let value = Value::Foreign(ForeignRef::detached(
+            ForeignResourceKey {
+                host_identity: "browser-main".into(),
+                handle: 5,
+                generation: 1,
+            },
+            ForeignTypeIdentity {
                 family: "web".into(),
                 name: "dom.Element".into(),
                 version: 1,
             },
-            ownership: ForeignOwnership::Borrowed,
-            affinity: ForeignAffinity::OriginThread,
-            lifetime: ForeignLifetime::External,
-        });
+            ForeignOwnership::Borrowed,
+            ForeignAffinity::OriginThread,
+            ForeignLifetime::External,
+        ));
         assert_eq!(matlab_class_name(&value), "dom.Element");
         assert_eq!(value_shape(&value), Some(vec![1, 1]));
         assert_eq!(preview_numeric_values(&value, 8), None);

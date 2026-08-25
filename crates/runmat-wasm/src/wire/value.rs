@@ -576,19 +576,21 @@ mod tests {
 
     #[test]
     fn foreign_json_is_opaque_and_does_not_expose_runtime_handle_identity() {
-        let value = Value::Foreign(runmat_value::ForeignRef {
-            host_identity: "private-host".into(),
-            handle: 42,
-            generation: 7,
-            type_identity: runmat_value::ForeignTypeIdentity {
+        let value = Value::Foreign(runmat_value::ForeignRef::detached(
+            runmat_value::ForeignResourceKey {
+                host_identity: "private-host".into(),
+                handle: 42,
+                generation: 7,
+            },
+            runmat_value::ForeignTypeIdentity {
                 family: "java".into(),
                 name: "java.lang.StringBuilder".into(),
                 version: 1,
             },
-            ownership: runmat_value::ForeignOwnership::Shared,
-            affinity: runmat_value::ForeignAffinity::OriginProcess,
-            lifetime: runmat_value::ForeignLifetime::Session,
-        });
+            runmat_value::ForeignOwnership::Shared,
+            runmat_value::ForeignAffinity::OriginProcess,
+            runmat_value::ForeignLifetime::Session,
+        ));
 
         let json = value_to_json(&value, 0);
         assert_eq!(json["kind"], "foreign");

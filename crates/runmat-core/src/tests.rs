@@ -14191,6 +14191,49 @@ fn generic_native_entry_publication_reuses_exact_units_and_invalidates_only_depe
     assert_eq!(session.generic_native_cache_counts(), (2, 1));
 }
 
+#[test]
+fn portable_product_preserves_and_validates_explicit_interop_contract() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let unit = block_on(session.compile_executable_unit(
+        ExecutableSource::new(
+            "core-interop-manifest-test@1",
+            "interop_manifest.m",
+            "answer = 42;\n",
+        ),
+        None,
+    ))
+    .expect("compile portable unit");
+    let interop = runmat_types::InteropManifest {
+        schema_version: runmat_types::INTEROP_MANIFEST_SCHEMA_VERSION,
+        foreign_types: Vec::new(),
+        adapters: vec![runmat_types::ForeignAdapterRequirement {
+            adapter: "native-test".into(),
+            minimum_version: 1,
+            capabilities: runmat_types::CapabilitySet::default(),
+            artifact_identities: vec!["native-test:fixture".into()],
+        }],
+    };
+
+    let first = unit
+        .portable_envelope_for_with_interop(None, interop.clone())
+        .expect("explicit interop product");
+    let second = unit
+        .portable_envelope_for_with_interop(None, interop.clone())
+        .expect("deterministic explicit interop product");
+    assert_eq!(first.manifest.interop, interop);
+    assert_eq!(
+        first.canonical_bytes().unwrap(),
+        second.canonical_bytes().unwrap()
+    );
+
+    let mut invalid = first.manifest.interop;
+    invalid.schema_version += 1;
+    assert!(unit
+        .portable_envelope_for_with_interop(None, invalid)
+        .unwrap_err()
+        .contains("interop.schema_version"));
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn deterministic_native_tiering_has_bounded_warmup_and_stable_steady_state() {

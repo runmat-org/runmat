@@ -373,7 +373,7 @@ mod tests {
     use runmat_accelerate_api::{
         clear_handle_metadata, GpuTensorHandle, GpuTensorStorage, NumericElementType,
     };
-    use runmat_value::{CellArray, ForeignRef, Tensor};
+    use runmat_value::{CellArray, ForeignRef, ForeignResourceKey, Tensor};
 
     #[test]
     fn preserves_recursive_numeric_class_and_shape() {
@@ -442,19 +442,21 @@ mod tests {
 
     #[test]
     fn foreign_reference_preserves_static_type_and_lifecycle_without_live_identity() {
-        let value = Value::Foreign(ForeignRef {
-            host_identity: "worker-7".into(),
-            handle: 91,
-            generation: 4,
-            type_identity: runmat_types::ForeignTypeIdentity {
+        let value = Value::Foreign(ForeignRef::detached(
+            ForeignResourceKey {
+                host_identity: "worker-7".into(),
+                handle: 91,
+                generation: 4,
+            },
+            runmat_types::ForeignTypeIdentity {
                 family: "java".into(),
                 name: "java.lang.StringBuilder".into(),
                 version: 2,
             },
-            ownership: ForeignOwnership::Shared,
-            affinity: ForeignAffinity::OriginProcess,
-            lifetime: ForeignLifetime::Session,
-        });
+            ForeignOwnership::Shared,
+            ForeignAffinity::OriginProcess,
+            ForeignLifetime::Session,
+        ));
 
         let fact = value_fact(&value);
         assert_eq!(

@@ -32,6 +32,21 @@ impl ExecutableUnit {
         &self,
         preferred_function: Option<&str>,
     ) -> Result<runmat_execution::ExecutableUnitEnvelope, String> {
+        self.portable_envelope_for_with_interop(
+            preferred_function,
+            runmat_types::InteropManifest::empty(),
+        )
+    }
+
+    /// Build a complete product with an explicit foreign-interoperability
+    /// contract. Package and adapter composition use this entrypoint once
+    /// foreign requirements have been resolved; ordinary source compilation
+    /// records the deterministic empty contract.
+    pub fn portable_envelope_for_with_interop(
+        &self,
+        preferred_function: Option<&str>,
+        interop: runmat_types::InteropManifest,
+    ) -> Result<runmat_execution::ExecutableUnitEnvelope, String> {
         let payloads = self.component_payloads()?;
         let revisions = self.component_revisions()?;
         let components = payloads
@@ -111,7 +126,7 @@ impl ExecutableUnit {
                 .iter()
                 .map(|region| region.contract.clone())
                 .collect(),
-            interop: runmat_types::InteropManifest::empty(),
+            interop,
             parallel: runmat_types::ParallelManifest::empty(),
             optional_sections: Vec::new(),
         };

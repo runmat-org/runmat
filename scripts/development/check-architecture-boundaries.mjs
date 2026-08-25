@@ -65,6 +65,11 @@ forbidDependencies("runmat-value", upwardValueDependencies);
 forbidDependencies("runmat-runtime", ["runmat-hir"]);
 forbidDependencies("runmat-hir", ["runmat-runtime", "runmat-value"]);
 
+const extensionAbiManifest = read("crates/runmat-extension-abi/Cargo.toml");
+if (/^\s*[^#\s][\w-]*\s*=\s*/m.test(extensionAbiManifest.split("[dependencies]")[1] ?? "")) {
+  fail("runmat-extension-abi must remain dependency-free");
+}
+
 const typesManifest = read("crates/runmat-types/Cargo.toml");
 for (const dependency of typesManifest.matchAll(/^(runmat-[\w-]+)\s*=/gm)) {
   fail(`runmat-types must remain dependency-neutral; found ${dependency[1]}`);
@@ -79,6 +84,12 @@ if (valueDeclarations.length !== 1 || !valueDeclarations[0].startsWith("crates/r
 }
 
 for (const { path: sourcePath, text } of allRust) {
+  if (
+    sourcePath.startsWith("crates/runmat-extension-abi/") &&
+    /\brunmat_(?:value|types|builtins|runtime|hir|mir|vm|core|jit|aot)\b/.test(text)
+  ) {
+    fail(`${sourcePath} leaks an internal RunMat crate across the public extension ABI`);
+  }
   if (sourcePath.startsWith("crates/runmat-runtime/") && /\brunmat_hir\b/.test(text)) {
     fail(`${sourcePath} imports frontend HIR vocabulary`);
   }

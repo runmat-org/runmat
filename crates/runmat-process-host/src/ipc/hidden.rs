@@ -8,6 +8,7 @@ pub enum HiddenMode {
     ExecutionWorker,
     ExecutionDriver,
     LocalSupervisor,
+    ExtensionHost,
 }
 
 impl HiddenMode {
@@ -17,6 +18,7 @@ impl HiddenMode {
             Self::ExecutionWorker => "--__runmat-execution-worker",
             Self::ExecutionDriver => "--__runmat-execution-driver",
             Self::LocalSupervisor => "--__runmat-local-supervisor",
+            Self::ExtensionHost => "--__runmat-extension-host",
         }
     }
 }
@@ -57,6 +59,7 @@ impl HiddenModeRegistry {
             HiddenMode::ExecutionWorker,
             HiddenMode::ExecutionDriver,
             HiddenMode::LocalSupervisor,
+            HiddenMode::ExtensionHost,
         ]
         .into_iter()
         .find(|mode| argument == OsStr::new(mode.marker()))
