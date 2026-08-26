@@ -213,6 +213,18 @@ impl JavaAdapter {
         if call.symbol == "configure" {
             return self.configure_value(call.arguments);
         }
+        if matches!(
+            call.symbol.as_str(),
+            "construct_edt" | "call_static_edt" | "invoke_member_edt"
+        ) && !self.desktop_available.get()
+        {
+            return Err(build_runtime_error(
+                "Java EDT execution requires a Desktop host with Java UI support",
+            )
+            .with_builtin("java")
+            .with_identifier("RunMat:Java:EdtUnavailable")
+            .build());
+        }
         self.ensure_session()?;
         self.drain_releases()?;
         let mut arguments = call.arguments.into_iter();
@@ -224,6 +236,13 @@ impl JavaAdapter {
                     .collect::<Result<Vec<_>, _>>()?;
                 self.with_session(|session| session.construct_resolved(&class, &values))?
             }
+            "construct_edt" => {
+                let class = string_argument(arguments.next(), "Java class")?;
+                let values = arguments
+                    .map(|value| self.argument_to_java(context, value))
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.with_session(|session| session.construct_resolved_on_edt(&class, &values))?
+            }
             "call_static" => {
                 let class = string_argument(arguments.next(), "Java class")?;
                 let method = string_argument(arguments.next(), "Java method")?;
@@ -231,6 +250,16 @@ impl JavaAdapter {
                     .map(|value| self.argument_to_java(context, value))
                     .collect::<Result<Vec<_>, _>>()?;
                 self.with_session(|session| session.call_static_resolved(&class, &method, &values))?
+            }
+            "call_static_edt" => {
+                let class = string_argument(arguments.next(), "Java class")?;
+                let method = string_argument(arguments.next(), "Java method")?;
+                let values = arguments
+                    .map(|value| self.argument_to_java(context, value))
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.with_session(|session| {
+                    session.call_static_resolved_on_edt(&class, &method, &values)
+                })?
             }
             "invoke_qualified" => {
                 let name = string_argument(arguments.next(), "qualified Java name")?;
@@ -262,6 +291,17 @@ impl JavaAdapter {
                     .collect::<Result<Vec<_>, _>>()?;
                 self.with_session(|session| {
                     session.call_method_resolved(java_handle, &method, &values)
+                })?
+            }
+            "invoke_member_edt" => {
+                let reference = foreign_argument(arguments.next())?;
+                let method = string_argument(arguments.next(), "Java method")?;
+                let java_handle = self.resolve_java_handle(&reference)?;
+                let values = arguments
+                    .map(|value| self.argument_to_java(context, value))
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.with_session(|session| {
+                    session.call_method_resolved_on_edt(java_handle, &method, &values)
                 })?
             }
             "get_member" => {
