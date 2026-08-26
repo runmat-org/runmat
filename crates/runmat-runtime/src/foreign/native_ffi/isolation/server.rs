@@ -14,9 +14,10 @@ use runmat_value::Value;
 use super::{
     decode_portable, encode_portable, wire_error, NativeCallbackRequest, NativeDriverMessage,
     NativeHostMessage, NativeInvocationRequest, NativeInvocationResult, NativeRemoteReference,
-    NativeShutdownResult, NativeWireError, NativeWireValue, NATIVE_FFI_HOST_MAX_CALLBACK_DEPTH,
-    NATIVE_FFI_HOST_MAX_MESSAGE_BYTES, NATIVE_FFI_HOST_PROTOCOL, NATIVE_FFI_HOST_SCHEMA_VERSION,
-    NATIVE_FFI_HOST_SECRET_ENV, NATIVE_FFI_HOST_SNAPSHOT_ROOT_ENV,
+    NativeShutdownResult, NativeWireError, NativeWireValue, NATIVE_FFI_HOST_FRONTEND_ENV,
+    NATIVE_FFI_HOST_MAX_CALLBACK_DEPTH, NATIVE_FFI_HOST_MAX_MESSAGE_BYTES,
+    NATIVE_FFI_HOST_PROTOCOL, NATIVE_FFI_HOST_SCHEMA_VERSION, NATIVE_FFI_HOST_SECRET_ENV,
+    NATIVE_FFI_HOST_SNAPSHOT_ROOT_ENV,
 };
 use crate::context::{ForeignCall, RuntimeContext};
 use crate::execution::RuntimeExecutionService;
@@ -64,9 +65,14 @@ pub fn run_native_ffi_extension_host() -> Result<(), String> {
         depth: Cell::new(0),
     });
     let handles = ForeignHandleRegistry::default();
-    let adapter = NativeFfiAdapter::new_with_callback_router(
+    let frontend = std::env::var_os(NATIVE_FFI_HOST_FRONTEND_ENV)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| "clang".into());
+    std::env::remove_var(NATIVE_FFI_HOST_FRONTEND_ENV);
+    let adapter = NativeFfiAdapter::new_with_callback_router_and_frontend(
         handles,
         Some(callback_router.clone() as Rc<dyn NativeFfiCallbackRouter>),
+        frontend,
     )
     .map_err(|error| error.to_string())?;
     let context = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));

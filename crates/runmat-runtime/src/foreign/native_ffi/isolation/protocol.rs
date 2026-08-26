@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 pub const NATIVE_FFI_HOST_KIND: &str = "native-ffi";
 pub const NATIVE_FFI_HOST_KIND_ENV: &str = "RUNMAT_EXTENSION_HOST_KIND";
+pub const NATIVE_FFI_HOST_FRONTEND_ENV: &str = "RUNMAT_NATIVE_FFI_HOST_FRONTEND";
 pub const NATIVE_FFI_HOST_PROTOCOL: &str = "runmat.native-ffi-host";
 pub const NATIVE_FFI_HOST_SECRET_ENV: &str = "RUNMAT_NATIVE_FFI_HOST_SECRET";
 pub const NATIVE_FFI_HOST_SNAPSHOT_ROOT_ENV: &str = "RUNMAT_NATIVE_FFI_SNAPSHOT_ROOT";

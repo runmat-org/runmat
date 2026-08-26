@@ -69,6 +69,7 @@ pub struct NativeFfiAdapter {
     isolated_call_active: Rc<Cell<bool>>,
     pending_isolated_calls: Rc<RefCell<Vec<ForeignCall>>>,
     prepared_artifact_identities: RefCell<BTreeSet<String>>,
+    compiler_frontend: PathBuf,
 }
 
 pub trait NativeFfiCallbackRouter {
@@ -93,6 +94,14 @@ impl NativeFfiAdapter {
     pub(crate) fn new_with_callback_router(
         handles: ForeignHandleRegistry,
         callback_router: Option<Rc<dyn NativeFfiCallbackRouter>>,
+    ) -> Result<Rc<Self>, RuntimeError> {
+        Self::new_with_callback_router_and_frontend(handles, callback_router, "clang".into())
+    }
+
+    pub(crate) fn new_with_callback_router_and_frontend(
+        handles: ForeignHandleRegistry,
+        callback_router: Option<Rc<dyn NativeFfiCallbackRouter>>,
+        compiler_frontend: PathBuf,
     ) -> Result<Rc<Self>, RuntimeError> {
         let sequence = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
         let host_identity = format!("native-ffi-{sequence}");
@@ -122,6 +131,7 @@ impl NativeFfiAdapter {
             isolated_call_active: Rc::new(Cell::new(false)),
             pending_isolated_calls: Rc::new(RefCell::new(Vec::new())),
             prepared_artifact_identities: RefCell::new(BTreeSet::new()),
+            compiler_frontend,
         }))
     }
 
@@ -315,7 +325,7 @@ impl NativeFfiAdapter {
             library_name: alias.clone(),
             library_path: library_path.clone(),
             target_triple: target_lexicon::HOST.to_string(),
-            clang: "clang".into(),
+            clang: self.compiler_frontend.clone(),
             include_directories,
             definitions: Vec::new(),
         };
@@ -1214,7 +1224,7 @@ impl NativeFfiAdapter {
             library_name: alias.clone(),
             library_path: library.clone(),
             target_triple: target_lexicon::HOST.to_string(),
-            clang: "clang".into(),
+            clang: self.compiler_frontend.clone(),
             include_directories: includes,
             definitions: Vec::new(),
         })
