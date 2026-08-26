@@ -9,6 +9,7 @@ members = [
     "crates/runmat-extension-abi",
     "crates/runmat-native-ffi",
     "crates/runmat-mex",
+    "crates/runmat-java",
     "crates/runmat-native-executor",
     "crates/runmat-aot-runtime",
     "crates/runmat-aot",
@@ -124,6 +125,7 @@ runmat-native-codegen = { version = "=0.6.2", path = "crates/runmat-native-codeg
 runmat-extension-abi = { version = "=0.6.2", path = "crates/runmat-extension-abi" }
 runmat-native-ffi = { version = "=0.6.2", path = "crates/runmat-native-ffi" }
 runmat-mex = { version = "=0.6.2", path = "crates/runmat-mex" }
+runmat-java = { version = "=0.6.2", path = "crates/runmat-java" }
 runmat-native-executor = { version = "=0.6.2", path = "crates/runmat-native-executor" }
 runmat-aot-runtime = { version = "=0.6.2", path = "crates/runmat-aot-runtime" }
 runmat-aot = { version = "=0.6.2", path = "crates/runmat-aot" }
