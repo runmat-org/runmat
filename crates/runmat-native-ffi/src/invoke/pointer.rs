@@ -237,7 +237,7 @@ impl<'pointer> PointerBinding<'pointer> {
     pub(super) fn address(&self) -> *mut c_void {
         match self.target {
             PointerBindingTarget::Resource(pointer) => pointer.address(),
-            PointerBindingTarget::Opaque(pointer) => pointer.address().as_ptr(),
+            PointerBindingTarget::Opaque(pointer) => pointer.address(),
         }
     }
 }

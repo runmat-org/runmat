@@ -271,3 +271,46 @@ fn callbacks_reenter_through_an_explicit_dispatch_contract() {
     .expect_err("callback failure must cross the boundary as an error");
     assert!(error.to_string().contains("synthetic callback failure"));
 }
+
+#[test]
+fn borrowed_pointer_returns_preserve_typed_nullability() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let Some(library_path) = compile_fixture(temporary.path()) else {
+        return;
+    };
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let metadata = prepare_header(&HeaderPreparation {
+        header: root.join("tests/fixtures/interface.h"),
+        library_name: "fixture".into(),
+        library_path: library_path.to_string_lossy().into_owned(),
+        target_triple: target_lexicon::HOST.to_string(),
+        clang: "clang".into(),
+        include_directories: Vec::new(),
+        definitions: Vec::new(),
+    })
+    .expect("prepared metadata");
+    let library = LoadedLibrary::open(&library_path).expect("loaded fixture");
+    let prototype = metadata.libraries[0]
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "fixture_borrowed_value")
+        .expect("pointer-returning prototype");
+
+    for (present, expected_null) in [(0, true), (1, false)] {
+        let result = invoke_symbol(
+            &library,
+            prototype,
+            &[Value::Int(IntValue::I32(present))],
+            &metadata,
+        )
+        .expect("pointer invocation");
+        let Some(InvocationValue::Pointer(pointer)) = result.return_value else {
+            panic!("expected a typed pointer return");
+        };
+        assert_eq!(pointer.is_null(), expected_null);
+        assert_eq!(
+            pointer.ownership,
+            runmat_native_ffi::PointerOwnership::Borrowed
+        );
+    }
+}

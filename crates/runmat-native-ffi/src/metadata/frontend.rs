@@ -241,7 +241,7 @@ impl Declarations {
             message: "missing function type".into(),
         })?;
         let return_spelling = signature
-            .split_once(" (")
+            .split_once('(')
             .map(|(return_type, _)| return_type)
             .ok_or_else(|| HeaderPreparationError::Unsupported {
                 declaration: name.into(),
@@ -272,15 +272,19 @@ impl Declarations {
             });
         }
         let return_type = parse_type(return_spelling, &self.typedefs)?;
-        let return_ownership = matches!(return_type, NativeType::Pointer { .. })
-            .then_some(PointerOwnership::LibraryOwned);
+        // A C declaration describes the pointee type, but it does not prove
+        // who owns the returned allocation or whether a null address is
+        // possible. Prepared declarations therefore use the only contract
+        // that can be inferred safely: a nullable borrowed reference.
+        let returns_pointer = matches!(return_type, NativeType::Pointer { .. });
+        let return_ownership = returns_pointer.then_some(PointerOwnership::Borrowed);
         self.functions.push(SymbolPrototype {
             name: name.into(),
             exported_name: name.into(),
             calling_convention: calling_convention(signature),
             return_type,
             return_ownership,
-            return_nullable: false,
+            return_nullable: returns_pointer,
             parameters,
             variadic: signature.contains(", ...)") || signature.ends_with("(...)"),
         });

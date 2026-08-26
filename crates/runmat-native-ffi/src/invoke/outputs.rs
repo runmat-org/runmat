@@ -57,32 +57,29 @@ pub(super) fn decode_return(
             ReturnSlot::Scalar(value),
         ) => Some(InvocationValue::Value(scalar_slot_value(*scalar, value))),
         (NativeType::Pointer { pointee, .. }, ReturnSlot::Pointer(pointer)) => {
-            match std::ptr::NonNull::new(*pointer) {
-                Some(address) => {
-                    // SAFETY: The function returned this address under the
-                    // ownership and pointee contract in the validated prototype.
-                    let pointer = unsafe {
-                        NativePointer::from_address(
-                            address,
-                            pointee.as_ref().clone(),
-                            prototype
-                                .return_ownership
-                                .ok_or_else(|| InvocationError::Output {
-                                    symbol: symbol.into(),
-                                    message: "pointer return has no ownership contract".into(),
-                                })?,
-                        )
-                    };
-                    Some(InvocationValue::Pointer(pointer))
-                }
-                None if prototype.return_nullable => None,
-                None => {
-                    return Err(InvocationError::Output {
-                        symbol: symbol.into(),
-                        message: "non-null pointer return was null".into(),
-                    })
-                }
+            let address = std::ptr::NonNull::new(*pointer);
+            if address.is_none() && !prototype.return_nullable {
+                return Err(InvocationError::Output {
+                    symbol: symbol.into(),
+                    message: "non-null pointer return was null".into(),
+                });
             }
+            // SAFETY: The function returned this address under the ownership
+            // and pointee contract in the validated prototype. Null remains a
+            // typed pointer resource when the prototype permits it.
+            let pointer = unsafe {
+                NativePointer::from_address(
+                    address,
+                    pointee.as_ref().clone(),
+                    prototype
+                        .return_ownership
+                        .ok_or_else(|| InvocationError::Output {
+                            symbol: symbol.into(),
+                            message: "pointer return has no ownership contract".into(),
+                        })?,
+                )
+            };
+            Some(InvocationValue::Pointer(pointer))
         }
         (NativeType::Structure { .. }, ReturnSlot::Structure(storage)) => Some(
             InvocationValue::Value(decode_structure(symbol, ty, storage.bytes(), metadata)?),
