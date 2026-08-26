@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use runmat_core::RunMatSession;
+use runmat_native_ffi::NativeInterfaceArtifactManifest;
 use runmat_value::{IntValue, Value};
 
 fn compile_fixture(directory: &Path) -> Option<PathBuf> {
@@ -88,4 +89,49 @@ fn legacy_shared_library_calls_use_the_session_foreign_runtime() {
             library_path.extension().unwrap().to_string_lossy()
         ))
         .is_file());
+}
+
+#[test]
+fn prepared_interface_is_installed_and_admitted_before_session_execution() {
+    if Command::new("clang").arg("--version").output().is_err() {
+        eprintln!("skipping native FFI integration test because clang is unavailable");
+        return;
+    }
+    let temporary = tempfile::tempdir().unwrap();
+    let Some(library_path) = compile_fixture(temporary.path()) else {
+        eprintln!("skipping native FFI integration test because the C compiler is unavailable");
+        return;
+    };
+    let header_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../runmat-runtime/tests/fixtures/native_ffi/interface.h");
+    let preparation = format!(
+        "clibgen.buildInterface('{}', 'Libraries', '{}', 'InterfaceName', 'prepared_fixture');",
+        header_path.display(),
+        library_path.display()
+    );
+    let mut preparing_session = RunMatSession::with_options(false, false).unwrap();
+    let result =
+        runmat_core::execute_text_request_for_testing(&mut preparing_session, &preparation)
+            .unwrap();
+    assert!(result.error.is_none(), "{:?}", result.error);
+
+    let manifest_path = NativeInterfaceArtifactManifest::path_for_library(&library_path);
+    let manifest = NativeInterfaceArtifactManifest::read(&manifest_path).unwrap();
+    let mut execution_session = RunMatSession::with_options(false, false).unwrap();
+    assert_eq!(
+        execution_session
+            .install_native_interface_artifact(&library_path, &manifest_path)
+            .unwrap(),
+        "prepared_fixture"
+    );
+    execution_session
+        .admit_interop_manifest(&manifest.interop_manifest())
+        .unwrap();
+    let result = runmat_core::execute_text_request_for_testing(
+        &mut execution_session,
+        "total = clib.prepared_fixture.fixture_add(int32(20), int32(22)); total",
+    )
+    .unwrap();
+    assert!(result.error.is_none(), "{:?}", result.error);
+    assert_eq!(result.value, Some(Value::Int(IntValue::I32(42))));
 }

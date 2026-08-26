@@ -45,7 +45,7 @@ fn materialize(
     stored_bytes: u64,
 ) -> Result<InstalledBundle, String> {
     let materialized_project = bundle
-        .requires_source_project()
+        .requires_materialization()
         .then(|| MaterializedProject::from_bundle(&bundle))
         .transpose()
         .map_err(|error| format!("remote bundle could not be materialized: {error}"))?

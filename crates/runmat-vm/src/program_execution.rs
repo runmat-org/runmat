@@ -67,13 +67,27 @@ fn captured_program_revision(program: &[u8]) -> ProgramRevision {
 }
 
 pub async fn execute_program_request(request: ProgramExecutionRequest) -> ProgramExecutionResponse {
+    execute_program_request_in_context(request, None).await
+}
+
+pub async fn execute_program_request_with_context(
+    request: ProgramExecutionRequest,
+    runtime: runmat_runtime::context::RuntimeContext,
+) -> ProgramExecutionResponse {
+    execute_program_request_in_context(request, Some(runtime)).await
+}
+
+async fn execute_program_request_in_context(
+    request: ProgramExecutionRequest,
+    runtime: Option<runmat_runtime::context::RuntimeContext>,
+) -> ProgramExecutionResponse {
     if request.validate_for_portable_host().is_err() {
         return ProgramExecutionResponse::Failure {
             message: "worker rejected a protocol or program identity mismatch".into(),
         };
     }
     if request.artifact.form == ExecutableForm::InterpreterScriptV1 {
-        return execute_script_request(request).await;
+        return execute_script_request(request, runtime).await;
     }
     if request.artifact.form == ExecutableForm::TestAttemptV1 {
         return ProgramExecutionResponse::Failure {
@@ -86,7 +100,7 @@ pub async fn execute_program_request(request: ProgramExecutionRequest) -> Progra
         };
     }
     if request.artifact.form == ExecutableForm::ExecutableUnitV3 {
-        return execute_unit_request(request).await;
+        return execute_unit_request(request, runtime).await;
     }
     if request.artifact.form == ExecutableForm::NativeObjectV1 {
         return ProgramExecutionResponse::Failure {
@@ -102,10 +116,13 @@ pub async fn execute_program_request(request: ProgramExecutionRequest) -> Progra
                 }
             }
         };
-    execute_function_request(&request, &registry).await
+    execute_function_request(&request, &registry, runtime.as_ref()).await
 }
 
-async fn execute_unit_request(request: ProgramExecutionRequest) -> ProgramExecutionResponse {
+async fn execute_unit_request(
+    request: ProgramExecutionRequest,
+    runtime: Option<runmat_runtime::context::RuntimeContext>,
+) -> ProgramExecutionResponse {
     let envelope = match request.artifact.executable_unit() {
         Ok(Some(envelope)) => envelope,
         Ok(None) => {
@@ -178,9 +195,11 @@ async fn execute_unit_request(request: ProgramExecutionRequest) -> ProgramExecut
     bytecode.layout = Some(layout);
 
     match envelope.manifest.identity.entrypoint_kind {
-        runmat_execution::ExecutableEntrypointKind::Script => execute_unit_script(bytecode).await,
+        runmat_execution::ExecutableEntrypointKind::Script => {
+            execute_unit_script(bytecode, runtime).await
+        }
         runmat_execution::ExecutableEntrypointKind::Function => {
-            execute_function_request(&request, &registry).await
+            execute_function_request(&request, &registry, runtime.as_ref()).await
         }
     }
 }
@@ -188,6 +207,7 @@ async fn execute_unit_request(request: ProgramExecutionRequest) -> ProgramExecut
 async fn execute_function_request(
     request: &ProgramExecutionRequest,
     registry: &crate::FunctionRegistry,
+    runtime: Option<&runmat_runtime::context::RuntimeContext>,
 ) -> ProgramExecutionResponse {
     let arguments = match request
         .arguments
@@ -202,14 +222,28 @@ async fn execute_function_request(
             }
         }
     };
-    match crate::invoke_semantic_function_value(
-        request.function,
-        &arguments,
-        usize::from(request.requested_outputs),
-        registry,
-    )
-    .await
-    {
+    let result = match runtime {
+        Some(runtime) => {
+            crate::invoke_semantic_function_value_in_context(
+                request.function,
+                &arguments,
+                usize::from(request.requested_outputs),
+                registry,
+                runtime.clone(),
+            )
+            .await
+        }
+        None => {
+            crate::invoke_semantic_function_value(
+                request.function,
+                &arguments,
+                usize::from(request.requested_outputs),
+                registry,
+            )
+            .await
+        }
+    };
+    match result {
         Ok(value) => match runmat_runtime::execution::value_codec::encode_inline_value(&value) {
             Ok(value) => ProgramExecutionResponse::Success { value },
             Err(error) => ProgramExecutionResponse::Failure {
@@ -222,12 +256,31 @@ async fn execute_function_request(
     }
 }
 
-async fn execute_unit_script(bytecode: crate::Bytecode) -> ProgramExecutionResponse {
+async fn execute_unit_script(
+    bytecode: crate::Bytecode,
+    runtime: Option<runmat_runtime::context::RuntimeContext>,
+) -> ProgramExecutionResponse {
     let result_slot = bytecode
         .var_names
         .iter()
         .find_map(|(slot, name)| (name == "ans").then_some(*slot));
-    match crate::interpret(&bytecode).await {
+    let result = match runtime {
+        Some(runtime) => {
+            let mut variables = vec![runmat_value::Value::Num(0.0); bytecode.var_count];
+            crate::interpret_with_vars_in_context(
+                &bytecode,
+                &mut variables,
+                Some("<main>"),
+                runtime,
+            )
+            .await
+            .map(|outcome| match outcome {
+                crate::InterpreterOutcome::Completed(values) => values,
+            })
+        }
+        None => crate::interpret(&bytecode).await,
+    };
+    match result {
         Ok(values) => {
             let value = result_slot
                 .and_then(|slot| values.get(slot).cloned())
@@ -245,7 +298,10 @@ async fn execute_unit_script(bytecode: crate::Bytecode) -> ProgramExecutionRespo
     }
 }
 
-async fn execute_script_request(request: ProgramExecutionRequest) -> ProgramExecutionResponse {
+async fn execute_script_request(
+    request: ProgramExecutionRequest,
+    runtime: Option<runmat_runtime::context::RuntimeContext>,
+) -> ProgramExecutionResponse {
     let bytecode: crate::Bytecode = match serde_json::from_slice(&request.artifact.executable_bytes)
     {
         Ok(bytecode) => bytecode,
@@ -255,7 +311,7 @@ async fn execute_script_request(request: ProgramExecutionRequest) -> ProgramExec
             }
         }
     };
-    execute_unit_script(bytecode).await
+    execute_unit_script(bytecode, runtime).await
 }
 
 #[cfg(test)]

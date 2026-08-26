@@ -101,4 +101,8 @@ impl ExecutionBundle {
             BundleCodeClosure::SourceProject { .. }
         )
     }
+
+    pub fn requires_materialization(&self) -> bool {
+        self.requires_source_project() || !self.manifest.foreign_artifacts.is_empty()
+    }
 }

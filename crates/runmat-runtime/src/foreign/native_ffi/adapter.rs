@@ -87,6 +87,18 @@ impl NativeFfiAdapter {
         }))
     }
 
+    pub fn install_prepared_artifact(
+        &self,
+        library_path: &std::path::Path,
+        manifest_path: &std::path::Path,
+    ) -> Result<String, RuntimeError> {
+        let manifest = NativeInterfaceArtifactManifest::read(manifest_path)
+            .map_err(|error| foreign_error(ForeignErrorKind::LoadFailed, error.to_string()))?;
+        let alias = manifest.interface_name.clone();
+        self.load_prepared_manifest(&alias, library_path, manifest)?;
+        Ok(alias)
+    }
+
     fn reap_released(&self) {
         let handles = self
             .released

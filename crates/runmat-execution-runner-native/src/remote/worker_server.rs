@@ -428,7 +428,7 @@ async fn validate_attempt(
     let Some(bundle) = state.bundle.as_ref() else {
         return Some("exact execution bundle is not installed".into());
     };
-    if bundle.requires_source_project() != state.materialized_project.is_some()
+    if bundle.requires_materialization() != state.materialized_project.is_some()
         || attempt.program.validate_for_portable_host().is_err()
         || !bundle
             .manifest

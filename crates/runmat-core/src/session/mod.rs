@@ -82,6 +82,10 @@ pub struct RunMatSession {
     /// Loaded C MEX modules and their persistent state, scoped to this session.
     #[cfg(not(target_arch = "wasm32"))]
     mex_runtime: std::rc::Rc<runmat_runtime::foreign::MexRuntimeSession>,
+    #[cfg(not(target_arch = "wasm32"))]
+    foreign_runtime: std::rc::Rc<runmat_runtime::foreign::ForeignRuntime>,
+    #[cfg(not(target_arch = "wasm32"))]
+    native_ffi_adapter: std::rc::Rc<runmat_runtime::foreign::NativeFfiAdapter>,
     /// Session-scoped production native entry publication and invalidation.
     #[cfg(not(target_arch = "wasm32"))]
     generic_native_cache: crate::generic_native::GenericNativeCache,
