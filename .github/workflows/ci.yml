@@ -183,7 +183,7 @@ jobs:
 
       - name: Upload analysis benchmark artifacts
         if: always() && ((github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/heads/release/'))) || (github.event_name == 'pull_request' && failure()))
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: analysis-benchmark-${{ matrix.name }}
           path: target/runmat-analysis-artifacts/*.json
@@ -251,7 +251,7 @@ jobs:
       RUNMAT_THERMO_FIELD_ARTIFACT_ROOT: ${{ github.workspace }}/target/runmat-analysis-artifacts/thermo-fields
       RUNMAT_GEOMETRY_PREP_ARTIFACT_ROOT: ${{ github.workspace }}/target/runmat-prep-artifacts
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: actions-rs/toolchain@v1
         with:
@@ -832,7 +832,7 @@ jobs:
 
       - name: Upload FEA conformance artifacts
         if: always() && (failure() || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/heads/release/'))
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fea-conformance-${{ github.run_id }}
           path: |
@@ -888,7 +888,7 @@ jobs:
     runs-on: ${{ matrix.platform.os }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Resolve branch artifact identity
         if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')
@@ -910,149 +910,17 @@ jobs:
         if: runner.os == 'macOS'
         run: bash scripts/ci-install-macos-cross-dependencies.sh "${{ matrix.platform.target }}"
 
+      - name: Restore Windows native dependency cache
+        if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
+        uses: actions/cache@v5
+        with:
+          path: ~/vcpkg-runmat/installed
+          key: windows-vcpkg-a7eda31-${{ matrix.platform.target }}-${{ hashFiles('infra/vcpkg-ports/**', 'infra/scripts/ensure-windows-vcpkg-dependencies.ps1', 'infra/scripts/prepare-windows-cross-dependencies.ps1') }}
+
       - name: Install Windows MSVC native dependencies
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
         shell: pwsh
-        run: |
-          choco install -y pkgconfiglite strawberryperl cmake --installargs 'ADD_CMAKE_TO_PATH=System'
-
-          Write-Host "Fetching prebuilt ZeroMQ for Windows (MSVC)"
-          curl -L -o libzmq.zip https://github.com/zeromq/libzmq/releases/download/v4.3.5/zeromq-4.3.5.zip
-          Expand-Archive -Path libzmq.zip -DestinationPath zmq
-          # Set env vars for ZMQ include/lib
-          $zmq = Join-Path $pwd "zmq"
-          Add-Content -Path $env:GITHUB_ENV -Value "INCLUDE=$($zmq)\include;$env:INCLUDE"
-          Add-Content -Path $env:GITHUB_ENV -Value "LIB=$($zmq)\lib;$env:LIB"
-          Add-Content -Path $env:GITHUB_ENV -Value "ZMQ_PATH=$($zmq)"
-          Add-Content -Path $env:GITHUB_ENV -Value "PKG_CONFIG_PATH=$($zmq)\lib\pkgconfig"
-
-          Write-Host "Cloning vcpkg and installing HDF5/OpenBLAS/CLAPACK/OpenCASCADE"
-          $vcpkgRoot = Join-Path $pwd "vcpkg"
-          $vcpkgRevision = "a7eda31dc16994fcaa8587982eb833a8695f1b6f"
-          git clone https://github.com/microsoft/vcpkg.git $vcpkgRoot
-          if ($LASTEXITCODE -ne 0) { throw "git clone of vcpkg failed with exit code $LASTEXITCODE" }
-          git -C $vcpkgRoot checkout $vcpkgRevision
-          if ($LASTEXITCODE -ne 0) { throw "git checkout of vcpkg revision $vcpkgRevision failed with exit code $LASTEXITCODE" }
-          & "$vcpkgRoot\bootstrap-vcpkg.bat"
-          if ($LASTEXITCODE -ne 0) { throw "bootstrap-vcpkg.bat failed with exit code $LASTEXITCODE" }
-
-          $finder = Join-Path $vcpkgRoot "scripts\cmake\vcpkg_find_fortran.cmake"
-          $content = Get-Content -LiteralPath $finder -Raw
-          $needle = "    include(CMakeDetermineFortranCompiler)"
-          $replacement = @'
-              include(CMakeDetermineFortranCompiler)
-
-              if(CMAKE_HOST_WIN32 AND "${VCPKG_CHAINLOAD_TOOLCHAIN_FILE}" STREQUAL "" AND
-                 ("${VCPKG_TARGET_ARCHITECTURE}" STREQUAL "x86" OR "${VCPKG_TARGET_ARCHITECTURE}" STREQUAL "x64"))
-                  if(CMAKE_Fortran_COMPILER)
-                      message(STATUS "Ignoring ambient Fortran compiler '${CMAKE_Fortran_COMPILER}' so vcpkg uses internal MinGW gfortran")
-                      unset(CMAKE_Fortran_COMPILER)
-                      unset(CMAKE_Fortran_COMPILER CACHE)
-                  endif()
-              endif()
-          '@
-          if (-not $content.Contains($replacement)) {
-            if (-not $content.Contains($needle)) {
-              throw "Could not find expected CMakeDetermineFortranCompiler hook in $finder"
-            }
-            Set-Content -LiteralPath $finder -Value $content.Replace($needle, $replacement) -NoNewline
-          }
-
-          $keptPath = [System.Collections.Generic.List[string]]::new()
-          foreach ($entry in ($env:Path -split ";")) {
-            if ([string]::IsNullOrWhiteSpace($entry)) {
-              continue
-            }
-            $expanded = [Environment]::ExpandEnvironmentVariables($entry.Trim('"'))
-            $hasFortran = $false
-            foreach ($compiler in @("flang.exe", "flang-new.exe", "gfortran.exe", "ifort.exe", "ifx.exe")) {
-              if (Test-Path -LiteralPath (Join-Path $expanded $compiler)) {
-                $hasFortran = $true
-                break
-              }
-            }
-            if (-not $hasFortran) {
-              $keptPath.Add($entry)
-            }
-          }
-          Remove-Item Env:FC -ErrorAction SilentlyContinue
-          Remove-Item Env:F77 -ErrorAction SilentlyContinue
-          Remove-Item Env:F90 -ErrorAction SilentlyContinue
-          $env:Path = [string]::Join(";", $keptPath)
-
-          # Compute vcpkg triplet based on target
-          if (Test-Path env:MatrixPlatformTarget) { Remove-Item env:MatrixPlatformTarget }
-          $env:MatrixPlatformTarget = "${{ matrix.platform.target }}"
-          if ($env:MatrixPlatformTarget -eq "aarch64-pc-windows-msvc") { $triplet = "arm64-windows" } else { $triplet = "x64-windows" }
-
-          # Ensure triplet in env
-          Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_ROOT=$vcpkgRoot"
-          Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_DEFAULT_TRIPLET=$triplet"
-          Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_TRIPLET=$triplet"
-          $overlayPorts = Join-Path $pwd "infra\vcpkg-ports"
-          if (-not (Test-Path (Join-Path $overlayPorts "libaec\vcpkg.json"))) {
-            throw "RunMat vcpkg overlay ports were not found at $overlayPorts"
-          }
-
-          function Install-VcpkgPackage {
-            param(
-              [Parameter(Mandatory = $true)]
-              [string]$Package,
-              [string[]]$ExtraArguments = @(),
-              [int]$MaximumAttempts = 3
-            )
-
-            for ($attempt = 1; $attempt -le $MaximumAttempts; $attempt++) {
-              & "$vcpkgRoot\vcpkg.exe" install "${Package}:$triplet" "--overlay-ports=$overlayPorts" @ExtraArguments
-              if ($LASTEXITCODE -eq 0) {
-                return
-              }
-
-              if ($attempt -eq $MaximumAttempts) {
-                throw "vcpkg install ${Package}:$triplet failed after $MaximumAttempts attempts"
-              }
-
-              $delaySeconds = 15 * [Math]::Pow(2, $attempt - 1)
-              Write-Warning "vcpkg install ${Package}:$triplet failed on attempt $attempt of $MaximumAttempts; retrying in $delaySeconds seconds"
-              Start-Sleep -Seconds $delaySeconds
-            }
-          }
-
-          # vcpkg builds OpenBLAS without LAPACK on Windows; use CLAPACK for
-          # LAPACK symbols without depending on a gfortran-backed LAPACK build.
-          Install-VcpkgPackage -Package "openblas"
-          Install-VcpkgPackage -Package "clapack"
-          Install-VcpkgPackage -Package "hdf5"
-          if ($triplet -eq "arm64-windows") {
-            Install-VcpkgPackage -Package "opencascade" -ExtraArguments @("--allow-unsupported")
-          } else {
-            Install-VcpkgPackage -Package "opencascade"
-          }
-          $hdf5Prefix = "$vcpkgRoot\installed\$triplet"
-          foreach ($artifact in @(
-            "$hdf5Prefix\include\H5pubconf.h",
-            "$hdf5Prefix\lib\hdf5.lib",
-            "$hdf5Prefix\bin\hdf5.dll"
-          )) {
-            if (-not (Test-Path $artifact)) {
-              throw "vcpkg hdf5 is missing required artifact: $artifact"
-            }
-          }
-          Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_DYNAMIC=1"
-          Add-Content -Path $env:GITHUB_PATH -Value "$vcpkgRoot\installed\$triplet\bin"
-
-          # Hint BLAS/LAPACK discovery for blas-sys/lapack-sys
-          Add-Content -Path $env:GITHUB_ENV -Value "BLAS_LIB_DIR=$vcpkgRoot\installed\$triplet\lib"
-          Add-Content -Path $env:GITHUB_ENV -Value "BLAS_LIBS=openblas"
-          Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIB_DIR=$vcpkgRoot\installed\$triplet\lib"
-          Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIBS=lapack;libf2c;openblas"
-          Add-Content -Path $env:GITHUB_ENV -Value "OPENBLAS_DIR=$vcpkgRoot\installed\$triplet"
-          Add-Content -Path $env:GITHUB_ENV -Value "HDF5_DIR=$hdf5Prefix"
-          Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_ROOT=$vcpkgRoot\installed\$triplet"
-          Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_INCLUDE_DIR=$vcpkgRoot\installed\$triplet\include\opencascade"
-          Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_LIB_DIR=$vcpkgRoot\installed\$triplet\lib"
-          Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_BIN_DIR=$vcpkgRoot\installed\$triplet\bin"
-          Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_LINK_MODE=dylib"
+        run: ./infra/scripts/prepare-windows-cross-dependencies.ps1 -Target "${{ matrix.platform.target }}"
 
       - name: Cross build (linux-x86_64)
         if: matrix.platform.target == 'x86_64-unknown-linux-gnu'
@@ -1155,7 +1023,7 @@ jobs:
 
       - name: Upload branch artifact
         if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: runmat-${{ steps.artifact-identity.outputs.version }}-${{ matrix.platform.release_for }}
           path: |
@@ -1183,7 +1051,7 @@ jobs:
           }
           JSON
       - name: Publish Runtime artifact readiness marker
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: runmat-runtime-artifacts-ready
           path: runtime-artifacts-ready.json

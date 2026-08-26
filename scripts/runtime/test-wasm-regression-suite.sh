@@ -36,6 +36,11 @@ regenerate_wasm_registry() {
   "${REPO_ROOT}/scripts/regenerate-wasm-registry.sh"
 }
 
+check_core_wasm_compatibility() {
+  echo "==> cargo check runmat-core (wasm32 compatibility with OCCT wasm host)"
+  cargo check -p runmat-core --target wasm32-unknown-unknown --no-default-features --features occt-wasm-host
+}
+
 run_symptom_closure_suite() {
   echo "==> wasm-pack test --node --test symptom_node_regressions --features occt-wasm-host"
   wasm-pack test --node . --features occt-wasm-host --test symptom_node_regressions
@@ -71,6 +76,10 @@ main() {
   resolve_chromedriver_args
 
   regenerate_wasm_registry
+
+  if [[ "${suite}" == "all" ]]; then
+    check_core_wasm_compatibility
+  fi
 
   pushd "${REPO_ROOT}/crates/runmat-wasm" >/dev/null
   case "${suite}" in

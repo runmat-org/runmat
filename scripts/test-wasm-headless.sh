@@ -13,9 +13,6 @@ export WASM_BINDGEN_TEST_TIMEOUT="${WASM_BINDGEN_TEST_TIMEOUT:-300}"
 export RUSTFLAGS="${RUSTFLAGS:--Copt-level=1}"
 
 echo "==> wasm-bindgen timeout: ${WASM_BINDGEN_TEST_TIMEOUT}s"
-echo "==> cargo check runmat-core (wasm32 compatibility with OCCT wasm host)"
-cargo check -p runmat-core --target wasm32-unknown-unknown --no-default-features --features occt-wasm-host
-
 "${WASM_SUITE}" all
 
 echo "All wasm headless tests completed."
