@@ -1,4 +1,4 @@
-use jni::objects::{JObject, JObjectArray, JString, JValue, JValueOwned};
+use jni::objects::{JClass, JObject, JObjectArray, JString, JValue, JValueOwned};
 
 use crate::JavaParameterType;
 
@@ -14,13 +14,11 @@ pub(super) struct ReflectedCallable {
 
 pub(super) fn field_descriptor(
     environment: &mut jni::JNIEnv<'_>,
+    class: &JClass<'_>,
     class_name: &str,
     field_name: &str,
     require_static: bool,
 ) -> Result<String, JavaInvocationError> {
-    let class = environment
-        .find_class(binary_name(class_name))
-        .map_err(|error| jni_error(environment, error))?;
     let fields = environment
         .call_method(class, "getFields", "()[Ljava/lang/reflect/Field;", &[])
         .and_then(JValueOwned::l)
@@ -66,11 +64,9 @@ pub(super) fn field_descriptor(
 
 pub(super) fn constructor_candidates(
     environment: &mut jni::JNIEnv<'_>,
+    class: &JClass<'_>,
     class_name: &str,
 ) -> Result<Vec<ReflectedCallable>, JavaInvocationError> {
-    let class = environment
-        .find_class(binary_name(class_name))
-        .map_err(|error| jni_error(environment, error))?;
     let members = environment
         .call_method(
             class,
@@ -92,13 +88,11 @@ pub(super) fn constructor_candidates(
 
 pub(super) fn method_candidates(
     environment: &mut jni::JNIEnv<'_>,
+    class: &JClass<'_>,
     class_name: &str,
     method_name: &str,
     require_static: bool,
 ) -> Result<Vec<ReflectedCallable>, JavaInvocationError> {
-    let class = environment
-        .find_class(binary_name(class_name))
-        .map_err(|error| jni_error(environment, error))?;
     let members = environment
         .call_method(class, "getMethods", "()[Ljava/lang/reflect/Method;", &[])
         .and_then(JValueOwned::l)

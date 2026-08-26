@@ -227,6 +227,26 @@ impl RunMatSession {
         self.native_ffi_adapter.set_isolation_policy(policy)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn set_java_config(
+        &mut self,
+        config: &runmat_config::runtime::JavaConfig,
+    ) -> Result<(), RuntimeError> {
+        self.java_adapter
+            .configure(runmat_runtime::foreign::JavaRuntimeConfiguration {
+                home: config.home.clone(),
+                minimum_version: config.minimum_version.get(),
+                maximum_version: config.maximum_version.map(|value| value.get()),
+                classpath: config.classpath.clone(),
+                options: config.options.clone(),
+            })
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn set_desktop_host_available(&mut self, available: bool) {
+        self.java_adapter.set_desktop_available(available);
+    }
+
     /// Configure garbage collector
     pub fn configure_gc(&self, config: GcConfig) -> Result<()> {
         gc_configure(config)

@@ -28,6 +28,9 @@ pub(crate) fn create_session(
     engine
         .set_native_ffi_config(&config.foreign.native)
         .context("failed to configure native-library isolation")?;
+    engine
+        .set_java_config(&config.foreign.java)
+        .context("failed to configure Java runtime")?;
     if let Some(client_id) = telemetry_client_id() {
         engine.set_telemetry_client_id(Some(client_id));
     }

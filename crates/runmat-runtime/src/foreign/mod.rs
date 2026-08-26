@@ -213,3 +213,40 @@ pub async fn try_invoke_clibgen(
             .await,
     )
 }
+
+/// Resolve fully qualified standard-library Java constructors and static calls
+/// through the session Java adapter. Other package roots remain available via
+/// `javaObject`, `javaMethod`, and imported-name resolution so this hook does
+/// not claim arbitrary source-package names.
+pub async fn try_invoke_java(
+    context: crate::context::RuntimeContext,
+    name: &str,
+    arguments: Vec<runmat_value::Value>,
+    requested_outputs: usize,
+) -> Option<Result<runmat_value::Value, crate::RuntimeError>> {
+    if !(name.starts_with("java.") || name.starts_with("javax.")) {
+        return None;
+    }
+    let Some(service) = context.service_ports().foreign().cloned() else {
+        return Some(Err(foreign_error(
+            ForeignErrorKind::UnsupportedOnWasm,
+            format!("Java call `{name}` is unavailable on this host"),
+        )));
+    };
+    let mut call_arguments = Vec::with_capacity(arguments.len() + 1);
+    call_arguments.push(runmat_value::Value::String(name.into()));
+    call_arguments.extend(arguments);
+    Some(
+        context
+            .scope(service.invoke(
+                context.clone(),
+                crate::context::ForeignCall {
+                    adapter: "java".into(),
+                    symbol: "invoke_qualified".into(),
+                    arguments: call_arguments,
+                    requested_outputs,
+                },
+            ))
+            .await,
+    )
+}

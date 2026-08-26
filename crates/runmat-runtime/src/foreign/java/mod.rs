@@ -1,4 +1,4 @@
 mod adapter;
 mod conversion;
 
-pub use adapter::JavaAdapter;
+pub use adapter::{JavaAdapter, JavaRuntimeConfiguration};

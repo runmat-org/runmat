@@ -63,7 +63,7 @@ pub fn select_overload(
         .iter()
         .enumerate()
         .filter_map(|(index, candidate)| {
-            candidate_cost(candidate, arguments).map(|cost| SelectedOverload {
+            candidate_conversion_cost(candidate, arguments).map(|cost| SelectedOverload {
                 candidate_index: index,
                 identity: candidate.identity.clone(),
                 conversion_cost: cost,
@@ -93,7 +93,7 @@ pub fn select_overload(
     Ok(best)
 }
 
-fn candidate_cost(
+pub fn candidate_conversion_cost(
     candidate: &JavaCallableCandidate,
     arguments: &[JavaArgumentType],
 ) -> Option<u32> {

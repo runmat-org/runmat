@@ -9,7 +9,7 @@ use runmat_runtime::execution::RuntimeExecutionService;
 use runmat_runtime::foreign::{ForeignPlatform, ForeignRuntime, JavaAdapter};
 use runmat_value::{IntValue, Value};
 
-fn live_runtime() -> Option<(Rc<ForeignRuntime>, RuntimeContext)> {
+fn live_runtime() -> Option<(Rc<ForeignRuntime>, RuntimeContext, Rc<JavaAdapter>)> {
     let home = std::env::var_os("RUNMAT_TEST_JAVA_HOME").map(PathBuf::from)?;
     let foreign = Rc::new(ForeignRuntime::new(ForeignPlatform::Native));
     let adapter = JavaAdapter::with_configuration(
@@ -23,11 +23,11 @@ fn live_runtime() -> Option<(Rc<ForeignRuntime>, RuntimeContext)> {
     )
     .expect("register Java host");
     foreign
-        .register_adapter(adapter)
+        .register_adapter(adapter.clone())
         .expect("register Java adapter");
     let context = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
         .with_service_ports(RuntimeServicePorts::default().with_foreign(foreign.clone()));
-    Some((foreign, context))
+    Some((foreign, context, adapter))
 }
 
 fn invoke(
@@ -54,7 +54,7 @@ fn invoke(
 
 #[test]
 fn java_objects_round_trip_through_runtime_owned_foreign_handles() {
-    let Some((_foreign, context)) = live_runtime() else {
+    let Some((_foreign, context, _adapter)) = live_runtime() else {
         eprintln!("RUNMAT_TEST_JAVA_HOME is unset; live JVM test was not requested");
         return;
     };
@@ -95,7 +95,7 @@ fn java_objects_round_trip_through_runtime_owned_foreign_handles() {
 
 #[test]
 fn java_exceptions_keep_their_public_runtime_identifier() {
-    let Some((_foreign, context)) = live_runtime() else {
+    let Some((_foreign, context, _adapter)) = live_runtime() else {
         eprintln!("RUNMAT_TEST_JAVA_HOME is unset; live JVM test was not requested");
         return;
     };
@@ -113,4 +113,92 @@ fn java_exceptions_keep_their_public_runtime_identifier() {
     assert!(error
         .to_string()
         .contains("java.lang.NumberFormatException"));
+}
+
+#[test]
+fn wide_unsigned_values_and_java_arrays_cross_the_runtime_boundary_exactly() {
+    let Some((_foreign, context, _adapter)) = live_runtime() else {
+        eprintln!("RUNMAT_TEST_JAVA_HOME is unset; live JVM test was not requested");
+        return;
+    };
+    assert_eq!(
+        invoke(
+            &context,
+            "call_static",
+            vec![
+                Value::String("java.lang.String".into()),
+                Value::String("valueOf".into()),
+                Value::Int(IntValue::U64(u64::MAX)),
+            ],
+        )
+        .expect("convert exact uint64 through BigInteger"),
+        Value::String(u64::MAX.to_string())
+    );
+
+    let array = invoke(
+        &context,
+        "new_array",
+        vec![
+            Value::String("java.lang.String".into()),
+            Value::Num(2.0),
+            Value::Int(IntValue::U8(3)),
+        ],
+    )
+    .expect("create multidimensional Java array");
+    let Value::Foreign(array) = array else {
+        panic!("javaArray must preserve the opaque Java array identity");
+    };
+    assert_eq!(
+        invoke(
+            &context,
+            "call_static",
+            vec![
+                Value::String("java.lang.reflect.Array".into()),
+                Value::String("getLength".into()),
+                Value::Foreign(array),
+            ],
+        )
+        .expect("read Java array length"),
+        Value::Int(IntValue::I32(2))
+    );
+}
+
+#[test]
+fn java_environment_configuration_and_desktop_capability_are_session_owned() {
+    let Some((_foreign, context, adapter)) = live_runtime() else {
+        eprintln!("RUNMAT_TEST_JAVA_HOME is unset; live JVM test was not requested");
+        return;
+    };
+    assert_eq!(
+        invoke(&context, "usejava", vec![Value::String("desktop".into())],).unwrap(),
+        Value::Bool(false)
+    );
+    adapter.set_desktop_available(true);
+    assert_eq!(
+        invoke(&context, "usejava", vec![Value::String("desktop".into())],).unwrap(),
+        Value::Bool(true)
+    );
+
+    let status = invoke(
+        &context,
+        "configure",
+        vec![
+            Value::String("Version".into()),
+            Value::String(
+                std::env::var_os("RUNMAT_TEST_JAVA_HOME")
+                    .expect("live Java home")
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+        ],
+    )
+    .expect("pin the Java major version before startup");
+    let Value::Object(status) = status else {
+        panic!("jenv configuration must return a JavaEnvironment object");
+    };
+    assert_eq!(status.class_name, "matlab.javaclient.JavaEnvironment");
+    assert_eq!(
+        status.properties.get("Status"),
+        Some(&Value::String("notloaded".into()))
+    );
 }

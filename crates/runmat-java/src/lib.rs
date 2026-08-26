@@ -26,6 +26,6 @@ pub use jvm::{discover_jvm, JavaDiscoveryRequest, JvmInstallation, JvmProcess};
 pub use jvm::{JvmConfig, JvmError, JvmVersion};
 pub use object::{JavaObjectHandle, JavaObjectMetadata, JavaObjectRegistry, ObjectRegistryError};
 pub use resolve::{
-    select_overload, JavaArgumentType, JavaCallableCandidate, JavaParameterType, OverloadError,
-    SelectedOverload,
+    candidate_conversion_cost, select_overload, JavaArgumentType, JavaCallableCandidate,
+    JavaParameterType, OverloadError, SelectedOverload,
 };

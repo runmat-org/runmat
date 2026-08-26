@@ -17,9 +17,9 @@ pub(super) fn value_to_java(value: Value) -> Result<JavaValue, RuntimeError> {
             IntValue::U8(value) => Ok(JavaValue::Short(i16::from(value))),
             IntValue::U16(value) => Ok(JavaValue::Int(i32::from(value))),
             IntValue::U32(value) => Ok(JavaValue::Long(i64::from(value))),
-            IntValue::U64(value) => i64::try_from(value).map(JavaValue::Long).map_err(|_| {
-                invalid_conversion("uint64 exceeds Java long; use java.math.BigInteger")
-            }),
+            IntValue::U64(value) => Ok(i64::try_from(value)
+                .map(JavaValue::Long)
+                .unwrap_or(JavaValue::UnsignedLong(value))),
         },
         other => Err(invalid_conversion(format!(
             "RunMat value {} is not yet convertible to Java",
@@ -38,6 +38,7 @@ pub(super) fn scalar_from_java(value: JavaValue) -> Result<Value, RuntimeError> 
         JavaValue::Short(value) => Ok(Value::Int(IntValue::I16(value))),
         JavaValue::Int(value) => Ok(Value::Int(IntValue::I32(value))),
         JavaValue::Long(value) => Ok(Value::Int(IntValue::I64(value))),
+        JavaValue::UnsignedLong(value) => Ok(Value::Int(IntValue::U64(value))),
         JavaValue::Float(value) => Tensor::from_f32(vec![value], vec![1, 1])
             .map(Value::Tensor)
             .map_err(invalid_conversion),
@@ -83,7 +84,10 @@ mod tests {
             value_to_java(Value::Int(IntValue::U32(u32::MAX))).unwrap(),
             JavaValue::Long(i64::from(u32::MAX))
         );
-        assert!(value_to_java(Value::Int(IntValue::U64(u64::MAX))).is_err());
+        assert_eq!(
+            value_to_java(Value::Int(IntValue::U64(u64::MAX))).unwrap(),
+            JavaValue::UnsignedLong(u64::MAX)
+        );
     }
 
     #[test]

@@ -1,17 +1,21 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use runmat_java::{
-    discover_jvm, JavaDiscoveryRequest, JavaInvocationError, JavaObjectHandle, JavaSession,
-    JavaValue, JvmConfig, JvmProcess, JAVA_ADAPTER_ID, JAVA_ADAPTER_VERSION,
+    discover_jvm, ClasspathSnapshot, JavaDiscoveryRequest, JavaInvocationError, JavaObjectHandle,
+    JavaSession, JavaValue, JvmConfig, JvmProcess, SessionClasspath, JAVA_ADAPTER_ID,
+    JAVA_ADAPTER_VERSION,
 };
 use runmat_types::{
     CapabilityRequirement, ForeignAffinity, ForeignCapability, ForeignLifetime, ForeignOwnership,
     ForeignTypeIdentity,
 };
-use runmat_value::{ForeignRef, ForeignResourceKey, Value, WeakForeignRef};
+use runmat_value::{
+    CellArray, CharArray, ForeignRef, ForeignResourceKey, IntValue, ObjectInstance, Value,
+    WeakForeignRef,
+};
 
 use super::super::{
     foreign_error, ForeignAdapter, ForeignAdapterDescriptor, ForeignAdapterFuture,
@@ -37,11 +41,34 @@ pub struct JavaAdapter {
     handles: ForeignHandleRegistry,
     host_identity: String,
     session: RefCell<Option<JavaSession>>,
-    discovery: JavaDiscoveryRequest,
-    config: JvmConfig,
+    discovery: RefCell<JavaDiscoveryRequest>,
+    config: RefCell<JvmConfig>,
+    initial_classpath: RefCell<SessionClasspath>,
     released: Arc<ReleaseQueue>,
     resources: RefCell<BTreeMap<u64, JavaObjectHandle>>,
     java_to_foreign: RefCell<BTreeMap<JavaObjectHandle, WeakForeignRef>>,
+    desktop_available: Cell<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JavaRuntimeConfiguration {
+    pub home: Option<std::path::PathBuf>,
+    pub minimum_version: u16,
+    pub maximum_version: Option<u16>,
+    pub classpath: Vec<std::path::PathBuf>,
+    pub options: Vec<String>,
+}
+
+impl Default for JavaRuntimeConfiguration {
+    fn default() -> Self {
+        Self {
+            home: None,
+            minimum_version: 8,
+            maximum_version: None,
+            classpath: Vec::new(),
+            options: Vec::new(),
+        }
+    }
 }
 
 impl std::fmt::Debug for JavaAdapter {
@@ -69,6 +96,8 @@ impl JavaAdapter {
         config: JvmConfig,
     ) -> Result<Rc<Self>, RuntimeError> {
         let host_identity = "java-process".to_string();
+        let initial_classpath = SessionClasspath::new(config.bootstrap_classpath.clone(), [])
+            .map_err(|error| invalid_conversion(error.to_string()))?;
         let released = Arc::new(ReleaseQueue::default());
         handles.register_host(ForeignHostRegistration {
             identity: host_identity.clone(),
@@ -87,11 +116,13 @@ impl JavaAdapter {
             handles,
             host_identity,
             session: RefCell::new(None),
-            discovery,
-            config,
+            discovery: RefCell::new(discovery),
+            config: RefCell::new(config),
+            initial_classpath: RefCell::new(initial_classpath),
             released,
             resources: RefCell::new(BTreeMap::new()),
             java_to_foreign: RefCell::new(BTreeMap::new()),
+            desktop_available: Cell::new(false),
         }))
     }
 
@@ -99,13 +130,45 @@ impl JavaAdapter {
         self.session.borrow().is_some()
     }
 
+    pub fn set_desktop_available(&self, available: bool) {
+        self.desktop_available.set(available);
+    }
+
+    pub fn configure(&self, configuration: JavaRuntimeConfiguration) -> Result<(), RuntimeError> {
+        if self.is_running() {
+            return Err(invalid_conversion(
+                "Java runtime configuration is immutable after JVM startup",
+            ));
+        }
+        let mut discovery = JavaDiscoveryRequest::from_process();
+        discovery.explicit_home = configuration.home;
+        let config = JvmConfig {
+            minimum_major: configuration.minimum_version,
+            maximum_major: configuration.maximum_version,
+            bootstrap_classpath: Vec::new(),
+            options: configuration.options,
+        };
+        config.validate().map_err(java_runtime_error)?;
+        let classpath =
+            SessionClasspath::new(config.bootstrap_classpath.clone(), configuration.classpath)
+                .map_err(|error| invalid_conversion(error.to_string()))?;
+        *self.discovery.borrow_mut() = discovery;
+        *self.config.borrow_mut() = config;
+        *self.initial_classpath.borrow_mut() = classpath;
+        Ok(())
+    }
+
     fn ensure_session(&self) -> Result<(), RuntimeError> {
         if self.session.borrow().is_some() {
             return Ok(());
         }
-        let installation = discover_jvm(&self.discovery).map_err(java_runtime_error)?;
-        let process = JvmProcess::launch(installation, &self.config).map_err(java_runtime_error)?;
-        *self.session.borrow_mut() = Some(JavaSession::new(process));
+        let installation = discover_jvm(&self.discovery.borrow()).map_err(java_runtime_error)?;
+        let process =
+            JvmProcess::launch(installation, &self.config.borrow()).map_err(java_runtime_error)?;
+        *self.session.borrow_mut() = Some(JavaSession::with_classpath(
+            process,
+            self.initial_classpath.borrow().clone(),
+        ));
         Ok(())
     }
 
@@ -133,6 +196,18 @@ impl JavaAdapter {
     }
 
     fn invoke_now(&self, call: ForeignCall) -> Result<Value, RuntimeError> {
+        if call.symbol == "classpath" {
+            return self.classpath_value(call.arguments);
+        }
+        if call.symbol == "status" {
+            return self.status_value();
+        }
+        if call.symbol == "usejava" {
+            return self.usejava_value(call.arguments);
+        }
+        if call.symbol == "configure" {
+            return self.configure_value(call.arguments);
+        }
         self.ensure_session()?;
         self.drain_releases()?;
         let mut arguments = call.arguments.into_iter();
@@ -151,6 +226,27 @@ impl JavaAdapter {
                     .map(|value| self.argument_to_java(value))
                     .collect::<Result<Vec<_>, _>>()?;
                 self.with_session(|session| session.call_static_resolved(&class, &method, &values))?
+            }
+            "invoke_qualified" => {
+                let name = string_argument(arguments.next(), "qualified Java name")?;
+                let values = arguments
+                    .map(|value| self.argument_to_java(value))
+                    .collect::<Result<Vec<_>, _>>()?;
+                if self.with_session(|session| session.class_exists(&name))? {
+                    self.with_session(|session| session.construct_resolved(&name, &values))?
+                } else {
+                    let (class, method) = name.rsplit_once('.').ok_or_else(|| {
+                        invalid_conversion("qualified Java call requires a dotted class name")
+                    })?;
+                    if !self.with_session(|session| session.class_exists(class))? {
+                        return Err(invalid_conversion(format!(
+                            "Java class {class} was not found"
+                        )));
+                    }
+                    self.with_session(|session| {
+                        session.call_static_resolved(class, method, &values)
+                    })?
+                }
             }
             "invoke_member" => {
                 let reference = foreign_argument(arguments.next())?;
@@ -180,6 +276,49 @@ impl JavaAdapter {
                     session.set_field_resolved(java_handle, &field, &value)
                 })?;
                 return Ok(Value::Foreign(reference));
+            }
+            "add_classpath" => {
+                let entry = string_argument(arguments.next(), "Java classpath entry")?;
+                let position = arguments
+                    .next()
+                    .map(|value| string_argument(Some(value), "Java classpath position"))
+                    .transpose()?;
+                let at_end = match position.as_deref() {
+                    None | Some("begin") => false,
+                    Some("end") => true,
+                    Some(_) => {
+                        return Err(invalid_conversion(
+                            "Java classpath position must be 'begin' or 'end'",
+                        ))
+                    }
+                };
+                self.with_session(|session| session.add_dynamic_classpath_at(entry, at_end))?;
+                return Ok(Value::OutputList(Vec::new()));
+            }
+            "remove_classpath" => {
+                let entry = string_argument(arguments.next(), "Java classpath entry")?;
+                self.with_session(|session| {
+                    session.remove_dynamic_classpath(std::path::Path::new(&entry))
+                })?;
+                return Ok(Value::OutputList(Vec::new()));
+            }
+            "set_classpath" => {
+                let entries = arguments
+                    .map(|value| string_argument(Some(value), "Java classpath entry"))
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.with_session(|session| {
+                    session.replace_dynamic_classpath(
+                        entries.into_iter().map(std::path::PathBuf::from),
+                    )
+                })?;
+                return Ok(Value::OutputList(Vec::new()));
+            }
+            "new_array" => {
+                let class = string_argument(arguments.next(), "Java array class")?;
+                let dimensions = arguments
+                    .map(java_dimension)
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.with_session(|session| session.new_object_array(&class, &dimensions))?
             }
             operation => {
                 return Err(foreign_error(
@@ -262,6 +401,195 @@ impl JavaAdapter {
             class_name: reference.type_identity.name.clone(),
         })
     }
+
+    fn classpath_value(&self, arguments: Vec<Value>) -> Result<Value, RuntimeError> {
+        let layer = arguments
+            .into_iter()
+            .next()
+            .map(|value| string_argument(Some(value), "Java classpath layer"))
+            .transpose()?
+            .unwrap_or_else(|| "all".into())
+            .to_ascii_lowercase();
+        let snapshot = self
+            .session
+            .borrow()
+            .as_ref()
+            .map(JavaSession::classpath)
+            .unwrap_or_else(|| self.initial_classpath.borrow().snapshot());
+        let paths = classpath_paths(&snapshot, &layer)?;
+        let length = paths.len();
+        CellArray::new(
+            paths
+                .into_iter()
+                .map(|path| Value::CharArray(CharArray::new_row(&path.to_string_lossy())))
+                .collect(),
+            length,
+            1,
+        )
+        .map(Value::Cell)
+        .map_err(invalid_conversion)
+    }
+
+    fn status_value(&self) -> Result<Value, RuntimeError> {
+        let running = self.session.borrow().is_some();
+        let installation = if let Some(session) = self.session.borrow().as_ref() {
+            Some(session.installation().clone())
+        } else {
+            discover_jvm(&self.discovery.borrow()).ok()
+        };
+        let mut status = ObjectInstance::new("matlab.javaclient.JavaEnvironment".into());
+        status.properties.insert(
+            "Version".into(),
+            Value::String(
+                installation
+                    .as_ref()
+                    .map(|value| value.version.raw.clone())
+                    .unwrap_or_default(),
+            ),
+        );
+        status.properties.insert(
+            "Home".into(),
+            Value::String(
+                installation
+                    .as_ref()
+                    .map(|value| value.home.display().to_string())
+                    .unwrap_or_default(),
+            ),
+        );
+        status.properties.insert(
+            "Library".into(),
+            Value::String(
+                installation
+                    .as_ref()
+                    .map(|value| value.library.display().to_string())
+                    .unwrap_or_default(),
+            ),
+        );
+        status.properties.insert(
+            "Status".into(),
+            Value::String(if running { "loaded" } else { "notloaded" }.into()),
+        );
+        status.properties.insert(
+            "Configuration".into(),
+            Value::String({
+                let discovery = self.discovery.borrow();
+                discovery
+                    .explicit_home
+                    .as_ref()
+                    .or(discovery.environment_home.as_ref())
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "system".into())
+            }),
+        );
+        Ok(Value::Object(status))
+    }
+
+    fn usejava_value(&self, arguments: Vec<Value>) -> Result<Value, RuntimeError> {
+        let feature =
+            string_argument(arguments.into_iter().next(), "Java feature")?.to_ascii_lowercase();
+        match feature.as_str() {
+            "jvm" => Ok(Value::Bool(
+                self.session.borrow().is_some() || discover_jvm(&self.discovery.borrow()).is_ok(),
+            )),
+            "desktop" => Ok(Value::Bool(self.desktop_available.get())),
+            "awt" | "swing" => {
+                self.ensure_session()?;
+                let headless = self.with_session(|session| {
+                    session.call_static_resolved("java.awt.GraphicsEnvironment", "isHeadless", &[])
+                })?;
+                let JavaValue::Boolean(headless) = headless else {
+                    return Err(invalid_conversion(
+                        "Java graphics environment returned an invalid capability value",
+                    ));
+                };
+                Ok(Value::Bool(!headless))
+            }
+            _ => Err(invalid_conversion(
+                "Java feature must be 'jvm', 'awt', 'swing', or 'desktop'",
+            )),
+        }
+    }
+
+    fn configure_value(&self, arguments: Vec<Value>) -> Result<Value, RuntimeError> {
+        if self.is_running() {
+            return Err(invalid_conversion(
+                "jenv cannot change Java configuration after JVM startup",
+            ));
+        }
+        if arguments.len() != 2 {
+            return Err(invalid_conversion(
+                "jenv configuration requires one name-value pair",
+            ));
+        }
+        let mut arguments = arguments.into_iter();
+        let name = string_argument(arguments.next(), "jenv option")?.to_ascii_lowercase();
+        let value = string_argument(arguments.next(), "jenv option value")?;
+        match name.as_str() {
+            "version" => {
+                let path = std::path::PathBuf::from(&value);
+                let mut discovery = self.discovery.borrow().clone();
+                let mut config = self.config.borrow().clone();
+                if path.exists() || value.contains(std::path::MAIN_SEPARATOR) {
+                    discovery.explicit_home = Some(path);
+                    discovery.required_major = None;
+                } else {
+                    let version = runmat_java::JvmVersion::parse(value.clone())
+                        .map_err(java_runtime_error)?;
+                    discovery.explicit_home = None;
+                    discovery.required_major = Some(version.major);
+                    config.minimum_major = version.major;
+                    config.maximum_major = Some(version.major);
+                }
+                let installation = discover_jvm(&discovery).map_err(java_runtime_error)?;
+                if !config.accepts(&installation.version) {
+                    return Err(invalid_conversion(format!(
+                        "Java {} does not satisfy the configured version bounds",
+                        installation.version.raw
+                    )));
+                }
+                *self.discovery.borrow_mut() = discovery;
+                *self.config.borrow_mut() = config;
+            }
+            "executionmode" => {
+                if !value.eq_ignore_ascii_case("inprocess") {
+                    return Err(invalid_conversion(
+                        "RunMat currently supports Java execution mode 'InProcess'",
+                    ));
+                }
+            }
+            _ => {
+                return Err(invalid_conversion(
+                    "jenv supports the 'Version' and 'ExecutionMode' options",
+                ))
+            }
+        }
+        self.status_value()
+    }
+}
+
+fn classpath_paths<'a>(
+    snapshot: &'a ClasspathSnapshot,
+    layer: &str,
+) -> Result<Vec<&'a std::path::PathBuf>, RuntimeError> {
+    Ok(match layer {
+        "all" => snapshot
+            .bootstrap
+            .iter()
+            .chain(snapshot.project.iter())
+            .chain(snapshot.dynamic.iter())
+            .collect(),
+        "static" | "bootstrap" => snapshot
+            .bootstrap
+            .iter()
+            .chain(snapshot.project.iter())
+            .collect(),
+        "dynamic" => snapshot.dynamic.iter().collect(),
+        _ => {
+            return Err(invalid_conversion(
+                "Java classpath layer must be 'all', 'static', or 'dynamic'",
+            ))
+        }
+    })
 }
 
 impl ForeignAdapter for JavaAdapter {
@@ -303,6 +631,33 @@ fn foreign_argument(value: Option<Value>) -> Result<ForeignRef, RuntimeError> {
             Ok(reference)
         }
         _ => Err(invalid_conversion("Java receiver must be a Java object")),
+    }
+}
+
+fn java_dimension(value: Value) -> Result<usize, RuntimeError> {
+    match value {
+        Value::Int(value) => match value {
+            IntValue::I8(value) => usize::try_from(value),
+            IntValue::I16(value) => usize::try_from(value),
+            IntValue::I32(value) => usize::try_from(value),
+            IntValue::I64(value) => usize::try_from(value),
+            IntValue::U8(value) => Ok(usize::from(value)),
+            IntValue::U16(value) => Ok(usize::from(value)),
+            IntValue::U32(value) => usize::try_from(value),
+            IntValue::U64(value) => usize::try_from(value),
+        }
+        .map_err(|_| invalid_conversion("Java array dimensions must be nonnegative integers")),
+        Value::Num(value)
+            if value.is_finite()
+                && value >= 0.0
+                && value.fract() == 0.0
+                && value <= usize::MAX as f64 =>
+        {
+            Ok(value as usize)
+        }
+        _ => Err(invalid_conversion(
+            "Java array dimensions must be nonnegative integer scalars",
+        )),
     }
 }
 

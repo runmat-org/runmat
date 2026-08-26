@@ -67,6 +67,32 @@ impl SessionClasspath {
         Ok(())
     }
 
+    pub fn add_dynamic_first(&mut self, entry: PathBuf) -> Result<(), ClasspathError> {
+        validate_entry(&entry)?;
+        if self.contains(&entry) {
+            return Err(ClasspathError::Duplicate(entry.display().to_string()));
+        }
+        self.dynamic.insert(0, entry);
+        self.revision = self.revision.saturating_add(1);
+        Ok(())
+    }
+
+    pub fn replace_dynamic(
+        &mut self,
+        entries: impl IntoIterator<Item = PathBuf>,
+    ) -> Result<(), ClasspathError> {
+        let dynamic = unique(entries)?;
+        if let Some(entry) = dynamic
+            .iter()
+            .find(|entry| self.bootstrap.contains(entry) || self.project.contains(entry))
+        {
+            return Err(ClasspathError::Duplicate(entry.display().to_string()));
+        }
+        self.dynamic = dynamic;
+        self.revision = self.revision.saturating_add(1);
+        Ok(())
+    }
+
     pub fn remove_dynamic(&mut self, entry: &Path) -> Result<(), ClasspathError> {
         let Some(index) = self.dynamic.iter().position(|candidate| candidate == entry) else {
             return Err(ClasspathError::NotDynamic(entry.display().to_string()));
@@ -169,5 +195,25 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(error, ClasspathError::Duplicate(_)));
+    }
+
+    #[test]
+    fn dynamic_prepend_and_replace_preserve_explicit_order() {
+        let mut classpath = SessionClasspath::default();
+        classpath.add_dynamic(PathBuf::from("second.jar")).unwrap();
+        classpath
+            .add_dynamic_first(PathBuf::from("first.jar"))
+            .unwrap();
+        assert_eq!(
+            classpath.entries(ClasspathLayer::Dynamic),
+            &[PathBuf::from("first.jar"), PathBuf::from("second.jar")]
+        );
+        classpath
+            .replace_dynamic([PathBuf::from("only.jar")])
+            .unwrap();
+        assert_eq!(
+            classpath.entries(ClasspathLayer::Dynamic),
+            &[PathBuf::from("only.jar")]
+        );
     }
 }

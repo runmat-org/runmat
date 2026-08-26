@@ -6,6 +6,7 @@ pub enum JavaValue {
     Short(i16),
     Int(i32),
     Long(i64),
+    UnsignedLong(u64),
     Float(f32),
     Double(f64),
     Char(u16),
