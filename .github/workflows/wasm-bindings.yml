@@ -79,6 +79,7 @@ jobs:
     environment: ${{ inputs.release_channel == 'prod' && 'Production' || 'Dev' }}
     env:
       RUST_BACKTRACE: 1
+      CARGO_INCREMENTAL: "0"
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -92,6 +93,11 @@ jobs:
           tool: |
             rust@1.90.0 + wasm32-unknown-unknown
             wasm-pack@0.14.0
+
+      - name: Restore Rust build cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: wasm-bindings
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
