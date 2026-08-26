@@ -14,8 +14,7 @@ use runmat_types::{
     CapabilityRequirement, ForeignAffinity, ForeignCapability, ForeignLifetime, ForeignOwnership,
     ForeignTypeIdentity,
 };
-use runmat_value::{CellArray, ForeignResourceKey, Value};
-use sha2::{Digest, Sha256};
+use runmat_value::{CellArray, ForeignResourceKey, StructValue, Value};
 
 use super::super::{
     foreign_error, ForeignAdapter, ForeignAdapterDescriptor, ForeignAdapterFuture,
@@ -200,20 +199,38 @@ impl NativeFfiAdapter {
     }
 
     fn pointer(&self, arguments: &[Value]) -> Result<Value, RuntimeError> {
-        if arguments.len() != 2 {
+        if arguments.len() > 2 {
             return Err(invalid_call(
-                "native FFI pointer expects a pointer type and initial value",
+                "native FFI pointer expects an optional pointer type and initial value",
             ));
         }
-        let type_name = string_argument(arguments, 0, "pointer")?;
+        let type_name = if arguments.is_empty() {
+            "voidPtr".to_string()
+        } else {
+            string_argument(arguments, 0, "pointer")?
+        };
         let pointee = legacy_pointer_type(&type_name)?;
         let metadata = Rc::new(pointer_metadata());
-        let pointer = NativePointerResource::new(pointee.clone(), &arguments[1], &metadata)
-            .map_err(|error| foreign_error(ForeignErrorKind::InvalidCall, error.to_string()))?;
+        let pointer = match arguments.get(1) {
+            Some(value) => NativePointerResource::new(pointee.clone(), value, &metadata)
+                .map_err(|error| foreign_error(ForeignErrorKind::InvalidCall, error.to_string()))?,
+            None => NativePointerResource::null(pointee.clone()),
+        };
+        self.register_caller_owned_pointer(pointer, metadata, type_name, "lib.pointer".into(), None)
+    }
+
+    fn register_caller_owned_pointer(
+        &self,
+        pointer: NativePointerResource,
+        metadata: Rc<NativeLibraryMetadata>,
+        type_name: String,
+        nominal_type: String,
+        library: Option<Rc<runmat_native_ffi::LoadedLibrary>>,
+    ) -> Result<Value, RuntimeError> {
         let reference = self.handles.register_resource(
             &self.host_identity,
             ForeignResourceMetadata {
-                type_identity: pointer_type_identity(&pointee),
+                type_identity: pointer_type_identity(nominal_type),
                 ownership: ForeignOwnership::Owned,
                 affinity: ForeignAffinity::OriginThread,
                 lifetime: ForeignLifetime::Session,
@@ -225,9 +242,88 @@ impl NativeFfiAdapter {
                 pointer: Rc::new(pointer),
                 metadata,
                 type_name,
+                library,
             },
         );
         Ok(Value::Foreign(reference))
+    }
+
+    fn structure(&self, arguments: &[Value]) -> Result<Value, RuntimeError> {
+        if !(1..=2).contains(&arguments.len()) {
+            return Err(invalid_call(
+                "native FFI structure expects a declared structure type and optional value",
+            ));
+        }
+        let requested = string_argument(arguments, 0, "structure")?;
+        let (entry, structure_name) = self.structure_library(&requested)?;
+        let initial_value = match arguments.get(1) {
+            Some(Value::Struct(value)) => Value::Struct(value.clone()),
+            Some(_) => {
+                return Err(invalid_call(
+                    "native structure initialization requires a scalar structure value",
+                ))
+            }
+            None => Value::Struct(default_structure_value(
+                &structure_name,
+                entry.metadata.as_ref(),
+            )?),
+        };
+        let pointer = NativePointerResource::new(
+            NativeType::Structure {
+                name: structure_name.clone(),
+            },
+            &initial_value,
+            &entry.metadata,
+        )
+        .map_err(|error| foreign_error(ForeignErrorKind::InvalidCall, error.to_string()))?;
+        self.register_caller_owned_pointer(
+            pointer,
+            Rc::clone(&entry.metadata),
+            structure_name.clone(),
+            format!("lib.{structure_name}"),
+            Some(Rc::clone(&entry.library)),
+        )
+    }
+
+    fn structure_library(&self, requested: &str) -> Result<(LibraryEntry, String), RuntimeError> {
+        let (requested_alias, structure_name) = requested
+            .split_once('.')
+            .map(|(alias, name)| (Some(alias), name))
+            .unwrap_or((None, requested));
+        if structure_name.trim().is_empty() {
+            return Err(invalid_call("native structure type must not be empty"));
+        }
+        let state = self.state.borrow();
+        let mut matches = state
+            .libraries
+            .iter()
+            .filter_map(|(alias, entry)| {
+                if requested_alias.is_some_and(|requested| requested != alias.as_str()) {
+                    return None;
+                }
+                entry
+                    .metadata
+                    .structures
+                    .iter()
+                    .find(|definition| definition.name == structure_name)
+                    .cloned()
+                    .map(|definition| (entry.clone(), definition))
+            })
+            .collect::<Vec<_>>();
+        let Some((entry, definition)) = matches.pop() else {
+            return Err(invalid_call(format!(
+                "native structure type `{requested}` is not declared by a loaded library"
+            )));
+        };
+        if matches
+            .iter()
+            .any(|(_, candidate)| candidate != &definition)
+        {
+            return Err(invalid_call(format!(
+                "native structure type `{structure_name}` is ambiguous; qualify it with the library alias"
+            )));
+        }
+        Ok((entry, structure_name.to_string()))
     }
 
     fn pointer_value(&self, arguments: &[Value]) -> Result<Value, RuntimeError> {
@@ -307,6 +403,24 @@ impl NativeFfiAdapter {
             ("datatype", PointerEntry::Opaque { pointer, .. }) => {
                 Ok(Value::String(format!("{:?}Ptr", pointer.pointee)))
             }
+            (
+                _,
+                PointerEntry::CallerOwned {
+                    pointer, metadata, ..
+                },
+            ) => {
+                let value = pointer.value(&metadata).map_err(|error| {
+                    foreign_error(ForeignErrorKind::InvalidCall, error.to_string())
+                })?;
+                let Value::Struct(structure) = value else {
+                    return Err(invalid_call(format!(
+                        "native pointer has no member `{member}`"
+                    )));
+                };
+                structure.fields.get(&member).cloned().ok_or_else(|| {
+                    invalid_call(format!("native structure has no field `{member}`"))
+                })
+            }
             _ => Err(invalid_call(format!(
                 "native pointer has no member `{member}`"
             ))),
@@ -320,11 +434,6 @@ impl NativeFfiAdapter {
             ));
         }
         let member = string_argument(arguments, 1, "set_member")?;
-        if !member.eq_ignore_ascii_case("Value") {
-            return Err(invalid_call(format!(
-                "native pointer member `{member}` is read-only or unavailable"
-            )));
-        }
         let Value::Foreign(reference) = &arguments[0] else {
             return Err(invalid_call(
                 "native FFI member assignment requires a foreign resource",
@@ -345,7 +454,30 @@ impl NativeFfiAdapter {
             })?;
         match entry {
             PointerEntry::CallerOwned { pointer, metadata, .. } => {
-                pointer.set_value(&arguments[2], &metadata).map_err(|error| {
+                let replacement = if member.eq_ignore_ascii_case("Value") {
+                    arguments[2].clone()
+                } else if member.eq_ignore_ascii_case("DataType") {
+                    return Err(invalid_call(
+                        "native pointer member `DataType` is read-only",
+                    ));
+                } else {
+                    let current = pointer.value(&metadata).map_err(|error| {
+                        foreign_error(ForeignErrorKind::InvalidCall, error.to_string())
+                    })?;
+                    let Value::Struct(mut structure) = current else {
+                        return Err(invalid_call(format!(
+                            "native pointer member `{member}` is unavailable"
+                        )));
+                    };
+                    let Some(field) = structure.fields.get_mut(&member) else {
+                        return Err(invalid_call(format!(
+                            "native structure has no field `{member}`"
+                        )));
+                    };
+                    *field = arguments[2].clone();
+                    Value::Struct(structure)
+                };
+                pointer.set_value(&replacement, &metadata).map_err(|error| {
                     foreign_error(ForeignErrorKind::InvalidCall, error.to_string())
                 })?;
                 Ok(arguments[0].clone())
@@ -498,7 +630,7 @@ impl NativeFfiAdapter {
         let reference = self.handles.register_resource(
             &self.host_identity,
             ForeignResourceMetadata {
-                type_identity: pointer_type_identity(&pointer.pointee),
+                type_identity: pointer_type_identity("lib.pointer".into()),
                 ownership,
                 affinity: ForeignAffinity::OriginThread,
                 lifetime: ForeignLifetime::Session,
@@ -586,6 +718,7 @@ impl NativeFfiAdapter {
             "is_loaded" => self.is_loaded(&call.arguments),
             "functions" => self.functions(&call.arguments),
             "pointer" => self.pointer(&call.arguments),
+            "structure" => self.structure(&call.arguments),
             "pointer_value" => self.pointer_value(&call.arguments),
             "get_member" => self.get_member(&call.arguments),
             "set_member" => self.set_member(&call.arguments),
@@ -651,12 +784,38 @@ fn pointer_metadata() -> NativeLibraryMetadata {
     }
 }
 
-fn pointer_type_identity(pointee: &NativeType) -> ForeignTypeIdentity {
-    let bytes = serde_json::to_vec(pointee).expect("native pointer type is serializable");
-    let digest = format!("{:x}", Sha256::digest(bytes));
+fn default_structure_value(
+    name: &str,
+    metadata: &NativeLibraryMetadata,
+) -> Result<StructValue, RuntimeError> {
+    let definition = metadata
+        .structures
+        .iter()
+        .find(|definition| definition.name == name)
+        .ok_or_else(|| invalid_call(format!("missing native structure definition `{name}`")))?;
+    let mut value = StructValue::new();
+    for field in &definition.fields {
+        let field_value = match &field.ty {
+            NativeType::Scalar { .. } | NativeType::Enumeration { .. } => Value::Num(0.0),
+            NativeType::Structure { name } => {
+                Value::Struct(default_structure_value(name, metadata)?)
+            }
+            unsupported => {
+                return Err(invalid_call(format!(
+                    "native structure field `{}` has unsupported default type {unsupported:?}",
+                    field.name
+                )))
+            }
+        };
+        value.fields.insert(field.name.clone(), field_value);
+    }
+    Ok(value)
+}
+
+fn pointer_type_identity(nominal_type: String) -> ForeignTypeIdentity {
     ForeignTypeIdentity {
         family: NATIVE_FFI_ADAPTER_ID.into(),
-        name: format!("pointer:{digest}"),
+        name: nominal_type,
         version: 1,
     }
 }

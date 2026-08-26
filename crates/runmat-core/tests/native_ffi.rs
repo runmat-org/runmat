@@ -47,8 +47,12 @@ fn legacy_shared_library_calls_use_the_session_foreign_runtime() {
          pointer_type = pointer.DataType;\n\
          pointer = calllib('core_fixture', 'fixture_increment', pointer);\n\
          pointer_value = pointer.Value;\n\
+         record = libstruct('fixture_record');\n\
+         record.left = int32(19);\n\
+         record.right = int32(23);\n\
+         record_total = calllib('core_fixture', 'fixture_record_sum', record);\n\
          loaded = libisloaded('core_fixture');\n\
-         pointer_value",
+         record_total",
         library_path.display(),
         header_path.display(),
         header_path.display(),
@@ -57,12 +61,17 @@ fn legacy_shared_library_calls_use_the_session_foreign_runtime() {
     let mut session = RunMatSession::with_options(false, false).unwrap();
     let result = runmat_core::execute_text_request_for_testing(&mut session, &source).unwrap();
     assert!(result.error.is_none(), "{:?}", result.error);
-    assert_eq!(result.value, Some(Value::Int(IntValue::I32(51))));
+    assert_eq!(result.value, Some(Value::Int(IntValue::I32(42))));
     assert!(result
         .workspace
         .values
         .iter()
-        .any(|entry| entry.name == "pointer" && entry.class_name.starts_with("pointer:")));
+        .any(|entry| entry.name == "pointer" && entry.class_name == "lib.pointer"));
+    assert!(result
+        .workspace
+        .values
+        .iter()
+        .any(|entry| entry.name == "record" && entry.class_name == "lib.fixture_record"));
     assert!(result
         .workspace
         .values

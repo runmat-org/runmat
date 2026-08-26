@@ -42,6 +42,8 @@ const OUTPUT: BuiltinParamDescriptor = BuiltinParamDescriptor {
 const LOAD_INPUTS: [BuiltinParamDescriptor; 1] = [VARIADIC];
 const CALL_INPUTS: [BuiltinParamDescriptor; 1] = [VARIADIC];
 const ONE_TEXT_INPUT: [BuiltinParamDescriptor; 1] = [TEXT];
+const NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
+const POINTER_TYPE_INPUT: [BuiltinParamDescriptor; 1] = [TEXT];
 const POINTER_INPUTS: [BuiltinParamDescriptor; 2] = [TEXT, VALUE];
 const OUTPUTS: [BuiltinParamDescriptor; 1] = [OUTPUT];
 
@@ -60,11 +62,35 @@ const ONE_TEXT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDe
     inputs: &ONE_TEXT_INPUT,
     outputs: &OUTPUTS,
 }];
-const POINTER_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "pointer = libpointer(type, value)",
-    inputs: &POINTER_INPUTS,
-    outputs: &OUTPUTS,
-}];
+const POINTER_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "pointer = libpointer()",
+        inputs: &NO_INPUTS,
+        outputs: &OUTPUTS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "pointer = libpointer(type)",
+        inputs: &POINTER_TYPE_INPUT,
+        outputs: &OUTPUTS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "pointer = libpointer(type, value)",
+        inputs: &POINTER_INPUTS,
+        outputs: &OUTPUTS,
+    },
+];
+const STRUCTURE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "value = libstruct(type)",
+        inputs: &POINTER_TYPE_INPUT,
+        outputs: &OUTPUTS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "value = libstruct(type, structure)",
+        inputs: &POINTER_INPUTS,
+        outputs: &OUTPUTS,
+    },
+];
 
 const ERROR_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.NATIVE_FFI.UNAVAILABLE",
@@ -100,6 +126,12 @@ const ONE_TEXT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 const POINTER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &POINTER_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+const STRUCTURE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &STRUCTURE_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
@@ -293,8 +325,21 @@ async fn libfunctions_builtin(alias: Value) -> BuiltinResult<Value> {
     integer_audit(crate::builtins::interop::native_ffi::INTEGER_AUDIT),
     builtin_path = "crate::builtins::interop::native_ffi"
 )]
-async fn libpointer_builtin(type_name: Value, initial_value: Value) -> BuiltinResult<Value> {
-    invoke_native("pointer", vec![type_name, initial_value], 1).await
+async fn libpointer_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
+    invoke_native("pointer", arguments, 1).await
+}
+
+#[runtime_builtin(
+    name = "libstruct",
+    category = "interop/native",
+    summary = "Create session-owned storage for a structure declared by a loaded library.",
+    keywords = "libstruct,structure,shared library,c,ffi,native",
+    descriptor(crate::builtins::interop::native_ffi::STRUCTURE_DESCRIPTOR),
+    integer_audit(crate::builtins::interop::native_ffi::INTEGER_AUDIT),
+    builtin_path = "crate::builtins::interop::native_ffi"
+)]
+async fn libstruct_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
+    invoke_native("structure", arguments, 1).await
 }
 
 fn invalid_builtin_call(message: impl Into<String>) -> crate::RuntimeError {

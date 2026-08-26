@@ -28,6 +28,7 @@ pub(super) enum PointerEntry {
         pointer: Rc<NativePointerResource>,
         metadata: Rc<NativeLibraryMetadata>,
         type_name: String,
+        library: Option<Rc<LoadedLibrary>>,
     },
     Opaque {
         pointer: Rc<NativePointer>,
@@ -40,11 +41,18 @@ impl std::fmt::Debug for PointerEntry {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::CallerOwned {
-                pointer, type_name, ..
+                pointer,
+                type_name,
+                library,
+                ..
             } => formatter
                 .debug_struct("CallerOwned")
                 .field("pointer", pointer)
                 .field("type_name", type_name)
+                .field(
+                    "library_references",
+                    &library.as_ref().map(Rc::strong_count),
+                )
                 .finish(),
             Self::Opaque {
                 pointer,
