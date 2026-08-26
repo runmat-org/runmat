@@ -126,12 +126,6 @@ jobs:
         working-directory: bindings/ts
         run: npm ci
 
-      - name: Regenerate wasm builtin registry
-        run: scripts/regenerate-wasm-registry.sh
-
-      - name: Build wasm32 target
-        run: cargo build -p runmat-wasm --target wasm32-unknown-unknown --features occt-wasm-host
-
       - name: Run wasm headless tests
         env:
           RUNMAT_CHROME_BIN: ${{ steps.setup_chrome.outputs.chrome-path }}

@@ -23,18 +23,53 @@ jobs:
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)
     strategy:
       fail-fast: false
-      max-parallel: 8
+      max-parallel: 9
       matrix:
         include:
           - runner: warp-ubuntu-latest-x64-16x
             name: linux-quality
             task: quality
+            needs_occt: true
           - runner: warp-ubuntu-latest-x64-16x
-            name: linux-tests
+            name: linux-tests-language
             task: test
+            test_group: language
+            needs_occt: false
+          - runner: warp-ubuntu-latest-x64-16x
+            name: linux-tests-runtime
+            task: test
+            test_group: runtime
+            needs_occt: true
+          - runner: warp-ubuntu-latest-x64-16x
+            name: linux-tests-geometry-analysis
+            task: test
+            test_group: geometry-analysis
+            needs_occt: true
+          - runner: warp-ubuntu-latest-x64-16x
+            name: linux-tests-tooling-distributed
+            task: test
+            test_group: tooling-distributed
+            needs_occt: true
           - runner: warp-macos-26-arm64-12x
-            name: macos-tests
+            name: macos-tests-language
             task: test
+            test_group: language
+            needs_occt: false
+          - runner: warp-macos-26-arm64-12x
+            name: macos-tests-runtime
+            task: test
+            test_group: runtime
+            needs_occt: false
+          - runner: warp-macos-26-arm64-12x
+            name: macos-tests-geometry-analysis
+            task: test
+            test_group: geometry-analysis
+            needs_occt: false
+          - runner: warp-macos-26-arm64-12x
+            name: macos-tests-tooling-distributed
+            task: test
+            test_group: tooling-distributed
+            needs_occt: false
     runs-on: ${{ matrix.runner }}
     env:
       # Enable backtraces on CI to aid debugging of panics/segfaults
@@ -80,14 +115,14 @@ jobs:
             libxkbcommon-x11-0 libxrandr-dev libzmq3-dev ninja-build pkg-config unzip zip
 
       - name: Restore pinned Linux OpenCASCADE
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.needs_occt
         uses: actions/cache@v4
         with:
           path: ~/vcpkg-runmat
           key: linux-${{ runner.arch }}-vcpkg-occt-2026.06.01-${{ hashFiles('infra/scripts/ensure-linux-vcpkg-occt.sh') }}
 
       - name: Ensure pinned Linux OpenCASCADE (vcpkg)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.needs_occt
         shell: bash
         env:
           RUNMAT_VCPKG_REF: 2026.06.01
@@ -130,7 +165,7 @@ jobs:
           export XDG_RUNTIME_DIR="${RUNNER_TEMP}/runmat-xdg-runtime"
           mkdir -p "$XDG_RUNTIME_DIR"
           chmod 700 "$XDG_RUNTIME_DIR"
-          cargo test --all-targets --all-features 2>&1 | tee test.log
+          python3 scripts/development/run-workspace-test-group.py "${{ matrix.test_group }}" 2>&1 | tee test.log
 
       - name: Test (macOS)
         if: matrix.task == 'test' && runner.os == 'macOS'
@@ -139,7 +174,7 @@ jobs:
           RUST_TEST_THREADS: 1
         run: |
           set -o pipefail
-          cargo test --all-targets --all-features 2>&1 | tee test.log
+          python3 scripts/development/run-workspace-test-group.py "${{ matrix.test_group }}" 2>&1 | tee test.log
 
       - name: Upload analysis benchmark artifacts
         if: always() && ((github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/heads/release/'))) || (github.event_name == 'pull_request' && failure()))
