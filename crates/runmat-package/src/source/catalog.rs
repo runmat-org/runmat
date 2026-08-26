@@ -117,6 +117,7 @@ pub struct FrozenProject {
     #[serde(with = "stable_source_path_map")]
     pub access_paths: BTreeMap<StableSourceId, PathBuf>,
     pub native_interfaces: Vec<FrozenNativeInterface>,
+    pub java_artifacts: Vec<FrozenJavaArtifact>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,6 +131,15 @@ pub struct FrozenNativeInterface {
     pub library_path: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FrozenJavaArtifact {
+    pub package_instance: ContentDigest,
+    pub name: String,
+    pub digest: ContentDigest,
+    pub path: PathBuf,
+}
+
 pub(crate) struct FrozenPackageInput {
     pub instance: ContentDigest,
     pub local_name: String,
@@ -137,6 +147,7 @@ pub(crate) struct FrozenPackageInput {
     pub root: PathBuf,
     pub files: Vec<FrozenSourceInput>,
     pub native_interfaces: Vec<FrozenNativeInterfaceInput>,
+    pub java_artifacts: Vec<FrozenJavaArtifactInput>,
 }
 
 pub(crate) struct FrozenSourceInput {
@@ -152,6 +163,12 @@ pub(crate) struct FrozenNativeInterfaceInput {
     pub library_bytes: Vec<u8>,
 }
 
+pub(crate) struct FrozenJavaArtifactInput {
+    pub name: String,
+    pub path: PathBuf,
+    pub bytes: Vec<u8>,
+}
+
 pub(crate) fn assemble_frozen_project(
     manifest_path: PathBuf,
     workspace_root: PathBuf,
@@ -161,6 +178,7 @@ pub(crate) fn assemble_frozen_project(
     let mut packages = BTreeMap::new();
     let mut access_paths = BTreeMap::new();
     let mut native_interfaces = Vec::new();
+    let mut java_artifacts = Vec::new();
     for package in package_inputs {
         if !graph.packages.contains_key(&package.instance) {
             return Err(CatalogAssemblyError::MissingInstance(package.instance));
@@ -199,6 +217,14 @@ pub(crate) fn assemble_frozen_project(
                 library_path: interface.library_path,
             });
         }
+        for artifact in package.java_artifacts {
+            java_artifacts.push(FrozenJavaArtifact {
+                package_instance: package.instance.clone(),
+                name: artifact.name,
+                digest: ContentDigest::sha256(&artifact.bytes),
+                path: artifact.path,
+            });
+        }
         sources.sort_by(|left, right| left.id.cmp(&right.id));
         let logical_root = logical_mount_root(&package.instance)?;
         packages.insert(
@@ -220,6 +246,9 @@ pub(crate) fn assemble_frozen_project(
     native_interfaces.sort_by(|left, right| {
         (&left.package_instance, &left.name).cmp(&(&right.package_instance, &right.name))
     });
+    java_artifacts.sort_by(|left, right| {
+        (&left.package_instance, &left.name).cmp(&(&right.package_instance, &right.name))
+    });
     Ok(FrozenProject {
         manifest_path,
         workspace_root,
@@ -227,6 +256,7 @@ pub(crate) fn assemble_frozen_project(
         sources: SourceCatalog { packages, revision },
         access_paths,
         native_interfaces,
+        java_artifacts,
     })
 }
 

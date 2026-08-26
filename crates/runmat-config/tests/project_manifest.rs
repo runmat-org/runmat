@@ -103,6 +103,55 @@ library = "/tmp/fixture.bin"
 }
 
 #[test]
+fn validates_explicit_java_artifacts() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::create_dir_all(tmp.path().join("lib")).unwrap();
+    fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
+    fs::write(tmp.path().join("lib/fixture.jar"), b"jar").unwrap();
+    let manifest_path = write_manifest(
+        tmp.path(),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[java-artifacts.fixture]
+path = "lib/fixture.jar"
+"#,
+    );
+    let loaded = load_project_manifest(&manifest_path).expect("Java artifact should validate");
+    assert_eq!(
+        loaded.java_artifacts["fixture"].path,
+        std::path::Path::new("lib/fixture.jar")
+    );
+}
+
+#[test]
+fn rejects_java_artifact_paths_outside_the_package() {
+    let parsed = parse_project_manifest_toml(
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[java-artifacts.fixture]
+path = "../fixture.jar"
+"#,
+    )
+    .unwrap();
+    let error = parsed.validate(std::path::Path::new(".")).unwrap_err();
+    assert!(error
+        .messages
+        .iter()
+        .any(|message| message.contains("must be project-relative")));
+}
+
+#[test]
 fn parses_manifest_with_runtime_section() {
     let parsed = parse_project_manifest_toml(
         r#"

@@ -192,6 +192,41 @@ library = "native/library.bin"
 }
 
 #[test]
+fn java_artifacts_are_frozen_and_require_a_jvm() {
+    let (temp, manifest) = fixture();
+    fs::create_dir_all(temp.path().join("lib")).unwrap();
+    fs::write(temp.path().join("lib/fixture.jar"), b"exact-jar").unwrap();
+    let root_manifest = fs::read_to_string(&manifest).unwrap();
+    fs::write(
+        &manifest,
+        format!("{root_manifest}\n[java-artifacts.fixture]\npath = \"lib/fixture.jar\"\n"),
+    )
+    .unwrap();
+
+    let error = build_frozen_project(&manifest, BTreeSet::new())
+        .expect_err("portable host must reject a JVM package");
+    assert!(error.to_string().contains("jvm"));
+
+    let frozen = build_frozen_project(
+        &manifest,
+        BTreeSet::from([runmat_package::HostCapability::Jvm]),
+    )
+    .unwrap();
+    let [artifact] = frozen.java_artifacts.as_slice() else {
+        panic!("expected one Java artifact");
+    };
+    assert_eq!(artifact.name, "fixture");
+    assert_eq!(
+        artifact.digest,
+        runmat_package::ContentDigest::sha256(b"exact-jar")
+    );
+    assert_eq!(
+        artifact.path,
+        temp.path().join("lib/fixture.jar").canonicalize().unwrap()
+    );
+}
+
+#[test]
 fn missing_dependency_manifest_is_a_package_loader_error() {
     let temp = TempDir::new().unwrap();
     fs::create_dir_all(temp.path().join("src")).unwrap();

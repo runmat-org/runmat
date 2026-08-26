@@ -3,7 +3,7 @@ use crate::GraphError;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub const FROZEN_PROJECT_HANDOFF_SCHEMA_VERSION: u32 = 2;
+pub const FROZEN_PROJECT_HANDOFF_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -132,6 +132,31 @@ fn validate_sources(project: &FrozenProject) -> Result<(), FrozenProjectHandoffE
         if previous.is_some_and(|previous| previous >= key) {
             return Err(FrozenProjectHandoffError::SourceCatalog(
                 "native interfaces must be sorted and unique by package and name".to_string(),
+            ));
+        }
+        previous = Some(key);
+    }
+    let mut previous = None;
+    for artifact in &project.java_artifacts {
+        if !project
+            .graph
+            .packages
+            .contains_key(&artifact.package_instance)
+        {
+            return Err(FrozenProjectHandoffError::SourceCatalog(format!(
+                "Java artifact `{}` belongs to an absent package instance",
+                artifact.name
+            )));
+        }
+        if artifact.name.trim().is_empty() {
+            return Err(FrozenProjectHandoffError::SourceCatalog(
+                "Java artifact name is empty".to_string(),
+            ));
+        }
+        let key = (&artifact.package_instance, artifact.name.as_str());
+        if previous.is_some_and(|previous| previous >= key) {
+            return Err(FrozenProjectHandoffError::SourceCatalog(
+                "Java artifacts must be sorted and unique by package and name".to_string(),
             ));
         }
         previous = Some(key);

@@ -16,6 +16,7 @@ runmat-execution = { workspace = true }
 runmat-native-codegen = { workspace = true, default-features = false }
 runmat-native-executor = { workspace = true }
 runmat-native-ffi = { workspace = true }
+runmat-java = { workspace = true }
 runmat-process-host = { workspace = true }
 runmat-runtime = { workspace = true, features = ["plot-core"] }
 runmat-types = { workspace = true }

@@ -180,6 +180,90 @@ roots = ["src"]
     );
 }
 
+#[test]
+fn declared_java_artifact_executes_from_the_project_package() {
+    let Some(java_home) = std::env::var_os("RUNMAT_TEST_JAVA_HOME").map(std::path::PathBuf::from)
+    else {
+        eprintln!("RUNMAT_TEST_JAVA_HOME is unset; packaged Java execution was not requested");
+        return;
+    };
+    let javac = java_home
+        .join("bin")
+        .join(if cfg!(windows) { "javac.exe" } else { "javac" });
+    let jar = java_home
+        .join("bin")
+        .join(if cfg!(windows) { "jar.exe" } else { "jar" });
+    if !javac.is_file() || !jar.is_file() {
+        eprintln!("packaged Java execution requires javac and jar");
+        return;
+    }
+
+    let temp = TempDir::new().unwrap();
+    let project = temp.path().join("project");
+    let cache = temp.path().join("cache");
+    let java_source = temp.path().join("java/fixture/packaged/Value.java");
+    let java_classes = temp.path().join("classes");
+    fs::create_dir_all(java_source.parent().unwrap()).unwrap();
+    fs::create_dir_all(&java_classes).unwrap();
+    fs::create_dir_all(project.join("src")).unwrap();
+    fs::create_dir_all(project.join("lib")).unwrap();
+    fs::write(
+        &java_source,
+        "package fixture.packaged; public final class Value { private Value() {} public static int read() { return 73; } }",
+    )
+    .unwrap();
+    assert!(Command::new(&javac)
+        .args(["-d", java_classes.to_str().unwrap()])
+        .arg(&java_source)
+        .status()
+        .unwrap()
+        .success());
+    let jar_path = project.join("lib/fixture.jar");
+    assert!(Command::new(&jar)
+        .args(["--create", "--file"])
+        .arg(&jar_path)
+        .args(["-C", java_classes.to_str().unwrap(), "."])
+        .status()
+        .unwrap()
+        .success());
+    fs::write(
+        project.join("runmat.toml"),
+        r#"
+[package]
+name = "java-application"
+version = "1.0.0"
+
+[sources]
+roots = ["src"]
+
+[java-artifacts.fixture]
+path = "lib/fixture.jar"
+"#,
+    )
+    .unwrap();
+    fs::write(
+        project.join("src/main.m"),
+        "value = fixture.packaged.Value.read(); disp(value);\n",
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_runmat"))
+        .current_dir(&project)
+        .env("RUNMAT_PACKAGE_CACHE_DIR", &cache)
+        .env(
+            "RUNMAT_EXECUTION_STATE_DIR",
+            temp.path().join("execution-state"),
+        )
+        .env("JAVA_HOME", &java_home)
+        .env("NO_GUI", "1")
+        .env_remove("RUNMAT_CONFIG")
+        .args(["run", "src/main.m"])
+        .output()
+        .expect("run packaged Java project");
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "73");
+}
+
 fn runmat(project: &std::path::Path, cache: &std::path::Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_runmat"))
         .current_dir(project)

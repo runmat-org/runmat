@@ -6,6 +6,7 @@
 
 #![deny(unsafe_op_in_unsafe_fn)]
 
+pub mod artifact;
 pub mod classpath;
 pub mod exception;
 #[cfg(not(target_family = "wasm"))]
@@ -16,6 +17,11 @@ pub mod resolve;
 
 pub const JAVA_ADAPTER_ID: &str = "java";
 pub const JAVA_ADAPTER_VERSION: u32 = 1;
+
+pub use artifact::{
+    JavaArtifactBundle, JavaArtifactBundleEntry, JavaArtifactError, JavaArtifactIdentity,
+    JAVA_ARCHIVE_MEDIA_TYPE,
+};
 
 pub use classpath::{ClasspathError, ClasspathLayer, ClasspathSnapshot, SessionClasspath};
 pub use exception::{JavaException, JavaStackFrame};

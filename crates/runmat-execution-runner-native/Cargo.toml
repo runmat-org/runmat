@@ -19,6 +19,7 @@ runmat-execution-transport-native = { workspace = true }
 runmat-meshing-core = { workspace = true }
 runmat-meshing-execution = { workspace = true }
 runmat-native-ffi = { workspace = true }
+runmat-java = { workspace = true }
 runmat-process-host = { workspace = true }
 runmat-package = { workspace = true }
 runmat-runtime = { workspace = true }

@@ -1,4 +1,4 @@
-use super::loader::{LoadedNativeInterface, LoadedSource, PackageOrigin};
+use super::loader::{LoadedJavaArtifact, LoadedNativeInterface, LoadedSource, PackageOrigin};
 use super::ProjectResolveError;
 use crate::{ContentDigest, NormalizedRelativePath, PathSourceId, SourceId};
 use runmat_config::project::{
@@ -62,7 +62,39 @@ pub(super) async fn load_native_interfaces(
     Ok(interfaces)
 }
 
+pub(super) async fn load_java_artifacts(
+    root: &Path,
+    manifest: &ProjectManifest,
+) -> Result<Vec<LoadedJavaArtifact>, ProjectResolveError> {
+    let mut artifacts = Vec::with_capacity(manifest.java_artifacts.len());
+    for (name, declaration) in &manifest.java_artifacts {
+        let path = root.join(&declaration.path);
+        let bytes = read_project_artifact(&path).await?;
+        artifacts.push(LoadedJavaArtifact {
+            name: name.clone(),
+            path,
+            bytes,
+        });
+    }
+    Ok(artifacts)
+}
+
+pub(super) struct PackageContent<'a> {
+    pub(super) sources: &'a [LoadedSource],
+    pub(super) native_interfaces: &'a [LoadedNativeInterface],
+    pub(super) java_artifacts: &'a [LoadedJavaArtifact],
+}
+
 async fn read_native_artifact(path: &Path) -> Result<Vec<u8>, ProjectResolveError> {
+    runmat_filesystem::read_async(path)
+        .await
+        .map_err(|error| ProjectResolveError::SourceRead {
+            path: path.to_path_buf(),
+            reason: error.to_string(),
+        })
+}
+
+async fn read_project_artifact(path: &Path) -> Result<Vec<u8>, ProjectResolveError> {
     runmat_filesystem::read_async(path)
         .await
         .map_err(|error| ProjectResolveError::SourceRead {
@@ -76,8 +108,7 @@ pub(super) fn source_identity(
     manifest_path: &Path,
     root: &Path,
     manifest: &ProjectManifest,
-    sources: &[LoadedSource],
-    native_interfaces: &[LoadedNativeInterface],
+    content: PackageContent<'_>,
     origin: &PackageOrigin,
 ) -> Result<SourceId, ProjectResolveError> {
     if let PackageOrigin::Git(source) = origin {
@@ -102,7 +133,7 @@ pub(super) fn source_identity(
             ))
         })?;
         let manifest_digest = ContentDigest::sha256(canonical_manifest);
-        let tree_digest = path_tree_digest(root, sources, native_interfaces)?;
+        let tree_digest = path_tree_digest(root, &content)?;
         if manifest_digest != expected_path.manifest_digest
             || tree_digest != expected_path.tree_digest
         {
@@ -131,17 +162,16 @@ pub(super) fn source_identity(
     Ok(SourceId::Path(PathSourceId {
         workspace_path,
         manifest_digest: ContentDigest::sha256(canonical_manifest),
-        tree_digest: path_tree_digest(root, sources, native_interfaces)?,
+        tree_digest: path_tree_digest(root, &content)?,
     }))
 }
 
 fn path_tree_digest(
     root: &Path,
-    sources: &[LoadedSource],
-    native_interfaces: &[LoadedNativeInterface],
+    content: &PackageContent<'_>,
 ) -> Result<ContentDigest, ProjectResolveError> {
     let mut input = Vec::new();
-    for source in sources {
+    for source in content.sources {
         let path = NormalizedRelativePath::new(
             source
                 .descriptor
@@ -156,7 +186,7 @@ fn path_tree_digest(
         input.extend_from_slice(&source.bytes);
         input.push(0);
     }
-    for interface in native_interfaces {
+    for interface in content.native_interfaces {
         append_native_artifact(
             &mut input,
             root,
@@ -170,7 +200,34 @@ fn path_tree_digest(
             &interface.library_bytes,
         )?;
     }
+    for artifact in content.java_artifacts {
+        append_project_artifact(&mut input, root, &artifact.path, &artifact.bytes)?;
+    }
     Ok(ContentDigest::sha256(input))
+}
+
+fn append_project_artifact(
+    input: &mut Vec<u8>,
+    root: &Path,
+    path: &Path,
+    bytes: &[u8],
+) -> Result<(), ProjectResolveError> {
+    let relative = path.strip_prefix(root).map_err(|_| {
+        ProjectResolveError::Invalid(format!(
+            "project artifact {} is outside package root {}",
+            path.display(),
+            root.display()
+        ))
+    })?;
+    let path = NormalizedRelativePath::new(relative)
+        .map_err(|error| ProjectResolveError::Invalid(error.to_string()))?;
+    input.extend_from_slice(path.as_str().as_bytes());
+    input.push(0);
+    input.extend_from_slice(bytes.len().to_string().as_bytes());
+    input.push(0);
+    input.extend_from_slice(bytes);
+    input.push(0);
+    Ok(())
 }
 
 fn append_native_artifact(

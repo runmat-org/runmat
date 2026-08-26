@@ -1,4 +1,6 @@
-use super::model::{LoadedNativeInterface, LoadedPathPackage, LoadedPathProject, LoadedSource};
+use super::model::{
+    LoadedJavaArtifact, LoadedNativeInterface, LoadedPathPackage, LoadedPathProject, LoadedSource,
+};
 use super::FrozenProjectError;
 use runmat_config::project::{
     build_project_source_index_async, load_project_manifest_async, ProjectManifest,
@@ -104,6 +106,16 @@ impl PathProjectLoader {
                     library_bytes,
                 });
             }
+            let mut java_artifacts = Vec::with_capacity(manifest.java_artifacts.len());
+            for (name, artifact) in &manifest.java_artifacts {
+                let path = project_root.join(&artifact.path);
+                let bytes = read_project_artifact(&path, "Java").await?;
+                java_artifacts.push(LoadedJavaArtifact {
+                    name: name.clone(),
+                    path,
+                    bytes,
+                });
+            }
 
             active.push((manifest_path.clone(), package_name.clone()));
             let mut dependencies = BTreeMap::new();
@@ -145,6 +157,7 @@ impl PathProjectLoader {
                     manifest,
                     sources,
                     native_interfaces,
+                    java_artifacts,
                     dependencies,
                 },
             );
@@ -158,6 +171,16 @@ async fn read_native_interface(path: &Path) -> Result<Vec<u8>, FrozenProjectErro
         super::PathProjectError::ReadNativeInterface {
             path: path.to_path_buf(),
             reason: error.to_string(),
+        }
+        .into()
+    })
+}
+
+async fn read_project_artifact(path: &Path, kind: &str) -> Result<Vec<u8>, FrozenProjectError> {
+    runmat_filesystem::read_async(path).await.map_err(|error| {
+        super::PathProjectError::ReadNativeInterface {
+            path: path.to_path_buf(),
+            reason: format!("read {kind} artifact: {error}"),
         }
         .into()
     })

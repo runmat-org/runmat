@@ -27,6 +27,14 @@ impl RunMatSession {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
+    pub fn install_java_project_artifacts(
+        &self,
+        artifacts: &[(runmat_java::JavaArtifactIdentity, std::path::PathBuf)],
+    ) -> Result<(), RuntimeError> {
+        self.java_adapter.install_project_artifacts(artifacts)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn admit_interop_manifest(
         &self,
         manifest: &runmat_types::InteropManifest,

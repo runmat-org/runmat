@@ -102,9 +102,9 @@ pub async fn submit(
             Some(revision.clone()),
         )
         .await?;
-    let native_interfaces = crate::commands::package::prepare_native_interfaces(frozen)?;
+    let foreign_artifacts = crate::commands::package::prepare_foreign_artifacts(frozen)?;
     let executable = unit
-        .portable_envelope_for_with_interop(function.as_deref(), native_interfaces.interop)
+        .portable_envelope_for_with_interop(function.as_deref(), foreign_artifacts.interop)
         .map_err(anyhow::Error::msg)?;
     let identity = &executable.manifest.identity;
     if identity.entrypoint_kind == runmat_execution::ExecutableEntrypointKind::Script
@@ -133,7 +133,7 @@ pub async fn submit(
     let mut builder = ExecutionBundleBuilder::native(frozen, revision.clone())?
         .with_compiled_package_closure()
         .with_materialized_program(recipe, form, executable_bytes);
-    for object in native_interfaces.objects {
+    for object in foreign_artifacts.objects {
         builder = builder.with_foreign_artifact(object)?;
     }
     let bundle = builder.build()?;

@@ -65,10 +65,11 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
     let java = runmat_runtime::foreign::JavaAdapter::new(foreign.handles().clone())
         .map_err(|error| error.to_string())?;
     foreign
-        .register_adapter(java)
+        .register_adapter(java.clone())
         .map_err(|error| error.to_string())?;
     let _native_interfaces =
         crate::native_interfaces::install(&input.native_interfaces, &native_ffi)?;
+    let _java_artifacts = crate::java_artifacts::install(&input.java_artifacts, &java)?;
     foreign
         .admit(&assembly.requirements.interop)
         .map_err(|error| format!("standalone interop admission failed: {error}"))?;

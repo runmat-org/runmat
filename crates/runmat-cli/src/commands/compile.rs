@@ -62,11 +62,11 @@ pub async fn execute(
     let mut session =
         super::session::create_session(false, false, config, "failed to create compile session")?;
     let project = install_project_for_source(&mut session, &file, cli).await?;
-    let native_interfaces = project
+    let foreign_artifacts = project
         .as_ref()
-        .map(|project| super::package::prepare_native_interfaces(&project.resolved.frozen))
+        .map(|project| super::package::prepare_foreign_artifacts(&project.resolved.frozen))
         .transpose()?
-        .unwrap_or_else(super::package::PreparedNativeInterfaces::empty);
+        .unwrap_or_else(super::package::PreparedForeignArtifacts::empty);
     let source = runmat_core::ExecutableSource::new("root", file.to_string_lossy(), source_text);
     let unit = session
         .compile_executable_unit(source, None)
@@ -76,7 +76,7 @@ pub async fn execute(
         &unit,
         &runtime,
         policy,
-        native_interfaces.interop.clone(),
+        foreign_artifacts.interop.clone(),
     )?;
     if explain_link {
         print_link_explanation(&program_link_plan);
@@ -101,7 +101,8 @@ pub async fn execute(
             },
             retained_builtin_bindings: program_link_plan.retained_builtin_bindings.clone(),
             interop: program_link_plan.interop.clone(),
-            native_interfaces: native_interfaces.bundle,
+            native_interfaces: foreign_artifacts.native_interfaces,
+            java_artifacts: foreign_artifacts.java_artifacts,
         },
     )?;
     let output = output.unwrap_or_else(|| default_output(&file));

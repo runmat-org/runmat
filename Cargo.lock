@@ -6232,6 +6232,7 @@ dependencies = [
  "runmat-filesystem",
  "runmat-gc",
  "runmat-hir",
+ "runmat-java",
  "runmat-mex",
  "runmat-mir",
  "runmat-native-codegen",
@@ -6360,6 +6361,7 @@ dependencies = [
  "runmat-core",
  "runmat-execution",
  "runmat-execution-artifact",
+ "runmat-java",
  "runmat-mir",
  "runmat-native-codegen",
  "runmat-native-ffi",
@@ -6378,6 +6380,7 @@ name = "runmat-aot-runtime"
 version = "0.6.2"
 dependencies = [
  "runmat-execution",
+ "runmat-java",
  "runmat-native-codegen",
  "runmat-native-executor",
  "runmat-native-ffi",
@@ -6458,6 +6461,7 @@ dependencies = [
  "runmat-filesystem",
  "runmat-gc",
  "runmat-hir",
+ "runmat-java",
  "runmat-jit",
  "runmat-lexer",
  "runmat-mex",
@@ -6549,6 +6553,7 @@ dependencies = [
  "runmat-execution-transport-native",
  "runmat-geometry-core",
  "runmat-geometry-fixtures",
+ "runmat-java",
  "runmat-meshing-core",
  "runmat-meshing-curve",
  "runmat-meshing-execution",
@@ -6726,6 +6731,7 @@ version = "0.6.2"
 dependencies = [
  "jni",
  "serde",
+ "serde_json",
  "sha2 0.10.9",
  "tempfile",
  "thiserror 1.0.69",

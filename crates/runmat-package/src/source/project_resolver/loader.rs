@@ -2,7 +2,10 @@ use super::selection::{
     feature_activation, join_relative, locked_dependency, locked_git_source, locked_server_source,
     validate_version,
 };
-use super::source::{canonical_path, find_manifest, is_file, load_sources, source_identity};
+use super::source::{
+    canonical_path, find_manifest, is_file, load_java_artifacts, load_sources, source_identity,
+    PackageContent,
+};
 use super::{PackageSourceProvider, ProjectResolveError, ProjectResolveOptions};
 use crate::{
     plan_git_acquisition, plan_server_project_acquisition, CanonicalPackageId, DependencyLocator,
@@ -46,6 +49,7 @@ pub(super) struct LoadedPackage {
     pub(super) instance: PackageInstanceId,
     pub(super) sources: Vec<LoadedSource>,
     pub(super) native_interfaces: Vec<LoadedNativeInterface>,
+    pub(super) java_artifacts: Vec<LoadedJavaArtifact>,
     pub(super) enabled_features: BTreeSet<String>,
     pub(super) dependencies: Vec<LoadedDependency>,
     pub(super) inventory: crate::SourceInventory,
@@ -62,6 +66,12 @@ pub(super) struct LoadedNativeInterface {
     pub(super) manifest_bytes: Vec<u8>,
     pub(super) library_path: PathBuf,
     pub(super) library_bytes: Vec<u8>,
+}
+
+pub(super) struct LoadedJavaArtifact {
+    pub(super) name: String,
+    pub(super) path: PathBuf,
+    pub(super) bytes: Vec<u8>,
 }
 
 pub(super) struct LoadedDependency {
@@ -137,13 +147,17 @@ impl Loader<'_> {
                 .to_path_buf();
             let (sources, source_index) = load_sources(&root, &config).await?;
             let native_interfaces = super::source::load_native_interfaces(&root, &config).await?;
+            let java_artifacts = load_java_artifacts(&root, &config).await?;
             let source = source_identity(
                 &self.workspace_root,
                 &manifest_path,
                 &root,
                 &config,
-                &sources,
-                &native_interfaces,
+                PackageContent {
+                    sources: &sources,
+                    native_interfaces: &native_interfaces,
+                    java_artifacts: &java_artifacts,
+                },
                 &origin,
             )?;
             let package = domain.canonical_id.clone().unwrap_or_else(|| {
@@ -174,6 +188,7 @@ impl Loader<'_> {
                     instance: instance.clone(),
                     sources,
                     native_interfaces,
+                    java_artifacts,
                     enabled_features: active_features.clone(),
                     dependencies: Vec::new(),
                     inventory,
