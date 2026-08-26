@@ -25,10 +25,10 @@ jobs:
       max-parallel: 8
       matrix:
         include:
-          - runner: ["self-hosted", "linux", "GCP"]
+          - runner: warp-ubuntu-latest-x64-16x
             name: linux-x86_64
-          - runner: macos-latest
-            name: macos-universal
+          - runner: warp-macos-26-arm64-12x
+            name: macos-aarch64
     runs-on: ${{ matrix.runner }}
     env:
       # Enable backtraces on CI to aid debugging of panics/segfaults
@@ -49,148 +49,31 @@ jobs:
           target_dir="${RUNNER_TEMP}/runmat-ci-${GITHUB_RUN_ID}-${MATRIX_NAME}"
           echo "CARGO_TARGET_DIR=${target_dir}" >> "${GITHUB_ENV}"
 
-      - name: Validate Rust toolchain (Linux self-hosted)
-        if: runner.os == 'Linux'
-        shell: bash
-        env:
-          RUST_TOOLCHAIN: 1.90.0-x86_64-unknown-linux-gnu
-          RUST_COMPONENTS: rustfmt clippy
-        run: |
-          set -euo pipefail
-
-          toolchain="${RUST_TOOLCHAIN}"
-          cargo_home="${CARGO_HOME:-${HOME}/.cargo}"
-          rustup_home="${RUSTUP_HOME:-${HOME}/.rustup}"
-          cargo_bin="${cargo_home}/bin"
-          rustup="${cargo_bin}/rustup"
-          cargo="${cargo_bin}/cargo"
-
-          if [[ ! -x "${rustup}" ]]; then
-            echo "Missing rustup at ${rustup}. Provision the runner with infra/scripts/bootstrap-linux-runner.sh." >&2
-            exit 1
-          fi
-          if [[ ! -x "${cargo}" ]]; then
-            echo "Missing cargo at ${cargo}. Provision the runner with infra/scripts/bootstrap-linux-runner.sh." >&2
-            exit 1
-          fi
-
-          {
-            echo "CARGO_HOME=${cargo_home}"
-            echo "RUSTUP_HOME=${rustup_home}"
-            echo "RUSTUP_TOOLCHAIN=${toolchain}"
-          } >> "${GITHUB_ENV}"
-          echo "${cargo_bin}" >> "${GITHUB_PATH}"
-
-          "${rustup}" which --toolchain "${toolchain}" cargo >/dev/null
-          installed_components="$("${rustup}" component list --toolchain "${toolchain}" --installed)"
-          for component in ${RUST_COMPONENTS}; do
-            if ! grep -q "^${component}-" <<<"${installed_components}"; then
-              echo "Missing Rust component '${component}' for toolchain ${toolchain}. Provision the runner with infra/scripts/bootstrap-linux-runner.sh." >&2
-              exit 1
-            fi
-          done
-          "${cargo}" -V
-          "${cargo_bin}/rustc" -V
-
-      - uses: actions-rs/toolchain@v1
-        if: runner.os == 'macOS'
+      - uses: dtolnay/rust-toolchain@1.90.0
         with:
-          toolchain: 1.90.0
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
-        if: runner.os == 'macOS'
 
-      - name: Validate Linux runner dependencies
+      - name: Install Linux native dependencies
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
+          sudo apt-get update
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            autoconf autoconf-archive automake build-essential ca-certificates cmake curl \
+            gdb git libdbus-1-dev libegl1-mesa-dev libgl1-mesa-dev libhdf5-dev \
+            liblapack-dev libopenblas-dev libssl-dev libtool libudev-dev libwayland-dev \
+            libx11-dev libxcursor-dev libxi-dev libxinerama-dev libxkbcommon-dev \
+            libxkbcommon-x11-0 libxrandr-dev libzmq3-dev ninja-build pkg-config unzip zip
 
-          packages=(
-            build-essential
-            ca-certificates
-            cmake
-            curl
-            autoconf
-            autoconf-archive
-            automake
-            gdb
-            git
-            libtool
-            libdbus-1-dev
-            libegl1-mesa-dev
-            libgl1-mesa-dev
-            libhdf5-dev
-            liblapack-dev
-            libopenblas-dev
-            libssl-dev
-            libudev-dev
-            libwayland-dev
-            libx11-dev
-            libxcursor-dev
-            libxi-dev
-            libxinerama-dev
-            libxkbcommon-dev
-            libxkbcommon-x11-0
-            libxrandr-dev
-            libzmq3-dev
-            ninja-build
-            pkg-config
-            unzip
-            zip
-          )
-
-          missing=()
-          ldconfig_bin="$(command -v ldconfig || true)"
-          if [[ -z "${ldconfig_bin}" && -x /usr/sbin/ldconfig ]]; then
-            ldconfig_bin=/usr/sbin/ldconfig
-          fi
-          for pkg in "${packages[@]}"; do
-            if ! dpkg-query -W -f='${Status}\n' "${pkg}" 2>/dev/null | grep -qx 'install ok installed'; then
-              missing+=("${pkg}")
-            fi
-          done
-
-          if ! command -v pkg-config >/dev/null 2>&1; then
-            missing+=('pkg-config(binary)')
-          fi
-          if ! command -v cmake >/dev/null 2>&1; then
-            missing+=('cmake(binary)')
-          fi
-          if ! command -v gdb >/dev/null 2>&1; then
-            missing+=('gdb(binary)')
-          fi
-          if ! command -v unzip >/dev/null 2>&1; then
-            missing+=('unzip(binary)')
-          fi
-          if ! command -v zip >/dev/null 2>&1; then
-            missing+=('zip(binary)')
-          fi
-          if ! command -v ninja >/dev/null 2>&1; then
-            missing+=('ninja(binary)')
-          fi
-          if ! pkg-config --exists libzmq; then
-            missing+=('libzmq(pkg-config)')
-          fi
-          if ! pkg-config --exists hdf5; then
-            missing+=('hdf5(pkg-config)')
-          fi
-          if [[ -z "${ldconfig_bin}" ]]; then
-            missing+=('ldconfig(binary)')
-          elif ! "${ldconfig_bin}" -p | grep -q 'libopenblas\.so'; then
-            missing+=('libopenblas(runtime)')
-          fi
-          if [[ -n "${ldconfig_bin}" ]] && ! "${ldconfig_bin}" -p | grep -q 'liblapack\.so'; then
-            missing+=('liblapack(runtime)')
-          fi
-
-          if ((${#missing[@]} > 0)); then
-            printf 'Missing Linux runner prerequisites:\n' >&2
-            printf '  %s\n' "${missing[@]}" >&2
-            echo "Provision the runner with infra/scripts/bootstrap-linux-runner.sh." >&2
-            exit 1
-          fi
+      - name: Restore pinned Linux OpenCASCADE
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: ~/vcpkg-runmat
+          key: linux-${{ runner.arch }}-vcpkg-occt-2026.06.01-${{ hashFiles('infra/scripts/ensure-linux-vcpkg-occt.sh') }}
 
       - name: Ensure pinned Linux OpenCASCADE (vcpkg)
         if: runner.os == 'Linux'
@@ -221,14 +104,6 @@ jobs:
 
       - name: Check (Unix)
         run: cargo check --all-targets --all-features
-
-      - name: Reclaim macOS linker space before tests
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo clean
-
       - name: Test (Linux)
         if: runner.os == 'Linux'
         env:
@@ -935,17 +810,17 @@ jobs:
       matrix:
         platform:
           - release_for: windows-x86_64
-            os: windows-latest-l
+            os: warp-windows-latest-x64-8x
             target: x86_64-pc-windows-msvc
             command: build
             bin: runmat.exe
           - release_for: macos-x86_64
-            os: macOS-latest
+            os: warp-macos-26-arm64-6x
             target: x86_64-apple-darwin
             command: build
             bin: runmat
           - release_for: macos-aarch64
-            os: macOS-latest
+            os: warp-macos-26-arm64-6x
             target: aarch64-apple-darwin
             command: build
             bin: runmat

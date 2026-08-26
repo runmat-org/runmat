@@ -4,7 +4,7 @@ _What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/r
 
 ## [v0.6.2](https://github.com/runmat-org/runmat/compare/v0.6.1...v0.6.2) - August 2026
 
-_August 25, 2026_
+_August 26, 2026_
 
 ### Runtime
 

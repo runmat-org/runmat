@@ -265,21 +265,21 @@ jobs:
         platform:
           
           - release_for: windows-x86_64
-            os: windows-latest-l
+            os: warp-windows-latest-x64-8x
             target: x86_64-pc-windows-msvc
             bin: runmat.exe
             name: runmat-windows-x86_64.zip
             command: build
 
           - release_for: macos-x86_64
-            os: macOS-latest
+            os: warp-macos-26-arm64-12x
             target: x86_64-apple-darwin
             bin: runmat
             name: runmat-darwin-x86_64.tar.gz
             command: build
 
           - release_for: macos-aarch64
-            os: macOS-latest
+            os: warp-macos-26-arm64-12x
             target: aarch64-apple-darwin
             bin: runmat
             name: runmat-darwin-aarch64.tar.gz

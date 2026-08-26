@@ -72,7 +72,7 @@ concurrency:
 
 jobs:
   build-and-publish:
-    runs-on: ubuntu-latest-gpu
+    runs-on: warp-ubuntu-latest-x64-16x
     # Environment-scoped secrets (NPM_TOKEN) require the job to declare the
     # correct environment. Direct dev pushes use Dev; workflow_dispatch and
     # release.yml workflow_call can select Production via release_channel=prod.
