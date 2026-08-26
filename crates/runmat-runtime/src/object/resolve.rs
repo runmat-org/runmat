@@ -271,6 +271,7 @@ pub async fn load_member(
             )
             .await
         }
+        Value::Foreign(reference) => crate::foreign::load_foreign_member(reference, field).await,
         Value::ClassRef(cls) => load_static_member(&cls, &field, caller_function_name),
         base @ (Value::Num(_) | Value::Int(_)) => {
             if !is_possible_graphics_handle_value(&base) {
@@ -525,6 +526,9 @@ where
                 1,
             )
             .await
+        }
+        Value::Foreign(reference) => {
+            crate::foreign::store_foreign_member(reference, field, rhs).await
         }
         Value::Num(0.0) if allow_init => {
             let mut st = StructValue::new();

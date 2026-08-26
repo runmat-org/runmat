@@ -13,6 +13,10 @@ int32_t fixture_sum(const int32_t *values, uint32_t length) {
     return total;
 }
 
+void fixture_increment(int32_t *value) {
+    *value += 1;
+}
+
 fixture_record fixture_make(double value, uint32_t tag) {
     fixture_record result = {value, tag};
     return result;

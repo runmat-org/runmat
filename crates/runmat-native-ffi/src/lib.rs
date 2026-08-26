@@ -21,8 +21,9 @@ pub use loader::{LoadedLibrary, LoadedSymbol, LoaderError};
 
 #[cfg(not(target_family = "wasm"))]
 pub use invoke::{
-    invoke_symbol, invoke_symbol_with_callbacks, CallbackBinding, CallbackDispatch,
-    InvocationError, InvocationResult, InvocationValue,
+    invoke_symbol, invoke_symbol_with_bindings, invoke_symbol_with_callbacks, CallbackBinding,
+    CallbackDispatch, InvocationError, InvocationResult, InvocationValue, NativePointerResource,
+    PointerBinding,
 };
 pub use metadata::{
     artifact_identity, normalize_metadata, validate_metadata, MetadataError, NativeLibraryMetadata,

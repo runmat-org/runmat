@@ -64,6 +64,7 @@ glob = "0.3"
 url = "2.5"
 base64 = "0.22"
 sha2 = "0.10"
+target-lexicon = { workspace = true }
 image = { version = "0.24", default-features = false, features = ["png", "jpeg", "gif", "bmp", "tiff", "webp", "ico"] }
 calamine = { version = "0.35.0", features = ["chrono"] }
 zip = { version = "7.2.0", default-features = false, features = ["deflate"] }
@@ -88,6 +89,7 @@ hdf5 = { package = "hdf5-metno", version = "0.13.0" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 runmat-process-host = { workspace = true }
+runmat-native-ffi = { workspace = true }
 arrow-array = "59.0.0"
 arrow-schema = "59.0.0"
 bytes = "1.12.0"

@@ -4,8 +4,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use runmat_native_ffi::{
-    invoke_symbol, invoke_symbol_with_callbacks, prepare_header, CallbackBinding,
-    HeaderPreparation, InvocationValue, LoadedLibrary,
+    invoke_symbol, invoke_symbol_with_bindings, invoke_symbol_with_callbacks, prepare_header,
+    CallbackBinding, HeaderPreparation, InvocationValue, LoadedLibrary, NativePointerResource,
+    NativeType, PointerBinding,
 };
 use runmat_value::{IntValue, IntegerStorage, StructValue, Tensor, Value};
 
@@ -32,6 +33,56 @@ fn field<'a>(value: &'a Value, name: &str) -> &'a Value {
         panic!("expected structure output");
     };
     value.fields.get(name).expect("field")
+}
+
+#[test]
+fn pointer_resources_keep_a_stable_typed_value_across_calls() {
+    let temporary = tempfile::tempdir().unwrap();
+    let Some(library_path) = compile_fixture(temporary.path()) else {
+        eprintln!("skipping native fixture because the C compiler is unavailable");
+        return;
+    };
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let metadata = prepare_header(&HeaderPreparation {
+        header: root.join("tests/fixtures/interface.h"),
+        library_name: "fixture".into(),
+        library_path: library_path.display().to_string(),
+        target_triple: target_lexicon::HOST.to_string(),
+        clang: "clang".into(),
+        include_directories: Vec::new(),
+        definitions: Vec::new(),
+    })
+    .unwrap();
+    let prototype = metadata.libraries[0]
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "fixture_increment")
+        .unwrap();
+    let NativeType::Pointer { pointee, .. } = &prototype.parameters[0].ty else {
+        panic!("fixture argument must be a pointer");
+    };
+    let pointer = NativePointerResource::new(
+        pointee.as_ref().clone(),
+        &Value::Int(IntValue::I32(40)),
+        &metadata,
+    )
+    .unwrap();
+    let library = LoadedLibrary::open(&library_path).unwrap();
+    for expected in [41, 42] {
+        invoke_symbol_with_bindings(
+            &library,
+            prototype,
+            &[Value::Int(IntValue::I32(0))],
+            &metadata,
+            &[],
+            &[PointerBinding::resource(0, &pointer)],
+        )
+        .unwrap();
+        assert_eq!(
+            pointer.value(&metadata).unwrap(),
+            Value::Int(IntValue::I32(expected))
+        );
+    }
 }
 
 #[test]

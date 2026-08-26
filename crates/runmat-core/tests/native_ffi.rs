@@ -1,0 +1,76 @@
+#![cfg(any(target_os = "macos", target_os = "linux"))]
+
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use runmat_core::RunMatSession;
+use runmat_value::{IntValue, Value};
+
+fn compile_fixture(directory: &Path) -> Option<PathBuf> {
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../runmat-runtime/tests/fixtures/native_ffi/interface.c");
+    let output = directory.join(if cfg!(target_os = "macos") {
+        "libcore_fixture.dylib"
+    } else {
+        "libcore_fixture.so"
+    });
+    let mut command = Command::new("clang");
+    if cfg!(target_os = "macos") {
+        command.arg("-dynamiclib");
+    } else {
+        command.args(["-shared", "-fPIC"]);
+    }
+    let status = command.arg(source).arg("-o").arg(&output).status().ok()?;
+    status.success().then_some(output)
+}
+
+#[test]
+fn legacy_shared_library_calls_use_the_session_foreign_runtime() {
+    if Command::new("clang").arg("--version").output().is_err() {
+        eprintln!("skipping native FFI integration test because clang is unavailable");
+        return;
+    }
+    let temporary = tempfile::tempdir().unwrap();
+    let Some(library_path) = compile_fixture(temporary.path()) else {
+        eprintln!("skipping native FFI integration test because the C compiler is unavailable");
+        return;
+    };
+    let header_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../runmat-runtime/tests/fixtures/native_ffi/interface.h");
+    let source = format!(
+        "loadlibrary('{}', '{}', 'alias', 'core_fixture');\n\
+         total = calllib('core_fixture', 'fixture_add', int32(19), int32(23));\n\
+         clibgen.buildInterface('{}', 'Libraries', '{}', 'InterfaceName', 'modern_fixture');\n\
+         modern_total = clib.modern_fixture.fixture_add(int32(20), int32(22));\n\
+         pointer = libpointer('int32Ptr', int32(40));\n\
+         pointer.Value = int32(50);\n\
+         pointer_type = pointer.DataType;\n\
+         pointer = calllib('core_fixture', 'fixture_increment', pointer);\n\
+         pointer_value = pointer.Value;\n\
+         loaded = libisloaded('core_fixture');\n\
+         pointer_value",
+        library_path.display(),
+        header_path.display(),
+        header_path.display(),
+        library_path.display()
+    );
+    let mut session = RunMatSession::with_options(false, false).unwrap();
+    let result = runmat_core::execute_text_request_for_testing(&mut session, &source).unwrap();
+    assert!(result.error.is_none(), "{:?}", result.error);
+    assert_eq!(result.value, Some(Value::Int(IntValue::I32(51))));
+    assert!(result
+        .workspace
+        .values
+        .iter()
+        .any(|entry| entry.name == "pointer" && entry.class_name.starts_with("pointer:")));
+    assert!(result
+        .workspace
+        .values
+        .iter()
+        .any(|entry| entry.name == "loaded" && entry.class_name == "logical"));
+    assert!(result
+        .workspace
+        .values
+        .iter()
+        .any(|entry| entry.name == "pointer_type" && entry.class_name == "string"));
+}

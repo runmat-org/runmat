@@ -49,6 +49,16 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
         let ports = runtime.service_ports().clone().with_builtin(builtins);
         runtime = runtime.with_service_ports(ports);
     }
+    let foreign = Rc::new(runmat_runtime::foreign::ForeignRuntime::new(
+        runmat_runtime::foreign::ForeignPlatform::Native,
+    ));
+    let native_ffi = runmat_runtime::foreign::NativeFfiAdapter::new(foreign.handles().clone())
+        .map_err(|error| error.to_string())?;
+    foreign
+        .register_adapter(native_ffi)
+        .map_err(|error| error.to_string())?;
+    let ports = runtime.service_ports().clone().with_foreign(foreign);
+    runtime = runtime.with_service_ports(ports);
     let mut mex_guard = crate::mex::install(&runtime);
     let mut entrypoints = BTreeMap::new();
     for function in &assembly.functions {

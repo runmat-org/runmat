@@ -520,6 +520,24 @@ pub async fn try_call_semantic_descriptor(
         return None;
     }
     let name = fallback_policy.resolution_name_for(&identity)?;
+    if matches!(identity, CallableIdentity::ExternalName(_)) {
+        let context = crate::context::legacy::active()?;
+        if let Some(result) = crate::foreign::try_invoke_clibgen(
+            context.clone(),
+            &name,
+            args.clone(),
+            requested_outputs,
+        )
+        .await
+        {
+            return Some(result);
+        }
+        if let Some(result) =
+            crate::foreign::try_invoke_clib(context, &name, args.clone(), requested_outputs).await
+        {
+            return Some(result);
+        }
+    }
     if matches!(identity, CallableIdentity::DynamicName(_))
         && crate::class_registry::get_class(&name).is_some()
     {
