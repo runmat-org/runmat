@@ -12,6 +12,9 @@ pub enum ForeignErrorKind {
     AffinityViolation,
     UnsupportedOnWasm,
     CallbackFailed,
+    InvalidCall,
+    LoadFailed,
+    InvocationFailed,
 }
 
 impl ForeignErrorKind {
@@ -27,6 +30,9 @@ impl ForeignErrorKind {
             Self::AffinityViolation => "RunMat:Foreign:AffinityViolation",
             Self::UnsupportedOnWasm => "RunMat:Foreign:UnsupportedOnWasm",
             Self::CallbackFailed => "RunMat:Foreign:CallbackFailed",
+            Self::InvalidCall => "RunMat:Foreign:InvalidCall",
+            Self::LoadFailed => "RunMat:Foreign:LoadFailed",
+            Self::InvocationFailed => "RunMat:Foreign:InvocationFailed",
         }
     }
 }

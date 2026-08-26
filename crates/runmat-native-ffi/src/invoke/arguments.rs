@@ -8,7 +8,7 @@ use crate::{NativeLibraryMetadata, NativeScalar, NativeType, Parameter, Paramete
 use super::abi::{scalar_size, type_layout};
 use super::InvocationError;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(super) enum ScalarSlot {
     I8(i8),
     U8(u8),
@@ -60,19 +60,22 @@ impl ScalarSlot {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(super) enum PointeeSlot {
     Scalar(ScalarSlot),
-    Array(NumericStorage),
+    Array {
+        storage: NumericStorage,
+        shape: Vec<usize>,
+    },
     Bytes(Vec<u8>),
     Structure(AlignedStorage),
 }
 
 impl PointeeSlot {
-    fn address(&mut self) -> *mut c_void {
+    pub(super) fn address(&mut self) -> *mut c_void {
         match self {
             Self::Scalar(value) => value.address(),
-            Self::Array(storage) => numeric_storage_address(storage),
+            Self::Array { storage, .. } => numeric_storage_address(storage),
             Self::Bytes(bytes) => bytes.as_mut_ptr().cast(),
             Self::Structure(storage) => storage.as_mut_ptr(),
         }
@@ -89,6 +92,7 @@ pub(super) struct PointerSlot {
 pub(super) enum ArgumentSlot {
     Scalar(ScalarSlot),
     Pointer(PointerSlot),
+    BoundPointer(*mut c_void),
     Callback(*mut c_void),
     Structure(AlignedStorage),
 }
@@ -98,13 +102,14 @@ impl ArgumentSlot {
         match self {
             Self::Scalar(value) => value.ffi_arg(),
             Self::Pointer(value) => arg(&value.address),
+            Self::BoundPointer(value) => arg(value),
             Self::Callback(value) => arg(value),
             Self::Structure(value) => value.ffi_arg(),
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(super) struct AlignedStorage {
     words: Vec<u128>,
     len: usize,
@@ -145,13 +150,16 @@ pub(super) fn prepare_arguments(
     values: &[Value],
     metadata: &NativeLibraryMetadata,
     callbacks: &std::collections::BTreeMap<usize, *mut c_void>,
+    pointers: &std::collections::BTreeMap<usize, *mut c_void>,
 ) -> Result<Vec<ArgumentSlot>, InvocationError> {
     parameters
         .iter()
         .zip(values)
         .enumerate()
         .map(|(index, (parameter, value))| {
-            prepare_argument(symbol, index, parameter, value, metadata, callbacks)
+            prepare_argument(
+                symbol, index, parameter, value, metadata, callbacks, pointers,
+            )
         })
         .collect()
 }
@@ -163,7 +171,19 @@ fn prepare_argument(
     value: &Value,
     metadata: &NativeLibraryMetadata,
     callbacks: &std::collections::BTreeMap<usize, *mut c_void>,
+    pointers: &std::collections::BTreeMap<usize, *mut c_void>,
 ) -> Result<ArgumentSlot, InvocationError> {
+    if let Some(pointer) = pointers.get(&index) {
+        if !matches!(parameter.ty, NativeType::Pointer { .. }) {
+            return Err(InvocationError::Argument {
+                symbol: symbol.into(),
+                argument: index + 1,
+                name: parameter.name.clone(),
+                message: "pointer binding points to a non-pointer argument".into(),
+            });
+        }
+        return Ok(ArgumentSlot::BoundPointer(*pointer));
+    }
     let result = match &parameter.ty {
         NativeType::Scalar { scalar } => {
             scalar_from_value(*scalar, value).map(ArgumentSlot::Scalar)
@@ -198,7 +218,7 @@ fn prepare_argument(
     })
 }
 
-fn pointee_from_value(
+pub(super) fn pointee_from_value(
     symbol: &str,
     pointee: &NativeType,
     value: &Value,
@@ -215,7 +235,10 @@ fn pointee_from_value(
                     .into_numeric_storage()
                     .map_err(|message| format!("could not access numeric array: {message}"))?;
                 ensure_storage_matches(*scalar, &storage)?;
-                Ok(PointeeSlot::Array(storage))
+                Ok(PointeeSlot::Array {
+                    storage,
+                    shape: tensor.shape.clone(),
+                })
             } else if matches!(
                 scalar,
                 NativeScalar::Char | NativeScalar::SignedChar | NativeScalar::I8
@@ -552,12 +575,12 @@ pub(super) fn is_output(parameter: &Parameter) -> bool {
     !matches!(parameter.direction, ParameterDirection::Input)
 }
 
-pub(super) fn pointee_value(slot: &PointerSlot, scalar: NativeScalar) -> Result<Value, String> {
-    match &*slot.pointee {
+pub(super) fn pointee_value(slot: &PointeeSlot, scalar: NativeScalar) -> Result<Value, String> {
+    match slot {
         PointeeSlot::Scalar(value) => Ok(scalar_slot_value(scalar, value)),
-        PointeeSlot::Array(storage) => {
-            let shape = vec![1, storage.len()];
-            runmat_value::Tensor::from_numeric_storage(storage.clone(), shape).map(Value::Tensor)
+        PointeeSlot::Array { storage, shape } => {
+            runmat_value::Tensor::from_numeric_storage(storage.clone(), shape.clone())
+                .map(Value::Tensor)
         }
         PointeeSlot::Bytes(bytes) => {
             let end = bytes

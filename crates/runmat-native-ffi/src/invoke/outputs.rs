@@ -108,7 +108,9 @@ pub(super) fn decode_output_parameters(
         .iter()
         .zip(slots)
         .enumerate()
-        .filter(|(_, (parameter, _))| is_output(parameter))
+        .filter(|(_, (parameter, slot))| {
+            is_output(parameter) && !matches!(slot, ArgumentSlot::BoundPointer(_))
+        })
         .map(|(index, (parameter, slot))| {
             let value =
                 decode_output_parameter(symbol, parameter, slot, metadata).map_err(|message| {
@@ -134,13 +136,22 @@ fn decode_output_parameter(
     let ArgumentSlot::Pointer(pointer) = slot else {
         return Err("output argument storage is not a pointer".into());
     };
-    match pointee.as_ref() {
+    decode_pointee(symbol, pointee, &pointer.pointee, metadata)
+}
+
+pub(super) fn decode_pointee(
+    symbol: &str,
+    pointee: &NativeType,
+    storage: &PointeeSlot,
+    metadata: &NativeLibraryMetadata,
+) -> Result<Value, String> {
+    match pointee {
         NativeType::Scalar { scalar }
         | NativeType::Enumeration {
             storage: scalar, ..
-        } => pointee_value(pointer, *scalar),
+        } => pointee_value(storage, *scalar),
         NativeType::Structure { .. } => {
-            let PointeeSlot::Structure(storage) = &*pointer.pointee else {
+            let PointeeSlot::Structure(storage) = storage else {
                 return Err("structured output storage is invalid".into());
             };
             decode_structure(symbol, pointee, storage.bytes(), metadata)

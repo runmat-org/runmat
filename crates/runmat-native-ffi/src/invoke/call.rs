@@ -8,6 +8,7 @@ use super::abi::{calling_convention, ffi_type};
 use super::arguments::prepare_arguments;
 use super::callback::{closure, CallbackBinding, CallbackState};
 use super::outputs::{decode_output_parameters, decode_return, return_slot, ReturnSlot};
+use super::pointer::PointerBinding;
 use super::InvocationError;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -28,7 +29,7 @@ pub fn invoke_symbol(
     arguments: &[Value],
     metadata: &NativeLibraryMetadata,
 ) -> Result<InvocationResult, InvocationError> {
-    invoke_symbol_with_callbacks(library, prototype, arguments, metadata, &[])
+    invoke_symbol_with_bindings(library, prototype, arguments, metadata, &[], &[])
 }
 
 pub fn invoke_symbol_with_callbacks(
@@ -37,6 +38,17 @@ pub fn invoke_symbol_with_callbacks(
     arguments: &[Value],
     metadata: &NativeLibraryMetadata,
     callbacks: &[CallbackBinding<'_>],
+) -> Result<InvocationResult, InvocationError> {
+    invoke_symbol_with_bindings(library, prototype, arguments, metadata, callbacks, &[])
+}
+
+pub fn invoke_symbol_with_bindings(
+    library: &LoadedLibrary,
+    prototype: &SymbolPrototype,
+    arguments: &[Value],
+    metadata: &NativeLibraryMetadata,
+    callbacks: &[CallbackBinding<'_>],
+    pointers: &[PointerBinding<'_>],
 ) -> Result<InvocationResult, InvocationError> {
     if prototype.variadic {
         return Err(InvocationError::Abi {
@@ -120,12 +132,52 @@ pub fn invoke_symbol_with_callbacks(
             (binding.argument_index, code.as_mut_ptr())
         })
         .collect::<BTreeMap<_, _>>();
+    let mut pointer_addresses = BTreeMap::new();
+    for binding in pointers {
+        let parameter = prototype
+            .parameters
+            .get(binding.argument_index)
+            .ok_or_else(|| InvocationError::Argument {
+                symbol: prototype.name.clone(),
+                argument: binding.argument_index + 1,
+                name: "pointer".into(),
+                message: "pointer binding index is out of range".into(),
+            })?;
+        let NativeType::Pointer { pointee, .. } = &parameter.ty else {
+            return Err(InvocationError::Argument {
+                symbol: prototype.name.clone(),
+                argument: binding.argument_index + 1,
+                name: parameter.name.clone(),
+                message: "pointer binding points to a non-pointer argument".into(),
+            });
+        };
+        if pointee.as_ref() != binding.pointee() {
+            return Err(InvocationError::Argument {
+                symbol: prototype.name.clone(),
+                argument: binding.argument_index + 1,
+                name: parameter.name.clone(),
+                message: "pointer resource type does not match the declared pointee".into(),
+            });
+        }
+        if pointer_addresses
+            .insert(binding.argument_index, binding.address())
+            .is_some()
+        {
+            return Err(InvocationError::Argument {
+                symbol: prototype.name.clone(),
+                argument: binding.argument_index + 1,
+                name: parameter.name.clone(),
+                message: "pointer argument has more than one binding".into(),
+            });
+        }
+    }
     let argument_slots = prepare_arguments(
         &prototype.name,
         &prototype.parameters,
         arguments,
         metadata,
         &callback_addresses,
+        &pointer_addresses,
     )?;
     let ffi_arguments = argument_slots
         .iter()
@@ -202,7 +254,10 @@ pub fn invoke_symbol_with_callbacks(
             prototype,
             &argument_slots,
             metadata,
-        )?,
+        )?
+        .into_iter()
+        .filter(|(index, _)| !pointer_addresses.contains_key(index))
+        .collect(),
     })
 }
 use std::collections::BTreeMap;

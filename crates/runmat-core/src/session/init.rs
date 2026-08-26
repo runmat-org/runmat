@@ -30,6 +30,16 @@ impl RunMatSession {
         let placement = std::rc::Rc::new(runmat_accelerate::placement::PlacementSession::default());
         let runtime_services = runmat_runtime::context::RuntimeServicePorts::default()
             .with_placement(placement.clone());
+        #[cfg(not(target_arch = "wasm32"))]
+        let runtime_services = {
+            let foreign_runtime = std::rc::Rc::new(runmat_runtime::foreign::ForeignRuntime::new(
+                runmat_runtime::foreign::ForeignPlatform::Native,
+            ));
+            let adapter =
+                runmat_runtime::foreign::NativeFfiAdapter::new(foreign_runtime.handles().clone())?;
+            foreign_runtime.register_adapter(adapter)?;
+            runtime_services.with_foreign(foreign_runtime)
+        };
         let session = Self {
             verbose,
             stats: ExecutionStats::default(),

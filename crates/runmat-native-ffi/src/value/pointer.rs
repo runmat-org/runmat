@@ -29,7 +29,7 @@ impl NativePointer {
         }
     }
 
-    pub fn address(&self) -> NonNull<c_void> {
+    pub(crate) fn address(&self) -> NonNull<c_void> {
         self.address
     }
 }
