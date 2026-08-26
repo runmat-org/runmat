@@ -1,5 +1,11 @@
 use serde::{Deserialize, Serialize};
 
+#[cfg(not(target_family = "wasm"))]
+mod capture;
+
+#[cfg(not(target_family = "wasm"))]
+pub(crate) use capture::capture_pending_exception;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JavaStackFrame {
     pub class_name: String,
