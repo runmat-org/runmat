@@ -31,14 +31,18 @@ impl RunMatSession {
         let runtime_services = runmat_runtime::context::RuntimeServicePorts::default()
             .with_placement(placement.clone());
         #[cfg(not(target_arch = "wasm32"))]
-        let runtime_services = {
+        let (runtime_services, foreign_runtime, native_ffi_adapter) = {
             let foreign_runtime = std::rc::Rc::new(runmat_runtime::foreign::ForeignRuntime::new(
                 runmat_runtime::foreign::ForeignPlatform::Native,
             ));
             let adapter =
                 runmat_runtime::foreign::NativeFfiAdapter::new(foreign_runtime.handles().clone())?;
-            foreign_runtime.register_adapter(adapter)?;
-            runtime_services.with_foreign(foreign_runtime)
+            foreign_runtime.register_adapter(adapter.clone())?;
+            (
+                runtime_services.with_foreign(foreign_runtime.clone()),
+                foreign_runtime,
+                adapter,
+            )
         };
         let session = Self {
             verbose,
@@ -53,6 +57,10 @@ impl RunMatSession {
             dynamic_function_cache: Arc::new(Mutex::new(HashMap::new())),
             #[cfg(not(target_arch = "wasm32"))]
             mex_runtime: std::rc::Rc::new(runmat_runtime::foreign::MexRuntimeSession::new()),
+            #[cfg(not(target_arch = "wasm32"))]
+            foreign_runtime,
+            #[cfg(not(target_arch = "wasm32"))]
+            native_ffi_adapter,
             #[cfg(not(target_arch = "wasm32"))]
             generic_native_cache: crate::generic_native::GenericNativeCache::default(),
             #[cfg(not(target_arch = "wasm32"))]

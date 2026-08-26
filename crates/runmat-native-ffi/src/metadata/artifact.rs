@@ -15,6 +15,9 @@ use super::{normalize_metadata, validate_metadata, MetadataError, NativeLibraryM
 pub const NATIVE_FFI_ARTIFACT_SCHEMA_VERSION: u16 = 1;
 pub const NATIVE_FFI_ADAPTER_ID: &str = "native-ffi";
 pub const NATIVE_FFI_ADAPTER_VERSION: u32 = 1;
+pub const NATIVE_INTERFACE_MANIFEST_MEDIA_TYPE: &str =
+    "application/vnd.runmat.native-interface+json";
+pub const NATIVE_LIBRARY_MEDIA_TYPE: &str = "application/vnd.runmat.native-library";
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]

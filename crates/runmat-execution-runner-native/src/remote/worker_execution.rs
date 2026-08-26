@@ -79,13 +79,8 @@ pub(super) async fn execute(
         .unwrap_or_else(|error| failure(&error.to_string()));
     }
     drop(progress_sender);
-    crate::execute_host_program_request_with_project(
-        program,
-        project
-            .as_deref()
-            .map(crate::materialized_project::MaterializedProject::handoff),
-    )
-    .await
+    crate::test_workload::execute_host_program_request_with_project(program, project.as_deref())
+        .await
 }
 
 pub(super) fn report(response: ProgramExecutionResponse) -> AttemptReport {

@@ -13,7 +13,8 @@ use crate::model::{
 pub use artifact::{
     artifact_identity, NativeInterfaceArtifactError, NativeInterfaceArtifactIdentity,
     NativeInterfaceArtifactManifest, NATIVE_FFI_ADAPTER_ID, NATIVE_FFI_ADAPTER_VERSION,
-    NATIVE_FFI_ARTIFACT_SCHEMA_VERSION,
+    NATIVE_FFI_ARTIFACT_SCHEMA_VERSION, NATIVE_INTERFACE_MANIFEST_MEDIA_TYPE,
+    NATIVE_LIBRARY_MEDIA_TYPE,
 };
 #[cfg(not(target_family = "wasm"))]
 pub use frontend::{prepare_header, HeaderPreparation, HeaderPreparationError};

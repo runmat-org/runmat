@@ -16,6 +16,34 @@ impl RunMatSession {
             .set_dynamic_eval_enabled(self.dynamic_eval_enabled);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn install_native_interface_artifact(
+        &self,
+        library_path: &std::path::Path,
+        manifest_path: &std::path::Path,
+    ) -> Result<String, RuntimeError> {
+        self.native_ffi_adapter
+            .install_prepared_artifact(library_path, manifest_path)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn admit_interop_manifest(
+        &self,
+        manifest: &runmat_types::InteropManifest,
+    ) -> Result<runmat_runtime::foreign::InteropAdmissionPlan, RuntimeError> {
+        self.foreign_runtime.admit(manifest)
+    }
+
+    pub fn execution_runtime_context(
+        &self,
+        revision: runmat_execution::ProgramRevision,
+    ) -> runmat_runtime::context::RuntimeContext {
+        self.configure_runtime_context();
+        self.runtime_context
+            .clone()
+            .with_program_revision(Some(revision))
+    }
+
     /// Replace the root execution service used by this session and every
     /// nested invocation compiled from it.
     pub fn install_execution_services(

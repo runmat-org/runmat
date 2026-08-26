@@ -33,5 +33,5 @@ pub use remote::{
     RemoteWorkerChannelConfig, RemoteWorkerRelayRequest,
 };
 pub use service::NativeExecutionService;
-pub use test_workload::{execute_host_program_request, execute_host_program_request_with_project};
+pub use test_workload::execute_host_program_request;
 pub use worker::run_worker_stdio;

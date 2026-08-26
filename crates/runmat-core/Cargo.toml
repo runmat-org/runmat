@@ -68,4 +68,5 @@ tempfile = "3"
 runmat-execution-artifact = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+runmat-native-ffi = { workspace = true }
 runmat-runtime = { workspace = true, features = ["interaction-test-hooks", "plot-core"] }
