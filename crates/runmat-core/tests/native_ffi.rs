@@ -82,4 +82,10 @@ fn legacy_shared_library_calls_use_the_session_foreign_runtime() {
         .values
         .iter()
         .any(|entry| entry.name == "pointer_type" && entry.class_name == "string"));
+    assert!(library_path
+        .with_extension(format!(
+            "{}.runmat.json",
+            library_path.extension().unwrap().to_string_lossy()
+        ))
+        .is_file());
 }

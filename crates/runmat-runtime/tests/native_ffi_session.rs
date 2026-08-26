@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::rc::Rc;
 
+use runmat_native_ffi::NativeInterfaceArtifactManifest;
 use runmat_runtime::context::{ForeignCall, RuntimeContext, RuntimeServicePorts};
 use runmat_runtime::execution::RuntimeExecutionService;
 use runmat_runtime::foreign::{
@@ -85,6 +86,62 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
     )
     .unwrap();
     assert_eq!(alias, Value::String("session_fixture".into()));
+
+    let prepared_alias = invoke(
+        &context,
+        "build_interface",
+        vec![
+            Value::String(header_path.display().to_string()),
+            Value::String("Libraries".into()),
+            Value::String(library_path.display().to_string()),
+            Value::String("InterfaceName".into()),
+            Value::String("prepared_fixture".into()),
+        ],
+        1,
+    )
+    .expect("prepared interface");
+    assert_eq!(prepared_alias, Value::String("prepared_fixture".into()));
+    let manifest_path = NativeInterfaceArtifactManifest::path_for_library(&library_path);
+    let manifest = NativeInterfaceArtifactManifest::read(&manifest_path).expect("manifest");
+    manifest
+        .validate_current_library(&std::fs::read(&library_path).unwrap())
+        .expect("exact prepared library");
+    invoke(
+        &context,
+        "unload",
+        vec![Value::String("prepared_fixture".into())],
+        1,
+    )
+    .unwrap();
+    assert_eq!(
+        invoke(
+            &context,
+            "load_prepared",
+            vec![
+                Value::String(library_path.display().to_string()),
+                Value::String(manifest_path.display().to_string()),
+                Value::String("restored_fixture".into()),
+            ],
+            1,
+        )
+        .expect("load prepared interface"),
+        Value::String("restored_fixture".into())
+    );
+    assert_eq!(
+        invoke(
+            &context,
+            "call",
+            vec![
+                Value::String("restored_fixture".into()),
+                Value::String("fixture_add".into()),
+                Value::Int(IntValue::I32(20)),
+                Value::Int(IntValue::I32(22)),
+            ],
+            1,
+        )
+        .unwrap(),
+        Value::Int(IntValue::I32(42))
+    );
     assert_eq!(
         invoke(
             &context,
@@ -290,6 +347,13 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
         &context,
         "unload",
         vec![Value::String("session_fixture".into())],
+        1,
+    )
+    .unwrap();
+    invoke(
+        &context,
+        "unload",
+        vec![Value::String("restored_fixture".into())],
         1,
     )
     .unwrap();

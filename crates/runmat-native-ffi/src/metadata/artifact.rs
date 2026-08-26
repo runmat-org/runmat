@@ -60,6 +60,18 @@ pub enum NativeInterfaceArtifactError {
     Metadata(#[from] MetadataError),
     #[error("could not encode native-interface artifact: {0}")]
     Encoding(#[from] serde_json::Error),
+    #[error("could not read native-interface artifact {path}: {source}")]
+    Read {
+        path: std::path::PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("could not write native-interface artifact {path}: {source}")]
+    Write {
+        path: std::path::PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("invalid native-interface artifact: {0}")]
     Invalid(String),
 }
@@ -104,6 +116,57 @@ impl NativeInterfaceArtifactManifest {
         };
         manifest.validate_library(library)?;
         Ok(manifest)
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    pub fn from_library_path(
+        interface_name: impl Into<String>,
+        metadata: NativeLibraryMetadata,
+        library_path: &Path,
+    ) -> Result<Self, NativeInterfaceArtifactError> {
+        let library =
+            std::fs::read(library_path).map_err(|source| NativeInterfaceArtifactError::Read {
+                path: library_path.to_path_buf(),
+                source,
+            })?;
+        Self::from_library(interface_name, metadata, &library)
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    pub fn read(path: &Path) -> Result<Self, NativeInterfaceArtifactError> {
+        let bytes = std::fs::read(path).map_err(|source| NativeInterfaceArtifactError::Read {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        Self::from_canonical_bytes(&bytes)
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    pub fn publish(&self, path: &Path) -> Result<(), NativeInterfaceArtifactError> {
+        use std::io::Write as _;
+
+        let bytes = self.canonical_bytes()?;
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(|source| {
+            NativeInterfaceArtifactError::Write {
+                path: path.to_path_buf(),
+                source,
+            }
+        })?;
+        temporary
+            .write_all(&bytes)
+            .and_then(|_| temporary.as_file_mut().sync_all())
+            .map_err(|source| NativeInterfaceArtifactError::Write {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        temporary
+            .persist(path)
+            .map_err(|error| NativeInterfaceArtifactError::Write {
+                path: path.to_path_buf(),
+                source: error.error,
+            })?;
+        Ok(())
     }
 
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, NativeInterfaceArtifactError> {

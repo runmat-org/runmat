@@ -145,6 +145,14 @@ fn prepared_artifact_identity_binds_content_not_physical_location() {
     assert!(first.validate_library(b"changed library bytes").is_err());
     first.interop_manifest().validate().unwrap();
 
+    let directory = tempfile::tempdir().unwrap();
+    let manifest_path = directory.path().join("fixture.runmat.json");
+    first.publish(&manifest_path).unwrap();
+    assert_eq!(
+        NativeInterfaceArtifactManifest::read(&manifest_path).unwrap(),
+        first
+    );
+
     let materialized = first
         .materialized_metadata(std::path::Path::new("/materialized/libfixture.so"))
         .unwrap();
