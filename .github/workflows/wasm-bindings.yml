@@ -106,6 +106,22 @@ jobs:
           install-chromedriver: true
           install-dependencies: true
 
+      - name: Configure Chrome for WebDriver tests
+        shell: bash
+        env:
+          RUNMAT_CHROME_BIN: ${{ steps.setup_chrome.outputs.chrome-path }}
+        run: |
+          set -euo pipefail
+          config_path="${RUNNER_TEMP}/runmat-webdriver.json"
+          node -e '
+            const fs = require("node:fs");
+            const [binary, output] = process.argv.slice(1);
+            fs.writeFileSync(output, JSON.stringify({
+              "goog:chromeOptions": { binary }
+            }));
+          ' "${RUNMAT_CHROME_BIN}" "${config_path}"
+          echo "WASM_BINDGEN_TEST_WEBDRIVER_JSON=${config_path}" >> "${GITHUB_ENV}"
+
       - name: Install npm dependencies
         working-directory: bindings/ts
         run: npm ci

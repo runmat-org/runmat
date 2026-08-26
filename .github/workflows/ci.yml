@@ -18,6 +18,7 @@ concurrency:
 
 jobs:
   build-and-test:
+    name: ${{ matrix.name }}
     # Run on pushes for all branches, and only on PRs from forks to avoid double CI on same-repo PRs
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)
     strategy:
@@ -26,9 +27,14 @@ jobs:
       matrix:
         include:
           - runner: warp-ubuntu-latest-x64-16x
-            name: linux-x86_64
+            name: linux-quality
+            task: quality
+          - runner: warp-ubuntu-latest-x64-16x
+            name: linux-tests
+            task: test
           - runner: warp-macos-26-arm64-12x
-            name: macos-aarch64
+            name: macos-tests
+            task: test
     runs-on: ${{ matrix.runner }}
     env:
       # Enable backtraces on CI to aid debugging of panics/segfaults
@@ -54,6 +60,11 @@ jobs:
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          # The full all-feature target tree is larger than a practical CI
+          # cache. Cache registries and git dependencies while keeping build
+          # artifacts local to each quality/test lane.
+          cache-targets: false
 
       - name: Install Linux native dependencies
         if: runner.os == 'Linux'
@@ -90,22 +101,27 @@ jobs:
           brew install hdf5 zeromq
 
       - name: Format
+        if: matrix.task == 'quality'
         run: cargo fmt -- --check
 
       - name: Validate crate architecture boundaries
+        if: matrix.task == 'quality'
         run: scripts/development/check-architecture-boundaries.sh
 
       - name: Validate public FEA field ids
+        if: matrix.task == 'quality'
         run: python3 scripts/fea/governance/validate_public_field_ids.py
 
       - name: Clippy (Unix)
+        if: matrix.task == 'quality'
         run: cargo clippy --all-targets --all-features -- -D warnings
 
 
       - name: Check (Unix)
+        if: matrix.task == 'quality'
         run: cargo check --all-targets --all-features
       - name: Test (Linux)
-        if: runner.os == 'Linux'
+        if: matrix.task == 'test' && runner.os == 'Linux'
         env:
           RUST_BACKTRACE: 1
           RUST_TEST_THREADS: 1
@@ -117,7 +133,7 @@ jobs:
           cargo test --all-targets --all-features 2>&1 | tee test.log
 
       - name: Test (macOS)
-        if: runner.os == 'macOS'
+        if: matrix.task == 'test' && runner.os == 'macOS'
         env:
           RUST_BACKTRACE: 1
           RUST_TEST_THREADS: 1
