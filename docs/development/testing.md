@@ -125,11 +125,9 @@ The `runmat-mex` suite includes source fixtures maintained in this repository an
 | Project | Revision | License file | Executed gateways |
 | --- | --- | --- | --- |
 | FieldTrip | `2e14f7291090b19568827799096daec7dfb99de8` | `COPYING` | `src/det2x2.c`, `src/getpid.c` |
-| hctsa | `f89569f78a2889a410ba9c0100f780120a3d750a` | `LICENSE.txt` | `Toolboxes/Physionet/sampen_mex.c`, `Toolboxes/gpml/util/minfunc/mex/lbfgsAddC.c` |
 
 ```bash
 RUNMAT_MEX_FIELDTRIP_CHECKOUT=/path/to/fieldtrip \
-RUNMAT_MEX_HCTSA_CHECKOUT=/path/to/hctsa \
 cargo test -p runmat-mex --test repository_cohorts -- --ignored
 ```
 
