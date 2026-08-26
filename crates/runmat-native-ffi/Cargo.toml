@@ -20,6 +20,6 @@ target-lexicon = { workspace = true }
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 libffi = "=5.2.0"
 libloading = "0.8.9"
+tempfile = "3.12"
 
 [dev-dependencies]
-tempfile = "3.12"

@@ -7,9 +7,11 @@ use std::sync::{Arc, Mutex};
 
 use runmat_native_ffi::{
     artifact_identity, invoke_symbol_with_bindings, prepare_header, CallbackBinding,
-    HeaderPreparation, InvocationValue, NativeLibraryMetadata, NativePointerResource, NativeType,
-    PointerBinding, PointerOwnership, NATIVE_FFI_METADATA_SCHEMA_VERSION,
+    HeaderPreparation, InvocationValue, NativeInterfaceArtifactManifest, NativeLibraryMetadata,
+    NativePointerResource, NativeType, PointerBinding, PointerOwnership,
+    NATIVE_FFI_METADATA_SCHEMA_VERSION,
 };
+pub use runmat_native_ffi::{NATIVE_FFI_ADAPTER_ID, NATIVE_FFI_ADAPTER_VERSION};
 use runmat_types::{
     CapabilityRequirement, ForeignAffinity, ForeignCapability, ForeignLifetime, ForeignOwnership,
     ForeignTypeIdentity,
@@ -27,9 +29,6 @@ use super::request::{
 use super::session::{LibraryEntry, NativeFfiSessionState, PointerEntry};
 use crate::context::{ForeignCall, RuntimeContext};
 use crate::RuntimeError;
-
-pub const NATIVE_FFI_ADAPTER_ID: &str = "native-ffi";
-pub const NATIVE_FFI_ADAPTER_VERSION: u32 = 1;
 
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 
@@ -121,14 +120,7 @@ impl NativeFfiAdapter {
             .enumerate()
             .map(|(index, _)| string_argument(arguments, index + 3, "load").map(PathBuf::from))
             .collect::<Result<Vec<_>, _>>()?;
-        if alias.trim().is_empty() {
-            return Err(invalid_call("native library alias must not be empty"));
-        }
-        if self.state.borrow().libraries.contains_key(&alias) {
-            return Err(invalid_call(format!(
-                "native library alias `{alias}` is already loaded"
-            )));
-        }
+        self.validate_available_alias(&alias)?;
         let metadata = prepare_header(&HeaderPreparation {
             header: PathBuf::from(header_path),
             library_name: alias.clone(),
@@ -141,17 +133,82 @@ impl NativeFfiAdapter {
         .map_err(|error| foreign_error(ForeignErrorKind::LoadFailed, error.to_string()))?;
         let identity = artifact_identity(&metadata)
             .map_err(|error| foreign_error(ForeignErrorKind::LoadFailed, error.to_string()))?;
-        let library = runmat_native_ffi::LoadedLibrary::open(&library_path)
+        self.insert_library(&alias, &library_path, metadata, identity)?;
+        Ok(Value::String(alias))
+    }
+
+    fn load_prepared(&self, arguments: &[Value]) -> Result<Value, RuntimeError> {
+        if !(2..=3).contains(&arguments.len()) {
+            return Err(invalid_call(
+                "prepared native FFI load expects a library path, manifest path, and optional alias",
+            ));
+        }
+        let library_path = PathBuf::from(string_argument(arguments, 0, "load_prepared")?);
+        let manifest_path = PathBuf::from(string_argument(arguments, 1, "load_prepared")?);
+        let manifest = NativeInterfaceArtifactManifest::read(&manifest_path)
+            .map_err(|error| foreign_error(ForeignErrorKind::LoadFailed, error.to_string()))?;
+        let alias = optional_string_argument(arguments, 2, "load_prepared")?
+            .unwrap_or_else(|| manifest.interface_name.clone());
+        self.load_prepared_manifest(&alias, &library_path, manifest)
+    }
+
+    fn load_prepared_manifest(
+        &self,
+        alias: &str,
+        library_path: &std::path::Path,
+        manifest: NativeInterfaceArtifactManifest,
+    ) -> Result<Value, RuntimeError> {
+        self.validate_available_alias(alias)?;
+        let library_bytes = std::fs::read(library_path).map_err(|error| {
+            foreign_error(
+                ForeignErrorKind::LoadFailed,
+                format!(
+                    "could not read native library {}: {error}",
+                    library_path.display()
+                ),
+            )
+        })?;
+        manifest
+            .validate_current_library(&library_bytes)
+            .map_err(|error| foreign_error(ForeignErrorKind::LoadFailed, error.to_string()))?;
+        let metadata = manifest
+            .materialized_metadata(library_path)
+            .map_err(|error| foreign_error(ForeignErrorKind::LoadFailed, error.to_string()))?;
+        let identity = manifest.identity.to_string();
+        self.insert_library(alias, library_path, metadata, identity)?;
+        Ok(Value::String(alias.into()))
+    }
+
+    fn validate_available_alias(&self, alias: &str) -> Result<(), RuntimeError> {
+        if alias.trim().is_empty() {
+            return Err(invalid_call("native library alias must not be empty"));
+        }
+        if self.state.borrow().libraries.contains_key(alias) {
+            return Err(invalid_call(format!(
+                "native library alias `{alias}` is already loaded"
+            )));
+        }
+        Ok(())
+    }
+
+    fn insert_library(
+        &self,
+        alias: &str,
+        library_path: impl AsRef<std::path::Path>,
+        metadata: NativeLibraryMetadata,
+        artifact_identity: String,
+    ) -> Result<(), RuntimeError> {
+        let library = runmat_native_ffi::LoadedLibrary::open(library_path.as_ref())
             .map_err(|error| foreign_error(ForeignErrorKind::LoadFailed, error.to_string()))?;
         self.state.borrow_mut().libraries.insert(
-            alias.clone(),
+            alias.into(),
             LibraryEntry {
                 library: Rc::new(library),
                 metadata: Rc::new(metadata),
-                artifact_identity: identity,
+                artifact_identity,
             },
         );
-        Ok(Value::String(alias))
+        Ok(())
     }
 
     fn unload(&self, arguments: &[Value]) -> Result<Value, RuntimeError> {
@@ -681,7 +738,7 @@ impl NativeFfiAdapter {
                     })?);
                 }
                 "includepath" | "includedirectories" => {
-                    includes.push(Value::String(String::try_from(&pair[1]).map_err(|_| {
+                    includes.push(PathBuf::from(String::try_from(&pair[1]).map_err(|_| {
                         invalid_call("buildInterface include path must be text")
                     })?));
                 }
@@ -696,14 +753,29 @@ impl NativeFfiAdapter {
             invalid_call("buildInterface requires the Libraries option for a native interface")
         })?;
         let alias = alias.map(Ok).unwrap_or_else(|| default_alias(&header))?;
-        let mut load_arguments = vec![
-            Value::String(library),
-            Value::String(header),
-            Value::String(alias.clone()),
-        ];
-        load_arguments.extend(includes);
-        self.load(&load_arguments)?;
-        Ok(Value::String(alias))
+        self.validate_available_alias(&alias)?;
+        let library_path = PathBuf::from(&library);
+        let metadata = prepare_header(&HeaderPreparation {
+            header: PathBuf::from(header),
+            library_name: alias.clone(),
+            library_path: library.clone(),
+            target_triple: target_lexicon::HOST.to_string(),
+            clang: "clang".into(),
+            include_directories: includes,
+            definitions: Vec::new(),
+        })
+        .map_err(|error| foreign_error(ForeignErrorKind::LoadFailed, error.to_string()))?;
+        let manifest = NativeInterfaceArtifactManifest::from_library_path(
+            alias.clone(),
+            metadata,
+            &library_path,
+        )
+        .map_err(|error| foreign_error(ForeignErrorKind::LoadFailed, error.to_string()))?;
+        let manifest_path = NativeInterfaceArtifactManifest::path_for_library(&library_path);
+        manifest
+            .publish(&manifest_path)
+            .map_err(|error| foreign_error(ForeignErrorKind::LoadFailed, error.to_string()))?;
+        self.load_prepared_manifest(&alias, &library_path, manifest)
     }
 
     fn invoke_operation(
@@ -714,6 +786,7 @@ impl NativeFfiAdapter {
         self.reap_released();
         match call.symbol.as_str() {
             "load" => self.load(&call.arguments),
+            "load_prepared" => self.load_prepared(&call.arguments),
             "unload" => self.unload(&call.arguments),
             "is_loaded" => self.is_loaded(&call.arguments),
             "functions" => self.functions(&call.arguments),
