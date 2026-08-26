@@ -9,7 +9,7 @@ use crate::{
 
 use super::CompilationPolicy;
 
-pub const PROGRAM_LINK_PLAN_SCHEMA_VERSION: u16 = 2;
+pub const PROGRAM_LINK_PLAN_SCHEMA_VERSION: u16 = 3;
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -31,6 +31,7 @@ pub struct ProgramLinkPlan {
     pub runtime_capabilities: RuntimeArchiveCapabilities,
     pub reachability: ReachabilityReport,
     pub retained_builtin_bindings: Vec<runmat_native_codegen::aot::AotBuiltinBinding>,
+    pub interop: runmat_types::InteropManifest,
     pub retained_runtime_families: Vec<RuntimeFamilyRetention>,
     pub omitted_runtime_families: Vec<String>,
 }
@@ -50,6 +51,26 @@ pub fn build_program_link_plan(
     runtime: &RuntimeArchive,
     policy: CompilationPolicy,
 ) -> AotResult<ProgramLinkPlan> {
+    build_program_link_plan_with_interop(
+        unit,
+        runtime,
+        policy,
+        runmat_types::InteropManifest::empty(),
+    )
+}
+
+pub fn build_program_link_plan_with_interop(
+    unit: &runmat_core::ExecutableUnit,
+    runtime: &RuntimeArchive,
+    policy: CompilationPolicy,
+    interop: runmat_types::InteropManifest,
+) -> AotResult<ProgramLinkPlan> {
+    interop.validate().map_err(|error| {
+        AotError::contract(
+            "aot.compile.interop",
+            format!("{}: {}", error.path, error.message),
+        )
+    })?;
     runtime.manifest.validate()?;
     policy.validate(&runtime.manifest.capabilities)?;
     runtime
@@ -80,6 +101,7 @@ pub fn build_program_link_plan(
         runtime_capabilities: runtime.manifest.capabilities.clone(),
         reachability,
         retained_builtin_bindings,
+        interop,
         retained_runtime_families,
         omitted_runtime_families,
     })

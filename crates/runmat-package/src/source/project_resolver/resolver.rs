@@ -1,7 +1,9 @@
 use super::loader::{Loader, PackageOrigin};
 use super::source::{canonical_path, is_file};
 use super::{PackageSourceProvider, ProjectResolveError, ProjectResolveOptions, ResolvedProject};
-use crate::source::catalog::{assemble_frozen_project, FrozenPackageInput, FrozenSourceInput};
+use crate::source::catalog::{
+    assemble_frozen_project, FrozenNativeInterfaceInput, FrozenPackageInput, FrozenSourceInput,
+};
 use crate::{
     build_resolved_graph, reconcile_path_lock, PackageLock, PathLockMode, ResolvedDependencyInput,
     ResolvedGraphInput, ResolvedPackageInput,
@@ -112,6 +114,17 @@ pub async fn resolve_project_async(
                 .map(|source| FrozenSourceInput {
                     descriptor: source.descriptor,
                     bytes: source.bytes,
+                })
+                .collect(),
+            native_interfaces: package
+                .native_interfaces
+                .into_iter()
+                .map(|interface| FrozenNativeInterfaceInput {
+                    name: interface.name,
+                    manifest_path: interface.manifest_path,
+                    manifest_bytes: interface.manifest_bytes,
+                    library_path: interface.library_path,
+                    library_bytes: interface.library_bytes,
                 })
                 .collect(),
         })

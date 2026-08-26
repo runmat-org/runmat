@@ -152,7 +152,10 @@ impl TryFrom<&runmat_config::project::ProjectManifest> for PackageManifest {
                 ))
             })
             .collect::<Result<_, _>>()?;
-        let required_capabilities = parse_capabilities(&manifest.capabilities.required)?;
+        let mut required_capabilities = parse_capabilities(&manifest.capabilities.required)?;
+        if !manifest.native_interfaces.is_empty() {
+            required_capabilities.insert(HostCapability::NativeLibrary);
+        }
         let optional_capabilities = parse_capabilities(&manifest.capabilities.optional)?;
         let registries = manifest
             .registries

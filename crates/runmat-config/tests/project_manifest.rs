@@ -45,6 +45,64 @@ path = "src/main"
 }
 
 #[test]
+fn validates_explicit_native_interface_artifacts() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::create_dir_all(tmp.path().join("native")).unwrap();
+    fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
+    fs::write(tmp.path().join("native/fixture.json"), "{}").unwrap();
+    fs::write(tmp.path().join("native/fixture.bin"), b"library").unwrap();
+    let manifest_path = write_manifest(
+        tmp.path(),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[native-interfaces.fixture]
+manifest = "native/fixture.json"
+library = "native/fixture.bin"
+"#,
+    );
+
+    let loaded = load_project_manifest(&manifest_path).expect("native interface should validate");
+    let interface = loaded.native_interfaces.get("fixture").unwrap();
+    assert_eq!(
+        interface.manifest,
+        std::path::Path::new("native/fixture.json")
+    );
+    assert_eq!(
+        interface.library,
+        std::path::Path::new("native/fixture.bin")
+    );
+}
+
+#[test]
+fn rejects_native_interface_paths_outside_the_package() {
+    let parsed = parse_project_manifest_toml(
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[native-interfaces.fixture]
+manifest = "../fixture.json"
+library = "/tmp/fixture.bin"
+"#,
+    )
+    .unwrap();
+    let error = parsed.validate(std::path::Path::new(".")).unwrap_err();
+    assert!(error
+        .messages
+        .iter()
+        .any(|message| message.contains("must be project-relative")));
+}
+
+#[test]
 fn parses_manifest_with_runtime_section() {
     let parsed = parse_project_manifest_toml(
         r#"

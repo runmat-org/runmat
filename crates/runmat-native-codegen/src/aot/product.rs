@@ -11,6 +11,7 @@ pub const AOT_RUNTIME_MAIN_SYMBOL: &str = "runmat_aot_main";
 pub const AOT_NATIVE_IR_SYMBOL: &str = "runmat_aot_native_ir";
 pub const AOT_PROGRAM_SYMBOL: &str = "runmat_aot_program";
 pub const AOT_RESUME_POINTS_SYMBOL: &str = "runmat_aot_resume_points";
+pub const AOT_NATIVE_INTERFACES_SYMBOL: &str = "runmat_aot_native_interfaces";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]

@@ -1,4 +1,4 @@
-use super::model::{LoadedPathPackage, LoadedPathProject, LoadedSource};
+use super::model::{LoadedNativeInterface, LoadedPathPackage, LoadedPathProject, LoadedSource};
 use super::FrozenProjectError;
 use runmat_config::project::{
     build_project_source_index_async, load_project_manifest_async, ProjectManifest,
@@ -90,6 +90,20 @@ impl PathProjectLoader {
                     })?;
                 sources.push(LoadedSource { descriptor, bytes });
             }
+            let mut native_interfaces = Vec::with_capacity(manifest.native_interfaces.len());
+            for (name, interface) in &manifest.native_interfaces {
+                let manifest_path = project_root.join(&interface.manifest);
+                let manifest_bytes = read_native_interface(&manifest_path).await?;
+                let library_path = project_root.join(&interface.library);
+                let library_bytes = read_native_interface(&library_path).await?;
+                native_interfaces.push(LoadedNativeInterface {
+                    name: name.clone(),
+                    manifest_path,
+                    manifest_bytes,
+                    library_path,
+                    library_bytes,
+                });
+            }
 
             active.push((manifest_path.clone(), package_name.clone()));
             let mut dependencies = BTreeMap::new();
@@ -130,12 +144,23 @@ impl PathProjectLoader {
                     project_root,
                     manifest,
                     sources,
+                    native_interfaces,
                     dependencies,
                 },
             );
             Ok(manifest_path)
         })
     }
+}
+
+async fn read_native_interface(path: &Path) -> Result<Vec<u8>, FrozenProjectError> {
+    runmat_filesystem::read_async(path).await.map_err(|error| {
+        super::PathProjectError::ReadNativeInterface {
+            path: path.to_path_buf(),
+            reason: error.to_string(),
+        }
+        .into()
+    })
 }
 
 async fn load_manifest(

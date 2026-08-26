@@ -28,6 +28,7 @@ pub struct ProjectManifest {
     pub source_replacements: BTreeMap<String, ProjectSourceReplacement>,
     pub publish: Option<ProjectPublication>,
     pub entrypoints: Vec<ProjectEntrypoint>,
+    pub native_interfaces: BTreeMap<String, ProjectNativeInterface>,
     pub test: ProjectTestConfig,
 }
 
@@ -63,6 +64,13 @@ pub struct ProjectEntrypoint {
     pub function: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectNativeInterface {
+    pub manifest: PathBuf,
+    pub library: PathBuf,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawProjectManifest {
@@ -88,6 +96,8 @@ struct RawProjectManifest {
     publish: Option<ProjectPublication>,
     #[serde(default)]
     entrypoints: BTreeMap<String, RawProjectEntrypoint>,
+    #[serde(default, rename = "native-interfaces")]
+    native_interfaces: BTreeMap<String, ProjectNativeInterface>,
     #[serde(default, rename = "runtime")]
     _runtime: Option<IgnoredAny>,
     #[serde(default)]
@@ -132,6 +142,7 @@ impl From<RawProjectManifest> for ProjectManifest {
             source_replacements: value.source_replacements,
             publish: value.publish,
             entrypoints,
+            native_interfaces: value.native_interfaces,
             test: value.test,
         }
     }
@@ -170,6 +181,8 @@ impl Serialize for ProjectManifest {
             #[serde(skip_serializing_if = "Option::is_none")]
             publish: &'a Option<ProjectPublication>,
             entrypoints: BTreeMap<&'a str, CanonicalEntrypoint<'a>>,
+            #[serde(rename = "native-interfaces")]
+            native_interfaces: &'a BTreeMap<String, ProjectNativeInterface>,
             #[serde(skip_serializing_if = "ProjectTestConfig::is_default")]
             test: &'a ProjectTestConfig,
         }
@@ -211,6 +224,7 @@ impl Serialize for ProjectManifest {
             source_replacements: &self.source_replacements,
             publish: &self.publish,
             entrypoints,
+            native_interfaces: &self.native_interfaces,
             test: &self.test,
         }
         .serialize(serializer)
@@ -269,6 +283,10 @@ enum PathRequirement {
     },
     Entrypoint {
         project_root: PathBuf,
+        path: PathBuf,
+        missing_message: String,
+    },
+    File {
         path: PathBuf,
         missing_message: String,
     },
@@ -477,6 +495,31 @@ impl ProjectManifest {
                 }
             }
         }
+        for (name, interface) in &self.native_interfaces {
+            if name.trim().is_empty() {
+                messages.push("native interface names must be non-empty".to_string());
+                continue;
+            }
+            for (kind, path) in [
+                ("manifest", &interface.manifest),
+                ("library", &interface.library),
+            ] {
+                if !is_relative_without_parent(path) {
+                    messages.push(format!(
+                        "native interface `{name}` {kind} path `{}` must be project-relative without `..` segments",
+                        path.display()
+                    ));
+                } else {
+                    path_requirements.push(PathRequirement::File {
+                        path: project_root.join(path),
+                        missing_message: format!(
+                            "native interface `{name}` {kind} path `{}` does not exist as a file under project root",
+                            path.display()
+                        ),
+                    });
+                }
+            }
+        }
         (messages, path_requirements)
     }
 
@@ -494,6 +537,12 @@ impl ProjectManifest {
                     path,
                     missing_message,
                 } if resolve_entrypoint_path(&project_root, &path).is_none() => {
+                    messages.push(missing_message);
+                }
+                PathRequirement::File {
+                    path,
+                    missing_message,
+                } if !path.is_file() => {
                     messages.push(missing_message);
                 }
                 _ => {}
@@ -530,6 +579,12 @@ impl ProjectManifest {
                     .await
                     .is_none() =>
                 {
+                    messages.push(missing_message);
+                }
+                PathRequirement::File {
+                    path,
+                    missing_message,
+                } if !path_is_file_async(&path).await => {
                     messages.push(missing_message);
                 }
                 _ => {}

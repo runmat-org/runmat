@@ -55,8 +55,13 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
     let native_ffi = runmat_runtime::foreign::NativeFfiAdapter::new(foreign.handles().clone())
         .map_err(|error| error.to_string())?;
     foreign
-        .register_adapter(native_ffi)
+        .register_adapter(native_ffi.clone())
         .map_err(|error| error.to_string())?;
+    let _native_interfaces =
+        crate::native_interfaces::install(&input.native_interfaces, &native_ffi)?;
+    foreign
+        .admit(&assembly.requirements.interop)
+        .map_err(|error| format!("standalone interop admission failed: {error}"))?;
     let ports = runtime.service_ports().clone().with_foreign(foreign);
     runtime = runtime.with_service_ports(ports);
     let mut mex_guard = crate::mex::install(&runtime);

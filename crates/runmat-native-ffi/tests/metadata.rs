@@ -1,6 +1,7 @@
 use runmat_native_ffi::{
-    artifact_identity, normalize_metadata, validate_metadata, NativeInterfaceArtifactManifest,
-    NativeLibrary, NativeLibraryMetadata, NativeScalar, NativeType, Parameter, ParameterDirection,
+    artifact_identity, normalize_metadata, validate_metadata, NativeInterfaceArtifactBundle,
+    NativeInterfaceArtifactBundleEntry, NativeInterfaceArtifactManifest, NativeLibrary,
+    NativeLibraryMetadata, NativeScalar, NativeType, Parameter, ParameterDirection,
     PointerOwnership, StructureDefinition, StructureField, SymbolPrototype,
     NATIVE_FFI_METADATA_SCHEMA_VERSION,
 };
@@ -160,4 +161,41 @@ fn prepared_artifact_identity_binds_content_not_physical_location() {
         materialized.libraries[0].path,
         "/materialized/libfixture.so"
     );
+}
+
+#[test]
+fn prepared_artifact_bundle_is_canonical_sorted_and_exact() {
+    assert_eq!(
+        NativeInterfaceArtifactBundle::default(),
+        NativeInterfaceArtifactBundle::empty()
+    );
+    let mut metadata = normalize_metadata(metadata());
+    metadata.target_triple = target_lexicon::HOST.to_string();
+    let first =
+        NativeInterfaceArtifactManifest::from_library("first", metadata.clone(), b"first library")
+            .unwrap();
+    let second =
+        NativeInterfaceArtifactManifest::from_library("second", metadata, b"second library")
+            .unwrap();
+    let bundle = NativeInterfaceArtifactBundle::new(vec![
+        NativeInterfaceArtifactBundleEntry {
+            manifest: second.canonical_bytes().unwrap(),
+            library: b"second library".to_vec(),
+        },
+        NativeInterfaceArtifactBundleEntry {
+            manifest: first.canonical_bytes().unwrap(),
+            library: b"first library".to_vec(),
+        },
+    ])
+    .unwrap();
+    let bytes = bundle.canonical_bytes().unwrap();
+    assert_eq!(
+        NativeInterfaceArtifactBundle::from_canonical_bytes(&bytes).unwrap(),
+        bundle
+    );
+    assert_eq!(bundle.manifests().unwrap().len(), 2);
+
+    let mut changed = bundle;
+    changed.interfaces[0].library.push(0);
+    assert!(changed.canonical_bytes().is_err());
 }

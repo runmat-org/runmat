@@ -135,6 +135,7 @@ impl NativeCompilationInput {
         assembly: &runmat_native_codegen::NativeAssembly,
         runtime_binding_mode: runmat_native_codegen::aot::AotRuntimeBindingMode,
         builtin_bindings: Vec<runmat_native_codegen::aot::AotBuiltinBinding>,
+        native_interfaces: Vec<u8>,
     ) -> Result<
         Vec<runmat_native_codegen::aot::NativeObjectData>,
         runmat_native_codegen::NativeCodegenError,
@@ -169,7 +170,7 @@ impl NativeCompilationInput {
                 format!("failed to encode embedded resume points: {error}"),
             )
         })?;
-        let mut data = Vec::with_capacity(3);
+        let mut data = Vec::with_capacity(4);
         for blob in [
             runmat_native_codegen::aot::embedded_blob(
                 runmat_native_codegen::aot::AOT_NATIVE_IR_SYMBOL,
@@ -184,6 +185,11 @@ impl NativeCompilationInput {
             runmat_native_codegen::aot::embedded_blob(
                 runmat_native_codegen::aot::AOT_RESUME_POINTS_SYMBOL,
                 resume_points,
+                8,
+            )?,
+            runmat_native_codegen::aot::embedded_blob(
+                runmat_native_codegen::aot::AOT_NATIVE_INTERFACES_SYMBOL,
+                native_interfaces,
                 8,
             )?,
         ] {
@@ -204,8 +210,19 @@ impl ExecutableUnit {
         &self,
         preferred_function: Option<&str>,
     ) -> Result<NativeCompilationInput, runmat_runtime::RuntimeError> {
+        self.prepare_native_compilation_for_with_interop(
+            preferred_function,
+            runmat_types::InteropManifest::empty(),
+        )
+    }
+
+    pub fn prepare_native_compilation_for_with_interop(
+        &self,
+        preferred_function: Option<&str>,
+        interop: runmat_types::InteropManifest,
+    ) -> Result<NativeCompilationInput, runmat_runtime::RuntimeError> {
         let envelope = self
-            .portable_envelope_for(preferred_function)
+            .portable_envelope_for_with_interop(preferred_function, interop)
             .map_err(native_product_error)?;
         let program_capture = serde_json::to_vec(self.functions()).map_err(|error| {
             native_product_error(format!("failed to capture native program: {error}"))
@@ -378,6 +395,7 @@ end
                 &assembly,
                 runmat_native_codegen::aot::AotRuntimeBindingMode::Dynamic,
                 Vec::new(),
+                br#"{"schema_version":1,"interfaces":[]}"#.to_vec(),
             )
             .expect("build retained AOT object data");
         let program_bytes = &object_data

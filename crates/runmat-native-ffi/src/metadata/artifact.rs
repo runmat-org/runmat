@@ -15,6 +15,7 @@ use super::{normalize_metadata, validate_metadata, MetadataError, NativeLibraryM
 pub const NATIVE_FFI_ARTIFACT_SCHEMA_VERSION: u16 = 1;
 pub const NATIVE_FFI_ADAPTER_ID: &str = "native-ffi";
 pub const NATIVE_FFI_ADAPTER_VERSION: u32 = 1;
+pub const NATIVE_INTERFACE_BUNDLE_SCHEMA_VERSION: u16 = 1;
 pub const NATIVE_INTERFACE_MANIFEST_MEDIA_TYPE: &str =
     "application/vnd.runmat.native-interface+json";
 pub const NATIVE_LIBRARY_MEDIA_TYPE: &str = "application/vnd.runmat.native-library";
@@ -45,6 +46,26 @@ pub struct NativeInterfaceArtifactManifest {
     pub metadata: NativeLibraryMetadata,
     pub library_digest: String,
     pub library_bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeInterfaceArtifactBundle {
+    pub schema_version: u16,
+    pub interfaces: Vec<NativeInterfaceArtifactBundleEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeInterfaceArtifactBundleEntry {
+    pub manifest: Vec<u8>,
+    pub library: Vec<u8>,
+}
+
+impl Default for NativeInterfaceArtifactBundle {
+    fn default() -> Self {
+        Self::empty()
+    }
 }
 
 #[derive(Serialize)]
@@ -282,6 +303,85 @@ impl NativeInterfaceArtifactManifest {
             return Err(NativeInterfaceArtifactError::Invalid(
                 "artifact identity does not match its content".into(),
             ));
+        }
+        Ok(())
+    }
+}
+
+impl NativeInterfaceArtifactBundle {
+    pub fn empty() -> Self {
+        Self {
+            schema_version: NATIVE_INTERFACE_BUNDLE_SCHEMA_VERSION,
+            interfaces: Vec::new(),
+        }
+    }
+
+    pub fn new(
+        interfaces: Vec<NativeInterfaceArtifactBundleEntry>,
+    ) -> Result<Self, NativeInterfaceArtifactError> {
+        let mut keyed = interfaces
+            .into_iter()
+            .map(|entry| {
+                NativeInterfaceArtifactManifest::from_canonical_bytes(&entry.manifest)
+                    .map(|manifest| (manifest.identity.to_string(), entry))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        keyed.sort_by(|left, right| left.0.cmp(&right.0));
+        let interfaces = keyed.into_iter().map(|(_, entry)| entry).collect();
+        let bundle = Self {
+            schema_version: NATIVE_INTERFACE_BUNDLE_SCHEMA_VERSION,
+            interfaces,
+        };
+        bundle.validate()?;
+        Ok(bundle)
+    }
+
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, NativeInterfaceArtifactError> {
+        let bundle = serde_json::from_slice::<Self>(bytes)?;
+        bundle.validate()?;
+        if bundle.canonical_bytes()? != bytes {
+            return Err(NativeInterfaceArtifactError::Invalid(
+                "native-interface bundle bytes are not canonical".into(),
+            ));
+        }
+        Ok(bundle)
+    }
+
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, NativeInterfaceArtifactError> {
+        self.validate()?;
+        Ok(serde_json::to_vec(self)?)
+    }
+
+    pub fn manifests(
+        &self,
+    ) -> Result<Vec<NativeInterfaceArtifactManifest>, NativeInterfaceArtifactError> {
+        self.interfaces
+            .iter()
+            .map(|entry| NativeInterfaceArtifactManifest::from_canonical_bytes(&entry.manifest))
+            .collect()
+    }
+
+    fn validate(&self) -> Result<(), NativeInterfaceArtifactError> {
+        if self.schema_version != NATIVE_INTERFACE_BUNDLE_SCHEMA_VERSION {
+            return Err(NativeInterfaceArtifactError::Invalid(format!(
+                "unsupported native-interface bundle schema version {}",
+                self.schema_version
+            )));
+        }
+        let mut previous = None;
+        for entry in &self.interfaces {
+            let manifest = NativeInterfaceArtifactManifest::from_canonical_bytes(&entry.manifest)?;
+            manifest.validate_library(&entry.library)?;
+            let identity = manifest.identity.to_string();
+            if previous
+                .as_ref()
+                .is_some_and(|previous| previous >= &identity)
+            {
+                return Err(NativeInterfaceArtifactError::Invalid(
+                    "native-interface bundle entries must be sorted and unique".into(),
+                ));
+            }
+            previous = Some(identity);
         }
         Ok(())
     }

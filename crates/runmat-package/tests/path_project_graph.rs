@@ -120,6 +120,78 @@ fn async_frozen_handoff_matches_native_stable_state() {
 }
 
 #[test]
+fn native_interface_artifacts_are_frozen_across_dependency_packages() {
+    let (temp, manifest) = fixture();
+    let helper = temp.path().join("deps/helper");
+    fs::create_dir_all(helper.join("native")).unwrap();
+    fs::write(helper.join("native/helper.json"), b"manifest").unwrap();
+    fs::write(helper.join("native/helper.bin"), b"library").unwrap();
+    let dependency_manifest = fs::read_to_string(helper.join("runmat.toml")).unwrap();
+    fs::write(
+        helper.join("runmat.toml"),
+        format!(
+            "{dependency_manifest}\n[native-interfaces.helper]\nmanifest = \"native/helper.json\"\nlibrary = \"native/helper.bin\"\n"
+        ),
+    )
+    .unwrap();
+
+    let frozen = build_frozen_project(
+        &manifest,
+        BTreeSet::from([runmat_package::HostCapability::NativeLibrary]),
+    )
+    .unwrap();
+    let [interface] = frozen.native_interfaces.as_slice() else {
+        panic!("expected one dependency-owned native interface");
+    };
+    assert_eq!(interface.name, "helper");
+    assert_eq!(
+        interface.manifest_path,
+        helper.join("native/helper.json").canonicalize().unwrap()
+    );
+    assert_eq!(
+        interface.library_path,
+        helper.join("native/helper.bin").canonicalize().unwrap()
+    );
+    assert_eq!(
+        interface.manifest_digest,
+        runmat_package::ContentDigest::sha256(b"manifest")
+    );
+    assert_eq!(
+        interface.library_digest,
+        runmat_package::ContentDigest::sha256(b"library")
+    );
+}
+
+#[test]
+fn native_interface_packages_require_native_library_capability() {
+    let temp = TempDir::new().unwrap();
+    fs::create_dir_all(temp.path().join("src")).unwrap();
+    fs::create_dir_all(temp.path().join("native")).unwrap();
+    fs::write(temp.path().join("src/main.m"), "x = 1;\n").unwrap();
+    fs::write(temp.path().join("native/interface.json"), b"manifest").unwrap();
+    fs::write(temp.path().join("native/library.bin"), b"library").unwrap();
+    fs::write(
+        temp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "native-package"
+
+[sources]
+roots = ["src"]
+
+[native-interfaces.fixture]
+manifest = "native/interface.json"
+library = "native/library.bin"
+"#,
+    )
+    .unwrap();
+
+    let error = build_frozen_project(&temp.path().join("runmat.toml"), BTreeSet::new())
+        .expect_err("portable host must reject native package");
+    assert!(error.to_string().contains("native-library"));
+}
+
+#[test]
 fn missing_dependency_manifest_is_a_package_loader_error() {
     let temp = TempDir::new().unwrap();
     fs::create_dir_all(temp.path().join("src")).unwrap();

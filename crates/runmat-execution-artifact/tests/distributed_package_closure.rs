@@ -106,6 +106,7 @@ fn every_source_kind_converges_into_one_portable_credential_free_closure() {
             revision: source_revision,
         },
         access_paths,
+        native_interfaces: Vec::new(),
     };
     let handoff = FrozenProjectHandoff::new(project.clone());
     handoff.validate().unwrap();

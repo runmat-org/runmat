@@ -1,6 +1,7 @@
 const MAX_NATIVE_IR_BYTES: usize = 512 * 1024 * 1024;
 const MAX_PROGRAM_BYTES: usize = 512 * 1024 * 1024;
 const MAX_RESUME_POINT_BYTES: usize = 64 * 1024 * 1024;
+const MAX_NATIVE_INTERFACE_BYTES: usize = 1024 * 1024 * 1024;
 const MAX_ARGUMENTS: i32 = 16_384;
 pub type AotFunctionResolver = unsafe extern "C" fn(function: u32) -> *const std::ffi::c_void;
 pub type AotBuiltinResolver = unsafe extern "C" fn(binding: u32) -> *const std::ffi::c_void;
@@ -17,6 +18,8 @@ pub struct LinkedProcessImage {
     pub program_len: u64,
     pub resume_points: *const u8,
     pub resume_points_len: u64,
+    pub native_interfaces: *const u8,
+    pub native_interfaces_len: u64,
 }
 
 pub struct AotProcessInput {
@@ -25,6 +28,7 @@ pub struct AotProcessInput {
     pub native_ir: Vec<u8>,
     pub program: Vec<u8>,
     pub resume_points: Vec<u8>,
+    pub native_interfaces: Vec<u8>,
 }
 
 impl AotProcessInput {
@@ -83,12 +87,21 @@ impl AotProcessInput {
                 "resume-point",
             )
         }?;
+        let native_interfaces = unsafe {
+            copy_bounded(
+                input.native_interfaces,
+                input.native_interfaces_len,
+                MAX_NATIVE_INTERFACE_BYTES,
+                "native-interface",
+            )
+        }?;
         Ok(Self {
             function_resolver,
             builtin_resolver,
             native_ir,
             program,
             resume_points,
+            native_interfaces,
         })
     }
 }
@@ -157,6 +170,8 @@ mod tests {
                 program_len: 1,
                 resume_points: one.as_ptr(),
                 resume_points_len: 1,
+                native_interfaces: one.as_ptr(),
+                native_interfaces_len: 1,
             })
         };
         assert!(invalid.is_err());
@@ -173,6 +188,8 @@ mod tests {
                 program_len: 1,
                 resume_points: one.as_ptr(),
                 resume_points_len: 1,
+                native_interfaces: one.as_ptr(),
+                native_interfaces_len: 1,
             })
         };
         assert!(oversized.is_err());

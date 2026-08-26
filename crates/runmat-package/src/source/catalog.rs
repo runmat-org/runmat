@@ -116,6 +116,18 @@ pub struct FrozenProject {
     pub sources: SourceCatalog,
     #[serde(with = "stable_source_path_map")]
     pub access_paths: BTreeMap<StableSourceId, PathBuf>,
+    pub native_interfaces: Vec<FrozenNativeInterface>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FrozenNativeInterface {
+    pub package_instance: ContentDigest,
+    pub name: String,
+    pub manifest_digest: ContentDigest,
+    pub manifest_path: PathBuf,
+    pub library_digest: ContentDigest,
+    pub library_path: PathBuf,
 }
 
 pub(crate) struct FrozenPackageInput {
@@ -124,11 +136,20 @@ pub(crate) struct FrozenPackageInput {
     pub source: SourceId,
     pub root: PathBuf,
     pub files: Vec<FrozenSourceInput>,
+    pub native_interfaces: Vec<FrozenNativeInterfaceInput>,
 }
 
 pub(crate) struct FrozenSourceInput {
     pub descriptor: ProjectSourceFile,
     pub bytes: Vec<u8>,
+}
+
+pub(crate) struct FrozenNativeInterfaceInput {
+    pub name: String,
+    pub manifest_path: PathBuf,
+    pub manifest_bytes: Vec<u8>,
+    pub library_path: PathBuf,
+    pub library_bytes: Vec<u8>,
 }
 
 pub(crate) fn assemble_frozen_project(
@@ -139,6 +160,7 @@ pub(crate) fn assemble_frozen_project(
 ) -> Result<FrozenProject, CatalogAssemblyError> {
     let mut packages = BTreeMap::new();
     let mut access_paths = BTreeMap::new();
+    let mut native_interfaces = Vec::new();
     for package in package_inputs {
         if !graph.packages.contains_key(&package.instance) {
             return Err(CatalogAssemblyError::MissingInstance(package.instance));
@@ -167,6 +189,16 @@ pub(crate) fn assemble_frozen_project(
                 is_private: file.descriptor.is_private,
             });
         }
+        for interface in package.native_interfaces {
+            native_interfaces.push(FrozenNativeInterface {
+                package_instance: package.instance.clone(),
+                name: interface.name,
+                manifest_digest: ContentDigest::sha256(&interface.manifest_bytes),
+                manifest_path: interface.manifest_path,
+                library_digest: ContentDigest::sha256(&interface.library_bytes),
+                library_path: interface.library_path,
+            });
+        }
         sources.sort_by(|left, right| left.id.cmp(&right.id));
         let logical_root = logical_mount_root(&package.instance)?;
         packages.insert(
@@ -185,12 +217,16 @@ pub(crate) fn assemble_frozen_project(
     }
     let revision = compute_source_revision(&graph.graph_digest, &packages)
         .map_err(|error| CatalogAssemblyError::Revision(error.to_string()))?;
+    native_interfaces.sort_by(|left, right| {
+        (&left.package_instance, &left.name).cmp(&(&right.package_instance, &right.name))
+    });
     Ok(FrozenProject {
         manifest_path,
         workspace_root,
         graph,
         sources: SourceCatalog { packages, revision },
         access_paths,
+        native_interfaces,
     })
 }
 

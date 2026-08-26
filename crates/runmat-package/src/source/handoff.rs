@@ -3,7 +3,7 @@ use crate::GraphError;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub const FROZEN_PROJECT_HANDOFF_SCHEMA_VERSION: u32 = 1;
+pub const FROZEN_PROJECT_HANDOFF_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -110,6 +110,31 @@ fn validate_sources(project: &FrozenProject) -> Result<(), FrozenProjectHandoffE
         return Err(FrozenProjectHandoffError::SourceCatalog(
             "access paths do not correspond one-to-one with source descriptors".to_string(),
         ));
+    }
+    let mut previous = None;
+    for interface in &project.native_interfaces {
+        if !project
+            .graph
+            .packages
+            .contains_key(&interface.package_instance)
+        {
+            return Err(FrozenProjectHandoffError::SourceCatalog(format!(
+                "native interface `{}` belongs to an absent package instance",
+                interface.name
+            )));
+        }
+        if interface.name.trim().is_empty() {
+            return Err(FrozenProjectHandoffError::SourceCatalog(
+                "native interface name is empty".to_string(),
+            ));
+        }
+        let key = (&interface.package_instance, interface.name.as_str());
+        if previous.is_some_and(|previous| previous >= key) {
+            return Err(FrozenProjectHandoffError::SourceCatalog(
+                "native interfaces must be sorted and unique by package and name".to_string(),
+            ));
+        }
+        previous = Some(key);
     }
     let expected = compute_source_revision(&project.graph.graph_digest, &project.sources.packages)
         .map_err(|error| FrozenProjectHandoffError::Revision(error.to_string()))?;
