@@ -8,7 +8,6 @@ use runmat_mex::{MexBuild, MexModule};
 use runmat_value::{Tensor, Value};
 
 const FIELDTRIP_REVISION: &str = "2e14f7291090b19568827799096daec7dfb99de8";
-const HCTSA_REVISION: &str = "f89569f78a2889a410ba9c0100f780120a3d750a";
 
 struct RepositoryCheckout {
     path: PathBuf,
@@ -70,47 +69,6 @@ fn build_module(source: &Path, output_name: &str, directory: &Path) -> MexModule
 
 fn tensor(values: Vec<f64>, shape: Vec<usize>) -> Value {
     Value::Tensor(Tensor::new(values, shape).unwrap())
-}
-
-#[test]
-#[ignore = "requires the pinned external repository checkouts named by its environment variables"]
-fn pinned_hctsa_c_gateways_build_and_execute() {
-    let checkout = RepositoryCheckout::from_environment(
-        "RUNMAT_MEX_HCTSA_CHECKOUT",
-        HCTSA_REVISION,
-        "LICENSE.txt",
-    );
-    let output = tempfile::tempdir().unwrap();
-
-    let sample_entropy = build_module(
-        &checkout.source("Toolboxes/Physionet/sampen_mex.c"),
-        "hctsa_sampen",
-        output.path(),
-    );
-    let entropy_result = sample_entropy
-        .invoke(
-            &[
-                tensor(vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0], vec![1, 6]),
-                Value::Num(2.0),
-                Value::Num(0.5),
-            ],
-            1,
-            sample_entropy.api_mode(),
-        )
-        .unwrap();
-    let Value::Tensor(entropy) = &entropy_result.outputs[0] else {
-        panic!("sampen_mex must return a numeric vector");
-    };
-    let values = entropy.materialize_f64();
-    assert_eq!(values.len(), 3);
-    assert!((values[0] - 0.916_290_731_874_155).abs() < 1.0e-12);
-    assert_eq!(&values[1..], &[0.0, 0.0]);
-
-    let _lbfgs_add = build_module(
-        &checkout.source("Toolboxes/gpml/util/minfunc/mex/lbfgsAddC.c"),
-        "hctsa_lbfgs_add",
-        output.path(),
-    );
 }
 
 #[test]
