@@ -92,3 +92,21 @@ fn outputs_must_be_pointer_typed() {
         .to_string()
         .contains("output parameters must have pointer type"));
 }
+
+#[test]
+fn pointer_returns_cannot_claim_ownership_without_a_release_contract() {
+    let mut invalid = normalize_metadata(metadata());
+    let symbol = &mut invalid.libraries[0].symbols[0];
+    symbol.return_type = NativeType::Pointer {
+        pointee: Box::new(NativeType::Scalar {
+            scalar: NativeScalar::F64,
+        }),
+        mutability: runmat_native_ffi::PointerMutability::Mutable,
+    };
+    symbol.return_ownership = Some(PointerOwnership::LibraryOwned);
+    symbol.return_nullable = true;
+    let error = validate_metadata(&invalid).expect_err("missing release contract");
+    assert!(error
+        .to_string()
+        .contains("require a matching release contract"));
+}

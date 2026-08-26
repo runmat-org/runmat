@@ -91,14 +91,21 @@ pub fn validate_metadata(metadata: &NativeLibraryMetadata) -> Result<(), Metadat
                 0,
             )?;
             match &symbol.return_type {
-                NativeType::Pointer { .. } => {
-                    if symbol.return_ownership.is_none() {
+                NativeType::Pointer { .. } => match symbol.return_ownership {
+                    None => {
                         return invalid(
                             format!("{symbol_path}.return_ownership"),
                             "pointer returns require an explicit ownership contract",
                         );
                     }
-                }
+                    Some(PointerOwnership::Borrowed) => {}
+                    Some(_) => {
+                        return invalid(
+                            format!("{symbol_path}.return_ownership"),
+                            "owned and shared pointer returns require a matching release contract",
+                        );
+                    }
+                },
                 _ if symbol.return_ownership.is_some() || symbol.return_nullable => {
                     return invalid(
                         format!("{symbol_path}.return_type"),

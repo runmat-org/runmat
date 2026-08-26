@@ -29,7 +29,7 @@ fn compiler_frontend_prepares_c_declarations() {
     .expect("prepared metadata");
 
     assert_eq!(metadata.libraries.len(), 1);
-    assert_eq!(metadata.libraries[0].symbols.len(), 6);
+    assert_eq!(metadata.libraries[0].symbols.len(), 7);
     assert_eq!(metadata.structures.len(), 1);
     assert_eq!(metadata.structures[0].fields.len(), 2);
     assert_eq!(metadata.enumerations.len(), 1);
@@ -46,4 +46,14 @@ fn compiler_frontend_prepares_c_declarations() {
         .find(|symbol| symbol.name == "fixture_tag")
         .expect("fixture_tag prototype");
     assert_eq!(tag.parameters[0].direction, ParameterDirection::Input);
+    let pointer = metadata.libraries[0]
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "fixture_borrowed_value")
+        .expect("pointer-returning prototype");
+    assert_eq!(
+        pointer.return_ownership,
+        Some(runmat_native_ffi::PointerOwnership::Borrowed)
+    );
+    assert!(pointer.return_nullable);
 }

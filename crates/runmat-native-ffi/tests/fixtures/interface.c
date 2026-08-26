@@ -29,3 +29,8 @@ fixture_record fixture_make(double value, uint32_t tag) {
 int32_t fixture_apply(int32_t value, int32_t (*callback)(int32_t)) {
     return callback(value) + callback(value + 1);
 }
+
+int32_t *fixture_borrowed_value(int32_t present) {
+    static int32_t value = 17;
+    return present ? &value : 0;
+}

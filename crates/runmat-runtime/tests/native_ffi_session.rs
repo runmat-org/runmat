@@ -9,6 +9,7 @@ use runmat_runtime::execution::RuntimeExecutionService;
 use runmat_runtime::foreign::{
     ForeignPlatform, ForeignRuntime, NativeFfiAdapter, NATIVE_FFI_ADAPTER_ID,
 };
+use runmat_types::ForeignOwnership;
 use runmat_value::{IntValue, Tensor, Value};
 
 fn compile_fixture(directory: &Path) -> Option<PathBuf> {
@@ -99,6 +100,24 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
         .unwrap(),
         Value::Int(IntValue::I32(42))
     );
+
+    for present in [0, 1] {
+        let returned = invoke(
+            &context,
+            "call",
+            vec![
+                Value::String("session_fixture".into()),
+                Value::String("fixture_borrowed_value".into()),
+                Value::Int(IntValue::I32(present)),
+            ],
+            1,
+        )
+        .expect("nullable pointer return");
+        let Value::Foreign(reference) = returned else {
+            panic!("pointer returns must remain typed foreign resources");
+        };
+        assert_eq!(reference.ownership, ForeignOwnership::Borrowed);
+    }
 
     let pointer = invoke(
         &context,
