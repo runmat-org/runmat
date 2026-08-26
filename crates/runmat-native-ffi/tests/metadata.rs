@@ -1,7 +1,8 @@
 use runmat_native_ffi::{
-    artifact_identity, normalize_metadata, validate_metadata, NativeLibrary, NativeLibraryMetadata,
-    NativeScalar, NativeType, Parameter, ParameterDirection, PointerOwnership, StructureDefinition,
-    StructureField, SymbolPrototype, NATIVE_FFI_METADATA_SCHEMA_VERSION,
+    artifact_identity, normalize_metadata, validate_metadata, NativeInterfaceArtifactManifest,
+    NativeLibrary, NativeLibraryMetadata, NativeScalar, NativeType, Parameter, ParameterDirection,
+    PointerOwnership, StructureDefinition, StructureField, SymbolPrototype,
+    NATIVE_FFI_METADATA_SCHEMA_VERSION,
 };
 
 fn metadata() -> NativeLibraryMetadata {
@@ -109,4 +110,46 @@ fn pointer_returns_cannot_claim_ownership_without_a_release_contract() {
     assert!(error
         .to_string()
         .contains("require a matching release contract"));
+}
+
+#[test]
+fn prepared_artifact_identity_binds_content_not_physical_location() {
+    let mut first_metadata = normalize_metadata(metadata());
+    first_metadata.target_triple = target_lexicon::HOST.to_string();
+    let mut relocated_metadata = first_metadata.clone();
+    relocated_metadata.libraries[0].path = "/another/materialization/libfixture.so".into();
+
+    let first = NativeInterfaceArtifactManifest::from_library(
+        "fixture",
+        first_metadata,
+        b"synthetic library bytes",
+    )
+    .expect("first manifest");
+    let relocated = NativeInterfaceArtifactManifest::from_library(
+        "fixture",
+        relocated_metadata,
+        b"synthetic library bytes",
+    )
+    .expect("relocated manifest");
+
+    assert_eq!(first.identity, relocated.identity);
+    assert_eq!(first.metadata, relocated.metadata);
+    assert_eq!(
+        NativeInterfaceArtifactManifest::from_canonical_bytes(&first.canonical_bytes().unwrap())
+            .unwrap(),
+        first
+    );
+    first
+        .validate_current_library(b"synthetic library bytes")
+        .unwrap();
+    assert!(first.validate_library(b"changed library bytes").is_err());
+    first.interop_manifest().validate().unwrap();
+
+    let materialized = first
+        .materialized_metadata(std::path::Path::new("/materialized/libfixture.so"))
+        .unwrap();
+    assert_eq!(
+        materialized.libraries[0].path,
+        "/materialized/libfixture.so"
+    );
 }

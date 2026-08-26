@@ -26,8 +26,10 @@ pub use invoke::{
     PointerBinding,
 };
 pub use metadata::{
-    artifact_identity, normalize_metadata, validate_metadata, MetadataError, NativeLibraryMetadata,
-    NATIVE_FFI_METADATA_SCHEMA_VERSION,
+    artifact_identity, normalize_metadata, validate_metadata, MetadataError,
+    NativeInterfaceArtifactError, NativeInterfaceArtifactIdentity, NativeInterfaceArtifactManifest,
+    NativeLibraryMetadata, NATIVE_FFI_ADAPTER_ID, NATIVE_FFI_ADAPTER_VERSION,
+    NATIVE_FFI_ARTIFACT_SCHEMA_VERSION, NATIVE_FFI_METADATA_SCHEMA_VERSION,
 };
 #[cfg(not(target_family = "wasm"))]
 pub use metadata::{prepare_header, HeaderPreparation, HeaderPreparationError};

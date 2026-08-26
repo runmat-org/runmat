@@ -10,7 +10,11 @@ use crate::model::{
     EnumerationDefinition, NativeLibrary, StructureDefinition, TypeAliasDefinition,
 };
 
-pub use artifact::artifact_identity;
+pub use artifact::{
+    artifact_identity, NativeInterfaceArtifactError, NativeInterfaceArtifactIdentity,
+    NativeInterfaceArtifactManifest, NATIVE_FFI_ADAPTER_ID, NATIVE_FFI_ADAPTER_VERSION,
+    NATIVE_FFI_ARTIFACT_SCHEMA_VERSION,
+};
 #[cfg(not(target_family = "wasm"))]
 pub use frontend::{prepare_header, HeaderPreparation, HeaderPreparationError};
 pub use normalize::normalize_metadata;
