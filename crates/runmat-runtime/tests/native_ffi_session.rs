@@ -86,6 +86,56 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
     )
     .unwrap();
     assert_eq!(alias, Value::String("session_fixture".into()));
+    let signatures = invoke(
+        &context,
+        "functions",
+        vec![
+            Value::String("session_fixture".into()),
+            Value::String("-full".into()),
+        ],
+        1,
+    )
+    .unwrap();
+    let Value::Cell(signatures) = signatures else {
+        panic!("full function metadata must be returned as a cell array");
+    };
+    assert!(signatures
+        .data
+        .iter()
+        .any(|value| { value == &Value::String("int32 fixture_add(int32, int32)".into()) }));
+
+    let census_header = temporary.path().join("census.h");
+    std::fs::write(
+        &census_header,
+        "#include <stdint.h>\nint32_t fixture_add(int32_t left, int32_t right);\nint32_t fixture_absent(int32_t value);\n",
+    )
+    .unwrap();
+    let report = invoke(
+        &context,
+        "load_report",
+        vec![
+            Value::String(library_path.display().to_string()),
+            Value::String(census_header.display().to_string()),
+            Value::String("census_fixture".into()),
+        ],
+        2,
+    )
+    .expect("legacy load report");
+    let Value::OutputList(report) = report else {
+        panic!("legacy load report must contain two outputs");
+    };
+    let Value::Cell(notfound) = &report[0] else {
+        panic!("missing functions must be reported as a cell array");
+    };
+    assert_eq!(notfound.data, vec![Value::String("fixture_absent".into())]);
+    assert!(matches!(&report[1], Value::String(_)));
+    invoke(
+        &context,
+        "unload",
+        vec![Value::String("census_fixture".into())],
+        1,
+    )
+    .unwrap();
 
     let prepared_alias = invoke(
         &context,
@@ -174,6 +224,41 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
             panic!("pointer returns must remain typed foreign resources");
         };
         assert_eq!(reference.ownership, ForeignOwnership::Borrowed);
+        if present == 1 {
+            let pointer = Value::Foreign(reference);
+            let retyped = invoke(
+                &context,
+                "invoke_member",
+                vec![
+                    pointer.clone(),
+                    Value::String("setdatatype".into()),
+                    Value::String("int32Ptr".into()),
+                    Value::Num(1.0),
+                    Value::Num(1.0),
+                ],
+                1,
+            )
+            .expect("opaque pointer type declaration");
+            let Value::Foreign(retyped_reference) = &retyped else {
+                panic!("setdatatype must preserve the foreign reference");
+            };
+            let Value::Foreign(original_reference) = &pointer else {
+                unreachable!("pointer is a foreign reference")
+            };
+            assert!(retyped_reference.is_same_resource(original_reference));
+            let copied = invoke(
+                &context,
+                "get_member",
+                vec![pointer, Value::String("Value".into())],
+                1,
+            )
+            .expect("typed opaque pointer copy");
+            let Value::Tensor(copied) = copied else {
+                panic!("typed pointer copy must retain integer tensor storage");
+            };
+            assert_eq!(copied.shape, vec![1, 1]);
+            assert_eq!(copied.numeric_value_at(0).unwrap().materialize_f64(), 17.0);
+        }
     }
 
     let pointer = invoke(

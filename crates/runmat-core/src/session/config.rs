@@ -200,6 +200,33 @@ impl RunMatSession {
             });
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn set_native_ffi_config(
+        &mut self,
+        config: &runmat_config::runtime::NativeFfiConfig,
+    ) -> Result<(), RuntimeError> {
+        let timeout = config
+            .timeout_ms
+            .map(|milliseconds| std::time::Duration::from_millis(milliseconds.get()));
+        let policy = match config.isolation {
+            runmat_config::runtime::NativeFfiIsolation::Process => {
+                runmat_runtime::foreign::NativeFfiIsolationPolicy::isolated(timeout)
+            }
+            runmat_config::runtime::NativeFfiIsolation::InProcess => {
+                runmat_runtime::foreign::NativeFfiIsolationPolicy::in_process()
+            }
+        };
+        self.set_native_ffi_isolation_policy(policy)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn set_native_ffi_isolation_policy(
+        &mut self,
+        policy: runmat_runtime::foreign::NativeFfiIsolationPolicy,
+    ) -> Result<(), RuntimeError> {
+        self.native_ffi_adapter.set_isolation_policy(policy)
+    }
+
     /// Configure garbage collector
     pub fn configure_gc(&self, config: GcConfig) -> Result<()> {
         gc_configure(config)
@@ -246,9 +273,15 @@ impl RunMatSession {
     /// context and callback services are still available.
     pub async fn shutdown_foreign_runtime(&mut self) -> Result<(), RuntimeError> {
         #[cfg(not(target_arch = "wasm32"))]
-        self.mex_runtime
-            .shutdown_gracefully(self.runtime_context.clone())
-            .await?;
+        {
+            let native_result = self.native_ffi_adapter.shutdown().await;
+            let mex_result = self
+                .mex_runtime
+                .shutdown_gracefully(self.runtime_context.clone())
+                .await;
+            native_result?;
+            mex_result?;
+        }
         Ok(())
     }
 

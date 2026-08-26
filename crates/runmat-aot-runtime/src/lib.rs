@@ -53,7 +53,7 @@ pub unsafe extern "C" fn runmat_aot_main(
             .map_err(|error| error.to_string())?
         {
             Some(runmat_process_host::HiddenMode::ExtensionHost) => {
-                return runmat_runtime::foreign::run_mex_extension_host()
+                return runmat_runtime::foreign::run_extension_host()
                     .map_err(|error| format!("standalone extension host failed: {error}"));
             }
             Some(mode) => {

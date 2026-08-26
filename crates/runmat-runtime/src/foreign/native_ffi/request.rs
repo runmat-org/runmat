@@ -51,6 +51,7 @@ pub(super) fn legacy_pointer_type(name: &str) -> Result<NativeType, RuntimeError
         return Ok(NativeType::Void);
     }
     let scalar = match normalized.as_str() {
+        "string" => NativeScalar::I8,
         "logicalptr" | "boolptr" => NativeScalar::Bool,
         "charptr" | "int8ptr" => NativeScalar::I8,
         "uint8ptr" => NativeScalar::U8,

@@ -9,6 +9,9 @@ use super::operand::materialize_operand;
 use super::state::HostState;
 
 pub(super) fn evaluate(state: &mut HostState, call: &MirCall) -> NativeExecutorResult<Vec<Value>> {
+    if let Some(outputs) = super::call_suspension::take_completed(state)? {
+        return Ok(outputs);
+    }
     let mut arguments = materialize_arguments(state, &call.args)?;
     let requested_outputs = call.requested_outputs.fixed_count();
     if matches!(
@@ -28,24 +31,31 @@ pub(super) fn evaluate(state: &mut HostState, call: &MirCall) -> NativeExecutorR
                 }
                 let base = arguments.remove(0);
                 let _outputs = runmat_runtime::output_context::push_output_count(requested_outputs);
-                let caller = state.function.name.as_str();
+                let caller = state.function.name.clone();
                 let class_context =
-                    runmat_runtime::class_registry::class_context_for_function(caller);
+                    runmat_runtime::class_registry::class_context_for_function(&caller);
                 let _access = class_context
                     .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
-                let value = super::sync::complete(
-                    &state.runtime,
-                    runmat_runtime::object::dispatch::call_method_or_member_index_with_outputs(
-                        base,
-                        identity.clone(),
-                        arguments,
-                        requested_outputs,
-                        (!caller.is_empty()).then_some(caller),
-                        call.fallback_policy,
-                    ),
-                    "method/member-index call",
+                let value = complete_call(
+                    state,
+                    {
+                        let identity = identity.clone();
+                        let fallback_policy = call.fallback_policy;
+                        async move {
+                            runmat_runtime::object::dispatch::call_method_or_member_index_with_outputs(
+                                base,
+                                identity,
+                                arguments,
+                                requested_outputs,
+                                (!caller.is_empty()).then_some(caller.as_str()),
+                                fallback_policy,
+                            )
+                            .await
+                        }
+                    },
+                    requested_outputs,
                 )?;
-                return normalize_outputs(value, requested_outputs);
+                return Ok(value);
             }
         }
     }
@@ -82,11 +92,11 @@ pub(super) fn evaluate(state: &mut HostState, call: &MirCall) -> NativeExecutorR
                 call.fallback_policy,
                 CallableCallKind::Direct,
             );
-            super::sync::complete(
-                &state.runtime,
+            return complete_call(
+                state,
                 runmat_runtime::call::descriptor::execute_callable_descriptor(descriptor),
-                "resolved call",
-            )
+                requested_outputs,
+            );
         }
         MirCallee::Dynamic(operand) => {
             let target = materialize_operand(state, operand)?;
@@ -196,12 +206,39 @@ pub(super) fn builtin(
     arguments: Vec<Value>,
     requested_outputs: usize,
 ) -> NativeExecutorResult<Vec<Value>> {
-    let result = super::sync::complete(
-        &state.runtime,
-        runmat_runtime::call_builtin_async_with_outputs(name, &arguments, requested_outputs),
-        "builtin call",
-    )?;
-    normalize_outputs(result, requested_outputs)
+    if let Some(outputs) = super::call_suspension::take_completed(state)? {
+        return Ok(outputs);
+    }
+    complete_call(
+        state,
+        {
+            let name = name.to_owned();
+            async move {
+                runmat_runtime::call_builtin_async_with_outputs(
+                    &name,
+                    &arguments,
+                    requested_outputs,
+                )
+                .await
+            }
+        },
+        requested_outputs,
+    )
+}
+
+fn complete_call(
+    state: &mut HostState,
+    future: impl std::future::Future<Output = Result<Value, runmat_runtime::RuntimeError>> + 'static,
+    requested_outputs: usize,
+) -> NativeExecutorResult<Vec<Value>> {
+    let runtime = state.runtime.clone();
+    super::call_suspension::begin(
+        state,
+        Box::pin(async move {
+            let value = runtime.scope(future).await?;
+            normalize_outputs(value, requested_outputs)
+        }),
+    )
 }
 
 fn normalize_outputs(result: Value, requested_outputs: usize) -> NativeExecutorResult<Vec<Value>> {

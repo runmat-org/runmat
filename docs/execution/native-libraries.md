@@ -45,6 +45,10 @@ loadlibrary("native/libfilters.dylib", "include/filters.h", "alias", "filters");
 output = calllib("filters", "apply", input, int32(3));
 ```
 
+`loadlibrary` accepts `alias`, repeated `includepath`, and repeated `addheader` options for C interfaces. Its optional `notfound` output lists declarations that are absent from the loaded binary, while `warnings` contains compiler-frontend diagnostics produced while reading the header. `libfunctions("filters", "-full")` returns normalized signatures, and `libpointer` and `libstruct` provide session-owned pointer and structure values. Prototype-file and generated-thunk workflows are not consumed at runtime; use a prepared `.runmat.json` interface when a project needs a persistent or compiled contract.
+
+A pointer returned by a library remains opaque until its declaration establishes a safe value conversion or the program supplies an explicit view. Use `setdatatype(pointer, type, dimensions...)` for the latter case. RunMat then makes a bounded copy when `pointer.Value` is read; it does not expose the native address as a number. Numeric pointer types, `string`, and structure or enumeration types declared by the pointer's loaded interface are accepted. The type and dimensions are a promise by the caller that the native allocation is valid for that view, so invalid declarations can still fail the isolated native host.
+
 Pointers returned with borrowed ownership remain tied to the loaded library and session. Owned pointers require a declared release contract. Nullable returns remain explicitly nullable. RunMat rejects calls when an argument cannot be represented by the declared native type without violating its range or ownership contract.
 
 ## Compilation And Remote Execution
@@ -55,6 +59,15 @@ Remote jobs carry the same two exact objects in the execution bundle. A worker v
 
 Native libraries are unavailable inside the browser's WebAssembly runtime. The portable executable still carries the interop requirement, allowing browser and WASM hosts to reject it before executing program instructions with a native-capability diagnostic. RunMat does not silently substitute a browser implementation for a declared native interface.
 
-## Trust
+## Isolation And Trust
 
-A shared library loaded in process has the permissions of the RunMat process and can corrupt or terminate it. Treat in-process interfaces as trusted native code. Exact digests provide identity and tamper detection; they do not make library code safe.
+RunMat loads native interfaces in a same-executable child process by default. Calls use an authenticated, bounded protocol; large values use private digest-verified snapshots; callbacks return to the originating runtime context; and pointer identities remain owned by the child session. A crash, timeout, or cancellation terminates that host without terminating the RunMat driver. The host is a crash-containment boundary, not an operating-system security sandbox: the library retains the child process's filesystem, network, and user permissions.
+
+You can opt a trusted interface into the RunMat process:
+
+```toml
+[runtime.foreign.native]
+isolation = "in_process"
+```
+
+In-process calls avoid the process transfer boundary, but a faulty library can corrupt or terminate RunMat. Exact digests provide identity and tamper detection in both modes; they do not make library code safe. Standalone compiled programs and distributed workers retain process isolation for packaged native interfaces.

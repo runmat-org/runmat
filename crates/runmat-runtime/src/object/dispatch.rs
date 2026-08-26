@@ -633,6 +633,9 @@ pub async fn call_method_or_member_index_named_with_outputs(
             )
             .await
         }
+        Value::Foreign(reference) => {
+            crate::foreign::invoke_foreign_method(reference, name, args, requested_outputs).await
+        }
         other => call_getfield_with_indices(other, name, args, requested_outputs).await,
     }
 }

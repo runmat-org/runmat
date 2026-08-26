@@ -187,6 +187,15 @@ See [MATLAB Language Compatibility](/docs/runtime/matlab-compatibility) for the 
 
 Modules with a valid RunMat build manifest retain exact admission and run in the owning session. The `unmanifested` setting applies only to the separately checked binary-compatibility tier; it does not bypass architecture, suffix, or adapter-ABI checks.
 
+### `[runtime.foreign.native]`
+
+| Key | Type | Default | Allowed values | Notes |
+| --- | --- | --- | --- | --- |
+| `isolation` | string | `"process"` | `process`, `in_process` | Runs shared-library calls in a same-executable child host by default. `in_process` is an explicit trusted-code opt-in. |
+| `timeout_ms` | positive integer | unset | — | Terminates the isolated native-library host when one invocation exceeds the configured duration. An unset value applies no automatic invocation deadline; cancellation still terminates the host. |
+
+Process isolation contains native crashes and hangs but does not reduce the library's operating-system permissions. Packaged standalone programs and distributed workers always use the process boundary. See [Native Library Interfaces](/docs/execution/native-libraries) for preparation, packaging, callbacks, and pointer lifetime behavior.
+
 The isolated extension host contains crashes and can be terminated on cancellation or timeout, but it is not an operating-system security sandbox. An admitted native module has the extension-host process's permissions. Use `unmanifested = "deny"` when only exact, manifest-bound RunMat artifacts should be allowed.
 
 ### `[runtime.jit]`
@@ -393,6 +402,10 @@ compat = "runmat"
 
 [runtime.foreign.mex]
 unmanifested = "isolate"
+# timeout_ms = 300000
+
+[runtime.foreign.native]
+isolation = "process"
 # timeout_ms = 300000
 
 [runtime.jit]

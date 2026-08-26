@@ -25,6 +25,9 @@ pub(crate) fn create_session(
     engine.set_callstack_limit(config.runtime.callstack_limit);
     engine.set_error_namespace(resolved_error_namespace(config));
     engine.set_mex_config(&config.foreign.mex);
+    engine
+        .set_native_ffi_config(&config.foreign.native)
+        .context("failed to configure native-library isolation")?;
     if let Some(client_id) = telemetry_client_id() {
         engine.set_telemetry_client_id(Some(client_id));
     }

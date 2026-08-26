@@ -193,6 +193,14 @@ fn decode_structure(
     Ok(Value::Struct(value))
 }
 
+pub(super) fn decode_pointer_structure(
+    ty: &NativeType,
+    bytes: &[u8],
+    metadata: &NativeLibraryMetadata,
+) -> Result<Value, InvocationError> {
+    decode_structure("lib.pointer", ty, bytes, metadata)
+}
+
 fn decode_field(
     symbol: &str,
     ty: &NativeType,

@@ -1,8 +1,9 @@
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use runmat_native_ffi::{
-    LoadedLibrary, NativeLibraryMetadata, NativePointer, NativePointerResource,
+    LoadedLibrary, NativeLibraryMetadata, NativePointer, NativePointerResource, NativeType,
 };
 
 #[derive(Clone)]
@@ -32,9 +33,17 @@ pub(super) enum PointerEntry {
     },
     Opaque {
         pointer: Rc<NativePointer>,
+        view: Rc<RefCell<Option<OpaquePointerView>>>,
         library: Rc<LoadedLibrary>,
         metadata: Rc<NativeLibraryMetadata>,
     },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct OpaquePointerView {
+    pub type_name: String,
+    pub pointee: NativeType,
+    pub shape: Vec<usize>,
 }
 
 impl std::fmt::Debug for PointerEntry {
@@ -58,6 +67,7 @@ impl std::fmt::Debug for PointerEntry {
                 pointer,
                 library,
                 metadata,
+                ..
             } => formatter
                 .debug_struct("Opaque")
                 .field("pointer", pointer)

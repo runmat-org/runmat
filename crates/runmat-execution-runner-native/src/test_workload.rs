@@ -54,6 +54,13 @@ async fn execute_portable_request(
             }
         }
     };
+    if let Err(error) = session.set_native_ffi_isolation_policy(
+        runmat_runtime::foreign::NativeFfiIsolationPolicy::isolated(None),
+    ) {
+        return ProgramExecutionResponse::Failure {
+            message: format!("failed to configure native-library isolation: {error}"),
+        };
+    }
     for requirement in &interop.adapters {
         if requirement.adapter != runmat_native_ffi::NATIVE_FFI_ADAPTER_ID {
             continue;
