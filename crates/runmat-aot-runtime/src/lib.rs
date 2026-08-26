@@ -4,6 +4,7 @@ mod builtin;
 mod execute;
 mod input;
 mod mex;
+mod native_interfaces;
 mod output;
 mod program;
 
@@ -40,6 +41,8 @@ pub unsafe extern "C" fn runmat_aot_main(
     program_len: u64,
     resume_points: *const u8,
     resume_points_len: u64,
+    native_interfaces: *const u8,
+    native_interfaces_len: u64,
 ) -> i32 {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         // SAFETY: the generated launcher forwards the process argument vector
@@ -74,6 +77,8 @@ pub unsafe extern "C" fn runmat_aot_main(
             program_len,
             resume_points,
             resume_points_len,
+            native_interfaces,
+            native_interfaces_len,
         };
         // SAFETY: the raw pointers were checked and converted to bounded borrows
         // above; both resolver contracts are documented on this entry.

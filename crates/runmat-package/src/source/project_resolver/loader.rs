@@ -45,6 +45,7 @@ pub(super) struct LoadedPackage {
     pub(super) domain: PackageManifest,
     pub(super) instance: PackageInstanceId,
     pub(super) sources: Vec<LoadedSource>,
+    pub(super) native_interfaces: Vec<LoadedNativeInterface>,
     pub(super) enabled_features: BTreeSet<String>,
     pub(super) dependencies: Vec<LoadedDependency>,
     pub(super) inventory: crate::SourceInventory,
@@ -53,6 +54,14 @@ pub(super) struct LoadedPackage {
 pub(super) struct LoadedSource {
     pub(super) descriptor: ProjectSourceFile,
     pub(super) bytes: Vec<u8>,
+}
+
+pub(super) struct LoadedNativeInterface {
+    pub(super) name: String,
+    pub(super) manifest_path: PathBuf,
+    pub(super) manifest_bytes: Vec<u8>,
+    pub(super) library_path: PathBuf,
+    pub(super) library_bytes: Vec<u8>,
 }
 
 pub(super) struct LoadedDependency {
@@ -127,12 +136,14 @@ impl Loader<'_> {
                 .unwrap_or_else(|| Path::new("."))
                 .to_path_buf();
             let (sources, source_index) = load_sources(&root, &config).await?;
+            let native_interfaces = super::source::load_native_interfaces(&root, &config).await?;
             let source = source_identity(
                 &self.workspace_root,
                 &manifest_path,
                 &root,
                 &config,
                 &sources,
+                &native_interfaces,
                 &origin,
             )?;
             let package = domain.canonical_id.clone().unwrap_or_else(|| {
@@ -162,6 +173,7 @@ impl Loader<'_> {
                     domain: domain.clone(),
                     instance: instance.clone(),
                     sources,
+                    native_interfaces,
                     enabled_features: active_features.clone(),
                     dependencies: Vec::new(),
                     inventory,

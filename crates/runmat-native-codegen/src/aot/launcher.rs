@@ -151,6 +151,7 @@ pub(super) fn define(
     let native_ir = required_data(data, super::AOT_NATIVE_IR_SYMBOL)?;
     let program = required_data(data, super::AOT_PROGRAM_SYMBOL)?;
     let resume_points = required_data(data, super::AOT_RESUME_POINTS_SYMBOL)?;
+    let native_interfaces = required_data(data, super::AOT_NATIVE_INTERFACES_SYMBOL)?;
     let pointer = module.isa().pointer_type();
 
     let mut runtime_signature = module.make_signature();
@@ -159,6 +160,8 @@ pub(super) fn define(
         AbiParam::new(pointer),
         AbiParam::new(pointer),
         AbiParam::new(pointer),
+        AbiParam::new(pointer),
+        AbiParam::new(types::I64),
         AbiParam::new(pointer),
         AbiParam::new(types::I64),
         AbiParam::new(pointer),
@@ -192,6 +195,8 @@ pub(super) fn define(
     let native_ir_data = module.declare_data_in_func(native_ir.0, &mut context.func);
     let program_data = module.declare_data_in_func(program.0, &mut context.func);
     let resume_data = module.declare_data_in_func(resume_points.0, &mut context.func);
+    let native_interfaces_data =
+        module.declare_data_in_func(native_interfaces.0, &mut context.func);
 
     let mut builder_context = FunctionBuilderContext::new();
     let mut builder = FunctionBuilder::new(&mut context.func, &mut builder_context);
@@ -205,9 +210,11 @@ pub(super) fn define(
     let native_ir_ptr = builder.ins().symbol_value(pointer, native_ir_data);
     let program_ptr = builder.ins().symbol_value(pointer, program_data);
     let resume_ptr = builder.ins().symbol_value(pointer, resume_data);
+    let native_interfaces_ptr = builder.ins().symbol_value(pointer, native_interfaces_data);
     let native_ir_len = length_constant(&mut builder, native_ir.1)?;
     let program_len = length_constant(&mut builder, program.1)?;
     let resume_len = length_constant(&mut builder, resume_points.1)?;
+    let native_interfaces_len = length_constant(&mut builder, native_interfaces.1)?;
     let call = builder.ins().call(
         runtime,
         &[
@@ -221,6 +228,8 @@ pub(super) fn define(
             program_len,
             resume_ptr,
             resume_len,
+            native_interfaces_ptr,
+            native_interfaces_len,
         ],
     );
     let status = builder.inst_results(call)[0];

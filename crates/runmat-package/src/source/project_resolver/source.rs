@@ -1,4 +1,4 @@
-use super::loader::{LoadedSource, PackageOrigin};
+use super::loader::{LoadedNativeInterface, LoadedSource, PackageOrigin};
 use super::ProjectResolveError;
 use crate::{ContentDigest, NormalizedRelativePath, PathSourceId, SourceId};
 use runmat_config::project::{
@@ -41,12 +41,43 @@ pub(super) async fn load_sources(
     Ok((sources, index))
 }
 
+pub(super) async fn load_native_interfaces(
+    root: &Path,
+    manifest: &ProjectManifest,
+) -> Result<Vec<LoadedNativeInterface>, ProjectResolveError> {
+    let mut interfaces = Vec::with_capacity(manifest.native_interfaces.len());
+    for (name, declaration) in &manifest.native_interfaces {
+        let manifest_path = root.join(&declaration.manifest);
+        let manifest_bytes = read_native_artifact(&manifest_path).await?;
+        let library_path = root.join(&declaration.library);
+        let library_bytes = read_native_artifact(&library_path).await?;
+        interfaces.push(LoadedNativeInterface {
+            name: name.clone(),
+            manifest_path,
+            manifest_bytes,
+            library_path,
+            library_bytes,
+        });
+    }
+    Ok(interfaces)
+}
+
+async fn read_native_artifact(path: &Path) -> Result<Vec<u8>, ProjectResolveError> {
+    runmat_filesystem::read_async(path)
+        .await
+        .map_err(|error| ProjectResolveError::SourceRead {
+            path: path.to_path_buf(),
+            reason: error.to_string(),
+        })
+}
+
 pub(super) fn source_identity(
     workspace_root: &Path,
     manifest_path: &Path,
     root: &Path,
     manifest: &ProjectManifest,
     sources: &[LoadedSource],
+    native_interfaces: &[LoadedNativeInterface],
     origin: &PackageOrigin,
 ) -> Result<SourceId, ProjectResolveError> {
     if let PackageOrigin::Git(source) = origin {
@@ -71,7 +102,7 @@ pub(super) fn source_identity(
             ))
         })?;
         let manifest_digest = ContentDigest::sha256(canonical_manifest);
-        let tree_digest = path_tree_digest(sources)?;
+        let tree_digest = path_tree_digest(root, sources, native_interfaces)?;
         if manifest_digest != expected_path.manifest_digest
             || tree_digest != expected_path.tree_digest
         {
@@ -100,11 +131,15 @@ pub(super) fn source_identity(
     Ok(SourceId::Path(PathSourceId {
         workspace_path,
         manifest_digest: ContentDigest::sha256(canonical_manifest),
-        tree_digest: path_tree_digest(sources)?,
+        tree_digest: path_tree_digest(root, sources, native_interfaces)?,
     }))
 }
 
-fn path_tree_digest(sources: &[LoadedSource]) -> Result<ContentDigest, ProjectResolveError> {
+fn path_tree_digest(
+    root: &Path,
+    sources: &[LoadedSource],
+    native_interfaces: &[LoadedNativeInterface],
+) -> Result<ContentDigest, ProjectResolveError> {
     let mut input = Vec::new();
     for source in sources {
         let path = NormalizedRelativePath::new(
@@ -121,7 +156,45 @@ fn path_tree_digest(sources: &[LoadedSource]) -> Result<ContentDigest, ProjectRe
         input.extend_from_slice(&source.bytes);
         input.push(0);
     }
+    for interface in native_interfaces {
+        append_native_artifact(
+            &mut input,
+            root,
+            &interface.manifest_path,
+            &interface.manifest_bytes,
+        )?;
+        append_native_artifact(
+            &mut input,
+            root,
+            &interface.library_path,
+            &interface.library_bytes,
+        )?;
+    }
     Ok(ContentDigest::sha256(input))
+}
+
+fn append_native_artifact(
+    input: &mut Vec<u8>,
+    root: &Path,
+    path: &Path,
+    bytes: &[u8],
+) -> Result<(), ProjectResolveError> {
+    let relative = path.strip_prefix(root).map_err(|_| {
+        ProjectResolveError::Invalid(format!(
+            "native interface artifact {} is outside package root {}",
+            path.display(),
+            root.display()
+        ))
+    })?;
+    let path = NormalizedRelativePath::new(relative)
+        .map_err(|error| ProjectResolveError::Invalid(error.to_string()))?;
+    input.extend_from_slice(path.as_str().as_bytes());
+    input.push(0);
+    input.extend_from_slice(bytes.len().to_string().as_bytes());
+    input.push(0);
+    input.extend_from_slice(bytes);
+    input.push(0);
+    Ok(())
 }
 
 pub(super) async fn find_manifest(root: &Path) -> Option<PathBuf> {

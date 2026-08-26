@@ -48,6 +48,10 @@ The browser runtime reads `runmat.lock` beside the manifest, resolves or replays
 
 Git dependencies use the RunMat Server Git snapshot gateway in browsers, while native hosts may use direct Git. Both validate the exact commit and canonical tree digest. Native-only capability requirements such as native libraries, MEX, JVM, or subprocesses fail during browser resolution with a dependency-path diagnostic instead of failing later during execution.
 
+## Native Interface Artifacts
+
+A package can declare a prepared native shared-library interface with `[native-interfaces.<name>]`. The declaration names the canonical prepared manifest and exact library file relative to that package root. Both files participate in package identity and follow the package through native compilation and remote execution. See [Native Library Interfaces](../execution/native-libraries.md) for preparation, trust, platform, and runtime behavior.
+
 ## Related Documentation
 
 - [Hosted Registry](./registry.md)

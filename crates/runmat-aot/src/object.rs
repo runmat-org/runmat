@@ -11,6 +11,8 @@ pub struct NativeObjectOptions {
     pub retained_functions: Option<BTreeSet<ProgramFunctionId>>,
     pub runtime_binding_mode: runmat_native_codegen::aot::AotRuntimeBindingMode,
     pub retained_builtin_bindings: Vec<runmat_native_codegen::aot::AotBuiltinBinding>,
+    pub interop: runmat_types::InteropManifest,
+    pub native_interfaces: runmat_native_ffi::NativeInterfaceArtifactBundle,
 }
 
 impl Default for NativeObjectOptions {
@@ -20,6 +22,8 @@ impl Default for NativeObjectOptions {
             retained_functions: None,
             runtime_binding_mode: runmat_native_codegen::aot::AotRuntimeBindingMode::Dynamic,
             retained_builtin_bindings: Vec::new(),
+            interop: runmat_types::InteropManifest::empty(),
+            native_interfaces: runmat_native_ffi::NativeInterfaceArtifactBundle::empty(),
         }
     }
 }
@@ -28,12 +32,14 @@ pub fn emit_native_object(
     unit: &runmat_core::ExecutableUnit,
     options: NativeObjectOptions,
 ) -> AotResult<RelocatableNativeObject> {
-    let mut input = unit.prepare_native_compilation().map_err(|error| {
-        AotError::contract(
-            "aot.compile.input",
-            format!("failed to prepare canonical native input: {error}"),
-        )
-    })?;
+    let mut input = unit
+        .prepare_native_compilation_for_with_interop(None, options.interop.clone())
+        .map_err(|error| {
+            AotError::contract(
+                "aot.compile.input",
+                format!("failed to prepare canonical native input: {error}"),
+            )
+        })?;
     if let Some(retained) = options.retained_functions.as_ref() {
         input = input.retain_functions(retained).map_err(|error| {
             AotError::contract(
@@ -50,6 +56,12 @@ pub fn emit_native_object(
             &assembly,
             options.runtime_binding_mode,
             options.retained_builtin_bindings.clone(),
+            options
+                .native_interfaces
+                .canonical_bytes()
+                .map_err(|error| {
+                    AotError::contract("aot.compile.native_interfaces", error.to_string())
+                })?,
         )
         .map_err(|error| AotError::contract("aot.compile.data", error.to_string()))?;
     runmat_native_codegen::aot::emit_relocatable_object_for_runtime(

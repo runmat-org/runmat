@@ -58,6 +58,7 @@ runmat-native-codegen = { workspace = true, features = ["compiler"] }
 runmat-execution = { workspace = true }
 runmat-execution-artifact = { workspace = true }
 runmat-execution-runner-native = { workspace = true }
+runmat-native-ffi = { workspace = true }
 runmat-process-host = { workspace = true }
 runmat-parser = { version = "=0.6.2", path = "../runmat-parser" }
 runmat-hir = { version = "=0.6.2", path = "../runmat-hir" }
@@ -74,6 +75,7 @@ runmat-package = { workspace = true }
 runmat-package-cache = { workspace = true }
 runmat-package-cache-native = { workspace = true }
 runmat-time = { version = "=0.6.2", path = "../runmat-time" }
+runmat-types = { workspace = true }
 runmat-filesystem = { version = "=0.6.2", path = "../runmat-filesystem" }
 runmat-telemetry = { version = "=0.6.2", path = "../runmat-telemetry" }
 runmat-static-analysis = { version = "=0.6.2", path = "../runmat-static-analysis" }
