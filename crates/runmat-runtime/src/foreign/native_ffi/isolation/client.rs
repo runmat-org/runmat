@@ -14,9 +14,10 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use super::{
     decode_portable, encode_portable, wire_error, NativeCallbackRequest, NativeCallbackResult,
     NativeDriverMessage, NativeHostMessage, NativeInvocationRequest, NativeRemoteReference,
-    NativeShutdownResult, NativeWireError, NativeWireValue, NATIVE_FFI_HOST_KIND,
-    NATIVE_FFI_HOST_KIND_ENV, NATIVE_FFI_HOST_MAX_MESSAGE_BYTES, NATIVE_FFI_HOST_PROTOCOL,
-    NATIVE_FFI_HOST_SCHEMA_VERSION, NATIVE_FFI_HOST_SECRET_ENV, NATIVE_FFI_HOST_SNAPSHOT_ROOT_ENV,
+    NativeShutdownResult, NativeWireError, NativeWireValue, NATIVE_FFI_HOST_FRONTEND_ENV,
+    NATIVE_FFI_HOST_KIND, NATIVE_FFI_HOST_KIND_ENV, NATIVE_FFI_HOST_MAX_MESSAGE_BYTES,
+    NATIVE_FFI_HOST_PROTOCOL, NATIVE_FFI_HOST_SCHEMA_VERSION, NATIVE_FFI_HOST_SECRET_ENV,
+    NATIVE_FFI_HOST_SNAPSHOT_ROOT_ENV,
 };
 use crate::context::{ForeignCall, RuntimeContext};
 use crate::foreign::{ForeignErrorKind, ForeignHandleRegistry, ForeignResourceMetadata};
@@ -78,6 +79,16 @@ impl IsolatedNativeFfiClient {
         command
             .environment
             .insert(NATIVE_FFI_HOST_KIND_ENV.into(), NATIVE_FFI_HOST_KIND.into());
+        let frontend = resolve_frontend();
+        let frontend = frontend.to_str().ok_or_else(|| {
+            wire_error(
+                "RunMat:NativeFFI:HostFrontend",
+                "native FFI compiler frontend path is not valid UTF-8",
+            )
+        })?;
+        command
+            .environment
+            .insert(NATIVE_FFI_HOST_FRONTEND_ENV.into(), frontend.into());
         command
             .environment
             .insert(NATIVE_FFI_HOST_SECRET_ENV.into(), secret.expose_hex());
@@ -506,6 +517,17 @@ impl IsolatedNativeFfiClient {
         }
         transport
     }
+}
+
+fn resolve_frontend() -> std::path::PathBuf {
+    let executable = if cfg!(windows) { "clang.exe" } else { "clang" };
+    std::env::var_os("PATH")
+        .and_then(|paths| {
+            std::env::split_paths(&paths)
+                .map(|directory| directory.join(executable))
+                .find(|candidate| candidate.is_file())
+        })
+        .unwrap_or_else(|| executable.into())
 }
 
 impl Drop for IsolatedNativeFfiClient {
