@@ -1,4 +1,4 @@
-#![cfg(any(target_os = "macos", target_os = "linux"))]
+#![cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -12,12 +12,20 @@ fn compile_fixture(directory: &Path) -> Option<PathBuf> {
         .join("../runmat-runtime/tests/fixtures/native_ffi/interface.c");
     let output = directory.join(if cfg!(target_os = "macos") {
         "libcore_fixture.dylib"
+    } else if cfg!(target_os = "windows") {
+        "core_fixture.dll"
     } else {
         "libcore_fixture.so"
     });
-    let mut command = Command::new("clang");
+    let mut command = Command::new(if cfg!(target_os = "windows") {
+        "gcc"
+    } else {
+        "clang"
+    });
     if cfg!(target_os = "macos") {
         command.arg("-dynamiclib");
+    } else if cfg!(target_os = "windows") {
+        command.arg("-shared");
     } else {
         command.args(["-shared", "-fPIC"]);
     }
