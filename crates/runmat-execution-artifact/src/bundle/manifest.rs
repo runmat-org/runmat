@@ -9,7 +9,7 @@ use crate::{
     ProgramArtifact, ProgramBuildRecipe,
 };
 
-pub const EXECUTION_BUNDLE_SCHEMA_VERSION: u16 = 3;
+pub const EXECUTION_BUNDLE_SCHEMA_VERSION: u16 = 4;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -42,6 +42,7 @@ pub struct BundleManifest {
     pub project_revision: ProjectRevisionRecord,
     pub code_closure: BundleCodeClosure,
     pub sources: Vec<ObjectDescriptor>,
+    pub foreign_artifacts: Vec<ObjectDescriptor>,
     pub callables: Vec<BundleCallable>,
     pub recipes: Vec<ProgramBuildRecipe>,
     pub artifacts: Vec<ProgramArtifact>,

@@ -15,6 +15,7 @@ pub enum ObjectNamespace {
     DetailedEvent,
     Log,
     Checkpoint,
+    ForeignArtifact,
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
