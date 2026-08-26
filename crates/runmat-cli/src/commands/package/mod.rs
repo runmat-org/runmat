@@ -1,5 +1,7 @@
 mod cache;
 mod credentials;
+mod foreign_artifacts;
+mod java_artifacts;
 mod native_interfaces;
 mod private_keys;
 mod publication;
@@ -14,7 +16,7 @@ mod server_transport;
 mod tree;
 mod vendor;
 
-pub(crate) use native_interfaces::{prepare_native_interfaces, PreparedNativeInterfaces};
+pub(crate) use foreign_artifacts::{prepare_foreign_artifacts, PreparedForeignArtifacts};
 pub(crate) use resolve::{
     install_project_for_source, resolve_for_source, resolve_for_test_manifest,
     NativeResolvedProject,

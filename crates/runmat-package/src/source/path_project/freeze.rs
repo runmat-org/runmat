@@ -14,7 +14,8 @@ use thiserror::Error;
 
 use crate::source::{
     catalog::{
-        assemble_frozen_project, FrozenNativeInterfaceInput, FrozenPackageInput, FrozenSourceInput,
+        assemble_frozen_project, FrozenJavaArtifactInput, FrozenNativeInterfaceInput,
+        FrozenPackageInput, FrozenSourceInput,
     },
     FrozenProject,
 };
@@ -159,6 +160,15 @@ fn build_catalog(
                         library_bytes: interface.library_bytes.clone(),
                     })
                     .collect(),
+                java_artifacts: package
+                    .java_artifacts
+                    .iter()
+                    .map(|artifact| FrozenJavaArtifactInput {
+                        name: artifact.name.clone(),
+                        path: artifact.path.clone(),
+                        bytes: artifact.bytes.clone(),
+                    })
+                    .collect(),
             })
         })
         .collect::<Result<Vec<_>, PathProjectError>>()?;
@@ -233,6 +243,14 @@ fn package_tree_digest(package: &LoadedPathPackage) -> Result<ContentDigest, Gra
             &package.project_root,
             &interface.library_path,
             &interface.library_bytes,
+        )?;
+    }
+    for artifact in &package.java_artifacts {
+        append_artifact_tree_entry(
+            &mut input,
+            &package.project_root,
+            &artifact.path,
+            &artifact.bytes,
         )?;
     }
     Ok(ContentDigest::sha256(input))

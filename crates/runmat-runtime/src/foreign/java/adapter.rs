@@ -4,9 +4,9 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use runmat_java::{
-    discover_jvm, ClasspathSnapshot, JavaCallbackInvocation, JavaDiscoveryRequest,
-    JavaInvocationError, JavaObjectHandle, JavaSession, JavaValue, JvmConfig, JvmProcess,
-    SessionClasspath, JAVA_ADAPTER_ID, JAVA_ADAPTER_VERSION,
+    discover_jvm, ClasspathSnapshot, JavaArtifactIdentity, JavaCallbackInvocation,
+    JavaDiscoveryRequest, JavaInvocationError, JavaObjectHandle, JavaSession, JavaValue, JvmConfig,
+    JvmProcess, SessionClasspath, JAVA_ADAPTER_ID, JAVA_ADAPTER_VERSION,
 };
 use runmat_types::{
     CapabilityRequirement, ForeignAffinity, ForeignCapability, ForeignLifetime, ForeignOwnership,
@@ -47,6 +47,7 @@ pub struct JavaAdapter {
     released: Arc<ReleaseQueue>,
     resources: Rc<RefCell<BTreeMap<u64, JavaObjectHandle>>>,
     java_to_foreign: Rc<RefCell<BTreeMap<JavaObjectHandle, WeakForeignRef>>>,
+    artifact_identities: RefCell<BTreeSet<String>>,
     desktop_available: Cell<bool>,
 }
 
@@ -123,6 +124,7 @@ impl JavaAdapter {
             released,
             resources: Rc::new(RefCell::new(BTreeMap::new())),
             java_to_foreign: Rc::new(RefCell::new(BTreeMap::new())),
+            artifact_identities: RefCell::new(BTreeSet::new()),
             desktop_available: Cell::new(false),
         }))
     }
@@ -156,6 +158,38 @@ impl JavaAdapter {
         *self.discovery.borrow_mut() = discovery;
         *self.config.borrow_mut() = config;
         *self.initial_classpath.borrow_mut() = classpath;
+        Ok(())
+    }
+
+    pub fn install_project_artifacts(
+        &self,
+        artifacts: &[(JavaArtifactIdentity, std::path::PathBuf)],
+    ) -> Result<(), RuntimeError> {
+        if self.is_running() {
+            return Err(invalid_conversion(
+                "Java project artifacts must be installed before JVM startup",
+            ));
+        }
+        let mut identities = BTreeSet::new();
+        let mut paths = self.initial_classpath.borrow().snapshot().project;
+        for (identity, path) in artifacts {
+            identity
+                .validate_file(path)
+                .map_err(|error| invalid_conversion(error.to_string()))?;
+            if !identities.insert(identity.to_string()) {
+                return Err(invalid_conversion(format!(
+                    "Java artifact identity `{identity}` appears more than once"
+                )));
+            }
+            if !paths.contains(path) {
+                paths.push(path.clone());
+            }
+        }
+        self.initial_classpath
+            .borrow_mut()
+            .replace_project(paths)
+            .map_err(|error| invalid_conversion(error.to_string()))?;
+        *self.artifact_identities.borrow_mut() = identities;
         Ok(())
     }
 
@@ -800,7 +834,7 @@ impl ForeignAdapter for JavaAdapter {
                 ForeignCapability::Callback,
                 ForeignCapability::Transfer,
             ]),
-            artifact_identities: BTreeSet::new(),
+            artifact_identities: self.artifact_identities.borrow().clone(),
             supports_wasm: false,
             supports_host_bridge: false,
         }

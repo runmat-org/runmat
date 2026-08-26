@@ -2,6 +2,7 @@ const MAX_NATIVE_IR_BYTES: usize = 512 * 1024 * 1024;
 const MAX_PROGRAM_BYTES: usize = 512 * 1024 * 1024;
 const MAX_RESUME_POINT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_NATIVE_INTERFACE_BYTES: usize = 1024 * 1024 * 1024;
+const MAX_JAVA_ARTIFACT_BYTES: usize = 1024 * 1024 * 1024;
 const MAX_ARGUMENTS: i32 = 16_384;
 pub type AotFunctionResolver = unsafe extern "C" fn(function: u32) -> *const std::ffi::c_void;
 pub type AotBuiltinResolver = unsafe extern "C" fn(binding: u32) -> *const std::ffi::c_void;
@@ -20,6 +21,8 @@ pub struct LinkedProcessImage {
     pub resume_points_len: u64,
     pub native_interfaces: *const u8,
     pub native_interfaces_len: u64,
+    pub java_artifacts: *const u8,
+    pub java_artifacts_len: u64,
 }
 
 pub struct AotProcessInput {
@@ -29,6 +32,7 @@ pub struct AotProcessInput {
     pub program: Vec<u8>,
     pub resume_points: Vec<u8>,
     pub native_interfaces: Vec<u8>,
+    pub java_artifacts: Vec<u8>,
 }
 
 impl AotProcessInput {
@@ -95,6 +99,14 @@ impl AotProcessInput {
                 "native-interface",
             )
         }?;
+        let java_artifacts = unsafe {
+            copy_bounded(
+                input.java_artifacts,
+                input.java_artifacts_len,
+                MAX_JAVA_ARTIFACT_BYTES,
+                "Java artifact",
+            )
+        }?;
         Ok(Self {
             function_resolver,
             builtin_resolver,
@@ -102,6 +114,7 @@ impl AotProcessInput {
             program,
             resume_points,
             native_interfaces,
+            java_artifacts,
         })
     }
 }
@@ -172,6 +185,8 @@ mod tests {
                 resume_points_len: 1,
                 native_interfaces: one.as_ptr(),
                 native_interfaces_len: 1,
+                java_artifacts: one.as_ptr(),
+                java_artifacts_len: 1,
             })
         };
         assert!(invalid.is_err());
@@ -190,6 +205,8 @@ mod tests {
                 resume_points_len: 1,
                 native_interfaces: one.as_ptr(),
                 native_interfaces_len: 1,
+                java_artifacts: one.as_ptr(),
+                java_artifacts_len: 1,
             })
         };
         assert!(oversized.is_err());

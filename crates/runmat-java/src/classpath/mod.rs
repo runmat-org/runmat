@@ -67,6 +67,22 @@ impl SessionClasspath {
         Ok(())
     }
 
+    pub fn replace_project(
+        &mut self,
+        entries: impl IntoIterator<Item = PathBuf>,
+    ) -> Result<(), ClasspathError> {
+        let project = unique(entries)?;
+        if let Some(entry) = project
+            .iter()
+            .find(|entry| self.bootstrap.contains(entry) || self.dynamic.contains(entry))
+        {
+            return Err(ClasspathError::Duplicate(entry.display().to_string()));
+        }
+        self.project = project;
+        self.revision = self.revision.saturating_add(1);
+        Ok(())
+    }
+
     pub fn add_dynamic_first(&mut self, entry: PathBuf) -> Result<(), ClasspathError> {
         validate_entry(&entry)?;
         if self.contains(&entry) {

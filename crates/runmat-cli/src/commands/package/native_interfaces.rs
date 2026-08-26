@@ -16,16 +16,6 @@ pub(crate) struct PreparedNativeInterfaces {
     pub(crate) bundle: NativeInterfaceArtifactBundle,
 }
 
-impl PreparedNativeInterfaces {
-    pub(crate) fn empty() -> Self {
-        Self {
-            interop: InteropManifest::empty(),
-            objects: Vec::new(),
-            bundle: NativeInterfaceArtifactBundle::empty(),
-        }
-    }
-}
-
 pub(crate) fn prepare_native_interfaces(
     project: &FrozenProject,
 ) -> Result<PreparedNativeInterfaces> {

@@ -17,10 +17,10 @@ pub use entrypoint::{
 pub use manifest::{
     discover_project_manifest_from, discover_project_manifest_from_async, load_project_manifest,
     load_project_manifest_async, load_project_manifest_async_with_options,
-    parse_project_manifest_json, parse_project_manifest_toml, ProjectEntrypoint, ProjectManifest,
-    ProjectManifestLoadError, ProjectManifestValidationError, ProjectManifestValidationOptions,
-    ProjectNativeInterface, ProjectPackage, ProjectSources, PROJECT_MANIFEST_FILENAME,
-    PROJECT_MANIFEST_FILENAMES,
+    parse_project_manifest_json, parse_project_manifest_toml, ProjectEntrypoint,
+    ProjectJavaArtifact, ProjectManifest, ProjectManifestLoadError, ProjectManifestValidationError,
+    ProjectManifestValidationOptions, ProjectNativeInterface, ProjectPackage, ProjectSources,
+    PROJECT_MANIFEST_FILENAME, PROJECT_MANIFEST_FILENAMES,
 };
 pub use source_index::{
     build_loose_source_index, build_loose_source_index_async, build_project_source_index,

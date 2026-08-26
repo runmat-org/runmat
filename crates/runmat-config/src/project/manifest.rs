@@ -29,6 +29,7 @@ pub struct ProjectManifest {
     pub publish: Option<ProjectPublication>,
     pub entrypoints: Vec<ProjectEntrypoint>,
     pub native_interfaces: BTreeMap<String, ProjectNativeInterface>,
+    pub java_artifacts: BTreeMap<String, ProjectJavaArtifact>,
     pub test: ProjectTestConfig,
 }
 
@@ -71,6 +72,12 @@ pub struct ProjectNativeInterface {
     pub library: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectJavaArtifact {
+    pub path: PathBuf,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawProjectManifest {
@@ -98,6 +105,8 @@ struct RawProjectManifest {
     entrypoints: BTreeMap<String, RawProjectEntrypoint>,
     #[serde(default, rename = "native-interfaces")]
     native_interfaces: BTreeMap<String, ProjectNativeInterface>,
+    #[serde(default, rename = "java-artifacts")]
+    java_artifacts: BTreeMap<String, ProjectJavaArtifact>,
     #[serde(default, rename = "runtime")]
     _runtime: Option<IgnoredAny>,
     #[serde(default)]
@@ -143,6 +152,7 @@ impl From<RawProjectManifest> for ProjectManifest {
             publish: value.publish,
             entrypoints,
             native_interfaces: value.native_interfaces,
+            java_artifacts: value.java_artifacts,
             test: value.test,
         }
     }
@@ -183,6 +193,8 @@ impl Serialize for ProjectManifest {
             entrypoints: BTreeMap<&'a str, CanonicalEntrypoint<'a>>,
             #[serde(rename = "native-interfaces")]
             native_interfaces: &'a BTreeMap<String, ProjectNativeInterface>,
+            #[serde(rename = "java-artifacts")]
+            java_artifacts: &'a BTreeMap<String, ProjectJavaArtifact>,
             #[serde(skip_serializing_if = "ProjectTestConfig::is_default")]
             test: &'a ProjectTestConfig,
         }
@@ -225,6 +237,7 @@ impl Serialize for ProjectManifest {
             publish: &self.publish,
             entrypoints,
             native_interfaces: &self.native_interfaces,
+            java_artifacts: &self.java_artifacts,
             test: &self.test,
         }
         .serialize(serializer)
@@ -518,6 +531,26 @@ impl ProjectManifest {
                         ),
                     });
                 }
+            }
+        }
+        for (name, artifact) in &self.java_artifacts {
+            if name.trim().is_empty() {
+                messages.push("Java artifact names must be non-empty".to_string());
+                continue;
+            }
+            if !is_relative_without_parent(&artifact.path) {
+                messages.push(format!(
+                    "Java artifact `{name}` path `{}` must be project-relative without `..` segments",
+                    artifact.path.display()
+                ));
+            } else {
+                path_requirements.push(PathRequirement::File {
+                    path: project_root.join(&artifact.path),
+                    missing_message: format!(
+                        "Java artifact `{name}` path `{}` does not exist as a file under project root",
+                        artifact.path.display()
+                    ),
+                });
             }
         }
         (messages, path_requirements)

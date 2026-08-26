@@ -14,6 +14,7 @@ pub(super) struct LoadedPathPackage {
     pub manifest: ProjectManifest,
     pub sources: Vec<LoadedSource>,
     pub native_interfaces: Vec<LoadedNativeInterface>,
+    pub java_artifacts: Vec<LoadedJavaArtifact>,
     pub dependencies: BTreeMap<String, PathBuf>,
 }
 
@@ -28,4 +29,10 @@ pub(super) struct LoadedNativeInterface {
     pub manifest_bytes: Vec<u8>,
     pub library_path: PathBuf,
     pub library_bytes: Vec<u8>,
+}
+
+pub(super) struct LoadedJavaArtifact {
+    pub name: String,
+    pub path: PathBuf,
+    pub bytes: Vec<u8>,
 }

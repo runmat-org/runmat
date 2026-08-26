@@ -3,7 +3,7 @@ use runmat_native_codegen::{aot::NATIVE_OBJECT_SCHEMA_VERSION, NativeTarget};
 
 use crate::{AotError, AotResult};
 
-pub const RUNTIME_ARCHIVE_SCHEMA_VERSION: u16 = 3;
+pub const RUNTIME_ARCHIVE_SCHEMA_VERSION: u16 = 4;
 pub const MAX_RUNTIME_ARCHIVE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 pub const MAX_RUNTIME_PAYLOAD_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_LINK_TOKENS: usize = 256;

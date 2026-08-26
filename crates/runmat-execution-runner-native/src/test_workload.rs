@@ -85,6 +85,42 @@ async fn execute_portable_request(
             }
         }
     }
+    if let Some(requirement) = interop
+        .adapters
+        .iter()
+        .find(|requirement| requirement.adapter == runmat_java::JAVA_ADAPTER_ID)
+    {
+        let Some(materialized) = materialized else {
+            return ProgramExecutionResponse::Failure {
+                message: "worker has no materialized Java artifacts".into(),
+            };
+        };
+        for identity in &requirement.artifact_identities {
+            if materialized.java_artifact(identity).is_none() {
+                return ProgramExecutionResponse::Failure {
+                    message: format!(
+                        "worker has no materialized Java artifact for required identity {identity}"
+                    ),
+                };
+            }
+        }
+        let required = requirement
+            .artifact_identities
+            .iter()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        let artifacts = materialized
+            .java_artifacts()
+            .iter()
+            .filter(|artifact| required.contains(&artifact.identity.to_string()))
+            .map(|artifact| (artifact.identity.clone(), artifact.path.clone()))
+            .collect::<Vec<_>>();
+        if let Err(error) = session.install_java_project_artifacts(&artifacts) {
+            return ProgramExecutionResponse::Failure {
+                message: format!("worker could not install Java artifacts: {error}"),
+            };
+        }
+    }
     if let Err(error) = session.admit_interop_manifest(&interop) {
         return ProgramExecutionResponse::Failure {
             message: format!("worker rejected foreign interoperability requirements: {error}"),

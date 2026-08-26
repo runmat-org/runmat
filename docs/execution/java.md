@@ -55,6 +55,15 @@ dynamicEntries = javaclasspath("-dynamic");
 
 Classpath changes replace the session class loader without changing the process JVM's bootstrap path. Existing objects continue to use the loader that defined their classes. The session loader is also installed as the calling thread's context loader so libraries that use `ServiceLoader`, JDBC drivers, and similar discovery mechanisms can find project and dynamic artifacts.
 
+For a JAR that must travel with a package, standalone executable, or remote job, declare it in `runmat.toml` instead of relying only on a machine-local classpath:
+
+```toml
+[java-artifacts.analysis]
+path = "lib/analysis.jar"
+```
+
+RunMat includes declared Java artifacts in the frozen package revision, verifies their content digests again before compilation or submission, and records their exact identities in the program's interoperability manifest. Artifact names must be unique across the resolved package graph and determine classpath order, which keeps class selection consistent in local, standalone, and remote execution. Standalone executables embed the JAR bytes; remote workers receive them through the same verified artifact bundle used by other foreign runtimes. A browser or worker without the `jvm` host capability rejects the package during resolution.
+
 ## Callbacks and listeners
 
 Pass a RunMat function handle where a Java method expects a functional interface or listener:

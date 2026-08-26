@@ -5,7 +5,9 @@ use runmat_package::FrozenProjectHandoff;
 
 use crate::{NativeExecutionError, NativeExecutionResult};
 
+mod java_artifacts;
 mod native_interfaces;
+pub(crate) use java_artifacts::MaterializedJavaArtifact;
 pub(crate) use native_interfaces::MaterializedNativeInterface;
 
 /// One private, exact, credential-free materialization of a portable bundle.
@@ -16,6 +18,7 @@ pub(crate) struct MaterializedProject {
     _root: tempfile::TempDir,
     handoff: Option<FrozenProjectHandoff>,
     native_interfaces: Vec<MaterializedNativeInterface>,
+    java_artifacts: Vec<MaterializedJavaArtifact>,
 }
 
 impl MaterializedProject {
@@ -56,10 +59,12 @@ impl MaterializedProject {
             .cloned()
             .collect::<Vec<_>>();
         let native_interfaces = native_interfaces::discover(&foreign_objects, root.path())?;
+        let java_artifacts = java_artifacts::discover(&foreign_objects, root.path())?;
         Ok(Self {
             _root: root,
             handoff,
             native_interfaces,
+            java_artifacts,
         })
     }
 
@@ -71,6 +76,16 @@ impl MaterializedProject {
         self.native_interfaces
             .iter()
             .find(|interface| interface.manifest.identity.as_str() == identity)
+    }
+
+    pub(crate) fn java_artifact(&self, identity: &str) -> Option<&MaterializedJavaArtifact> {
+        self.java_artifacts
+            .iter()
+            .find(|artifact| artifact.identity.as_str() == identity)
+    }
+
+    pub(crate) fn java_artifacts(&self) -> &[MaterializedJavaArtifact] {
+        &self.java_artifacts
     }
 }
 
@@ -267,6 +282,15 @@ mod tests {
             library_bytes.clone(),
         )
         .unwrap();
+        let java_bytes = b"PK\x05\x06\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0".to_vec();
+        let java_identity = runmat_java::JavaArtifactIdentity::for_bytes(&java_bytes);
+        let java = LogicalObject::new(
+            ObjectNamespace::ForeignArtifact,
+            "java/fixture.jar",
+            runmat_java::JAVA_ARCHIVE_MEDIA_TYPE,
+            java_bytes.clone(),
+        )
+        .unwrap();
         let recipe = ProgramBuildRecipe {
             schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
             program_revision: revision.clone(),
@@ -304,6 +328,8 @@ mod tests {
             .unwrap()
             .with_foreign_artifact(library)
             .unwrap()
+            .with_foreign_artifact(java)
+            .unwrap()
             .with_materialized_program(
                 recipe,
                 ExecutableForm::NativeObjectV1,
@@ -337,6 +363,12 @@ mod tests {
             manifest
         );
         assert!(std::fs::metadata(&interface.library_path)
+            .unwrap()
+            .permissions()
+            .readonly());
+        let java = materialized.java_artifact(java_identity.as_str()).unwrap();
+        assert_eq!(std::fs::read(&java.path).unwrap(), java_bytes);
+        assert!(std::fs::metadata(&java.path)
             .unwrap()
             .permissions()
             .readonly());

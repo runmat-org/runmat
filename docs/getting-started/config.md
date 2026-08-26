@@ -210,6 +210,13 @@ RunMat starts Java lazily on the first operation that needs the JVM. `jenv` repo
 
 The Desktop host enables `javaObjectEDT` and `javaMethodEDT` for synchronous AWT Event Dispatch Thread calls. CLI, server, and browser sessions reject EDT operations explicitly. See [Java Interoperability](/docs/runtime/execution/java) for value conversion, classloader, callback, and EDT behavior.
 
+Use `[java-artifacts.<name>]` for JARs that are part of the project rather than local machine configuration. Each entry has one project-relative `path`; RunMat freezes its exact bytes for package, native compilation, and remote execution:
+
+```toml
+[java-artifacts.analysis]
+path = "lib/analysis.jar"
+```
+
 The isolated extension host contains crashes and can be terminated on cancellation or timeout, but it is not an operating-system security sandbox. An admitted native module has the extension-host process's permissions. Use `unmanifested = "deny"` when only exact, manifest-bound RunMat artifacts should be allowed.
 
 ### `[runtime.jit]`
