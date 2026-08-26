@@ -645,8 +645,8 @@ pub(super) fn capture_boxed(
 }
 
 pub(super) struct PreparedArguments<'local> {
-    prepared: Vec<PreparedValue>,
-    objects: Vec<JObject<'local>>,
+    pub(super) prepared: Vec<PreparedValue>,
+    pub(super) objects: Vec<JObject<'local>>,
     null: JObject<'local>,
 }
 
@@ -670,7 +670,7 @@ impl PreparedArguments<'_> {
     }
 }
 
-enum PreparedValue {
+pub(super) enum PreparedValue {
     Null,
     Boolean(bool),
     Byte(i8),

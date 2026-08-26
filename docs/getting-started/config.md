@@ -208,6 +208,8 @@ Process isolation contains native crashes and hangs but does not reduce the libr
 
 RunMat starts Java lazily on the first operation that needs the JVM. `jenv` reports the selected installation and load state without starting it, and `javaclasspath` can inspect the configured project and dynamic layers. A process can host only one JVM configuration; a later session must use the same installation and startup options once Java has started.
 
+The Desktop host enables `javaObjectEDT` and `javaMethodEDT` for synchronous AWT Event Dispatch Thread calls. CLI, server, and browser sessions reject EDT operations explicitly. See [Java Interoperability](/docs/runtime/execution/java) for value conversion, classloader, callback, and EDT behavior.
+
 The isolated extension host contains crashes and can be terminated on cancellation or timeout, but it is not an operating-system security sandbox. An admitted native module has the extension-host process's permissions. Use `unmanifested = "deny"` when only exact, manifest-bound RunMat artifacts should be allowed.
 
 ### `[runtime.jit]`

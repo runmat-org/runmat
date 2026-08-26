@@ -66,6 +66,7 @@ impl JavaSession {
         class_name: &str,
     ) -> Result<JClass<'local>, JavaInvocationError> {
         self.ensure_class_loader(environment)?;
+        self.install_context_class_loader(environment)?;
         let loader = self.class_loader.borrow();
         let Some(loader) = loader.as_ref() else {
             return environment
@@ -121,6 +122,7 @@ impl JavaSession {
         self.process.with_attached(|environment| {
             let loader = build_class_loader(environment, &entries)?;
             *self.class_loader.borrow_mut() = loader;
+            self.install_context_class_loader(environment)?;
             Ok::<(), JavaInvocationError>(())
         })?;
         *self.classpath.borrow_mut() = candidate;
@@ -139,6 +141,34 @@ impl JavaSession {
             return Ok(());
         }
         *self.class_loader.borrow_mut() = build_class_loader(environment, &entries)?;
+        Ok(())
+    }
+
+    fn install_context_class_loader(
+        &self,
+        environment: &mut jni::JNIEnv<'_>,
+    ) -> Result<(), JavaInvocationError> {
+        let loader = self.class_loader.borrow();
+        let Some(loader) = loader.as_ref() else {
+            return Ok(());
+        };
+        let thread = environment
+            .call_static_method(
+                "java/lang/Thread",
+                "currentThread",
+                "()Ljava/lang/Thread;",
+                &[],
+            )
+            .and_then(JValueOwned::l)
+            .map_err(|error| jni_error(environment, error))?;
+        environment
+            .call_method(
+                thread,
+                "setContextClassLoader",
+                "(Ljava/lang/ClassLoader;)V",
+                &[JValue::Object(loader.as_obj())],
+            )
+            .map_err(|error| jni_error(environment, error))?;
         Ok(())
     }
 }

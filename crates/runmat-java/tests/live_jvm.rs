@@ -16,7 +16,14 @@ fn live_session() -> Option<std::rc::Rc<JavaSession>> {
         ..JavaDiscoveryRequest::default()
     })
     .unwrap();
-    let process = JvmProcess::launch(installation, &JvmConfig::default()).unwrap();
+    let process = JvmProcess::launch(
+        installation,
+        &JvmConfig {
+            options: vec!["-Djava.awt.headless=true".into()],
+            ..JvmConfig::default()
+        },
+    )
+    .unwrap();
     Some(std::rc::Rc::new(JavaSession::new(process)))
 }
 
@@ -222,17 +229,47 @@ fn dynamic_classpath_add_and_remove_rebuilds_the_session_loader() {
     let package = root.path().join("fixture/dynamic");
     std::fs::create_dir_all(&package).unwrap();
     let source = package.join("DynamicValue.java");
+    let interface = package.join("NumberSource.java");
+    let driver = package.join("FixtureDriver.java");
+    let service_access = package.join("ServiceAccess.java");
     std::fs::write(
         &source,
-        "package fixture.dynamic; public final class DynamicValue { public static int value() { return 73; } }",
+        "package fixture.dynamic; public final class DynamicValue implements NumberSource { public DynamicValue() {} public int value() { return 73; } public static int staticValue() { return 73; } }",
+    )
+    .unwrap();
+    std::fs::write(
+        &interface,
+        "package fixture.dynamic; public interface NumberSource { int value(); }",
+    )
+    .unwrap();
+    std::fs::write(
+        &driver,
+        "package fixture.dynamic; import java.sql.*; import java.util.Properties; import java.util.logging.Logger; public final class FixtureDriver implements Driver { public Connection connect(String url, Properties info) { return null; } public boolean acceptsURL(String url) { return url != null && url.startsWith(\"jdbc:fixture:\"); } public DriverPropertyInfo[] getPropertyInfo(String url, Properties info) { return new DriverPropertyInfo[0]; } public int getMajorVersion() { return 1; } public int getMinorVersion() { return 0; } public boolean jdbcCompliant() { return false; } public Logger getParentLogger() { return Logger.getGlobal(); } }",
+    )
+    .unwrap();
+    std::fs::write(
+        &service_access,
+        "package fixture.dynamic; import java.util.ServiceLoader; public final class ServiceAccess { private ServiceAccess() {} public static ServiceLoader<?> load(Class<?> type, ClassLoader loader) { return ServiceLoader.load(type, loader); } }",
     )
     .unwrap();
     assert!(Command::new(compiler)
         .args(["-d", root.path().to_str().unwrap()])
-        .arg(&source)
+        .args([&interface, &source, &driver, &service_access])
         .status()
         .unwrap()
         .success());
+    let services = root.path().join("META-INF/services");
+    std::fs::create_dir_all(&services).unwrap();
+    std::fs::write(
+        services.join("fixture.dynamic.NumberSource"),
+        "fixture.dynamic.DynamicValue\n",
+    )
+    .unwrap();
+    std::fs::write(
+        services.join("java.sql.Driver"),
+        "fixture.dynamic.FixtureDriver\n",
+    )
+    .unwrap();
 
     let before = session.classpath();
     let added = session.add_dynamic_classpath(root.path()).unwrap();
@@ -240,15 +277,131 @@ fn dynamic_classpath_add_and_remove_rebuilds_the_session_loader() {
     assert_ne!(added.identity, before.identity);
     assert_eq!(
         session
-            .call_static_resolved("fixture.dynamic.DynamicValue", "value", &[])
+            .call_static_resolved("fixture.dynamic.DynamicValue", "staticValue", &[])
             .unwrap(),
         JavaValue::Int(73)
+    );
+
+    let thread = session
+        .call_static_resolved("java.lang.Thread", "currentThread", &[])
+        .unwrap();
+    let JavaValue::Object { handle: thread, .. } = thread else {
+        panic!("currentThread must return a Java object");
+    };
+    let loader = session
+        .call_method_resolved(thread, "getContextClassLoader", &[])
+        .unwrap();
+    let JavaValue::Object { handle: loader, .. } = loader else {
+        panic!("context class loader must be a Java object");
+    };
+    let service_class = session
+        .call_method_resolved(
+            loader,
+            "loadClass",
+            &[JavaValue::String("fixture.dynamic.NumberSource".into())],
+        )
+        .unwrap();
+    let services = session
+        .call_static_resolved(
+            "fixture.dynamic.ServiceAccess",
+            "load",
+            &[
+                service_class,
+                JavaValue::Object {
+                    handle: loader,
+                    class_name: "java.net.URLClassLoader".into(),
+                },
+            ],
+        )
+        .unwrap();
+    let JavaValue::Object {
+        handle: services, ..
+    } = services
+    else {
+        panic!("ServiceLoader.load must return a Java object");
+    };
+    let iterator = session
+        .call_method_resolved(services, "iterator", &[])
+        .unwrap();
+    let JavaValue::Object {
+        handle: iterator, ..
+    } = iterator
+    else {
+        panic!("ServiceLoader.iterator must return a Java object");
+    };
+    assert_eq!(
+        session
+            .call_method_resolved(iterator, "hasNext", &[])
+            .unwrap(),
+        JavaValue::Boolean(true)
+    );
+    let provider = session.call_method_resolved(iterator, "next", &[]).unwrap();
+    let JavaValue::Object {
+        handle: provider, ..
+    } = provider
+    else {
+        panic!("ServiceLoader provider must be a Java object");
+    };
+    assert_eq!(
+        session
+            .call_method_resolved(provider, "value", &[])
+            .unwrap(),
+        JavaValue::Int(73)
+    );
+    let driver_class = session
+        .call_method_resolved(
+            loader,
+            "loadClass",
+            &[JavaValue::String("java.sql.Driver".into())],
+        )
+        .unwrap();
+    let drivers = session
+        .call_static_resolved(
+            "fixture.dynamic.ServiceAccess",
+            "load",
+            &[
+                driver_class,
+                JavaValue::Object {
+                    handle: loader,
+                    class_name: "java.net.URLClassLoader".into(),
+                },
+            ],
+        )
+        .unwrap();
+    let JavaValue::Object {
+        handle: drivers, ..
+    } = drivers
+    else {
+        panic!("JDBC service loader must be a Java object");
+    };
+    let drivers = session
+        .call_method_resolved(drivers, "iterator", &[])
+        .unwrap();
+    let JavaValue::Object {
+        handle: drivers, ..
+    } = drivers
+    else {
+        panic!("JDBC provider iterator must be a Java object");
+    };
+    let driver = session.call_method_resolved(drivers, "next", &[]).unwrap();
+    let JavaValue::Object { handle: driver, .. } = driver else {
+        panic!("JDBC provider must be a Java object");
+    };
+    assert_eq!(
+        session
+            .call_method_resolved(
+                driver,
+                "acceptsURL",
+                &[JavaValue::String("jdbc:fixture:memory".into())],
+            )
+            .unwrap(),
+        JavaValue::Boolean(true)
     );
     let removed = session.remove_dynamic_classpath(root.path()).unwrap();
     assert_eq!(removed.revision, added.revision + 1);
     assert!(removed.dynamic.is_empty());
     assert!(session
-        .call_static_resolved("fixture.dynamic.DynamicValue", "value", &[])
+        .call_static_resolved("fixture.dynamic.DynamicValue", "staticValue", &[])
         .is_err());
 }
 
@@ -395,4 +548,43 @@ fn callback_from_a_java_worker_thread_fails_with_an_affinity_error() {
     assert!(error
         .to_string()
         .contains("outside its originating RunMat thread or session"));
+}
+
+#[test]
+fn edt_calls_execute_on_the_awt_event_thread() {
+    let Some(session) = live_session() else {
+        eprintln!("RUNMAT_TEST_JAVA_HOME is unset; live JVM test was not requested");
+        return;
+    };
+    assert_eq!(
+        session
+            .call_static_resolved_on_edt(
+                "javax.swing.SwingUtilities",
+                "isEventDispatchThread",
+                &[],
+            )
+            .unwrap(),
+        JavaValue::Boolean(true)
+    );
+    let builder = session
+        .construct_resolved_on_edt(
+            "java.lang.StringBuilder",
+            &[JavaValue::String("initial".into())],
+        )
+        .unwrap();
+    let JavaValue::Object {
+        handle: builder, ..
+    } = builder
+    else {
+        panic!("StringBuilder constructor must return an object");
+    };
+    session
+        .call_method_resolved_on_edt(builder, "append", &[JavaValue::String("-updated".into())])
+        .unwrap();
+    assert_eq!(
+        session
+            .call_method_resolved_on_edt(builder, "toString", &[])
+            .unwrap(),
+        JavaValue::String("initial-updated".into())
+    );
 }

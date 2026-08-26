@@ -143,6 +143,19 @@ async fn java_object_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 #[runtime_builtin(
+    name = "javaObjectEDT",
+    category = "interop/java",
+    summary = "Construct a Java object on the Desktop event-dispatch thread.",
+    keywords = "javaObjectEDT,java,jvm,desktop,edt,constructor",
+    descriptor(crate::builtins::interop::java::VARIADIC_DESCRIPTOR),
+    integer_audit(crate::builtins::interop::java::INTEGER_AUDIT),
+    builtin_path = "crate::builtins::interop::java"
+)]
+async fn java_object_edt_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
+    invoke_java("construct_edt", arguments).await
+}
+
+#[runtime_builtin(
     name = "javaMethod",
     category = "interop/java",
     summary = "Invoke a static or instance Java method.",
@@ -151,11 +164,39 @@ async fn java_object_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
     integer_audit(crate::builtins::interop::java::INTEGER_AUDIT),
     builtin_path = "crate::builtins::interop::java"
 )]
-async fn java_method_builtin(mut arguments: Vec<Value>) -> BuiltinResult<Value> {
+async fn java_method_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
+    java_method_dispatch(arguments, "invoke_member", "call_static", "javaMethod").await
+}
+
+#[runtime_builtin(
+    name = "javaMethodEDT",
+    category = "interop/java",
+    summary = "Invoke a Java method on the Desktop event-dispatch thread.",
+    keywords = "javaMethodEDT,java,jvm,desktop,edt,method",
+    descriptor(crate::builtins::interop::java::VARIADIC_DESCRIPTOR),
+    integer_audit(crate::builtins::interop::java::INTEGER_AUDIT),
+    builtin_path = "crate::builtins::interop::java"
+)]
+async fn java_method_edt_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
+    java_method_dispatch(
+        arguments,
+        "invoke_member_edt",
+        "call_static_edt",
+        "javaMethodEDT",
+    )
+    .await
+}
+
+async fn java_method_dispatch(
+    mut arguments: Vec<Value>,
+    member_operation: &str,
+    static_operation: &str,
+    builtin: &str,
+) -> BuiltinResult<Value> {
     if arguments.len() < 2 {
-        return Err(invalid_call(
-            "javaMethod expects a method and class or object",
-        ));
+        return Err(invalid_call(format!(
+            "{builtin} expects a method and class or object"
+        )));
     }
     let method = arguments.remove(0);
     let receiver = arguments.remove(0);
@@ -163,12 +204,12 @@ async fn java_method_builtin(mut arguments: Vec<Value>) -> BuiltinResult<Value> 
         Value::Foreign(reference) if reference.type_identity.family == JAVA_ADAPTER => {
             let mut call = vec![Value::Foreign(reference), method];
             call.extend(arguments);
-            invoke_java("invoke_member", call).await
+            invoke_java(member_operation, call).await
         }
         class => {
             let mut call = vec![class, method];
             call.extend(arguments);
-            invoke_java("call_static", call).await
+            invoke_java(static_operation, call).await
         }
     }
 }

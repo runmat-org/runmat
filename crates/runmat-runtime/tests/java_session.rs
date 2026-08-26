@@ -46,7 +46,10 @@ fn live_runtime() -> Option<(Rc<ForeignRuntime>, RuntimeContext, Rc<JavaAdapter>
             search_system: false,
             ..JavaDiscoveryRequest::default()
         },
-        JvmConfig::default(),
+        JvmConfig {
+            options: vec!["-Djava.awt.headless=true".into()],
+            ..JvmConfig::default()
+        },
     )
     .expect("register Java host");
     foreign
@@ -363,4 +366,36 @@ fn java_callbacks_reenter_the_originating_runtime_call_service() {
         .iter()
         .all(|request| request.requested_outputs == 1));
     assert_eq!(requests[0].arguments, vec![Value::Int(IntValue::I32(1))]);
+}
+
+#[test]
+fn java_edt_operations_require_desktop_authority_and_run_on_the_edt() {
+    let Some((_foreign, context, adapter)) = live_runtime() else {
+        eprintln!("RUNMAT_TEST_JAVA_HOME is unset; live JVM test was not requested");
+        return;
+    };
+    let error = invoke(
+        &context,
+        "call_static_edt",
+        vec![
+            Value::String("javax.swing.SwingUtilities".into()),
+            Value::String("isEventDispatchThread".into()),
+        ],
+    )
+    .expect_err("headless sessions must not claim Java EDT authority");
+    assert_eq!(error.identifier(), Some("RunMat:Java:EdtUnavailable"));
+
+    adapter.set_desktop_available(true);
+    assert_eq!(
+        invoke(
+            &context,
+            "call_static_edt",
+            vec![
+                Value::String("javax.swing.SwingUtilities".into()),
+                Value::String("isEventDispatchThread".into()),
+            ],
+        )
+        .expect("Desktop-authorized call must run on the Java EDT"),
+        Value::Bool(true)
+    );
 }

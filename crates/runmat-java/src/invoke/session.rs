@@ -1,4 +1,5 @@
 use super::{
+    edt::{dispatch as dispatch_edt, EdtInvocation, EdtTarget, OwnedArguments},
     error::jni_error,
     reflection::{constructor_candidates, field_descriptor, method_candidates, ReflectedCallable},
     JavaInvocationError, JavaValue,
@@ -89,6 +90,36 @@ impl JavaSession {
         })
     }
 
+    pub fn construct_resolved_on_edt(
+        &self,
+        class_name: &str,
+        arguments: &[JavaValue],
+    ) -> Result<JavaValue, JavaInvocationError> {
+        let callable = self.resolve_constructor(class_name, arguments)?;
+        self.process.with_attached(|environment| {
+            let class = self.load_class(environment, class_name)?;
+            let class = environment
+                .new_global_ref(class)
+                .map_err(|error| jni_error(environment, error))?;
+            let prepared = self.prepare_arguments(
+                environment,
+                arguments,
+                Some(&callable.parameters),
+                callable.varargs,
+            )?;
+            let arguments = OwnedArguments::capture(environment, prepared)?;
+            let result = dispatch_edt(
+                environment,
+                EdtInvocation {
+                    target: EdtTarget::Constructor(class),
+                    descriptor: callable.descriptor,
+                    arguments,
+                },
+            )?;
+            self.capture_edt_result(environment, result)
+        })
+    }
+
     pub fn call_static(
         &self,
         class_name: &str,
@@ -127,6 +158,40 @@ impl JavaSession {
                 .call_static_method(class, method_name, &callable.descriptor, &values)
                 .map_err(|error| jni_error(environment, error))?;
             self.capture_value(environment, result)
+        })
+    }
+
+    pub fn call_static_resolved_on_edt(
+        &self,
+        class_name: &str,
+        method_name: &str,
+        arguments: &[JavaValue],
+    ) -> Result<JavaValue, JavaInvocationError> {
+        let callable = self.resolve_method(class_name, method_name, true, arguments)?;
+        self.process.with_attached(|environment| {
+            let class = self.load_class(environment, class_name)?;
+            let class = environment
+                .new_global_ref(class)
+                .map_err(|error| jni_error(environment, error))?;
+            let prepared = self.prepare_arguments(
+                environment,
+                arguments,
+                Some(&callable.parameters),
+                callable.varargs,
+            )?;
+            let arguments = OwnedArguments::capture(environment, prepared)?;
+            let result = dispatch_edt(
+                environment,
+                EdtInvocation {
+                    target: EdtTarget::Static {
+                        class,
+                        method: method_name.to_string(),
+                    },
+                    descriptor: callable.descriptor,
+                    arguments,
+                },
+            )?;
+            self.capture_edt_result(environment, result)
         })
     }
 
@@ -184,6 +249,45 @@ impl JavaSession {
                 )
                 .map_err(|error| jni_error(environment, error))?;
             self.capture_value(environment, result)
+        })
+    }
+
+    pub fn call_method_resolved_on_edt(
+        &self,
+        receiver: JavaObjectHandle,
+        method_name: &str,
+        arguments: &[JavaValue],
+    ) -> Result<JavaValue, JavaInvocationError> {
+        let class_name = self.objects.borrow().get(receiver)?.0.class_name.clone();
+        let receiver_ref = self.global_reference(receiver)?;
+        let callable = self.process.with_attached(|environment| {
+            let class = environment
+                .get_object_class(receiver_ref.as_obj())
+                .map_err(|error| jni_error(environment, error))?;
+            let candidates =
+                method_candidates(environment, &class, &class_name, method_name, false)?;
+            choose_callable(self, environment, candidates, arguments)
+        })?;
+        self.process.with_attached(|environment| {
+            let prepared = self.prepare_arguments(
+                environment,
+                arguments,
+                Some(&callable.parameters),
+                callable.varargs,
+            )?;
+            let arguments = OwnedArguments::capture(environment, prepared)?;
+            let result = dispatch_edt(
+                environment,
+                EdtInvocation {
+                    target: EdtTarget::Instance {
+                        receiver: receiver_ref,
+                        method: method_name.to_string(),
+                    },
+                    descriptor: callable.descriptor,
+                    arguments,
+                },
+            )?;
+            self.capture_edt_result(environment, result)
         })
     }
 
