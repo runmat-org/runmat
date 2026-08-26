@@ -214,17 +214,16 @@ pub async fn try_invoke_clibgen(
     )
 }
 
-/// Resolve fully qualified standard-library Java constructors and static calls
-/// through the session Java adapter. Other package roots remain available via
-/// `javaObject`, `javaMethod`, and imported-name resolution so this hook does
-/// not claim arbitrary source-package names.
+/// Resolve a qualified constructor or static call through the session Java
+/// adapter after source and package resolution has classified it as an external
+/// name. Native-library namespaces retain their own adapter routing.
 pub async fn try_invoke_java(
     context: crate::context::RuntimeContext,
     name: &str,
     arguments: Vec<runmat_value::Value>,
     requested_outputs: usize,
 ) -> Option<Result<runmat_value::Value, crate::RuntimeError>> {
-    if !(name.starts_with("java.") || name.starts_with("javax.")) {
+    if !is_java_qualified_candidate(name) {
         return None;
     }
     let Some(service) = context.service_ports().foreign().cloned() else {
@@ -249,4 +248,22 @@ pub async fn try_invoke_java(
             ))
             .await,
     )
+}
+
+fn is_java_qualified_candidate(name: &str) -> bool {
+    name.contains('.') && !name.starts_with("clib.") && !name.starts_with("clibgen.")
+}
+
+#[cfg(test)]
+mod java_qualified_tests {
+    use super::is_java_qualified_candidate;
+
+    #[test]
+    fn accepts_custom_java_packages_without_claiming_native_namespaces() {
+        assert!(is_java_qualified_candidate("fixture.dynamic.Value.create"));
+        assert!(is_java_qualified_candidate("java.util.ArrayList"));
+        assert!(!is_java_qualified_candidate("plain_name"));
+        assert!(!is_java_qualified_candidate("clib.fixture.call"));
+        assert!(!is_java_qualified_candidate("clibgen.buildInterface"));
+    }
 }
