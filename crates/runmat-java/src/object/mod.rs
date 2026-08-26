@@ -106,6 +106,20 @@ impl<T> JavaObjectRegistry<T> {
         self.entries.is_empty()
     }
 
+    pub fn iter(&self) -> impl Iterator<Item = (JavaObjectHandle, &JavaObjectMetadata, &T)> {
+        let generation = self.generation;
+        self.entries.iter().map(move |(handle, entry)| {
+            (
+                JavaObjectHandle {
+                    handle: *handle,
+                    generation,
+                },
+                &entry.metadata,
+                &entry.value,
+            )
+        })
+    }
+
     fn validate_generation(&self, handle: JavaObjectHandle) -> Result<(), ObjectRegistryError> {
         if handle.generation == self.generation {
             Ok(())
@@ -155,5 +169,23 @@ mod tests {
         assert_eq!(registry.get(first).unwrap().1, "fixture");
         assert_eq!(registry.remove(first).unwrap(), "fixture");
         assert!(registry.is_empty());
+    }
+
+    #[test]
+    fn iteration_retains_generation_and_metadata() {
+        let mut registry = JavaObjectRegistry::default();
+        let handle = registry
+            .insert(
+                JavaObjectMetadata {
+                    class_name: "java.lang.Object".into(),
+                },
+                11,
+            )
+            .unwrap();
+        let entries = registry.iter().collect::<Vec<_>>();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, handle);
+        assert_eq!(entries[0].1.class_name, "java.lang.Object");
+        assert_eq!(*entries[0].2, 11);
     }
 }

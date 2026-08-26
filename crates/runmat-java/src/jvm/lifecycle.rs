@@ -74,15 +74,19 @@ impl JvmProcess {
         &self.state.installation
     }
 
-    pub fn with_attached<R>(
+    pub fn with_attached<R, E>(
         &self,
-        operation: impl FnOnce(&mut jni::JNIEnv<'_>) -> Result<R, JvmError>,
-    ) -> Result<R, JvmError> {
+        operation: impl FnOnce(&mut jni::JNIEnv<'_>) -> Result<R, E>,
+    ) -> Result<R, E>
+    where
+        E: From<JvmError>,
+    {
         let mut environment = self
             .state
             .vm
             .attach_current_thread()
-            .map_err(|error| JvmError::ThreadAttachment(error.to_string()))?;
+            .map_err(|error| JvmError::ThreadAttachment(error.to_string()))
+            .map_err(E::from)?;
         operation(&mut environment)
     }
 }
