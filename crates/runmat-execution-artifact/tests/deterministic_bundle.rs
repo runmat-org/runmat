@@ -4,7 +4,7 @@ mod support;
 
 use runmat_execution_artifact::{
     archive::{read_bundle, write_bundle, ArchiveLimits},
-    ExecutableForm, ExecutionBundleBuilder,
+    ExecutableForm, ExecutionBundleBuilder, LogicalObject, ObjectNamespace,
 };
 
 #[test]
@@ -157,6 +157,63 @@ fn compiled_package_closure_round_trips_without_source_or_project_payloads() {
     assert!(decoded
         .project_handoff_at(std::path::Path::new("unused"))
         .is_err());
+}
+
+#[test]
+fn foreign_artifacts_are_exact_first_class_bundle_objects() {
+    let (_temp, project, revision) = support::frozen_project();
+    let sidecar = LogicalObject::new(
+        ObjectNamespace::ForeignArtifact,
+        "foreign/fixture/interface.runmat.json",
+        "application/vnd.runmat.native-interface+json",
+        b"canonical sidecar".to_vec(),
+    )
+    .unwrap();
+    let library = LogicalObject::new(
+        ObjectNamespace::ForeignArtifact,
+        "foreign/fixture/library.native",
+        "application/vnd.runmat.native-library",
+        b"synthetic native library".to_vec(),
+    )
+    .unwrap();
+    let bundle = ExecutionBundleBuilder::native(&project, revision.clone())
+        .unwrap()
+        .with_foreign_artifact(sidecar)
+        .unwrap()
+        .with_foreign_artifact(library)
+        .unwrap()
+        .with_materialized_program(
+            support::recipe(revision),
+            ExecutableForm::InterpreterBytecodeV1,
+            b"canonical-bytecode".to_vec(),
+        )
+        .build()
+        .unwrap();
+
+    assert_eq!(bundle.manifest.foreign_artifacts.len(), 2);
+    assert_eq!(
+        bundle
+            .objects
+            .iter()
+            .filter(|object| object.descriptor.namespace == ObjectNamespace::ForeignArtifact)
+            .count(),
+        2
+    );
+    let mut archive = Vec::new();
+    write_bundle(&bundle, &mut archive, ArchiveLimits::default()).unwrap();
+    assert_eq!(
+        read_bundle(archive.as_slice(), ArchiveLimits::default()).unwrap(),
+        bundle
+    );
+
+    let mut tampered = bundle;
+    let foreign = tampered
+        .objects
+        .iter_mut()
+        .find(|object| object.descriptor.namespace == ObjectNamespace::ForeignArtifact)
+        .unwrap();
+    foreign.bytes.push(0);
+    assert!(tampered.validate().is_err());
 }
 
 #[test]

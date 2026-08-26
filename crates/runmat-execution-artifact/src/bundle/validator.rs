@@ -48,7 +48,10 @@ pub(super) fn validate(bundle: &ExecutionBundle) -> ArtifactResult<()> {
         .iter()
         .map(|object| object.descriptor.clone())
         .collect::<Vec<_>>();
-    if descriptors != bundle.manifest.sources
+    let mut manifest_descriptors = bundle.manifest.sources.clone();
+    manifest_descriptors.extend(bundle.manifest.foreign_artifacts.clone());
+    manifest_descriptors.sort();
+    if descriptors != manifest_descriptors
         || bundle
             .manifest
             .sources
@@ -57,6 +60,16 @@ pub(super) fn validate(bundle: &ExecutionBundle) -> ArtifactResult<()> {
         || bundle
             .manifest
             .sources
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+        || bundle
+            .manifest
+            .foreign_artifacts
+            .iter()
+            .any(|artifact| artifact.namespace != ObjectNamespace::ForeignArtifact)
+        || bundle
+            .manifest
+            .foreign_artifacts
             .windows(2)
             .any(|pair| pair[0] >= pair[1])
         || bundle
@@ -168,7 +181,10 @@ fn validate_code_closure(bundle: &ExecutionBundle) -> ArtifactResult<()> {
                 || package.source_digest != bundle.manifest.project_revision.source_digest
                 || !bundle.manifest.sources.is_empty()
                 || !bundle.manifest.callables.is_empty()
-                || !bundle.objects.is_empty()
+                || bundle
+                    .objects
+                    .iter()
+                    .any(|object| object.descriptor.namespace != ObjectNamespace::ForeignArtifact)
                 || bundle.manifest.artifacts.is_empty()
                 || bundle.manifest.artifacts.iter().any(|artifact| {
                     !matches!(
@@ -268,14 +284,14 @@ fn validate_project_handoff(
 }
 
 pub(super) fn identity(manifest: &BundleManifest) -> ArtifactResult<Digest> {
-    let mut bytes = b"runmat-execution-bundle-v3\0".to_vec();
+    let mut bytes = b"runmat-execution-bundle-v4\0".to_vec();
     let revision = manifest
         .program_revision
         .canonical_bytes()
         .map_err(|error| ArtifactError::Encoding(error.to_string()))?;
     let mut encoder = Encoder::new(&mut bytes);
     encoder
-        .array(12)
+        .array(13)
         .and_then(|encoder| encoder.u16(manifest.schema_version))
         .and_then(|encoder| encoder.bytes(&revision))
         .and_then(|encoder| encoder.bytes(manifest.project_revision.graph_digest.bytes()))
@@ -295,6 +311,19 @@ pub(super) fn identity(manifest: &BundleManifest) -> ArtifactResult<Digest> {
             .and_then(|encoder| encoder.bytes(source.digest.bytes()))
             .and_then(|encoder| encoder.u64(source.encoded_length))
             .and_then(|encoder| encoder.str(&source.media_type))
+            .map_err(encoding)?;
+    }
+    encoder
+        .array(manifest.foreign_artifacts.len() as u64)
+        .map_err(encoding)?;
+    for artifact in &manifest.foreign_artifacts {
+        encoder
+            .array(5)
+            .and_then(|encoder| encoder.u8(artifact.namespace as u8))
+            .and_then(|encoder| encoder.str(&artifact.logical_name))
+            .and_then(|encoder| encoder.bytes(artifact.digest.bytes()))
+            .and_then(|encoder| encoder.u64(artifact.encoded_length))
+            .and_then(|encoder| encoder.str(&artifact.media_type))
             .map_err(encoding)?;
     }
     encoder

@@ -22,10 +22,10 @@ pub(super) fn encode_manifest(manifest: &BundleManifest) -> ArtifactResult<Vec<u
             "bundle code closure is too large".to_string(),
         ));
     }
-    let mut bytes = b"runmat-execution-bundle-manifest-v3\0".to_vec();
+    let mut bytes = b"runmat-execution-bundle-manifest-v4\0".to_vec();
     let mut encoder = Encoder::new(&mut bytes);
     encoder
-        .array(11)
+        .array(12)
         .and_then(|encoder| encoder.u16(manifest.schema_version))
         .and_then(|encoder| {
             encoder.bytes(
@@ -43,6 +43,12 @@ pub(super) fn encode_manifest(manifest: &BundleManifest) -> ArtifactResult<Vec<u
         .map_err(encode_error)?;
     for source in &manifest.sources {
         encode_descriptor_to(&mut encoder, source)?;
+    }
+    encoder
+        .array(manifest.foreign_artifacts.len() as u64)
+        .map_err(encode_error)?;
+    for artifact in &manifest.foreign_artifacts {
+        encode_descriptor_to(&mut encoder, artifact)?;
     }
     encoder
         .array(manifest.callables.len() as u64)
@@ -107,10 +113,10 @@ pub(super) fn encode_manifest(manifest: &BundleManifest) -> ArtifactResult<Vec<u
 
 pub(super) fn decode_manifest(bytes: &[u8]) -> ArtifactResult<BundleManifest> {
     let payload = bytes
-        .strip_prefix(b"runmat-execution-bundle-manifest-v3\0")
+        .strip_prefix(b"runmat-execution-bundle-manifest-v4\0")
         .ok_or_else(|| ArtifactError::Invalid("invalid bundle manifest domain".into()))?;
     let mut decoder = Decoder::new(payload);
-    require_len(decoder.array(), 11, "bundle manifest")?;
+    require_len(decoder.array(), 12, "bundle manifest")?;
     let schema_version = decoder.u16().map_err(decode_error)?;
     let revision = decoder.bytes().map_err(decode_error)?;
     let program_revision = ProgramRevision::from_canonical_bytes(revision)
@@ -132,6 +138,11 @@ pub(super) fn decode_manifest(bytes: &[u8]) -> ArtifactResult<BundleManifest> {
     let mut sources = Vec::with_capacity(source_count);
     for _ in 0..source_count {
         sources.push(decode_descriptor_from(&mut decoder)?);
+    }
+    let foreign_artifact_count = bounded_len(decoder.array(), "foreign artifacts")?;
+    let mut foreign_artifacts = Vec::with_capacity(foreign_artifact_count);
+    for _ in 0..foreign_artifact_count {
+        foreign_artifacts.push(decode_descriptor_from(&mut decoder)?);
     }
     let callable_count = bounded_len(decoder.array(), "callables")?;
     let mut callables = Vec::with_capacity(callable_count);
@@ -193,6 +204,7 @@ pub(super) fn decode_manifest(bytes: &[u8]) -> ArtifactResult<BundleManifest> {
         project_revision,
         code_closure,
         sources,
+        foreign_artifacts,
         callables,
         recipes,
         artifacts,
@@ -402,6 +414,7 @@ fn decode_namespace(value: u8) -> ArtifactResult<ObjectNamespace> {
         5 => Ok(ObjectNamespace::DetailedEvent),
         6 => Ok(ObjectNamespace::Log),
         7 => Ok(ObjectNamespace::Checkpoint),
+        8 => Ok(ObjectNamespace::ForeignArtifact),
         _ => Err(ArtifactError::Invalid("invalid object namespace".into())),
     }
 }
