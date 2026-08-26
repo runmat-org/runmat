@@ -81,7 +81,7 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v5
 
       - name: Isolate Cargo build artifacts
         shell: bash
@@ -112,11 +112,12 @@ jobs:
             gdb git libdbus-1-dev libegl1-mesa-dev libgl1-mesa-dev libhdf5-dev \
             liblapack-dev libopenblas-dev libssl-dev libtool libudev-dev libwayland-dev \
             libx11-dev libxcursor-dev libxi-dev libxinerama-dev libxkbcommon-dev \
-            libxkbcommon-x11-0 libxrandr-dev libzmq3-dev ninja-build pkg-config unzip zip
+            libxkbcommon-x11-0 libxrandr-dev libzmq3-dev ninja-build pkg-config unzip zip \
+            xauth xvfb
 
       - name: Restore pinned Linux OpenCASCADE
         if: runner.os == 'Linux' && matrix.needs_occt
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/vcpkg-runmat
           key: linux-${{ runner.arch }}-vcpkg-occt-2026.06.01-${{ hashFiles('infra/scripts/ensure-linux-vcpkg-occt.sh') }}
@@ -132,6 +133,9 @@ jobs:
       - name: Install macOS native dependencies
         if: runner.os == 'macOS'
         run: |
+          if brew tap | grep -qx 'aws/tap'; then
+            brew untap aws/tap
+          fi
           brew update
           brew install hdf5 zeromq
 
@@ -165,7 +169,8 @@ jobs:
           export XDG_RUNTIME_DIR="${RUNNER_TEMP}/runmat-xdg-runtime"
           mkdir -p "$XDG_RUNTIME_DIR"
           chmod 700 "$XDG_RUNTIME_DIR"
-          python3 scripts/development/run-workspace-test-group.py "${{ matrix.test_group }}" 2>&1 | tee test.log
+          xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" \
+            python3 scripts/development/run-workspace-test-group.py "${{ matrix.test_group }}" 2>&1 | tee test.log
 
       - name: Test (macOS)
         if: matrix.task == 'test' && runner.os == 'macOS'
