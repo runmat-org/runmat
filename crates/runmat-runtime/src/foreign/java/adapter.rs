@@ -22,7 +22,7 @@ use super::super::{
     ForeignErrorKind, ForeignExecutionPolicy, ForeignHandleRegistry, ForeignHostRegistration,
     ForeignHostRelease, ForeignResourceMetadata,
 };
-use super::conversion::{invalid_conversion, scalar_from_java, value_to_java};
+use super::conversion::{array_from_java, invalid_conversion, scalar_from_java, value_to_java};
 use crate::context::{ForeignCall, RuntimeContext};
 use crate::{build_runtime_error, RuntimeError};
 
@@ -339,6 +339,30 @@ impl JavaAdapter {
     }
 
     fn value_from_java(&self, value: JavaValue) -> Result<Value, RuntimeError> {
+        if let JavaValue::Array {
+            component,
+            elements,
+        } = value
+        {
+            if matches!(
+                component,
+                runmat_java::JavaParameterType::Object(_)
+                    | runmat_java::JavaParameterType::Array(_)
+            ) {
+                let length = elements.len();
+                return CellArray::new(
+                    elements
+                        .into_iter()
+                        .map(|value| self.value_from_java(value))
+                        .collect::<Result<_, _>>()?,
+                    length,
+                    1,
+                )
+                .map(Value::Cell)
+                .map_err(invalid_conversion);
+            }
+            return array_from_java(component, elements);
+        }
         let JavaValue::Object { handle, class_name } = value else {
             return scalar_from_java(value);
         };

@@ -7,7 +7,7 @@ use runmat_java::{JavaDiscoveryRequest, JvmConfig, JAVA_ADAPTER_ID};
 use runmat_runtime::context::{ForeignCall, RuntimeContext, RuntimeServicePorts};
 use runmat_runtime::execution::RuntimeExecutionService;
 use runmat_runtime::foreign::{ForeignPlatform, ForeignRuntime, JavaAdapter};
-use runmat_value::{IntValue, Value};
+use runmat_value::{CellArray, IntValue, IntegerStorage, Tensor, Value};
 
 fn live_runtime() -> Option<(Rc<ForeignRuntime>, RuntimeContext, Rc<JavaAdapter>)> {
     let home = std::env::var_os("RUNMAT_TEST_JAVA_HOME").map(PathBuf::from)?;
@@ -161,6 +161,81 @@ fn wide_unsigned_values_and_java_arrays_cross_the_runtime_boundary_exactly() {
         .expect("read Java array length"),
         Value::Int(IntValue::I32(2))
     );
+}
+
+#[test]
+fn typed_vectors_and_reference_collections_use_reviewed_java_copies() {
+    let Some((_foreign, context, _adapter)) = live_runtime() else {
+        eprintln!("RUNMAT_TEST_JAVA_HOME is unset; live JVM test was not requested");
+        return;
+    };
+    let copied = invoke(
+        &context,
+        "call_static",
+        vec![
+            Value::String("java.util.Arrays".into()),
+            Value::String("copyOf".into()),
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::I32(vec![3, 5]), vec![1, 2]).unwrap(),
+            ),
+            Value::Int(IntValue::I32(3)),
+        ],
+    )
+    .expect("copy an exact integer vector through Java");
+    let Value::Tensor(copied) = copied else {
+        panic!("Java int[] must return an integer tensor");
+    };
+    assert_eq!(
+        copied.integer_storage(),
+        Some(&IntegerStorage::I32(vec![3, 5, 0]))
+    );
+
+    let rendered = invoke(
+        &context,
+        "call_static",
+        vec![
+            Value::String("java.util.Arrays".into()),
+            Value::String("toString".into()),
+            Value::Cell(
+                CellArray::new(
+                    vec![Value::String("entry".into()), Value::Int(IntValue::I32(8))],
+                    1,
+                    2,
+                )
+                .unwrap(),
+            ),
+        ],
+    )
+    .expect("box a heterogeneous cell as Object[]");
+    assert_eq!(rendered, Value::String("[entry, 8]".into()));
+
+    let pattern = invoke(
+        &context,
+        "call_static",
+        vec![
+            Value::String("java.util.regex.Pattern".into()),
+            Value::String("compile".into()),
+            Value::String(",".into()),
+        ],
+    )
+    .expect("compile a regular expression");
+    let Value::Foreign(pattern) = pattern else {
+        panic!("Pattern.compile must return a Java object");
+    };
+    let split = invoke(
+        &context,
+        "invoke_member",
+        vec![
+            Value::Foreign(pattern),
+            Value::String("split".into()),
+            Value::String("left,right".into()),
+        ],
+    )
+    .expect("convert a returned Java String array");
+    let Value::StringArray(split) = split else {
+        panic!("Java String[] must return a RunMat string array");
+    };
+    assert_eq!(split.data, vec!["left", "right"]);
 }
 
 #[test]
