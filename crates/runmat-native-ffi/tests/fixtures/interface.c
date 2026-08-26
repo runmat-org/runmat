@@ -5,6 +5,10 @@ double fixture_scale(fixture_record *record, double factor) {
     return record->value;
 }
 
+uint32_t fixture_tag(const fixture_record *record) {
+    return record->tag;
+}
+
 int32_t fixture_sum(const int32_t *values, uint32_t length) {
     int32_t total = 0;
     for (uint32_t index = 0; index < length; ++index) {

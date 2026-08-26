@@ -14,7 +14,7 @@ use super::InvocationError;
 pub struct NativePointerResource {
     pointee: NativeType,
     ownership: PointerOwnership,
-    storage: UnsafeCell<PointeeSlot>,
+    storage: UnsafeCell<Option<PointeeSlot>>,
 }
 
 impl std::fmt::Debug for NativePointerResource {
@@ -44,8 +44,16 @@ impl NativePointerResource {
         Ok(Self {
             pointee,
             ownership: PointerOwnership::CallerOwned,
-            storage: UnsafeCell::new(storage),
+            storage: UnsafeCell::new(Some(storage)),
         })
+    }
+
+    pub fn null(pointee: NativeType) -> Self {
+        Self {
+            pointee,
+            ownership: PointerOwnership::CallerOwned,
+            storage: UnsafeCell::new(None),
+        }
     }
 
     pub fn pointee(&self) -> &NativeType {
@@ -60,6 +68,12 @@ impl NativePointerResource {
         // SAFETY: Native calls are synchronous and the session serializes use
         // of this resource. No Rust reference to its storage crosses a call.
         let storage = unsafe { &*self.storage.get() };
+        let Some(storage) = storage.as_ref() else {
+            return Ok(Value::Tensor(
+                runmat_value::Tensor::new(Vec::new(), vec![0, 0])
+                    .expect("empty pointer value has a valid shape"),
+            ));
+        };
         decode_pointee("libpointer", &self.pointee, storage, metadata).map_err(|message| {
             InvocationError::Output {
                 symbol: "libpointer".into(),
@@ -83,19 +97,27 @@ impl NativePointerResource {
         // SAFETY: Session serialization prevents native access while the
         // existing allocation is updated in place.
         let storage = unsafe { &mut *self.storage.get() };
-        replace_storage(storage, replacement).map_err(|message| InvocationError::Argument {
-            symbol: "libpointer".into(),
-            argument: 2,
-            name: "value".into(),
-            message,
-        })
+        if let Some(storage) = storage {
+            replace_storage(storage, replacement).map_err(|message| InvocationError::Argument {
+                symbol: "libpointer".into(),
+                argument: 2,
+                name: "value".into(),
+                message,
+            })
+        } else {
+            *storage = Some(replacement);
+            Ok(())
+        }
     }
 
     pub(super) fn address(&self) -> *mut c_void {
         // SAFETY: The resource owns stable backing storage for its lifetime.
         // Session serialization prevents overlapping native and Rust access.
         let storage = unsafe { &mut *self.storage.get() };
-        storage.address()
+        storage
+            .as_mut()
+            .map(PointeeSlot::address)
+            .unwrap_or(std::ptr::null_mut())
     }
 }
 

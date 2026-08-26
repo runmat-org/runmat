@@ -314,12 +314,14 @@ fn parse_type(
         } else {
             PointerMutability::Mutable
         };
-        let pointee = pointee
-            .strip_prefix("const ")
-            .unwrap_or(pointee)
-            .strip_suffix(" const")
-            .unwrap_or(pointee)
-            .trim();
+        let pointee = if let Some(unqualified) = pointee.strip_prefix("const ") {
+            unqualified
+        } else if let Some(unqualified) = pointee.strip_suffix(" const") {
+            unqualified
+        } else {
+            pointee
+        }
+        .trim();
         return Ok(NativeType::Pointer {
             pointee: Box::new(parse_type(pointee, typedefs)?),
             mutability,

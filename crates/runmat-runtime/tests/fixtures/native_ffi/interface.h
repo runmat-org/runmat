@@ -3,7 +3,13 @@
 
 #include <stdint.h>
 
+typedef struct fixture_record {
+    int32_t left;
+    int32_t right;
+} fixture_record;
+
 int32_t fixture_add(int32_t left, int32_t right);
 void fixture_increment(int32_t *value);
+int32_t fixture_record_sum(const fixture_record *value);
 
 #endif

@@ -47,6 +47,9 @@ pub(super) fn default_alias(path: &str) -> Result<String, RuntimeError> {
 
 pub(super) fn legacy_pointer_type(name: &str) -> Result<NativeType, RuntimeError> {
     let normalized = name.trim().to_ascii_lowercase();
+    if normalized == "voidptr" {
+        return Ok(NativeType::Void);
+    }
     let scalar = match normalized.as_str() {
         "logicalptr" | "boolptr" => NativeScalar::Bool,
         "charptr" | "int8ptr" => NativeScalar::I8,

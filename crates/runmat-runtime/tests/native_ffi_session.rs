@@ -180,6 +180,93 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
     .unwrap_err();
     assert_eq!(shape_error.identifier(), Some("RunMat:Foreign:InvalidCall"));
 
+    let null_pointer = invoke(&context, "pointer", Vec::new(), 1).unwrap();
+    assert!(matches!(null_pointer, Value::Foreign(_)));
+    assert_eq!(
+        invoke(
+            &context,
+            "get_member",
+            vec![null_pointer, Value::String("DataType".into())],
+            1,
+        )
+        .unwrap(),
+        Value::String("voidPtr".into())
+    );
+
+    let typed_null = invoke(
+        &context,
+        "pointer",
+        vec![Value::String("int32Ptr".into())],
+        1,
+    )
+    .unwrap();
+    assert_eq!(
+        invoke(
+            &context,
+            "get_member",
+            vec![typed_null.clone(), Value::String("Value".into())],
+            1,
+        )
+        .unwrap(),
+        Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap())
+    );
+    invoke(
+        &context,
+        "set_member",
+        vec![
+            typed_null.clone(),
+            Value::String("Value".into()),
+            Value::Int(IntValue::I32(7)),
+        ],
+        1,
+    )
+    .unwrap();
+    assert_eq!(
+        invoke(
+            &context,
+            "get_member",
+            vec![typed_null, Value::String("Value".into())],
+            1,
+        )
+        .unwrap(),
+        Value::Int(IntValue::I32(7))
+    );
+
+    let record = invoke(
+        &context,
+        "structure",
+        vec![Value::String("fixture_record".into())],
+        1,
+    )
+    .unwrap();
+    for (field, value) in [("left", 19), ("right", 23)] {
+        invoke(
+            &context,
+            "set_member",
+            vec![
+                record.clone(),
+                Value::String(field.into()),
+                Value::Int(IntValue::I32(value)),
+            ],
+            1,
+        )
+        .unwrap();
+    }
+    assert_eq!(
+        invoke(
+            &context,
+            "call",
+            vec![
+                Value::String("session_fixture".into()),
+                Value::String("fixture_record_sum".into()),
+                record,
+            ],
+            1,
+        )
+        .unwrap(),
+        Value::Int(IntValue::I32(42))
+    );
+
     invoke(
         &context,
         "unload",
