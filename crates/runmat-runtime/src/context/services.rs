@@ -310,6 +310,15 @@ impl RuntimeServicePorts {
         RuntimeForeignService,
         Foreign
     );
+
+    /// Remove the strong foreign-runtime edge while retaining every other
+    /// session authority. A long-lived foreign callback can retain this
+    /// context and restore the foreign port from a weak reference while it
+    /// executes without creating a host/session ownership cycle.
+    pub fn without_foreign(mut self) -> Self {
+        self.foreign = None;
+        self
+    }
     port_accessors!(
         with_parallel,
         parallel,

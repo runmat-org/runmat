@@ -9,12 +9,15 @@ use crate::{
 };
 use jni::objects::GlobalRef;
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 
 pub struct JavaSession {
     pub(super) process: JvmProcess,
     pub(super) objects: RefCell<JavaObjectRegistry<GlobalRef>>,
     pub(super) classpath: RefCell<SessionClasspath>,
     pub(super) class_loader: RefCell<Option<GlobalRef>>,
+    pub(super) callback_ids: RefCell<Vec<u64>>,
+    pub(super) callback_proxies: RefCell<BTreeMap<(u64, String), GlobalRef>>,
 }
 
 impl std::fmt::Debug for JavaSession {
@@ -38,6 +41,8 @@ impl JavaSession {
             objects: RefCell::new(JavaObjectRegistry::default()),
             classpath: RefCell::new(classpath),
             class_loader: RefCell::new(None),
+            callback_ids: RefCell::new(Vec::new()),
+            callback_proxies: RefCell::new(BTreeMap::new()),
         }
     }
 
@@ -53,7 +58,7 @@ impl JavaSession {
     ) -> Result<JavaValue, JavaInvocationError> {
         self.process.with_attached(|environment| {
             let class = self.load_class(environment, class_name)?;
-            let prepared = self.prepare_arguments(environment, arguments)?;
+            let prepared = self.prepare_arguments(environment, arguments, None, false)?;
             let values = prepared.values();
             let object = environment
                 .new_object(class, signature, &values)
@@ -68,7 +73,20 @@ impl JavaSession {
         arguments: &[JavaValue],
     ) -> Result<JavaValue, JavaInvocationError> {
         let callable = self.resolve_constructor(class_name, arguments)?;
-        self.construct(class_name, &callable.descriptor, arguments)
+        self.process.with_attached(|environment| {
+            let class = self.load_class(environment, class_name)?;
+            let prepared = self.prepare_arguments(
+                environment,
+                arguments,
+                Some(&callable.parameters),
+                callable.varargs,
+            )?;
+            let values = prepared.values();
+            let object = environment
+                .new_object(class, &callable.descriptor, &values)
+                .map_err(|error| jni_error(environment, error))?;
+            self.capture_object(environment, object)
+        })
     }
 
     pub fn call_static(
@@ -80,7 +98,7 @@ impl JavaSession {
     ) -> Result<JavaValue, JavaInvocationError> {
         self.process.with_attached(|environment| {
             let class = self.load_class(environment, class_name)?;
-            let prepared = self.prepare_arguments(environment, arguments)?;
+            let prepared = self.prepare_arguments(environment, arguments, None, false)?;
             let values = prepared.values();
             let result = environment
                 .call_static_method(class, method_name, signature, &values)
@@ -96,7 +114,20 @@ impl JavaSession {
         arguments: &[JavaValue],
     ) -> Result<JavaValue, JavaInvocationError> {
         let callable = self.resolve_method(class_name, method_name, true, arguments)?;
-        self.call_static(class_name, method_name, &callable.descriptor, arguments)
+        self.process.with_attached(|environment| {
+            let class = self.load_class(environment, class_name)?;
+            let prepared = self.prepare_arguments(
+                environment,
+                arguments,
+                Some(&callable.parameters),
+                callable.varargs,
+            )?;
+            let values = prepared.values();
+            let result = environment
+                .call_static_method(class, method_name, &callable.descriptor, &values)
+                .map_err(|error| jni_error(environment, error))?;
+            self.capture_value(environment, result)
+        })
     }
 
     pub fn call_method(
@@ -108,7 +139,7 @@ impl JavaSession {
     ) -> Result<JavaValue, JavaInvocationError> {
         let receiver = self.global_reference(receiver)?;
         self.process.with_attached(|environment| {
-            let prepared = self.prepare_arguments(environment, arguments)?;
+            let prepared = self.prepare_arguments(environment, arguments, None, false)?;
             let values = prepared.values();
             let result = environment
                 .call_method(receiver.as_obj(), method_name, signature, &values)
@@ -136,7 +167,24 @@ impl JavaSession {
                 method_candidates(environment, &class, &class_name, method_name, false)?;
             choose_callable(self, environment, candidates, arguments)
         })?;
-        self.call_method(receiver, method_name, &callable.descriptor, arguments)
+        self.process.with_attached(|environment| {
+            let prepared = self.prepare_arguments(
+                environment,
+                arguments,
+                Some(&callable.parameters),
+                callable.varargs,
+            )?;
+            let values = prepared.values();
+            let result = environment
+                .call_method(
+                    receiver_ref.as_obj(),
+                    method_name,
+                    &callable.descriptor,
+                    &values,
+                )
+                .map_err(|error| jni_error(environment, error))?;
+            self.capture_value(environment, result)
+        })
     }
 
     pub fn get_static_field_resolved(
@@ -244,7 +292,8 @@ impl JavaSession {
                 .get_object_class(receiver_ref.as_obj())
                 .map_err(|error| jni_error(environment, error))?;
             let descriptor = field_descriptor(environment, &class, &class_name, field_name, false)?;
-            let prepared = self.prepare_arguments(environment, std::slice::from_ref(value))?;
+            let prepared =
+                self.prepare_arguments(environment, std::slice::from_ref(value), None, false)?;
             let values = prepared.values();
             environment
                 .set_field(receiver_ref.as_obj(), field_name, descriptor, values[0])
@@ -288,6 +337,9 @@ impl JavaSession {
 
     pub fn restart_session(&self) -> Result<(), JavaInvocationError> {
         self.process.with_attached(|_| {
+            let callback_ids = std::mem::take(&mut *self.callback_ids.borrow_mut());
+            super::callback::remove_callbacks(&callback_ids);
+            self.callback_proxies.borrow_mut().clear();
             self.objects.borrow_mut().restart();
             self.class_loader.borrow_mut().take();
             Ok(())
@@ -304,7 +356,9 @@ impl JavaSession {
 
 impl Drop for JavaSession {
     fn drop(&mut self) {
+        super::callback::remove_callbacks(self.callback_ids.get_mut());
         let _ = self.process.with_attached::<_, crate::JvmError>(|_| {
+            self.callback_proxies.get_mut().clear();
             self.objects.get_mut().restart();
             self.class_loader.get_mut().take();
             Ok(())
@@ -495,6 +549,7 @@ fn java_argument_type(value: &JavaValue) -> JavaArgumentType {
         JavaValue::Double(_) => JavaArgumentType::Double,
         JavaValue::Char(_) => JavaArgumentType::Char,
         JavaValue::String(_) => JavaArgumentType::String,
+        JavaValue::Callback(_) => JavaArgumentType::Callback,
         JavaValue::Object { class_name, .. } => class_name_argument_type(class_name),
         JavaValue::Array { component, .. } => {
             JavaArgumentType::Array(Box::new(parameter_as_argument(component)))

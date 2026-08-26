@@ -4,9 +4,9 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use runmat_java::{
-    discover_jvm, ClasspathSnapshot, JavaDiscoveryRequest, JavaInvocationError, JavaObjectHandle,
-    JavaSession, JavaValue, JvmConfig, JvmProcess, SessionClasspath, JAVA_ADAPTER_ID,
-    JAVA_ADAPTER_VERSION,
+    discover_jvm, ClasspathSnapshot, JavaCallbackInvocation, JavaDiscoveryRequest,
+    JavaInvocationError, JavaObjectHandle, JavaSession, JavaValue, JvmConfig, JvmProcess,
+    SessionClasspath, JAVA_ADAPTER_ID, JAVA_ADAPTER_VERSION,
 };
 use runmat_types::{
     CapabilityRequirement, ForeignAffinity, ForeignCapability, ForeignLifetime, ForeignOwnership,
@@ -18,9 +18,9 @@ use runmat_value::{
 };
 
 use super::super::{
-    foreign_error, ForeignAdapter, ForeignAdapterDescriptor, ForeignAdapterFuture,
-    ForeignErrorKind, ForeignExecutionPolicy, ForeignHandleRegistry, ForeignHostRegistration,
-    ForeignHostRelease, ForeignResourceMetadata,
+    foreign_error, invoke_foreign_callback, ForeignAdapter, ForeignAdapterDescriptor,
+    ForeignAdapterFuture, ForeignCallbackRequest, ForeignErrorKind, ForeignExecutionPolicy,
+    ForeignHandleRegistry, ForeignHostRegistration, ForeignHostRelease, ForeignResourceMetadata,
 };
 use super::conversion::{array_from_java, invalid_conversion, scalar_from_java, value_to_java};
 use crate::context::{ForeignCall, RuntimeContext};
@@ -40,13 +40,13 @@ impl ForeignHostRelease for ReleaseQueue {
 pub struct JavaAdapter {
     handles: ForeignHandleRegistry,
     host_identity: String,
-    session: RefCell<Option<JavaSession>>,
+    session: RefCell<Option<Rc<JavaSession>>>,
     discovery: RefCell<JavaDiscoveryRequest>,
     config: RefCell<JvmConfig>,
     initial_classpath: RefCell<SessionClasspath>,
     released: Arc<ReleaseQueue>,
-    resources: RefCell<BTreeMap<u64, JavaObjectHandle>>,
-    java_to_foreign: RefCell<BTreeMap<JavaObjectHandle, WeakForeignRef>>,
+    resources: Rc<RefCell<BTreeMap<u64, JavaObjectHandle>>>,
+    java_to_foreign: Rc<RefCell<BTreeMap<JavaObjectHandle, WeakForeignRef>>>,
     desktop_available: Cell<bool>,
 }
 
@@ -107,6 +107,7 @@ impl JavaAdapter {
                 ForeignCapability::Invoke,
                 ForeignCapability::Read,
                 ForeignCapability::Write,
+                ForeignCapability::Callback,
                 ForeignCapability::Transfer,
             ]),
             policy: ForeignExecutionPolicy::trusted_in_process(),
@@ -120,8 +121,8 @@ impl JavaAdapter {
             config: RefCell::new(config),
             initial_classpath: RefCell::new(initial_classpath),
             released,
-            resources: RefCell::new(BTreeMap::new()),
-            java_to_foreign: RefCell::new(BTreeMap::new()),
+            resources: Rc::new(RefCell::new(BTreeMap::new())),
+            java_to_foreign: Rc::new(RefCell::new(BTreeMap::new())),
             desktop_available: Cell::new(false),
         }))
     }
@@ -165,10 +166,10 @@ impl JavaAdapter {
         let installation = discover_jvm(&self.discovery.borrow()).map_err(java_runtime_error)?;
         let process =
             JvmProcess::launch(installation, &self.config.borrow()).map_err(java_runtime_error)?;
-        *self.session.borrow_mut() = Some(JavaSession::with_classpath(
+        *self.session.borrow_mut() = Some(Rc::new(JavaSession::with_classpath(
             process,
             self.initial_classpath.borrow().clone(),
-        ));
+        )));
         Ok(())
     }
 
@@ -195,7 +196,11 @@ impl JavaAdapter {
         Ok(())
     }
 
-    fn invoke_now(&self, call: ForeignCall) -> Result<Value, RuntimeError> {
+    fn invoke_now(
+        &self,
+        context: &RuntimeContext,
+        call: ForeignCall,
+    ) -> Result<Value, RuntimeError> {
         if call.symbol == "classpath" {
             return self.classpath_value(call.arguments);
         }
@@ -215,7 +220,7 @@ impl JavaAdapter {
             "construct" => {
                 let class = string_argument(arguments.next(), "Java class")?;
                 let values = arguments
-                    .map(|value| self.argument_to_java(value))
+                    .map(|value| self.argument_to_java(context, value))
                     .collect::<Result<Vec<_>, _>>()?;
                 self.with_session(|session| session.construct_resolved(&class, &values))?
             }
@@ -223,14 +228,14 @@ impl JavaAdapter {
                 let class = string_argument(arguments.next(), "Java class")?;
                 let method = string_argument(arguments.next(), "Java method")?;
                 let values = arguments
-                    .map(|value| self.argument_to_java(value))
+                    .map(|value| self.argument_to_java(context, value))
                     .collect::<Result<Vec<_>, _>>()?;
                 self.with_session(|session| session.call_static_resolved(&class, &method, &values))?
             }
             "invoke_qualified" => {
                 let name = string_argument(arguments.next(), "qualified Java name")?;
                 let values = arguments
-                    .map(|value| self.argument_to_java(value))
+                    .map(|value| self.argument_to_java(context, value))
                     .collect::<Result<Vec<_>, _>>()?;
                 if self.with_session(|session| session.class_exists(&name))? {
                     self.with_session(|session| session.construct_resolved(&name, &values))?
@@ -253,7 +258,7 @@ impl JavaAdapter {
                 let method = string_argument(arguments.next(), "Java method")?;
                 let java_handle = self.resolve_java_handle(&reference)?;
                 let values = arguments
-                    .map(|value| self.argument_to_java(value))
+                    .map(|value| self.argument_to_java(context, value))
                     .collect::<Result<Vec<_>, _>>()?;
                 self.with_session(|session| {
                     session.call_method_resolved(java_handle, &method, &values)
@@ -268,9 +273,12 @@ impl JavaAdapter {
             "set_member" => {
                 let reference = foreign_argument(arguments.next())?;
                 let field = string_argument(arguments.next(), "Java field")?;
-                let value = self.argument_to_java(arguments.next().ok_or_else(|| {
-                    invalid_conversion("Java field assignment requires a value")
-                })?)?;
+                let value = self.argument_to_java(
+                    context,
+                    arguments.next().ok_or_else(|| {
+                        invalid_conversion("Java field assignment requires a value")
+                    })?,
+                )?;
                 let java_handle = self.resolve_java_handle(&reference)?;
                 self.with_session(|session| {
                     session.set_field_resolved(java_handle, &field, &value)
@@ -335,63 +343,25 @@ impl JavaAdapter {
         operation: impl FnOnce(&JavaSession) -> Result<T, JavaInvocationError>,
     ) -> Result<T, RuntimeError> {
         let session = self.session.borrow();
+        operation(session.as_deref().expect("session initialized")).map_err(java_invocation_error)
+    }
+
+    fn with_session_rc<T>(
+        &self,
+        operation: impl FnOnce(&Rc<JavaSession>) -> Result<T, JavaInvocationError>,
+    ) -> Result<T, RuntimeError> {
+        let session = self.session.borrow();
         operation(session.as_ref().expect("session initialized")).map_err(java_invocation_error)
     }
 
     fn value_from_java(&self, value: JavaValue) -> Result<Value, RuntimeError> {
-        if let JavaValue::Array {
-            component,
-            elements,
-        } = value
-        {
-            if matches!(
-                component,
-                runmat_java::JavaParameterType::Object(_)
-                    | runmat_java::JavaParameterType::Array(_)
-            ) {
-                let length = elements.len();
-                return CellArray::new(
-                    elements
-                        .into_iter()
-                        .map(|value| self.value_from_java(value))
-                        .collect::<Result<_, _>>()?,
-                    length,
-                    1,
-                )
-                .map(Value::Cell)
-                .map_err(invalid_conversion);
-            }
-            return array_from_java(component, elements);
-        }
-        let JavaValue::Object { handle, class_name } = value else {
-            return scalar_from_java(value);
-        };
-        if let Some(reference) = self
-            .java_to_foreign
-            .borrow()
-            .get(&handle)
-            .and_then(WeakForeignRef::upgrade)
-        {
-            return Ok(Value::Foreign(reference));
-        }
-        let reference = self.handles.register_resource(
+        value_from_java_parts(
+            &self.handles,
             &self.host_identity,
-            ForeignResourceMetadata {
-                type_identity: ForeignTypeIdentity {
-                    family: JAVA_ADAPTER_ID.into(),
-                    name: class_name,
-                    version: JAVA_ADAPTER_VERSION,
-                },
-                ownership: ForeignOwnership::Shared,
-                affinity: ForeignAffinity::OriginProcess,
-                lifetime: ForeignLifetime::Session,
-            },
-        )?;
-        self.resources.borrow_mut().insert(reference.handle, handle);
-        if let Some(weak) = reference.downgrade() {
-            self.java_to_foreign.borrow_mut().insert(handle, weak);
-        }
-        Ok(Value::Foreign(reference))
+            &self.resources,
+            &self.java_to_foreign,
+            value,
+        )
     }
 
     fn resolve_java_handle(
@@ -412,7 +382,64 @@ impl JavaAdapter {
             .ok_or_else(|| foreign_error(ForeignErrorKind::StaleHandle, "Java object is stale"))
     }
 
-    fn argument_to_java(&self, value: Value) -> Result<JavaValue, RuntimeError> {
+    fn argument_to_java(
+        &self,
+        context: &RuntimeContext,
+        value: Value,
+    ) -> Result<JavaValue, RuntimeError> {
+        if super::super::is_callable(&value) {
+            let callback = value;
+            let foreign = context
+                .service_ports()
+                .foreign()
+                .map(Rc::downgrade)
+                .ok_or_else(|| invalid_conversion("Java callback requires a foreign runtime"))?;
+            let callback_context = context
+                .clone()
+                .with_service_ports(context.service_ports().clone().without_foreign());
+            let handles = self.handles.clone();
+            let host_identity = self.host_identity.clone();
+            let resources = Rc::clone(&self.resources);
+            let java_to_foreign = Rc::clone(&self.java_to_foreign);
+            return self.with_session_rc(|session| {
+                session.register_callback(move |invocation: JavaCallbackInvocation| {
+                    let foreign = foreign.upgrade().ok_or_else(|| {
+                        JavaInvocationError::Callback(
+                            "callback's originating foreign runtime has ended".into(),
+                        )
+                    })?;
+                    let context = callback_context.clone().with_service_ports(
+                        callback_context
+                            .service_ports()
+                            .clone()
+                            .with_foreign(foreign),
+                    );
+                    let arguments = invocation
+                        .arguments
+                        .into_iter()
+                        .map(|value| {
+                            value_from_java_parts(
+                                &handles,
+                                &host_identity,
+                                &resources,
+                                &java_to_foreign,
+                                value,
+                            )
+                        })
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(|error| JavaInvocationError::Callback(error.to_string()))?;
+                    let requested_outputs = usize::from(invocation.returns_value);
+                    let request = callback_request(&callback, arguments, requested_outputs)?;
+                    let result = pollster::block_on(invoke_foreign_callback(context, request))
+                        .map_err(|error| JavaInvocationError::Callback(error.to_string()))?;
+                    if !invocation.returns_value {
+                        return Ok(JavaValue::Null);
+                    }
+                    value_to_java(result)
+                        .map_err(|error| JavaInvocationError::Callback(error.to_string()))
+                })
+            });
+        }
         let Value::Foreign(reference) = value else {
             return value_to_java(value);
         };
@@ -438,7 +465,7 @@ impl JavaAdapter {
             .session
             .borrow()
             .as_ref()
-            .map(JavaSession::classpath)
+            .map(|session| session.classpath())
             .unwrap_or_else(|| self.initial_classpath.borrow().snapshot());
         let paths = classpath_paths(&snapshot, &layer)?;
         let length = paths.len();
@@ -591,6 +618,110 @@ impl JavaAdapter {
     }
 }
 
+fn value_from_java_parts(
+    handles: &ForeignHandleRegistry,
+    host_identity: &str,
+    resources: &RefCell<BTreeMap<u64, JavaObjectHandle>>,
+    java_to_foreign: &RefCell<BTreeMap<JavaObjectHandle, WeakForeignRef>>,
+    value: JavaValue,
+) -> Result<Value, RuntimeError> {
+    if let JavaValue::Array {
+        component,
+        elements,
+    } = value
+    {
+        if matches!(
+            component,
+            runmat_java::JavaParameterType::Object(_) | runmat_java::JavaParameterType::Array(_)
+        ) {
+            let length = elements.len();
+            return CellArray::new(
+                elements
+                    .into_iter()
+                    .map(|value| {
+                        value_from_java_parts(
+                            handles,
+                            host_identity,
+                            resources,
+                            java_to_foreign,
+                            value,
+                        )
+                    })
+                    .collect::<Result<_, _>>()?,
+                length,
+                1,
+            )
+            .map(Value::Cell)
+            .map_err(invalid_conversion);
+        }
+        return array_from_java(component, elements);
+    }
+    let JavaValue::Object { handle, class_name } = value else {
+        return scalar_from_java(value);
+    };
+    if let Some(reference) = java_to_foreign
+        .borrow()
+        .get(&handle)
+        .and_then(WeakForeignRef::upgrade)
+    {
+        return Ok(Value::Foreign(reference));
+    }
+    let reference = handles.register_resource(
+        host_identity,
+        ForeignResourceMetadata {
+            type_identity: ForeignTypeIdentity {
+                family: JAVA_ADAPTER_ID.into(),
+                name: class_name,
+                version: JAVA_ADAPTER_VERSION,
+            },
+            ownership: ForeignOwnership::Shared,
+            affinity: ForeignAffinity::OriginProcess,
+            lifetime: ForeignLifetime::Session,
+        },
+    )?;
+    resources.borrow_mut().insert(reference.handle, handle);
+    if let Some(weak) = reference.downgrade() {
+        java_to_foreign.borrow_mut().insert(handle, weak);
+    }
+    Ok(Value::Foreign(reference))
+}
+
+fn callback_request(
+    callback: &Value,
+    mut arguments: Vec<Value>,
+    requested_outputs: usize,
+) -> Result<ForeignCallbackRequest, JavaInvocationError> {
+    use runmat_types::{CallableIdentity, FunctionId, MethodId};
+
+    let callable = match callback {
+        Value::FunctionHandle(name) => crate::callable_identity_for_handle_name(name).0,
+        Value::ExternalFunctionHandle(name) => crate::external_callable_identity_for_name(name),
+        Value::MethodFunctionHandle(name) => CallableIdentity::Method(MethodId(name.clone())),
+        Value::BoundFunctionHandle { function, .. } => {
+            CallableIdentity::BoundFunction(FunctionId(*function))
+        }
+        Value::Closure(closure) => {
+            let mut captured = closure.captures.clone();
+            captured.append(&mut arguments);
+            arguments = captured;
+            closure.bound_function.map_or_else(
+                || crate::callable_identity_for_handle_name(&closure.function_name).0,
+                |function| CallableIdentity::AnonymousFunction(FunctionId(function)),
+            )
+        }
+        _ => {
+            return Err(JavaInvocationError::Callback(
+                "Java callback is not a callable RunMat value".into(),
+            ))
+        }
+    };
+    Ok(ForeignCallbackRequest {
+        callable,
+        arguments,
+        requested_outputs,
+    })
+}
+
 fn classpath_paths<'a>(
     snapshot: &'a ClasspathSnapshot,
     layer: &str,
@@ -626,6 +757,7 @@ impl ForeignAdapter for JavaAdapter {
                 ForeignCapability::Invoke,
                 ForeignCapability::Read,
                 ForeignCapability::Write,
+                ForeignCapability::Callback,
                 ForeignCapability::Transfer,
             ]),
             artifact_identities: BTreeSet::new(),
@@ -634,8 +766,8 @@ impl ForeignAdapter for JavaAdapter {
         }
     }
 
-    fn invoke(&self, _context: RuntimeContext, call: ForeignCall) -> ForeignAdapterFuture {
-        let result = self.invoke_now(call);
+    fn invoke(&self, context: RuntimeContext, call: ForeignCall) -> ForeignAdapterFuture {
+        let result = self.invoke_now(&context, call);
         Box::pin(async move { result })
     }
 }

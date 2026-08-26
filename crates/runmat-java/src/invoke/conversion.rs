@@ -10,10 +10,38 @@ impl JavaSession {
         &self,
         environment: &mut jni::JNIEnv<'local>,
         arguments: &[JavaValue],
+        parameters: Option<&[crate::JavaParameterType]>,
+        varargs: bool,
     ) -> Result<PreparedArguments<'local>, JavaInvocationError> {
+        let expanded;
+        let arguments = if varargs {
+            let parameters = parameters.ok_or_else(|| {
+                JavaInvocationError::UnsupportedValue(
+                    "resolved Java varargs require parameter metadata".into(),
+                )
+            })?;
+            let fixed = parameters.len().saturating_sub(1);
+            let Some(crate::JavaParameterType::Array(component)) = parameters.last() else {
+                return Err(JavaInvocationError::UnsupportedValue(
+                    "Java varargs parameter is not an array".into(),
+                ));
+            };
+            expanded = arguments[..fixed]
+                .iter()
+                .cloned()
+                .chain(std::iter::once(JavaValue::Array {
+                    component: (**component).clone(),
+                    elements: arguments[fixed..].to_vec(),
+                }))
+                .collect::<Vec<_>>();
+            expanded.as_slice()
+        } else {
+            arguments
+        };
         let mut prepared = Vec::with_capacity(arguments.len());
         let mut objects = Vec::new();
-        for argument in arguments {
+        let mut callback_objects = std::collections::BTreeMap::new();
+        for (index, argument) in arguments.iter().enumerate() {
             let value = match argument {
                 JavaValue::Null => PreparedValue::Null,
                 JavaValue::Boolean(value) => PreparedValue::Boolean(*value),
@@ -45,6 +73,27 @@ impl JavaSession {
                         .map_err(|error| jni_error(environment, error))?;
                     objects.push(JObject::from(string));
                     PreparedValue::Object(objects.len() - 1)
+                }
+                JavaValue::Callback(callback) => {
+                    let Some(crate::JavaParameterType::Object(interface)) =
+                        parameters.and_then(|parameters| parameters.get(index))
+                    else {
+                        return Err(JavaInvocationError::UnsupportedValue(
+                            "Java callback requires a resolved interface parameter".into(),
+                        ));
+                    };
+                    if let Some(index) = callback_objects.get(callback) {
+                        PreparedValue::Object(*index)
+                    } else {
+                        objects.push(self.create_callback_proxy(
+                            environment,
+                            *callback,
+                            interface,
+                        )?);
+                        let index = objects.len() - 1;
+                        callback_objects.insert(*callback, index);
+                        PreparedValue::Object(index)
+                    }
                 }
                 JavaValue::Object { handle, .. } => {
                     let reference = self.global_reference(*handle)?;
@@ -259,7 +308,12 @@ impl JavaSession {
                     .new_object_array(length, binary_name(class_name), JObject::null())
                     .map_err(|error| jni_error(environment, error))?;
                 for (index, element) in elements.iter().enumerate() {
-                    let object = self.value_as_object(environment, element)?;
+                    let object = match element {
+                        JavaValue::Callback(callback) => {
+                            self.create_callback_proxy(environment, *callback, class_name)?
+                        }
+                        _ => self.value_as_object(environment, element)?,
+                    };
                     environment
                         .set_object_array_element(&array, index as i32, object)
                         .map_err(|error| jni_error(environment, error))?;
@@ -299,7 +353,7 @@ impl JavaSession {
         })
     }
 
-    fn value_as_object<'local>(
+    pub(super) fn value_as_object<'local>(
         &self,
         environment: &mut jni::JNIEnv<'local>,
         value: &JavaValue,
@@ -332,6 +386,9 @@ impl JavaSession {
                 component,
                 elements,
             } => self.create_array(environment, component, elements),
+            JavaValue::Callback(_) => Err(JavaInvocationError::UnsupportedValue(
+                "nested Java callbacks require a resolved interface parameter".into(),
+            )),
             value => {
                 let (class, signature, argument) = boxed_primitive(value)?;
                 environment
@@ -515,6 +572,7 @@ fn boxed_primitive(
             JValue::Char(*value),
         ),
         JavaValue::Null
+        | JavaValue::Callback(_)
         | JavaValue::UnsignedLong(_)
         | JavaValue::String(_)
         | JavaValue::Array { .. }
@@ -530,7 +588,7 @@ pub(super) fn binary_name(class_name: &str) -> String {
     class_name.replace('.', "/")
 }
 
-fn object_class_name(
+pub(super) fn object_class_name(
     environment: &mut jni::JNIEnv<'_>,
     object: &JObject<'_>,
 ) -> Result<String, JavaInvocationError> {
@@ -550,7 +608,7 @@ fn object_class_name(
     Ok(value)
 }
 
-fn capture_boxed(
+pub(super) fn capture_boxed(
     environment: &mut jni::JNIEnv<'_>,
     object: &JObject<'_>,
     class_name: &str,

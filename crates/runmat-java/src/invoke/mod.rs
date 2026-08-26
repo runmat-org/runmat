@@ -1,3 +1,4 @@
+mod callback;
 mod conversion;
 mod error;
 mod loader;
@@ -7,4 +8,4 @@ mod value;
 
 pub use error::JavaInvocationError;
 pub use session::JavaSession;
-pub use value::JavaValue;
+pub use value::{JavaCallbackInvocation, JavaValue};

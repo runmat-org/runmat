@@ -8,7 +8,7 @@ use runmat_java::{
     JvmProcess,
 };
 
-fn live_session() -> Option<JavaSession> {
+fn live_session() -> Option<std::rc::Rc<JavaSession>> {
     let home = std::env::var_os("RUNMAT_TEST_JAVA_HOME").map(PathBuf::from)?;
     let installation = discover_jvm(&JavaDiscoveryRequest {
         explicit_home: Some(home),
@@ -17,7 +17,7 @@ fn live_session() -> Option<JavaSession> {
     })
     .unwrap();
     let process = JvmProcess::launch(installation, &JvmConfig::default()).unwrap();
-    Some(JavaSession::new(process))
+    Some(std::rc::Rc::new(JavaSession::new(process)))
 }
 
 #[test]
@@ -111,6 +111,20 @@ fn invokes_standard_library_and_preserves_object_identity() {
             .call_static_resolved("java.lang.Integer", "valueOf", &[JavaValue::Int(31)])
             .unwrap(),
         JavaValue::Int(31)
+    );
+    assert_eq!(
+        session
+            .call_static_resolved(
+                "java.lang.String",
+                "format",
+                &[
+                    JavaValue::String("%s-%s".into()),
+                    JavaValue::String("left".into()),
+                    JavaValue::String("right".into()),
+                ],
+            )
+            .unwrap(),
+        JavaValue::String("left-right".into())
     );
     let copied = session
         .call_static_resolved(
@@ -236,4 +250,149 @@ fn dynamic_classpath_add_and_remove_rebuilds_the_session_loader() {
     assert!(session
         .call_static_resolved("fixture.dynamic.DynamicValue", "value", &[])
         .is_err());
+}
+
+#[test]
+fn functional_interface_callbacks_reenter_on_the_originating_thread() {
+    let Some(session) = live_session() else {
+        eprintln!("RUNMAT_TEST_JAVA_HOME is unset; live JVM test was not requested");
+        return;
+    };
+    let callback = session
+        .register_callback(|invocation| {
+            let [JavaValue::Int(value)] = invocation.arguments.as_slice() else {
+                return Err(JavaInvocationError::Callback(
+                    "expected one Java int callback argument".into(),
+                ));
+            };
+            Ok(JavaValue::Int(value + 2))
+        })
+        .unwrap();
+    let stream = session
+        .call_static_resolved(
+            "java.util.stream.IntStream",
+            "iterate",
+            &[JavaValue::Int(1), callback],
+        )
+        .unwrap();
+    let JavaValue::Object { handle: stream, .. } = stream else {
+        panic!("IntStream.iterate must return a Java stream object");
+    };
+    let stream = session
+        .call_method_resolved(stream, "limit", &[JavaValue::Long(3)])
+        .unwrap();
+    let JavaValue::Object { handle: stream, .. } = stream else {
+        panic!("IntStream.limit must preserve a Java stream object");
+    };
+    assert_eq!(
+        session
+            .call_method_resolved(stream, "toArray", &[])
+            .unwrap(),
+        JavaValue::Array {
+            component: runmat_java::JavaParameterType::Int,
+            elements: vec![JavaValue::Int(1), JavaValue::Int(3), JavaValue::Int(5)],
+        }
+    );
+}
+
+#[test]
+fn listener_callbacks_preserve_opaque_argument_identity_and_void_returns() {
+    let Some(session) = live_session() else {
+        eprintln!("RUNMAT_TEST_JAVA_HOME is unset; live JVM test was not requested");
+        return;
+    };
+    let observed = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let callback_observed = std::rc::Rc::clone(&observed);
+    let callback = session
+        .register_callback(move |invocation| {
+            assert_eq!(invocation.method_name, "propertyChange");
+            assert!(!invocation.returns_value);
+            let [JavaValue::Object { class_name, .. }] = invocation.arguments.as_slice() else {
+                return Err(JavaInvocationError::Callback(
+                    "expected one property-change event".into(),
+                ));
+            };
+            callback_observed.borrow_mut().push(class_name.clone());
+            Ok(JavaValue::Null)
+        })
+        .unwrap();
+    let support = session
+        .construct_resolved(
+            "java.beans.PropertyChangeSupport",
+            &[JavaValue::String("source".into())],
+        )
+        .unwrap();
+    let JavaValue::Object {
+        handle: support, ..
+    } = support
+    else {
+        panic!("property-change support must be an object");
+    };
+    session
+        .call_method_resolved(
+            support,
+            "addPropertyChangeListener",
+            std::slice::from_ref(&callback),
+        )
+        .unwrap();
+    assert_eq!(
+        session
+            .call_method_resolved(
+                support,
+                "firePropertyChange",
+                &[
+                    JavaValue::String("value".into()),
+                    JavaValue::Int(1),
+                    JavaValue::Int(2),
+                ],
+            )
+            .unwrap(),
+        JavaValue::Null
+    );
+    assert_eq!(
+        observed.borrow().as_slice(),
+        ["java.beans.PropertyChangeEvent"]
+    );
+    session
+        .call_method_resolved(support, "removePropertyChangeListener", &[callback])
+        .unwrap();
+    session
+        .call_method_resolved(
+            support,
+            "firePropertyChange",
+            &[
+                JavaValue::String("value".into()),
+                JavaValue::Int(2),
+                JavaValue::Int(3),
+            ],
+        )
+        .unwrap();
+    assert_eq!(observed.borrow().len(), 1);
+}
+
+#[test]
+fn callback_from_a_java_worker_thread_fails_with_an_affinity_error() {
+    let Some(session) = live_session() else {
+        eprintln!("RUNMAT_TEST_JAVA_HOME is unset; live JVM test was not requested");
+        return;
+    };
+    let callback = session
+        .register_callback(|_| Ok(JavaValue::String("done".into())))
+        .unwrap();
+    let future = session
+        .call_static_resolved(
+            "java.util.concurrent.CompletableFuture",
+            "supplyAsync",
+            &[callback],
+        )
+        .unwrap();
+    let JavaValue::Object { handle: future, .. } = future else {
+        panic!("supplyAsync must return a future");
+    };
+    let error = session
+        .call_method_resolved(future, "join", &[])
+        .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("outside its originating RunMat thread or session"));
 }

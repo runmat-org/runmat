@@ -20,7 +20,7 @@ pub const JAVA_ADAPTER_VERSION: u32 = 1;
 pub use classpath::{ClasspathError, ClasspathLayer, ClasspathSnapshot, SessionClasspath};
 pub use exception::{JavaException, JavaStackFrame};
 #[cfg(not(target_family = "wasm"))]
-pub use invoke::{JavaInvocationError, JavaSession, JavaValue};
+pub use invoke::{JavaCallbackInvocation, JavaInvocationError, JavaSession, JavaValue};
 #[cfg(not(target_family = "wasm"))]
 pub use jvm::{discover_jvm, JavaDiscoveryRequest, JvmInstallation, JvmProcess};
 pub use jvm::{JvmConfig, JvmError, JvmVersion};
