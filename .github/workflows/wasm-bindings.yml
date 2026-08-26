@@ -97,7 +97,12 @@ jobs:
       - name: Restore Rust build cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: wasm-bindings
+          # The expensive WASM graph is primarily RunMat workspace crates, so
+          # retain those artifacts as well as third-party dependencies. Bump
+          # the namespace when changing cache policy because GitHub cache keys
+          # are immutable.
+          shared-key: wasm-bindings-workspace-v1
+          cache-workspace-crates: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
