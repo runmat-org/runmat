@@ -269,9 +269,9 @@ pub(super) fn scalar_from_java(value: JavaValue) -> Result<Value, RuntimeError> 
             .map(|value| Value::CharArray(CharArray::new_row(&value.to_string())))
             .ok_or_else(|| invalid_conversion("Java char is not a valid Unicode scalar")),
         JavaValue::String(value) => Ok(Value::String(value)),
-        JavaValue::Array { .. } | JavaValue::Object { .. } => Err(invalid_conversion(
-            "Java compound value requires session-owned conversion",
-        )),
+        JavaValue::Array { .. } | JavaValue::Object { .. } | JavaValue::Callback(_) => Err(
+            invalid_conversion("Java compound value requires session-owned conversion"),
+        ),
     }
 }
 

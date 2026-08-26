@@ -15,6 +15,8 @@ pub enum JavaInvocationError {
     Exception(JavaException),
     #[error("Java invocation returned an unsupported value: {0}")]
     UnsupportedValue(String),
+    #[error("Java callback failed: {0}")]
+    Callback(String),
     #[error(transparent)]
     Overload(#[from] OverloadError),
 }

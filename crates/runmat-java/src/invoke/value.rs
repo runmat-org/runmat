@@ -11,6 +11,7 @@ pub enum JavaValue {
     Double(f64),
     Char(u16),
     String(String),
+    Callback(u64),
     Array {
         component: crate::JavaParameterType,
         elements: Vec<JavaValue>,
@@ -19,5 +20,12 @@ pub enum JavaValue {
         handle: JavaObjectHandle,
         class_name: String,
     },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct JavaCallbackInvocation {
+    pub method_name: String,
+    pub arguments: Vec<JavaValue>,
+    pub returns_value: bool,
 }
 use crate::JavaObjectHandle;

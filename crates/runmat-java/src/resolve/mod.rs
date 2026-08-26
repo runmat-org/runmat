@@ -14,6 +14,7 @@ pub enum JavaArgumentType {
     Double,
     Char,
     String,
+    Callback,
     Object(String),
     Array(Box<JavaArgumentType>),
 }
@@ -143,6 +144,7 @@ fn conversion_cost(argument: &JavaArgumentType, parameter: &JavaParameterType) -
         (A::Null, P::String | P::Object(_) | P::Array(_)) => Some(1),
         (A::String, P::Object(name)) if name == "java.lang.String" => Some(1),
         (A::String, P::Object(name)) if name == "java.lang.Object" => Some(3),
+        (A::Callback, P::Object(_)) => Some(2),
         (A::Object(actual), P::Object(expected)) if actual == expected => Some(0),
         (A::Object(_), P::Object(expected)) if expected == "java.lang.Object" => Some(4),
         (A::Array(actual), P::Array(expected)) => {

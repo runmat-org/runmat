@@ -1,13 +1,40 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::rc::Rc;
+use std::{cell::RefCell, future::Future};
 
 use runmat_java::{JavaDiscoveryRequest, JvmConfig, JAVA_ADAPTER_ID};
-use runmat_runtime::context::{ForeignCall, RuntimeContext, RuntimeServicePorts};
+use runmat_runtime::context::{
+    ForeignCall, RuntimeCallRequest, RuntimeCallService, RuntimeContext, RuntimeServicePorts,
+};
 use runmat_runtime::execution::RuntimeExecutionService;
 use runmat_runtime::foreign::{ForeignPlatform, ForeignRuntime, JavaAdapter};
 use runmat_value::{CellArray, IntValue, IntegerStorage, Tensor, Value};
+
+#[derive(Default)]
+struct IncrementingCallService {
+    requests: RefCell<Vec<RuntimeCallRequest>>,
+}
+
+impl RuntimeCallService for IncrementingCallService {
+    fn resolve(&self, name: &str) -> Option<usize> {
+        (name == "increment_callback").then_some(1)
+    }
+
+    fn invoke(
+        &self,
+        request: RuntimeCallRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<Value, runmat_runtime::RuntimeError>> + 'static>> {
+        let result = match request.arguments.as_slice() {
+            [Value::Int(IntValue::I32(value))] => Value::Int(IntValue::I32(value + 2)),
+            _ => Value::Num(f64::NAN),
+        };
+        self.requests.borrow_mut().push(request);
+        Box::pin(async move { Ok(result) })
+    }
+}
 
 fn live_runtime() -> Option<(Rc<ForeignRuntime>, RuntimeContext, Rc<JavaAdapter>)> {
     let home = std::env::var_os("RUNMAT_TEST_JAVA_HOME").map(PathBuf::from)?;
@@ -276,4 +303,64 @@ fn java_environment_configuration_and_desktop_capability_are_session_owned() {
         status.properties.get("Status"),
         Some(&Value::String("notloaded".into()))
     );
+}
+
+#[test]
+fn java_callbacks_reenter_the_originating_runtime_call_service() {
+    let Some((foreign, base_context, _adapter)) = live_runtime() else {
+        eprintln!("RUNMAT_TEST_JAVA_HOME is unset; live JVM test was not requested");
+        return;
+    };
+    let calls = Rc::new(IncrementingCallService::default());
+    let context = base_context.with_service_ports(
+        RuntimeServicePorts::default()
+            .with_foreign(foreign)
+            .with_call(calls.clone()),
+    );
+    let stream = invoke(
+        &context,
+        "call_static",
+        vec![
+            Value::String("java.util.stream.IntStream".into()),
+            Value::String("iterate".into()),
+            Value::Int(IntValue::I32(1)),
+            Value::FunctionHandle("increment_callback".into()),
+        ],
+    )
+    .expect("create a stream with a RunMat callback");
+    let Value::Foreign(stream) = stream else {
+        panic!("IntStream.iterate must return a Java stream");
+    };
+    let stream = invoke(
+        &context,
+        "invoke_member",
+        vec![
+            Value::Foreign(stream),
+            Value::String("limit".into()),
+            Value::Int(IntValue::I64(3)),
+        ],
+    )
+    .expect("limit the stream");
+    let Value::Foreign(stream) = stream else {
+        panic!("IntStream.limit must preserve the stream");
+    };
+    let values = invoke(
+        &context,
+        "invoke_member",
+        vec![Value::Foreign(stream), Value::String("toArray".into())],
+    )
+    .expect("evaluate the callback-backed stream");
+    let Value::Tensor(values) = values else {
+        panic!("IntStream.toArray must return an integer tensor");
+    };
+    assert_eq!(
+        values.integer_storage(),
+        Some(&IntegerStorage::I32(vec![1, 3, 5]))
+    );
+    let requests = calls.requests.borrow();
+    assert_eq!(requests.len(), 2);
+    assert!(requests
+        .iter()
+        .all(|request| request.requested_outputs == 1));
+    assert_eq!(requests[0].arguments, vec![Value::Int(IntValue::I32(1))]);
 }
