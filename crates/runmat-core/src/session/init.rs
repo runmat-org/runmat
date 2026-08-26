@@ -38,6 +38,9 @@ impl RunMatSession {
             let adapter =
                 runmat_runtime::foreign::NativeFfiAdapter::new(foreign_runtime.handles().clone())?;
             foreign_runtime.register_adapter(adapter.clone())?;
+            let java =
+                runmat_runtime::foreign::JavaAdapter::new(foreign_runtime.handles().clone())?;
+            foreign_runtime.register_adapter(java)?;
             (
                 runtime_services.with_foreign(foreign_runtime.clone()),
                 foreign_runtime,

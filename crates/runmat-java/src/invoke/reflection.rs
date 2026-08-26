@@ -124,7 +124,7 @@ fn reflected_callables(
     let length = environment
         .get_array_length(&members)
         .map_err(|error| jni_error(environment, error))?;
-    let mut callables = Vec::new();
+    let mut callables: Vec<(ReflectedCallable, bool)> = Vec::new();
     for index in 0..length {
         let member = environment
             .get_object_array_element(&members, index)
@@ -137,7 +137,9 @@ fn reflected_callables(
         if name != requested_name {
             continue;
         }
-        if !constructors {
+        let generated = if constructors {
+            false
+        } else {
             let bridge = environment
                 .call_method(&member, "isBridge", "()Z", &[])
                 .and_then(JValueOwned::z)
@@ -146,9 +148,6 @@ fn reflected_callables(
                 .call_method(&member, "isSynthetic", "()Z", &[])
                 .and_then(JValueOwned::z)
                 .map_err(|error| jni_error(environment, error))?;
-            if bridge || synthetic {
-                continue;
-            }
             let modifiers = environment
                 .call_method(&member, "getModifiers", "()I", &[])
                 .and_then(JValueOwned::i)
@@ -165,7 +164,8 @@ fn reflected_callables(
             if is_static != require_static {
                 continue;
             }
-        }
+            bridge || synthetic
+        };
         let parameter_classes = environment
             .call_method(&member, "getParameterTypes", "()[Ljava/lang/Class;", &[])
             .and_then(JValueOwned::l)
@@ -198,14 +198,27 @@ fn reflected_callables(
             .and_then(JValueOwned::z)
             .map_err(|error| jni_error(environment, error))?;
         let descriptor = format!("({}){return_descriptor}", parameter_descriptors.join(""));
-        callables.push(ReflectedCallable {
+        let callable = ReflectedCallable {
             identity: format!("{class_name}.{requested_name}{descriptor}"),
             descriptor,
             parameters,
             varargs,
-        });
+        };
+        if let Some((existing, existing_generated)) = callables.iter_mut().find(|(existing, _)| {
+            existing.parameters == callable.parameters && existing.varargs == callable.varargs
+        }) {
+            if *existing_generated && !generated {
+                *existing = callable;
+                *existing_generated = false;
+            }
+        } else {
+            callables.push((callable, generated));
+        }
     }
-    Ok(callables)
+    Ok(callables
+        .into_iter()
+        .map(|(callable, _generated)| callable)
+        .collect())
 }
 
 fn class_descriptor(

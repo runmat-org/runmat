@@ -62,6 +62,11 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
     foreign
         .register_adapter(native_ffi.clone())
         .map_err(|error| error.to_string())?;
+    let java = runmat_runtime::foreign::JavaAdapter::new(foreign.handles().clone())
+        .map_err(|error| error.to_string())?;
+    foreign
+        .register_adapter(java)
+        .map_err(|error| error.to_string())?;
     let _native_interfaces =
         crate::native_interfaces::install(&input.native_interfaces, &native_ffi)?;
     foreign

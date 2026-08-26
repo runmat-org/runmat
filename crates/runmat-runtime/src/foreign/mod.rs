@@ -2,6 +2,8 @@ mod callback;
 mod conversion;
 mod error;
 mod handle;
+#[cfg(not(target_arch = "wasm32"))]
+mod java;
 mod manifest;
 #[cfg(not(target_arch = "wasm32"))]
 mod mex;
@@ -15,6 +17,8 @@ pub use callback::*;
 pub use conversion::*;
 pub use error::*;
 pub use handle::*;
+#[cfg(not(target_arch = "wasm32"))]
+pub use java::*;
 pub use manifest::*;
 #[cfg(not(target_arch = "wasm32"))]
 pub use mex::*;
