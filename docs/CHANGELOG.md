@@ -4,6 +4,8 @@ _What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/r
 
 ## [v0.6.2](https://github.com/runmat-org/runmat/compare/v0.6.1...v0.6.2) - August 2026
 
+_August 25, 2026_
+
 ### Runtime
 
 #### Added
@@ -43,7 +45,9 @@ _What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/r
 * Improved language-server startup, semantic-highlighting recovery, runtime loading, failure handling, and observability so projects recover more reliably when browser workers or background services restart.
 * Fixed Windows native plots so they appear immediately, remain aligned through layout and DPI changes, and receive pointer, wheel, drag, and overlay interaction correctly.
 
-## [v0.6.1](https://github.com/runmat-org/runmat/compare/v0.6.0...v0.6.1) - July 2026
+## [v0.6.1](https://github.com/runmat-org/runmat/compare/v0.6.0...v0.6.1) - August 2026
+
+_August 5, 2026_
 
 ### Runtime
 
@@ -54,6 +58,8 @@ _What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/r
 * Fixed `addpath` and `addpath(genpath(...))` so `.m` functions on the session search path are callable immediately and across later REPL inputs through direct calls, `feval`, function handles, and callbacks, with `which`, path precedence, `rmpath`, packages, and private functions using the same runtime resolution behavior.
 
 ## [v0.6.0](https://github.com/runmat-org/runmat/compare/v0.5.6...v0.6.0) - July 2026
+
+_July 28, 2026_
 
 ### Desktop
 
