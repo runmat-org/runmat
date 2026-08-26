@@ -314,9 +314,31 @@ impl JavaSession {
             JavaValue::Object { handle, .. } => environment
                 .new_local_ref(self.global_reference(*handle)?.as_obj())
                 .map_err(|error| jni_error(environment, error)),
-            _ => Err(JavaInvocationError::UnsupportedValue(
-                "object arrays currently accept strings, objects, and null".into(),
-            )),
+            JavaValue::UnsignedLong(value) => {
+                let text = JObject::from(
+                    environment
+                        .new_string(value.to_string())
+                        .map_err(|error| jni_error(environment, error))?,
+                );
+                environment
+                    .new_object(
+                        "java/math/BigInteger",
+                        "(Ljava/lang/String;)V",
+                        &[JValue::Object(&text)],
+                    )
+                    .map_err(|error| jni_error(environment, error))
+            }
+            JavaValue::Array {
+                component,
+                elements,
+            } => self.create_array(environment, component, elements),
+            value => {
+                let (class, signature, argument) = boxed_primitive(value)?;
+                environment
+                    .call_static_method(class, "valueOf", signature, &[argument])
+                    .and_then(JValueOwned::l)
+                    .map_err(|error| jni_error(environment, error))
+            }
         }
     }
 
@@ -412,12 +434,96 @@ impl JavaSession {
                     elements.push(self.capture_object(environment, element)?);
                 }
                 Ok(JavaValue::Array {
-                    component: crate::JavaParameterType::Object("java.lang.Object".into()),
+                    component: array_component_type(class_name)?,
                     elements,
                 })
             }
         }
     }
+}
+
+fn array_component_type(class_name: &str) -> Result<crate::JavaParameterType, JavaInvocationError> {
+    let component = class_name.strip_prefix('[').ok_or_else(|| {
+        JavaInvocationError::UnsupportedValue(format!("invalid Java array class {class_name}"))
+    })?;
+    Ok(match component {
+        "Z" => crate::JavaParameterType::Boolean,
+        "B" => crate::JavaParameterType::Byte,
+        "S" => crate::JavaParameterType::Short,
+        "I" => crate::JavaParameterType::Int,
+        "J" => crate::JavaParameterType::Long,
+        "F" => crate::JavaParameterType::Float,
+        "D" => crate::JavaParameterType::Double,
+        "C" => crate::JavaParameterType::Char,
+        "Ljava.lang.String;" => crate::JavaParameterType::String,
+        value if value.starts_with('L') && value.ends_with(';') => {
+            crate::JavaParameterType::Object(value[1..value.len() - 1].into())
+        }
+        value if value.starts_with('[') => {
+            crate::JavaParameterType::Array(Box::new(array_component_type(value)?))
+        }
+        _ => {
+            return Err(JavaInvocationError::UnsupportedValue(format!(
+                "unsupported Java array class {class_name}"
+            )))
+        }
+    })
+}
+
+fn boxed_primitive(
+    value: &JavaValue,
+) -> Result<(&'static str, &'static str, JValue<'static, 'static>), JavaInvocationError> {
+    Ok(match value {
+        JavaValue::Boolean(value) => (
+            "java/lang/Boolean",
+            "(Z)Ljava/lang/Boolean;",
+            JValue::Bool(u8::from(*value)),
+        ),
+        JavaValue::Byte(value) => (
+            "java/lang/Byte",
+            "(B)Ljava/lang/Byte;",
+            JValue::Byte(*value),
+        ),
+        JavaValue::Short(value) => (
+            "java/lang/Short",
+            "(S)Ljava/lang/Short;",
+            JValue::Short(*value),
+        ),
+        JavaValue::Int(value) => (
+            "java/lang/Integer",
+            "(I)Ljava/lang/Integer;",
+            JValue::Int(*value),
+        ),
+        JavaValue::Long(value) => (
+            "java/lang/Long",
+            "(J)Ljava/lang/Long;",
+            JValue::Long(*value),
+        ),
+        JavaValue::Float(value) => (
+            "java/lang/Float",
+            "(F)Ljava/lang/Float;",
+            JValue::Float(*value),
+        ),
+        JavaValue::Double(value) => (
+            "java/lang/Double",
+            "(D)Ljava/lang/Double;",
+            JValue::Double(*value),
+        ),
+        JavaValue::Char(value) => (
+            "java/lang/Character",
+            "(C)Ljava/lang/Character;",
+            JValue::Char(*value),
+        ),
+        JavaValue::Null
+        | JavaValue::UnsignedLong(_)
+        | JavaValue::String(_)
+        | JavaValue::Array { .. }
+        | JavaValue::Object { .. } => {
+            return Err(JavaInvocationError::UnsupportedValue(
+                "Java value cannot be boxed as a primitive".into(),
+            ))
+        }
+    })
 }
 
 pub(super) fn binary_name(class_name: &str) -> String {
