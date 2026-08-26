@@ -11,6 +11,7 @@ pub struct JavaDiscoveryRequest {
     pub environment_home: Option<PathBuf>,
     pub java_executable: Option<PathBuf>,
     pub search_system: bool,
+    pub required_major: Option<u16>,
 }
 
 impl JavaDiscoveryRequest {
@@ -20,6 +21,7 @@ impl JavaDiscoveryRequest {
             environment_home: std::env::var_os("JAVA_HOME").map(PathBuf::from),
             java_executable: None,
             search_system: true,
+            required_major: None,
         }
     }
 }
@@ -62,7 +64,19 @@ pub fn discover_jvm(request: &JavaDiscoveryRequest) -> Result<JvmInstallation, J
             continue;
         }
         match inspect_home(&candidate) {
-            Ok(installation) => return Ok(installation),
+            Ok(installation)
+                if request
+                    .required_major
+                    .is_none_or(|major| installation.version.major == major) =>
+            {
+                return Ok(installation);
+            }
+            Ok(installation) => failures.push(format!(
+                "Java {} at {} does not match requested major version {}",
+                installation.version.raw,
+                installation.home.display(),
+                request.required_major.expect("required major is present")
+            )),
             Err(error) => failures.push(error.to_string()),
         }
     }

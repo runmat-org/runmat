@@ -1,5 +1,6 @@
 mod conversion;
 mod error;
+mod loader;
 mod reflection;
 mod session;
 mod value;

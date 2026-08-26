@@ -31,7 +31,7 @@ impl RunMatSession {
         let runtime_services = runmat_runtime::context::RuntimeServicePorts::default()
             .with_placement(placement.clone());
         #[cfg(not(target_arch = "wasm32"))]
-        let (runtime_services, foreign_runtime, native_ffi_adapter) = {
+        let (runtime_services, foreign_runtime, native_ffi_adapter, java_adapter) = {
             let foreign_runtime = std::rc::Rc::new(runmat_runtime::foreign::ForeignRuntime::new(
                 runmat_runtime::foreign::ForeignPlatform::Native,
             ));
@@ -40,11 +40,12 @@ impl RunMatSession {
             foreign_runtime.register_adapter(adapter.clone())?;
             let java =
                 runmat_runtime::foreign::JavaAdapter::new(foreign_runtime.handles().clone())?;
-            foreign_runtime.register_adapter(java)?;
+            foreign_runtime.register_adapter(java.clone())?;
             (
                 runtime_services.with_foreign(foreign_runtime.clone()),
                 foreign_runtime,
                 adapter,
+                java,
             )
         };
         let session = Self {
@@ -64,6 +65,8 @@ impl RunMatSession {
             foreign_runtime,
             #[cfg(not(target_arch = "wasm32"))]
             native_ffi_adapter,
+            #[cfg(not(target_arch = "wasm32"))]
+            java_adapter,
             #[cfg(not(target_arch = "wasm32"))]
             generic_native_cache: crate::generic_native::GenericNativeCache::default(),
             #[cfg(not(target_arch = "wasm32"))]

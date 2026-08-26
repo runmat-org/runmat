@@ -86,6 +86,8 @@ pub struct RunMatSession {
     foreign_runtime: std::rc::Rc<runmat_runtime::foreign::ForeignRuntime>,
     #[cfg(not(target_arch = "wasm32"))]
     native_ffi_adapter: std::rc::Rc<runmat_runtime::foreign::NativeFfiAdapter>,
+    #[cfg(not(target_arch = "wasm32"))]
+    java_adapter: std::rc::Rc<runmat_runtime::foreign::JavaAdapter>,
     /// Session-scoped production native entry publication and invalidation.
     #[cfg(not(target_arch = "wasm32"))]
     generic_native_cache: crate::generic_native::GenericNativeCache,

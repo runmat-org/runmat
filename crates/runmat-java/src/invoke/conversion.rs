@@ -21,6 +21,21 @@ impl JavaSession {
                 JavaValue::Short(value) => PreparedValue::Short(*value),
                 JavaValue::Int(value) => PreparedValue::Int(*value),
                 JavaValue::Long(value) => PreparedValue::Long(*value),
+                JavaValue::UnsignedLong(value) => {
+                    let text = environment
+                        .new_string(value.to_string())
+                        .map_err(|error| jni_error(environment, error))?;
+                    let text = JObject::from(text);
+                    let integer = environment
+                        .new_object(
+                            "java/math/BigInteger",
+                            "(Ljava/lang/String;)V",
+                            &[JValue::Object(&text)],
+                        )
+                        .map_err(|error| jni_error(environment, error))?;
+                    objects.push(integer);
+                    PreparedValue::Object(objects.len() - 1)
+                }
                 JavaValue::Float(value) => PreparedValue::Float(*value),
                 JavaValue::Double(value) => PreparedValue::Double(*value),
                 JavaValue::Char(value) => PreparedValue::Char(*value),
@@ -97,23 +112,45 @@ impl JavaSession {
         if let Some(value) = capture_boxed(environment, &object, &class_name)? {
             return Ok(value);
         }
+        if class_name == "java.math.BigInteger" {
+            let text = environment
+                .call_method(&object, "toString", "()Ljava/lang/String;", &[])
+                .and_then(JValueOwned::l)
+                .map_err(|error| jni_error(environment, error))?;
+            let text = JString::from(text);
+            let text: String = environment
+                .get_string(&text)
+                .map_err(|error| jni_error(environment, error))?
+                .into();
+            if let Ok(value) = text.parse::<u64>() {
+                return Ok(JavaValue::UnsignedLong(value));
+            }
+        }
         if class_name.starts_with('[') {
             return self.capture_array(environment, object, &class_name);
         }
-        {
-            let objects = self.objects.borrow();
-            for (handle, metadata, reference) in objects.iter() {
-                if environment
-                    .is_same_object(&object, reference.as_obj())
-                    .map_err(|error| jni_error(environment, error))?
-                {
-                    return Ok(JavaValue::Object {
-                        handle,
-                        class_name: metadata.class_name.clone(),
-                    });
-                }
+        self.capture_reference(environment, object, class_name)
+    }
+
+    pub(super) fn capture_reference(
+        &self,
+        environment: &mut jni::JNIEnv<'_>,
+        object: JObject<'_>,
+        class_name: String,
+    ) -> Result<JavaValue, JavaInvocationError> {
+        let objects = self.objects.borrow();
+        for (handle, metadata, reference) in objects.iter() {
+            if environment
+                .is_same_object(&object, reference.as_obj())
+                .map_err(|error| jni_error(environment, error))?
+            {
+                return Ok(JavaValue::Object {
+                    handle,
+                    class_name: metadata.class_name.clone(),
+                });
             }
         }
+        drop(objects);
         let reference = environment
             .new_global_ref(object)
             .map_err(|error| jni_error(environment, error))?;

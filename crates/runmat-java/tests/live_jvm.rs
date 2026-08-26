@@ -1,6 +1,7 @@
 #![cfg(not(target_family = "wasm"))]
 
 use std::path::PathBuf;
+use std::process::Command;
 
 use runmat_java::{
     discover_jvm, JavaDiscoveryRequest, JavaInvocationError, JavaSession, JavaValue, JvmConfig,
@@ -132,6 +133,26 @@ fn invokes_standard_library_and_preserves_object_identity() {
         }
     );
 
+    let wrapped = session
+        .call_static_resolved(
+            "java.nio.CharBuffer",
+            "wrap",
+            &[JavaValue::String("interface-value".into())],
+        )
+        .unwrap();
+    let JavaValue::Object {
+        handle: wrapped, ..
+    } = wrapped
+    else {
+        panic!("interface-typed argument did not return a Java object");
+    };
+    assert_eq!(
+        session
+            .call_method_resolved(wrapped, "remaining", &[])
+            .unwrap(),
+        JavaValue::Int(15)
+    );
+
     let list = session
         .construct_resolved("java.util.ArrayList", &[])
         .unwrap();
@@ -154,4 +175,65 @@ fn invokes_standard_library_and_preserves_object_identity() {
             JavaValue::String("fixture-b".into()),
         ]
     );
+    let view = session
+        .call_static_resolved(
+            "java.util.Collections",
+            "unmodifiableList",
+            &[JavaValue::Object {
+                handle: list,
+                class_name: "java.util.ArrayList".into(),
+            }],
+        )
+        .unwrap();
+    assert!(matches!(view, JavaValue::Object { .. }));
+}
+
+#[test]
+fn dynamic_classpath_add_and_remove_rebuilds_the_session_loader() {
+    let Some(session) = live_session() else {
+        eprintln!("RUNMAT_TEST_JAVA_HOME is unset; live JVM test was not requested");
+        return;
+    };
+    let home = PathBuf::from(std::env::var_os("RUNMAT_TEST_JAVA_HOME").unwrap());
+    let compiler = home.join("bin").join(if cfg!(target_os = "windows") {
+        "javac.exe"
+    } else {
+        "javac"
+    });
+    if !compiler.is_file() {
+        eprintln!("live JVM fixture requires javac; test was not requested");
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    let package = root.path().join("fixture/dynamic");
+    std::fs::create_dir_all(&package).unwrap();
+    let source = package.join("DynamicValue.java");
+    std::fs::write(
+        &source,
+        "package fixture.dynamic; public final class DynamicValue { public static int value() { return 73; } }",
+    )
+    .unwrap();
+    assert!(Command::new(compiler)
+        .args(["-d", root.path().to_str().unwrap()])
+        .arg(&source)
+        .status()
+        .unwrap()
+        .success());
+
+    let before = session.classpath();
+    let added = session.add_dynamic_classpath(root.path()).unwrap();
+    assert_eq!(added.revision, before.revision + 1);
+    assert_ne!(added.identity, before.identity);
+    assert_eq!(
+        session
+            .call_static_resolved("fixture.dynamic.DynamicValue", "value", &[])
+            .unwrap(),
+        JavaValue::Int(73)
+    );
+    let removed = session.remove_dynamic_classpath(root.path()).unwrap();
+    assert_eq!(removed.revision, added.revision + 1);
+    assert!(removed.dynamic.is_empty());
+    assert!(session
+        .call_static_resolved("fixture.dynamic.DynamicValue", "value", &[])
+        .is_err());
 }

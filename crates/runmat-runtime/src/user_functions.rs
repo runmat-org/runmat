@@ -520,6 +520,18 @@ pub async fn try_call_semantic_descriptor(
         return None;
     }
     let name = fallback_policy.resolution_name_for(&identity)?;
+    if matches!(
+        identity,
+        CallableIdentity::ExternalName(_) | CallableIdentity::Imported(_)
+    ) {
+        let context = crate::context::legacy::active()?;
+        if let Some(result) =
+            crate::foreign::try_invoke_java(context.clone(), &name, args.clone(), requested_outputs)
+                .await
+        {
+            return Some(result);
+        }
+    }
     if matches!(identity, CallableIdentity::ExternalName(_)) {
         let context = crate::context::legacy::active()?;
         if let Some(result) = crate::foreign::try_invoke_clibgen(

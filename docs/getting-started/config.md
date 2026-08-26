@@ -196,6 +196,18 @@ Modules with a valid RunMat build manifest retain exact admission and run in the
 
 Process isolation contains native crashes and hangs but does not reduce the library's operating-system permissions. Packaged standalone programs and distributed workers always use the process boundary. See [Native Library Interfaces](/docs/execution/native-libraries) for preparation, packaging, callbacks, and pointer lifetime behavior.
 
+### `[runtime.foreign.java]`
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `home` | path | unset | Uses this Java installation instead of `JAVA_HOME` or platform discovery. The path must identify a complete installation with a loadable JVM library. |
+| `minimum_version` | positive integer | `8` | Rejects an older Java runtime before JVM startup. |
+| `maximum_version` | positive integer | unset | Rejects a newer Java runtime before JVM startup. |
+| `classpath` | array of paths | `[]` | Project-owned Java directories and JARs. These form the session's static project classpath; `javaaddpath` manages a separate dynamic layer. |
+| `options` | array of strings | `[]` | JVM startup options. They are immutable after the process JVM starts. |
+
+RunMat starts Java lazily on the first operation that needs the JVM. `jenv` reports the selected installation and load state without starting it, and `javaclasspath` can inspect the configured project and dynamic layers. A process can host only one JVM configuration; a later session must use the same installation and startup options once Java has started.
+
 The isolated extension host contains crashes and can be terminated on cancellation or timeout, but it is not an operating-system security sandbox. An admitted native module has the extension-host process's permissions. Use `unmanifested = "deny"` when only exact, manifest-bound RunMat artifacts should be allowed.
 
 ### `[runtime.jit]`
@@ -407,6 +419,13 @@ unmanifested = "isolate"
 [runtime.foreign.native]
 isolation = "process"
 # timeout_ms = 300000
+
+[runtime.foreign.java]
+minimum_version = 8
+# maximum_version = 21
+# home = "/path/to/java/home"
+classpath = []
+options = []
 
 [runtime.jit]
 enabled = true
