@@ -3,7 +3,7 @@ use std::ffi::c_void;
 
 use runmat_value::Value;
 
-use crate::{NativeLibraryMetadata, NativePointer, NativeType, PointerOwnership};
+use crate::{NativeLibraryMetadata, NativePointer, NativeScalar, NativeType, PointerOwnership};
 
 use super::arguments::{pointee_from_value, PointeeSlot};
 use super::outputs::decode_pointee;
@@ -64,6 +64,12 @@ impl NativePointerResource {
         self.ownership
     }
 
+    pub fn is_null(&self) -> bool {
+        // SAFETY: Reading whether the session-owned optional allocation is
+        // present does not expose or alias its contents.
+        unsafe { (&*self.storage.get()).is_none() }
+    }
+
     pub fn value(&self, metadata: &NativeLibraryMetadata) -> Result<Value, InvocationError> {
         // SAFETY: Native calls are synchronous and the session serializes use
         // of this resource. No Rust reference to its storage crosses a call.
@@ -118,6 +124,178 @@ impl NativePointerResource {
             .as_mut()
             .map(PointeeSlot::address)
             .unwrap_or(std::ptr::null_mut())
+    }
+}
+
+/// Copy a caller-declared view of an opaque native pointer into a RunMat
+/// value. The copy is bounded and keeps raw memory access inside this crate.
+pub fn copy_pointer_value(
+    pointer: &NativePointer,
+    pointee: &NativeType,
+    shape: &[usize],
+    metadata: &NativeLibraryMetadata,
+) -> Result<Value, InvocationError> {
+    const MAX_COPY_BYTES: usize = 512 * 1024 * 1024;
+
+    if shape.is_empty() || shape.contains(&0) {
+        return Err(pointer_output_error(
+            "pointer views require one or more positive dimensions",
+        ));
+    }
+    let element_count = shape
+        .iter()
+        .try_fold(1usize, |count, dimension| count.checked_mul(*dimension));
+    let Some(element_count) = element_count else {
+        return Err(pointer_output_error(
+            "pointer view dimensions overflow usize",
+        ));
+    };
+    if pointer.is_null() {
+        return Err(pointer_output_error(
+            "a null pointer cannot be copied into a nonempty value",
+        ));
+    }
+
+    match pointee {
+        NativeType::Scalar { scalar }
+        | NativeType::Enumeration {
+            storage: scalar, ..
+        } => copy_scalar_pointer(pointer, *scalar, element_count, shape, MAX_COPY_BYTES),
+        NativeType::Structure { .. } if element_count == 1 => {
+            let (size, _) = super::abi::type_layout("lib.pointer", pointee, metadata)?;
+            if size > MAX_COPY_BYTES {
+                return Err(pointer_output_error("pointer view exceeds the copy limit"));
+            }
+            let bytes = copy_address(pointer, size);
+            super::outputs::decode_pointer_structure(pointee, &bytes, metadata)
+        }
+        NativeType::Structure { .. } => Err(pointer_output_error(
+            "arrays of structures require an explicit prepared copy contract",
+        )),
+        _ => Err(pointer_output_error(
+            "pointer view type is not supported for direct copying",
+        )),
+    }
+}
+
+fn copy_scalar_pointer(
+    pointer: &NativePointer,
+    scalar: NativeScalar,
+    element_count: usize,
+    shape: &[usize],
+    max_bytes: usize,
+) -> Result<Value, InvocationError> {
+    macro_rules! copy_numeric {
+        ($native:ty, $variant:ident) => {{
+            let byte_len = element_count
+                .checked_mul(std::mem::size_of::<$native>())
+                .ok_or_else(|| pointer_output_error("pointer view byte length overflowed"))?;
+            if byte_len > max_bytes {
+                return Err(pointer_output_error("pointer view exceeds the copy limit"));
+            }
+            let bytes = copy_address(pointer, byte_len);
+            let values = bytes
+                .chunks_exact(std::mem::size_of::<$native>())
+                .map(|bytes| <$native>::from_ne_bytes(bytes.try_into().expect("exact chunk")))
+                .collect::<Vec<_>>();
+            let tensor = runmat_value::Tensor::from_numeric_storage(
+                runmat_value::NumericStorage::$variant(values),
+                shape.to_vec(),
+            )
+            .map_err(pointer_output_error)?;
+            Ok(Value::Tensor(tensor))
+        }};
+    }
+
+    match scalar {
+        NativeScalar::Bool => {
+            let bytes = copy_address(pointer, element_count);
+            let logical = runmat_value::LogicalArray::new(
+                bytes
+                    .into_iter()
+                    .map(|value| u8::from(value != 0))
+                    .collect(),
+                shape.to_vec(),
+            )
+            .map_err(pointer_output_error)?;
+            Ok(Value::LogicalArray(logical))
+        }
+        NativeScalar::Char | NativeScalar::SignedChar | NativeScalar::I8 => {
+            copy_numeric!(i8, I8)
+        }
+        NativeScalar::UnsignedChar | NativeScalar::U8 => copy_numeric!(u8, U8),
+        NativeScalar::Short | NativeScalar::I16 => copy_numeric!(i16, I16),
+        NativeScalar::UnsignedShort | NativeScalar::U16 => copy_numeric!(u16, U16),
+        NativeScalar::Int | NativeScalar::I32 => copy_numeric!(i32, I32),
+        NativeScalar::UnsignedInt | NativeScalar::U32 => copy_numeric!(u32, U32),
+        NativeScalar::Long => match std::mem::size_of::<std::ffi::c_long>() {
+            4 => copy_numeric!(i32, I32),
+            8 => copy_numeric!(i64, I64),
+            _ => Err(pointer_output_error("unsupported C long width")),
+        },
+        NativeScalar::UnsignedLong => match std::mem::size_of::<std::ffi::c_ulong>() {
+            4 => copy_numeric!(u32, U32),
+            8 => copy_numeric!(u64, U64),
+            _ => Err(pointer_output_error("unsupported C unsigned long width")),
+        },
+        NativeScalar::LongLong | NativeScalar::I64 => copy_numeric!(i64, I64),
+        NativeScalar::UnsignedLongLong | NativeScalar::U64 => copy_numeric!(u64, U64),
+        NativeScalar::Isize => {
+            let byte_len = element_count
+                .checked_mul(std::mem::size_of::<isize>())
+                .ok_or_else(|| pointer_output_error("pointer view byte length overflowed"))?;
+            if byte_len > max_bytes {
+                return Err(pointer_output_error("pointer view exceeds the copy limit"));
+            }
+            let bytes = copy_address(pointer, byte_len);
+            let values = bytes
+                .chunks_exact(std::mem::size_of::<isize>())
+                .map(|bytes| isize::from_ne_bytes(bytes.try_into().expect("exact chunk")) as i64)
+                .collect();
+            runmat_value::Tensor::from_numeric_storage(
+                runmat_value::NumericStorage::I64(values),
+                shape.to_vec(),
+            )
+            .map(Value::Tensor)
+            .map_err(pointer_output_error)
+        }
+        NativeScalar::Usize => {
+            let byte_len = element_count
+                .checked_mul(std::mem::size_of::<usize>())
+                .ok_or_else(|| pointer_output_error("pointer view byte length overflowed"))?;
+            if byte_len > max_bytes {
+                return Err(pointer_output_error("pointer view exceeds the copy limit"));
+            }
+            let bytes = copy_address(pointer, byte_len);
+            let values = bytes
+                .chunks_exact(std::mem::size_of::<usize>())
+                .map(|bytes| usize::from_ne_bytes(bytes.try_into().expect("exact chunk")) as u64)
+                .collect();
+            runmat_value::Tensor::from_numeric_storage(
+                runmat_value::NumericStorage::U64(values),
+                shape.to_vec(),
+            )
+            .map(Value::Tensor)
+            .map_err(pointer_output_error)
+        }
+        NativeScalar::F32 => copy_numeric!(f32, F32),
+        NativeScalar::F64 => copy_numeric!(f64, F64),
+    }
+}
+
+fn copy_address(pointer: &NativePointer, byte_len: usize) -> Vec<u8> {
+    // SAFETY: `setdatatype` is an explicit caller assertion that the native
+    // address is valid for the requested type and dimensions. The caller has
+    // already checked a bounded, nonzero byte length. Native execution is
+    // isolated by default so an invalid external pointer cannot corrupt the
+    // driver process.
+    unsafe { std::slice::from_raw_parts(pointer.address().cast::<u8>(), byte_len).to_vec() }
+}
+
+fn pointer_output_error(message: impl Into<String>) -> InvocationError {
+    InvocationError::Output {
+        symbol: "lib.pointer".into(),
+        message: message.into(),
     }
 }
 

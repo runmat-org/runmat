@@ -21,9 +21,9 @@ pub use loader::{LoadedLibrary, LoadedSymbol, LoaderError};
 
 #[cfg(not(target_family = "wasm"))]
 pub use invoke::{
-    invoke_symbol, invoke_symbol_with_bindings, invoke_symbol_with_callbacks, CallbackBinding,
-    CallbackDispatch, InvocationError, InvocationResult, InvocationValue, NativePointerResource,
-    PointerBinding,
+    copy_pointer_value, invoke_symbol, invoke_symbol_with_bindings, invoke_symbol_with_callbacks,
+    CallbackBinding, CallbackDispatch, InvocationError, InvocationResult, InvocationValue,
+    NativePointerResource, PointerBinding,
 };
 pub use metadata::{
     artifact_identity, normalize_metadata, validate_metadata, MetadataError,
@@ -35,7 +35,10 @@ pub use metadata::{
     NATIVE_LIBRARY_MEDIA_TYPE,
 };
 #[cfg(not(target_family = "wasm"))]
-pub use metadata::{prepare_header, HeaderPreparation, HeaderPreparationError};
+pub use metadata::{
+    prepare_header, prepare_header_with_declarations, prepare_header_with_declarations_report,
+    HeaderPreparation, HeaderPreparationError, HeaderPreparationResult,
+};
 pub use model::*;
 #[cfg(not(target_family = "wasm"))]
 pub use value::NativePointer;

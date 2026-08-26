@@ -16,6 +16,8 @@ pub enum NativeExecutorError {
     UnsupportedExit(u32),
     #[error("native IR site is not executable by the generic host: {0}")]
     UnsupportedSite(String),
+    #[error("native call suspended for asynchronous completion")]
+    CallSuspended,
     #[error("native execution is unavailable on this platform")]
     Unavailable,
 }

@@ -59,6 +59,27 @@ pub enum HeaderPreparationError {
 pub fn prepare_header(
     preparation: &HeaderPreparation,
 ) -> Result<NativeLibraryMetadata, HeaderPreparationError> {
+    prepare_header_with_declarations(preparation, &[])
+}
+
+pub fn prepare_header_with_declarations(
+    preparation: &HeaderPreparation,
+    additional_headers: &[PathBuf],
+) -> Result<NativeLibraryMetadata, HeaderPreparationError> {
+    prepare_header_with_declarations_report(preparation, additional_headers)
+        .map(|result| result.metadata)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeaderPreparationResult {
+    pub metadata: NativeLibraryMetadata,
+    pub warnings: String,
+}
+
+pub fn prepare_header_with_declarations_report(
+    preparation: &HeaderPreparation,
+    additional_headers: &[PathBuf],
+) -> Result<HeaderPreparationResult, HeaderPreparationError> {
     let bytes = fs::read(&preparation.header).map_err(|source| HeaderPreparationError::Read {
         path: preparation.header.clone(),
         source,
@@ -97,12 +118,29 @@ pub fn prepare_header(
         .header
         .canonicalize()
         .unwrap_or_else(|_| preparation.header.clone());
+    let mut declaration_headers = BTreeSet::from([canonical_header]);
+    let mut source_inputs = vec![(preparation.header.clone(), bytes)];
+    for header in additional_headers {
+        let resolved = resolve_additional_header(header, preparation);
+        let bytes = fs::read(&resolved).map_err(|source| HeaderPreparationError::Read {
+            path: resolved.clone(),
+            source,
+        })?;
+        declaration_headers.insert(resolved.canonicalize().unwrap_or_else(|_| resolved.clone()));
+        source_inputs.push((resolved, bytes));
+    }
+    source_inputs.sort_by(|left, right| left.0.cmp(&right.0));
+    let mut source_hasher = Sha256::new();
+    for (_, bytes) in source_inputs {
+        source_hasher.update((bytes.len() as u64).to_le_bytes());
+        source_hasher.update(bytes);
+    }
     let mut declarations = Declarations::default();
-    declarations.visit(&ast, &canonical_header)?;
+    declarations.visit(&ast, &declaration_headers)?;
     let metadata = normalize_metadata(NativeLibraryMetadata {
         schema_version: NATIVE_FFI_METADATA_SCHEMA_VERSION,
         target_triple: preparation.target_triple.clone(),
-        source_digest: format!("{:x}", Sha256::digest(bytes)),
+        source_digest: format!("{:x}", source_hasher.finalize()),
         libraries: vec![NativeLibrary {
             name: preparation.library_name.clone(),
             path: preparation.library_path.clone(),
@@ -114,7 +152,33 @@ pub fn prepare_header(
         aliases: declarations.aliases,
     });
     validate_metadata(&metadata)?;
-    Ok(metadata)
+    Ok(HeaderPreparationResult {
+        metadata,
+        warnings: bounded_diagnostic(&output.stderr),
+    })
+}
+
+fn resolve_additional_header(header: &Path, preparation: &HeaderPreparation) -> PathBuf {
+    let with_extension = if header.extension().is_none() {
+        header.with_extension("h")
+    } else {
+        header.to_path_buf()
+    };
+    if with_extension.is_absolute() || with_extension.is_file() {
+        return with_extension;
+    }
+    if let Some(parent) = preparation.header.parent() {
+        let candidate = parent.join(&with_extension);
+        if candidate.is_file() {
+            return candidate;
+        }
+    }
+    preparation
+        .include_directories
+        .iter()
+        .map(|directory| directory.join(&with_extension))
+        .find(|candidate| candidate.is_file())
+        .unwrap_or(with_extension)
 }
 
 #[derive(Default)]
@@ -128,8 +192,12 @@ struct Declarations {
 }
 
 impl Declarations {
-    fn visit(&mut self, node: &Value, header: &Path) -> Result<(), HeaderPreparationError> {
-        if originates_in(node, header) {
+    fn visit(
+        &mut self,
+        node: &Value,
+        headers: &BTreeSet<PathBuf>,
+    ) -> Result<(), HeaderPreparationError> {
+        if headers.iter().any(|header| originates_in(node, header)) {
             match string(node, "kind") {
                 Some("TypedefDecl") => self.typedef(node)?,
                 Some("RecordDecl") => self.record(node)?,
@@ -140,7 +208,7 @@ impl Declarations {
         }
         if let Some(children) = node.get("inner").and_then(Value::as_array) {
             for child in children {
-                self.visit(child, header)?;
+                self.visit(child, headers)?;
             }
         }
         Ok(())

@@ -78,27 +78,26 @@ impl NativeInvocation {
         continuation: u64,
         generation: u64,
     ) -> NativeExecutorResult<()> {
+        if self.state.pending_call.is_some() {
+            let target =
+                match super::call_suspension::complete(&mut self.state, continuation, generation)
+                    .await
+                {
+                    Ok(target) => target,
+                    Err(NativeExecutorError::Runtime(error)) => {
+                        return self.resume_runtime_error(*error);
+                    }
+                    Err(error) => return Err(error),
+                };
+            self.install_resume_target(target)?;
+            self.resume_pending = false;
+            return Ok(());
+        }
         let completion =
             match super::awaiting::complete(&mut self.state, continuation, generation).await {
                 Ok(completion) => completion,
                 Err(NativeExecutorError::Runtime(error)) => {
-                    let error = *error;
-                    let exception = self.state.arena.insert(runmat_value::Value::MException(
-                        runmat_runtime::runtime_error::exception_from_error(&error),
-                    ));
-                    let native_exception = runmat_runtime::native::NativeException {
-                        handle: exception.handle,
-                        generation: exception.generation,
-                        source: self.state.current_source,
-                    };
-                    if let Some(target) =
-                        super::site::redirect_exception(&mut self.state, native_exception)?
-                    {
-                        self.install_resume_target(target)?;
-                        self.resume_pending = false;
-                        return Ok(());
-                    }
-                    return Err(NativeExecutorError::from(self.state.annotate_error(error)));
+                    return self.resume_runtime_error(*error);
                 }
                 Err(error) => return Err(error),
             };
@@ -106,6 +105,26 @@ impl NativeInvocation {
         self.install_resume_target(target)?;
         self.resume_pending = false;
         Ok(())
+    }
+
+    fn resume_runtime_error(
+        &mut self,
+        error: runmat_runtime::RuntimeError,
+    ) -> NativeExecutorResult<()> {
+        let exception = self.state.arena.insert(runmat_value::Value::MException(
+            runmat_runtime::runtime_error::exception_from_error(&error),
+        ));
+        let native_exception = runmat_runtime::native::NativeException {
+            handle: exception.handle,
+            generation: exception.generation,
+            source: self.state.current_source,
+        };
+        if let Some(target) = super::site::redirect_exception(&mut self.state, native_exception)? {
+            self.install_resume_target(target)?;
+            self.resume_pending = false;
+            return Ok(());
+        }
+        Err(NativeExecutorError::from(self.state.annotate_error(error)))
     }
 
     /// Resume a guard failure in the generic native version at the exact site.

@@ -6,7 +6,7 @@ use runmat_builtins::{
     BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, Value};
+use runmat_value::Value;
 
 use crate::{build_runtime_error, BuiltinResult};
 
@@ -62,6 +62,18 @@ const ONE_TEXT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDe
     inputs: &ONE_TEXT_INPUT,
     outputs: &OUTPUTS,
 }];
+const FUNCTIONS_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "names = libfunctions(library)",
+        inputs: &ONE_TEXT_INPUT,
+        outputs: &OUTPUTS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "signatures = libfunctions(library, '-full')",
+        inputs: &LOAD_INPUTS,
+        outputs: &OUTPUTS,
+    },
+];
 const POINTER_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
     BuiltinSignatureDescriptor {
         label: "pointer = libpointer()",
@@ -91,6 +103,11 @@ const STRUCTURE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
         outputs: &OUTPUTS,
     },
 ];
+const SETDATATYPE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "setdatatype(pointer, type, dimensions)",
+    inputs: &LOAD_INPUTS,
+    outputs: &[],
+}];
 
 const ERROR_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.NATIVE_FFI.UNAVAILABLE",
@@ -124,6 +141,12 @@ const ONE_TEXT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
 };
+const FUNCTIONS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &FUNCTIONS_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
 const POINTER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &POINTER_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -132,6 +155,12 @@ const POINTER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 const STRUCTURE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &STRUCTURE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+const SETDATATYPE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SETDATATYPE_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
@@ -205,7 +234,7 @@ async fn loadlibrary_builtin(mut arguments: Vec<Value>) -> BuiltinResult<Value> 
         arguments.push(Value::String(header.display().to_string()));
     }
     let mut alias = None;
-    let mut include_paths = Vec::new();
+    let mut preparation_options = Vec::new();
     if arguments.len() > 2 {
         if !(arguments.len() - 2).is_multiple_of(2) {
             return Err(invalid_builtin_call(
@@ -222,9 +251,16 @@ async fn loadlibrary_builtin(mut arguments: Vec<Value>) -> BuiltinResult<Value> 
                     })?));
                 }
                 "includepath" => {
-                    include_paths.push(Value::String(String::try_from(&pair[1]).map_err(|_| {
-                        invalid_builtin_call("loadlibrary include path must be text")
-                    })?))
+                    preparation_options.push(Value::String("includepath".into()));
+                    preparation_options.push(Value::String(String::try_from(&pair[1]).map_err(
+                        |_| invalid_builtin_call("loadlibrary include path must be text"),
+                    )?));
+                }
+                "addheader" => {
+                    preparation_options.push(Value::String("addheader".into()));
+                    preparation_options.push(Value::String(String::try_from(&pair[1]).map_err(
+                        |_| invalid_builtin_call("loadlibrary additional header must be text"),
+                    )?));
                 }
                 unsupported => {
                     return Err(invalid_builtin_call(format!(
@@ -247,16 +283,23 @@ async fn loadlibrary_builtin(mut arguments: Vec<Value>) -> BuiltinResult<Value> 
             .to_string();
         arguments.push(Value::String(alias));
     }
-    arguments.extend(include_paths);
-    invoke_native("load", arguments, 1).await?;
+    arguments.extend(preparation_options);
+    let report = invoke_native("load_report", arguments, 2).await?;
+    let Value::OutputList(mut report) = report else {
+        return Err(invalid_builtin_call(
+            "native library loader returned an invalid preparation report",
+        ));
+    };
+    if report.len() != 2 {
+        return Err(invalid_builtin_call(
+            "native library loader returned an incomplete preparation report",
+        ));
+    }
     let requested = crate::output_count::current_output_count().unwrap_or(0);
     Ok(match requested {
         0 => Value::OutputList(Vec::new()),
-        1 => Value::Cell(CellArray::new(Vec::new(), 0, 0).map_err(invalid_builtin_call)?),
-        _ => Value::OutputList(vec![
-            Value::Cell(CellArray::new(Vec::new(), 0, 0).map_err(invalid_builtin_call)?),
-            Value::String(String::new()),
-        ]),
+        1 => report.remove(0),
+        _ => Value::OutputList(report),
     })
 }
 
@@ -308,12 +351,12 @@ async fn libisloaded_builtin(alias: Value) -> BuiltinResult<Value> {
     category = "interop/native",
     summary = "List functions declared by a loaded C shared library interface.",
     keywords = "libfunctions,shared library,c,ffi,native",
-    descriptor(crate::builtins::interop::native_ffi::ONE_TEXT_DESCRIPTOR),
+    descriptor(crate::builtins::interop::native_ffi::FUNCTIONS_DESCRIPTOR),
     integer_audit(crate::builtins::interop::native_ffi::INTEGER_AUDIT),
     builtin_path = "crate::builtins::interop::native_ffi"
 )]
-async fn libfunctions_builtin(alias: Value) -> BuiltinResult<Value> {
-    invoke_native("functions", vec![alias], 1).await
+async fn libfunctions_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
+    invoke_native("functions", arguments, 1).await
 }
 
 #[runtime_builtin(
@@ -327,6 +370,28 @@ async fn libfunctions_builtin(alias: Value) -> BuiltinResult<Value> {
 )]
 async fn libpointer_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
     invoke_native("pointer", arguments, 1).await
+}
+
+#[runtime_builtin(
+    name = "setdatatype",
+    category = "interop/native",
+    summary = "Declare the type and dimensions of an opaque native pointer.",
+    keywords = "setdatatype,libpointer,pointer,shared library,c,ffi,native",
+    sink = true,
+    suppress_auto_output = true,
+    descriptor(crate::builtins::interop::native_ffi::SETDATATYPE_DESCRIPTOR),
+    integer_audit(crate::builtins::interop::native_ffi::INTEGER_AUDIT),
+    builtin_path = "crate::builtins::interop::native_ffi"
+)]
+async fn setdatatype_builtin(mut arguments: Vec<Value>) -> BuiltinResult<Value> {
+    if arguments.len() < 3 {
+        return Err(invalid_builtin_call(
+            "setdatatype expects a pointer, type, and one or more dimensions",
+        ));
+    }
+    arguments.insert(1, Value::String("setdatatype".into()));
+    invoke_native("invoke_member", arguments, 1).await?;
+    Ok(Value::OutputList(Vec::new()))
 }
 
 #[runtime_builtin(

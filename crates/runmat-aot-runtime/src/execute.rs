@@ -54,6 +54,11 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
     ));
     let native_ffi = runmat_runtime::foreign::NativeFfiAdapter::new(foreign.handles().clone())
         .map_err(|error| error.to_string())?;
+    native_ffi
+        .set_isolation_policy(runmat_runtime::foreign::NativeFfiIsolationPolicy::isolated(
+            None,
+        ))
+        .map_err(|error| error.to_string())?;
     foreign
         .register_adapter(native_ffi.clone())
         .map_err(|error| error.to_string())?;
@@ -105,7 +110,7 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
         .enable_all()
         .build()
         .map_err(|error| format!("standalone async runtime initialization failed: {error}"))?;
-    let (execution, lifecycle) = async_runtime.block_on(async {
+    let (execution, native_lifecycle, mex_lifecycle) = async_runtime.block_on(async {
         let execution =
             if assembly.executable_identity.entrypoint_kind == ExecutableEntrypointKind::Script {
                 let local_names = function
@@ -136,12 +141,15 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
                 )
                 .await
             };
-        let lifecycle = mex_guard.shutdown_gracefully().await;
-        (execution, lifecycle)
+        let native_lifecycle = native_ffi.shutdown().await;
+        let mex_lifecycle = mex_guard.shutdown_gracefully().await;
+        (execution, native_lifecycle, mex_lifecycle)
     });
     let execution =
         execution.map_err(|error| format!("standalone native execution failed: {error}"))?;
-    lifecycle.map_err(|error| format!("standalone MEX shutdown failed: {error}"))?;
+    native_lifecycle
+        .map_err(|error| format!("standalone native-library shutdown failed: {error}"))?;
+    mex_lifecycle.map_err(|error| format!("standalone MEX shutdown failed: {error}"))?;
     if let Some(expression) = execution.expression {
         crate::output::value(&expression);
     } else {

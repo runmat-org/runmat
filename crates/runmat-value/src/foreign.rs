@@ -1,5 +1,5 @@
 use runmat_types::{ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignTypeIdentity};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ForeignResourceKey {
@@ -38,6 +38,23 @@ pub struct ForeignRef {
     pub affinity: ForeignAffinity,
     pub lifetime: ForeignLifetime,
     lease: Option<Arc<ForeignLease>>,
+}
+
+/// Non-owning identity for an existing managed foreign reference.
+///
+/// Adapters use this to preserve handle identity without keeping the foreign
+/// resource alive. Upgrading shares the original lease, so dropping any one
+/// clone cannot release a resource that another clone still owns.
+#[derive(Debug, Clone)]
+pub struct WeakForeignRef {
+    host_identity: String,
+    handle: u64,
+    generation: u64,
+    type_identity: ForeignTypeIdentity,
+    ownership: ForeignOwnership,
+    affinity: ForeignAffinity,
+    lifetime: ForeignLifetime,
+    lease: Weak<ForeignLease>,
 }
 
 impl ForeignRef {
@@ -110,6 +127,34 @@ impl ForeignRef {
             && self.handle == other.handle
             && self.generation == other.generation
     }
+
+    pub fn downgrade(&self) -> Option<WeakForeignRef> {
+        Some(WeakForeignRef {
+            host_identity: self.host_identity.clone(),
+            handle: self.handle,
+            generation: self.generation,
+            type_identity: self.type_identity.clone(),
+            ownership: self.ownership,
+            affinity: self.affinity,
+            lifetime: self.lifetime,
+            lease: Arc::downgrade(self.lease.as_ref()?),
+        })
+    }
+}
+
+impl WeakForeignRef {
+    pub fn upgrade(&self) -> Option<ForeignRef> {
+        Some(ForeignRef {
+            host_identity: self.host_identity.clone(),
+            handle: self.handle,
+            generation: self.generation,
+            type_identity: self.type_identity.clone(),
+            ownership: self.ownership,
+            affinity: self.affinity,
+            lifetime: self.lifetime,
+            lease: Some(self.lease.upgrade()?),
+        })
+    }
 }
 
 impl PartialEq for ForeignRef {
@@ -127,12 +172,22 @@ impl Eq for ForeignRef {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[derive(Debug)]
     struct NoopRelease;
 
     impl ForeignResourceRelease for NoopRelease {
         fn release(&self, _key: &ForeignResourceKey) {}
+    }
+
+    #[derive(Debug)]
+    struct CountingRelease(AtomicUsize);
+
+    impl ForeignResourceRelease for CountingRelease {
+        fn release(&self, _key: &ForeignResourceKey) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     fn reference(generation: u64) -> ForeignRef {
@@ -163,5 +218,33 @@ mod tests {
         let mut different_host = current.clone();
         different_host.host_identity = "host-b".into();
         assert!(!current.is_same_resource(&different_host));
+    }
+
+    #[test]
+    fn weak_upgrade_shares_one_managed_lease() {
+        let release = Arc::new(CountingRelease(AtomicUsize::new(0)));
+        let reference = ForeignRef::managed(
+            ForeignResourceKey {
+                host_identity: "host-a".into(),
+                handle: 19,
+                generation: 1,
+            },
+            ForeignTypeIdentity {
+                family: "native-ffi".into(),
+                name: "lib.pointer".into(),
+                version: 1,
+            },
+            ForeignOwnership::Owned,
+            ForeignAffinity::OriginProcess,
+            ForeignLifetime::Session,
+            release.clone(),
+        );
+        let weak = reference.downgrade().unwrap();
+        let upgraded = weak.upgrade().unwrap();
+        drop(reference);
+        assert_eq!(release.0.load(Ordering::Relaxed), 0);
+        drop(upgraded);
+        assert_eq!(release.0.load(Ordering::Relaxed), 1);
+        assert!(weak.upgrade().is_none());
     }
 }

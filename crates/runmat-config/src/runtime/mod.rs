@@ -7,6 +7,6 @@ pub use schema::{
     AccelerateProviderPreference, AutoOffloadConfig, AutoOffloadLogLevel, ExportConfig,
     ExportFormat, FeaArtifactStoreMode, FeaConfig, ForeignConfig, GcConfig, GcPreset, GuiConfig,
     JitConfig, JitOptLevel, LanguageCompatMode, LanguageConfig, LogLevel, LoggingConfig, MexConfig,
-    PlotBackend, PlotMode, PlottingConfig, RunMatRuntimeConfig, RuntimeConfig, TelemetryConfig,
-    TelemetryDrainMode, UnmanifestedMexPolicy,
+    NativeFfiConfig, NativeFfiIsolation, PlotBackend, PlotMode, PlottingConfig,
+    RunMatRuntimeConfig, RuntimeConfig, TelemetryConfig, TelemetryDrainMode, UnmanifestedMexPolicy,
 };

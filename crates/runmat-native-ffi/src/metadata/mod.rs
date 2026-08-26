@@ -18,7 +18,10 @@ pub use artifact::{
     NATIVE_LIBRARY_MEDIA_TYPE,
 };
 #[cfg(not(target_family = "wasm"))]
-pub use frontend::{prepare_header, HeaderPreparation, HeaderPreparationError};
+pub use frontend::{
+    prepare_header, prepare_header_with_declarations, prepare_header_with_declarations_report,
+    HeaderPreparation, HeaderPreparationError, HeaderPreparationResult,
+};
 pub use normalize::normalize_metadata;
 pub use validate::{validate_metadata, MetadataError};
 

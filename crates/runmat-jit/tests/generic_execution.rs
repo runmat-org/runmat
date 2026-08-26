@@ -600,27 +600,43 @@ fn cancellation_exits_without_committing_speculative_outputs() {
 }
 
 #[test]
-fn suspending_semantic_call_exits_explicitly_without_nested_executor_or_replay() {
+fn suspending_external_call_resumes_exactly_without_replay() {
     let runtime = runtime_context();
     let activation = runtime.enter();
-    let invoker = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
-        Arc::new(|function, _arguments, requested_outputs| {
-            assert_eq!(function, 9);
-            assert_eq!(requested_outputs, 1);
-            Box::pin(std::future::pending::<
-                Result<Value, runmat_runtime::RuntimeError>,
-            >())
+    let calls = Arc::new(AtomicUsize::new(0));
+    let invoker_calls = Arc::clone(&calls);
+    let invoker = runmat_runtime::user_functions::install_external_function_invoker(Some(
+        Arc::new(move |call| {
+            assert_eq!(call.function, 9);
+            assert_eq!(call.requested_outputs, 1);
+            invoker_calls.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move {
+                let mut yielded = false;
+                futures::future::poll_fn(|context| {
+                    if yielded {
+                        std::task::Poll::Ready(())
+                    } else {
+                        yielded = true;
+                        context.waker().wake_by_ref();
+                        std::task::Poll::Pending
+                    }
+                })
+                .await;
+                Ok(Value::Num(7.0))
+            })
         }),
     ));
     drop(activation);
     let executor = compile_executor(semantic_call_fixture()).unwrap();
-    let error = executor
-        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime)
-        .expect_err("R13 must reject a real suspension boundary");
-    let NativeExecutorError::UnsupportedSite(message) = error else {
-        panic!("suspension must remain a typed unsupported-site exit");
-    };
-    assert!(message.contains("requires the R14 continuation cohort"));
+    let execution = futures::executor::block_on(executor.invoke_async(
+        ProgramFunctionId(0),
+        Vec::new(),
+        1,
+        runtime,
+    ))
+    .unwrap();
+    assert_eq!(execution.outputs, vec![Value::Num(7.0)]);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
     drop(invoker);
 }
 
@@ -1385,9 +1401,10 @@ fn semantic_call_fixture() -> runmat_native_codegen::NativeAssembly {
             kind: MirStmtKind::Assign {
                 place: MirPlace::Local(MirLocalId(0)),
                 value: MirRvalue::Call(MirCall {
-                    callee: MirCallee::Static(CallableIdentity::BoundFunction(
-                        runmat_types::FunctionId(9),
-                    )),
+                    callee: MirCallee::Static(CallableIdentity::ExternalFunction {
+                        function: runmat_types::FunctionId(9),
+                        display_name: "fixture.external".into(),
+                    }),
                     args: vec![MirCallArg::Single(MirOperand::Constant(
                         MirConstant::Number("1".into()),
                     ))],

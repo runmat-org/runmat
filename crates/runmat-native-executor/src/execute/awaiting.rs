@@ -46,7 +46,7 @@ pub(super) fn begin(
             Ok(AwaitStart::Ready(value))
         }
         AwaitAction::Pending(value) => {
-            let (continuation, generation) = state.next_await_identity()?;
+            let (continuation, generation) = state.next_suspension_identity()?;
             state.pending_await = Some(PendingAwait {
                 continuation,
                 generation,
@@ -59,7 +59,7 @@ pub(super) fn begin(
             })
         }
         AwaitAction::ExecuteFuture { handle, call } => {
-            let (continuation, generation) = state.next_await_identity()?;
+            let (continuation, generation) = state.next_suspension_identity()?;
             state.pending_await = Some(PendingAwait {
                 continuation,
                 generation,

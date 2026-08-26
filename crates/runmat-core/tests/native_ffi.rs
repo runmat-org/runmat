@@ -39,7 +39,7 @@ fn legacy_shared_library_calls_use_the_session_foreign_runtime() {
     let header_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../runmat-runtime/tests/fixtures/native_ffi/interface.h");
     let source = format!(
-        "loadlibrary('{}', '{}', 'alias', 'core_fixture');\n\
+        "[notfound, header_warnings] = loadlibrary('{}', '{}', 'alias', 'core_fixture');\n\
          total = calllib('core_fixture', 'fixture_add', int32(19), int32(23));\n\
          clibgen.buildInterface('{}', 'Libraries', '{}', 'InterfaceName', 'modern_fixture');\n\
          modern_total = clib.modern_fixture.fixture_add(int32(20), int32(22));\n\
@@ -48,6 +48,12 @@ fn legacy_shared_library_calls_use_the_session_foreign_runtime() {
          pointer_type = pointer.DataType;\n\
          pointer = calllib('core_fixture', 'fixture_increment', pointer);\n\
          pointer_value = pointer.Value;\n\
+         opaque = calllib('core_fixture', 'fixture_borrowed_value', int32(1));\n\
+         setdatatype(opaque, 'int32Ptr', 1, 1);\n\
+         opaque_value = opaque.Value;\n\
+         opaque_method = calllib('core_fixture', 'fixture_borrowed_value', int32(1));\n\
+         opaque_method.setdatatype('int32Ptr', 1, 1);\n\
+         opaque_method_value = opaque_method.Value;\n\
          record = libstruct('fixture_record');\n\
          record.left = int32(19);\n\
          record.right = int32(23);\n\
@@ -83,6 +89,24 @@ fn legacy_shared_library_calls_use_the_session_foreign_runtime() {
         .values
         .iter()
         .any(|entry| entry.name == "pointer_type" && entry.class_name == "string"));
+    assert!(result
+        .workspace
+        .values
+        .iter()
+        .any(|entry| entry.name == "notfound" && entry.class_name == "cell"));
+    assert!(result
+        .workspace
+        .values
+        .iter()
+        .any(|entry| { entry.name == "header_warnings" && entry.class_name == "string" }));
+    assert!(result.workspace.values.iter().any(|entry| {
+        entry.name == "opaque_value" && entry.class_name == "int32" && entry.shape == vec![1, 1]
+    }));
+    assert!(result.workspace.values.iter().any(|entry| {
+        entry.name == "opaque_method_value"
+            && entry.class_name == "int32"
+            && entry.shape == vec![1, 1]
+    }));
     assert!(library_path
         .with_extension(format!(
             "{}.runmat.json",

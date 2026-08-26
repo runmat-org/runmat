@@ -24,6 +24,18 @@ pub use policy::*;
 pub use runtime::*;
 pub use telemetry::*;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub fn run_extension_host() -> Result<(), String> {
+    match std::env::var(native_ffi::NATIVE_FFI_HOST_KIND_ENV)
+        .ok()
+        .as_deref()
+    {
+        Some(native_ffi::NATIVE_FFI_HOST_KIND) => native_ffi::run_native_ffi_extension_host(),
+        Some(kind) => Err(format!("unknown extension host kind `{kind}`")),
+        None => mex::run_mex_extension_host(),
+    }
+}
+
 /// Read a member from a foreign resource through the adapter that owns its
 /// type family.
 pub async fn load_foreign_member(
@@ -61,10 +73,41 @@ pub async fn store_foreign_member(
     .await
 }
 
+/// Invoke a method on a foreign resource through its owning adapter. Object
+/// dispatch remains backend-neutral; native libraries, JVMs, and later
+/// adapters define their own method sets behind this operation.
+pub async fn invoke_foreign_method(
+    reference: runmat_value::ForeignRef,
+    method: String,
+    arguments: Vec<runmat_value::Value>,
+    requested_outputs: usize,
+) -> Result<runmat_value::Value, crate::RuntimeError> {
+    let mut call_arguments = Vec::with_capacity(arguments.len() + 2);
+    call_arguments.push(runmat_value::Value::Foreign(reference.clone()));
+    call_arguments.push(runmat_value::Value::String(method));
+    call_arguments.extend(arguments);
+    invoke_foreign(
+        reference,
+        "invoke_member",
+        call_arguments,
+        requested_outputs,
+    )
+    .await
+}
+
 async fn invoke_foreign_member(
     reference: runmat_value::ForeignRef,
     operation: &str,
     arguments: Vec<runmat_value::Value>,
+) -> Result<runmat_value::Value, crate::RuntimeError> {
+    invoke_foreign(reference, operation, arguments, 1).await
+}
+
+async fn invoke_foreign(
+    reference: runmat_value::ForeignRef,
+    operation: &str,
+    arguments: Vec<runmat_value::Value>,
+    requested_outputs: usize,
 ) -> Result<runmat_value::Value, crate::RuntimeError> {
     let context = crate::context::legacy::active().ok_or_else(|| {
         foreign_error(
@@ -84,7 +127,7 @@ async fn invoke_foreign_member(
                 adapter: reference.type_identity.family,
                 symbol: operation.into(),
                 arguments,
-                requested_outputs: 1,
+                requested_outputs,
             },
         ))
         .await

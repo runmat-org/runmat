@@ -146,6 +146,7 @@ impl HostState {
 
     fn interpreter_resume_supported(&self, site: &runmat_native_codegen::NativeMirSite) -> bool {
         if self.pending_await.is_some()
+            || self.pending_call.is_some()
             || self.pending_place_mutation.is_some()
             || self.last_error.is_some()
             || !self.active_for_loops.is_empty()
@@ -189,17 +190,17 @@ impl HostState {
         self.current_block = Some(block);
     }
 
-    pub fn next_await_identity(&mut self) -> NativeExecutorResult<(u64, u64)> {
-        if self.pending_await.is_some() {
+    pub fn next_suspension_identity(&mut self) -> NativeExecutorResult<(u64, u64)> {
+        if self.pending_await.is_some() || self.pending_call.is_some() {
             return Err(NativeExecutorError::Host(
-                "native invocation already has a pending await".into(),
+                "native invocation already has a pending suspension".into(),
             ));
         }
         let continuation = self.next_await_continuation;
-        self.next_await_continuation = self
-            .next_await_continuation
-            .checked_add(1)
-            .ok_or_else(|| NativeExecutorError::Host("native await identity exhausted".into()))?;
+        self.next_await_continuation =
+            self.next_await_continuation.checked_add(1).ok_or_else(|| {
+                NativeExecutorError::Host("native suspension identity exhausted".into())
+            })?;
         Ok((continuation, 1))
     }
 

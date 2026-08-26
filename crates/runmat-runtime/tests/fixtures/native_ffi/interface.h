@@ -12,5 +12,8 @@ int32_t fixture_add(int32_t left, int32_t right);
 void fixture_increment(int32_t *value);
 int32_t fixture_record_sum(const fixture_record *value);
 int32_t *fixture_borrowed_value(int32_t present);
+int32_t fixture_apply(int32_t value, int32_t (*callback)(int32_t));
+void fixture_abort(void);
+void fixture_hang(void);
 
 #endif

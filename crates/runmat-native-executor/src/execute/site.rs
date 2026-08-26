@@ -133,7 +133,13 @@ pub(super) fn execute(
             && state.has_for_loop(block.id)
             && matches!(block.terminator.kind, NativeTerminatorKind::For { .. });
         if !retained_for_iterable {
-            execute_instruction(state, &instruction)?;
+            match execute_instruction(state, &instruction) {
+                Ok(()) => {}
+                Err(NativeExecutorError::CallSuspended) => {
+                    return super::call_suspension::publish(state, call, request, exit);
+                }
+                Err(error) => return Err(error),
+            }
         }
         refresh_frame_roots(state, call)?;
         Ok(NativeSiteOutcome::continue_execution())
@@ -150,6 +156,7 @@ fn enter_site(
 ) -> NativeExecutorResult<()> {
     state.hit_coverage(site);
     state.current_source = runtime_source(source);
+    state.current_request = Some(request);
     state.enter_site_block(runmat_native_codegen::NativeBlockId(request.block));
     // SAFETY: NativeCall was validated before entry and its frame/resume
     // backing allocations live for the complete synchronous invocation.

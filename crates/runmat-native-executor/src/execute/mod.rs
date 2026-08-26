@@ -3,6 +3,7 @@
 mod aggregate;
 mod awaiting;
 mod call;
+mod call_suspension;
 mod callbacks;
 mod candidate;
 mod deoptimization;

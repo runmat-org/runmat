@@ -21,6 +21,9 @@ pub type ForeignAdapterFuture =
 pub trait ForeignAdapter {
     fn descriptor(&self) -> ForeignAdapterDescriptor;
     fn invoke(&self, context: RuntimeContext, call: ForeignCall) -> ForeignAdapterFuture;
+    fn is_isolated(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Clone)]
@@ -97,11 +100,16 @@ impl ForeignRuntime {
             .collect::<BTreeMap<_, _>>();
         let plan = admit_interop_manifest(manifest, &adapters, self.platform)?;
         for adapter in &plan.adapters {
+            let isolated = self
+                .adapters
+                .borrow()
+                .get(adapter)
+                .is_some_and(|adapter| adapter.is_isolated());
             self.telemetry.record(ForeignTelemetryEvent {
                 adapter: adapter.clone(),
                 operation: "manifest_admission".into(),
                 capability: None,
-                isolated: false,
+                isolated,
                 outcome: ForeignTelemetryOutcome::Admitted,
                 error_identifier: None,
             });
@@ -131,13 +139,14 @@ impl RuntimeForeignService for ForeignRuntime {
                 ));
             }
             let descriptor = adapter.descriptor();
+            let isolated = adapter.is_isolated();
             let operation = call.symbol.clone();
             let result = context.scope(adapter.invoke(context.clone(), call)).await;
             telemetry.record(ForeignTelemetryEvent {
                 adapter: descriptor.adapter,
                 operation,
                 capability: Some(runmat_types::ForeignCapability::Invoke),
-                isolated: false,
+                isolated,
                 outcome: if result.is_ok() {
                     ForeignTelemetryOutcome::Succeeded
                 } else {

@@ -96,6 +96,33 @@ impl ForeignResourceRelease for RegistryLeaseRelease {
 }
 
 impl ForeignHandleRegistry {
+    pub fn set_host_policy(
+        &self,
+        host_identity: &str,
+        policy: ForeignExecutionPolicy,
+    ) -> Result<(), RuntimeError> {
+        let mut state = self.state.lock().map_err(|_| {
+            foreign_error(
+                ForeignErrorKind::HostUnavailable,
+                "foreign host registry lock was poisoned",
+            )
+        })?;
+        let host = state.hosts.get_mut(host_identity).ok_or_else(|| {
+            foreign_error(
+                ForeignErrorKind::HostUnavailable,
+                format!("foreign host {host_identity} is not registered"),
+            )
+        })?;
+        if !host.resources.is_empty() {
+            return Err(foreign_error(
+                ForeignErrorKind::InvalidCall,
+                "foreign host isolation cannot change while resources are live",
+            ));
+        }
+        host.policy = policy;
+        Ok(())
+    }
+
     pub fn register_host(
         &self,
         registration: ForeignHostRegistration,

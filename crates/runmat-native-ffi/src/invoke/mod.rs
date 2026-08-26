@@ -12,4 +12,4 @@ pub use call::{
 };
 pub use callback::{CallbackBinding, CallbackDispatch};
 pub use error::InvocationError;
-pub use pointer::{NativePointerResource, PointerBinding};
+pub use pointer::{copy_pointer_value, NativePointerResource, PointerBinding};
