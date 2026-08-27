@@ -8,6 +8,7 @@ use crate::environment::apply_environment;
 use crate::{ProcessHostError, ProcessHostResult};
 
 pub async fn spawn(spec: HostCommand) -> ProcessHostResult<ChildProcess> {
+    let lifetime = spec.lifetime;
     let mut command = Command::new(&spec.executable);
     command
         .args(&spec.arguments)
@@ -52,7 +53,16 @@ pub async fn spawn(spec: HostCommand) -> ProcessHostResult<ChildProcess> {
     super::limits::configure(&mut command, spec.resource_limits);
     let child = command.spawn()?;
     let process_id = child.id();
-    let containment = super::process_tree::contain(&child, spec.resource_limits)?;
+    // Owned children stay inside the host's process-tree containment so they
+    // are terminated with their owner. Detached children deliberately outlive
+    // this `ChildProcess`; assigning them to kill-on-close containment would
+    // either terminate them when this value is dropped or fail on Windows
+    // hosts whose runner already owns the process through a Job Object.
+    let containment = if lifetime == ChildLifetime::Owned {
+        super::process_tree::contain(&child, spec.resource_limits)?
+    } else {
+        None
+    };
     let stderr = CapturedStderr::new(spec.max_stderr_bytes);
     let mut process = ChildProcess::new(child, process_id, stderr, containment);
     if piped {

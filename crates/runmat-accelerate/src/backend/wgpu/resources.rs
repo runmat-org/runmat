@@ -159,4 +159,14 @@ impl KernelResourceRegistry {
             map.remove(&product_id);
         }
     }
+
+    #[cfg(test)]
+    pub(crate) fn clear_test_state(&self) {
+        if let Ok(mut map) = self.matmul_sources.lock() {
+            map.clear();
+        }
+        if let Ok(mut buffers) = self.scratch_buffers.lock() {
+            buffers.clear();
+        }
+    }
 }

@@ -1213,7 +1213,7 @@ impl WgpuProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
+    use crate::backend::wgpu::provider::{register_test_wgpu_provider, WgpuProviderOptions};
     use futures::executor::block_on;
     use runmat_accelerate_api::{
         HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView, HostNumericDataView,
@@ -1252,7 +1252,7 @@ mod tests {
 
     #[test]
     fn wgpu_linear_gather_and_scatter_copy_complex_logical_elements() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let data = [1.0_f32, 10.0, 2.0, 20.0, 3.0, 30.0, 4.0, 40.0];
@@ -1290,7 +1290,7 @@ mod tests {
 
     #[test]
     fn wgpu_linear_gather_and_scatter_preserve_u64_words() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let values = [0_u64, 1_u64 << 63, u64::MAX];
@@ -1331,7 +1331,7 @@ mod tests {
 
     #[test]
     fn wgpu_linear_gather_and_scatter_preserve_all_native_integer_classes() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         macro_rules! check {
@@ -1380,7 +1380,7 @@ mod tests {
 
     #[test]
     fn wgpu_row_and_column_scatter_preserve_native_u64_words() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let matrix = provider

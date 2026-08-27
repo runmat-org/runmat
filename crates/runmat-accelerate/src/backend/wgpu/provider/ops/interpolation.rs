@@ -172,20 +172,17 @@ impl WgpuProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::wgpu::provider::register_wgpu_provider;
+    use crate::backend::wgpu::provider::register_test_wgpu_provider;
     use runmat_accelerate_api::{AccelProvider, HostTensorView};
-    use std::sync::{Mutex, OnceLock};
 
     fn with_wgpu_provider<F, R>(f: F) -> Option<R>
     where
         F: FnOnce(&'static dyn AccelProvider) -> R,
     {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        let _guard = LOCK.get_or_init(|| Mutex::new(())).lock().expect("lock");
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return None;
         };
-        Some(f(provider))
+        Some(f(provider.provider()))
     }
 
     fn assert_values_close(actual: &[f64], expected: &[f64], tolerance: f64) {

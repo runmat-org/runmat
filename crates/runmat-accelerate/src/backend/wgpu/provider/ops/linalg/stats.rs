@@ -1392,12 +1392,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
 
 #[cfg(test)]
 mod covariance_conversion_tests {
-    use crate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
+    use crate::backend::wgpu::provider::{register_test_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::{AccelProvider, HostTensorView};
 
     #[test]
     fn covariance_to_correlation_wgpu_returns_resident_outputs() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let covariance = provider
@@ -1430,7 +1430,7 @@ mod covariance_conversion_tests {
 
     #[test]
     fn covariance_to_correlation_wgpu_rejects_invalid_covariance() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let covariance = provider

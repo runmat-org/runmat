@@ -146,4 +146,11 @@ impl BufferResidency {
             })
             .unwrap_or(0)
     }
+
+    #[cfg(test)]
+    pub(crate) fn clear(&self) {
+        if let Ok(mut pools) = self.pools.lock() {
+            pools.clear();
+        }
+    }
 }

@@ -256,6 +256,43 @@ impl WgpuProvider {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn clear_test_state(&self) {
+        let entries = self
+            .buffers
+            .lock()
+            .map(|mut buffers| buffers.drain().collect::<Vec<_>>())
+            .unwrap_or_default();
+        for (buffer_id, entry) in entries {
+            let buffer_ptr = entry.buffer.as_ref() as *const wgpu::Buffer as usize;
+            self.bind_group_cache.invalidate_buffer(buffer_ptr);
+            self.kernel_resources.clear_matmul_source(buffer_id);
+            runmat_accelerate_api::clear_handle_metadata(&GpuTensorHandle::new(
+                entry.shape.clone(),
+                self.runtime_device_id,
+                buffer_id,
+            ));
+            entry.buffer.destroy();
+        }
+        self.buffer_residency.clear();
+        self.kernel_resources.clear_test_state();
+        if let Ok(mut pow2) = self.pow2_of.lock() {
+            pow2.clear();
+        }
+        if let Ok(mut moments) = self.moments_cache.lock() {
+            moments.clear();
+        }
+        self.device.poll(wgpu::Maintain::Wait);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_buffer_count(&self) -> usize {
+        self.buffers
+            .lock()
+            .map(|buffers| buffers.len())
+            .unwrap_or(0)
+    }
+
     pub(super) fn create_storage_buffer_for_usage(
         &self,
         usage: BufferUsageClass,

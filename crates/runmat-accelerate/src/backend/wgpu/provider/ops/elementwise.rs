@@ -2227,9 +2227,9 @@ mod tests {
         }
     }
 
-    fn register_wgpu_provider_for_test(
-    ) -> Option<&'static crate::backend::wgpu::provider::WgpuProvider> {
-        match crate::backend::wgpu::provider::register_wgpu_provider(
+    fn register_wgpu_provider_for_test() -> Option<crate::backend::wgpu::provider::WgpuTestSession>
+    {
+        match crate::backend::wgpu::provider::register_test_wgpu_provider(
             crate::backend::wgpu::provider::WgpuProviderOptions::default(),
         ) {
             Ok(provider) => Some(provider),
@@ -3366,7 +3366,7 @@ mod tests {
 
     #[tokio::test]
     async fn wgpu_erfcinv_matches_erfc_inverse() {
-        let Ok(provider) = crate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = crate::backend::wgpu::provider::register_test_wgpu_provider(
             crate::backend::wgpu::provider::WgpuProviderOptions::default(),
         ) else {
             return;
@@ -3411,7 +3411,7 @@ mod tests {
 
     #[tokio::test]
     async fn wgpu_round_ops_match_cpu() {
-        let Ok(provider) = crate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = crate::backend::wgpu::provider::register_test_wgpu_provider(
             crate::backend::wgpu::provider::WgpuProviderOptions::default(),
         ) else {
             return;
@@ -3466,14 +3466,14 @@ mod tests {
         };
         let shape = [2, 2];
         let a = complex_pair(
-            provider,
+            provider.provider(),
             &[1.0, -2.0, 3.5, 0.5],
             &[0.5, 4.0, -1.0, -2.5],
             &shape,
         )
         .await;
         let b = complex_pair(
-            provider,
+            provider.provider(),
             &[2.0, 0.25, -1.0, 4.0],
             &[-1.0, 0.75, 2.0, -0.5],
             &shape,
@@ -3537,7 +3537,7 @@ mod tests {
 
     #[tokio::test]
     async fn wgpu_complex_unary_trig_ops_match_cpu() {
-        let Ok(provider) = crate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = crate::backend::wgpu::provider::register_test_wgpu_provider(
             crate::backend::wgpu::provider::WgpuProviderOptions::default(),
         ) else {
             return;
@@ -3545,7 +3545,7 @@ mod tests {
         let input = [(0.5, 0.75), (2.0, -0.25), (-0.75, 0.5)];
         let real = input.iter().map(|&(re, _)| re).collect::<Vec<_>>();
         let imag = input.iter().map(|&(_, im)| im).collect::<Vec<_>>();
-        let handle = complex_pair(provider, &real, &imag, &[3, 1]).await;
+        let handle = complex_pair(provider.provider(), &real, &imag, &[3, 1]).await;
 
         let sin = provider.unary_sin(&handle).await.expect("complex sin");
         let cos = provider.unary_cos(&handle).await.expect("complex cos");
@@ -3588,7 +3588,7 @@ mod tests {
 
     #[tokio::test]
     async fn wgpu_complex_unary_trig_large_imag_edges_are_not_nan() {
-        let Ok(provider) = crate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = crate::backend::wgpu::provider::register_test_wgpu_provider(
             crate::backend::wgpu::provider::WgpuProviderOptions::default(),
         ) else {
             return;
@@ -3607,7 +3607,7 @@ mod tests {
         let real = input.iter().map(|&(re, _)| re).collect::<Vec<_>>();
         let imag = input.iter().map(|&(_, im)| im).collect::<Vec<_>>();
         let shape = [input.len(), 1];
-        let handle = complex_pair(provider, &real, &imag, &shape).await;
+        let handle = complex_pair(provider.provider(), &real, &imag, &shape).await;
 
         let sin = provider.unary_sin(&handle).await.expect("complex sin");
         let sinc = provider.unary_sinc(&handle).await.expect("complex sinc");
@@ -3687,7 +3687,13 @@ mod tests {
             return;
         };
         let shape = [3, 1];
-        let complex = complex_pair(provider, &[1.0, -2.0, 4.0], &[0.5, 3.0, -1.5], &shape).await;
+        let complex = complex_pair(
+            provider.provider(),
+            &[1.0, -2.0, 4.0],
+            &[0.5, 3.0, -1.5],
+            &shape,
+        )
+        .await;
         let real = provider
             .upload(&HostTensorView {
                 data: &[2.0, -1.0, 0.25],
@@ -3723,12 +3729,12 @@ mod tests {
 
     #[tokio::test]
     async fn wgpu_complex_repmat_preserves_interleaved_storage() {
-        let Ok(provider) = crate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = crate::backend::wgpu::provider::register_test_wgpu_provider(
             crate::backend::wgpu::provider::WgpuProviderOptions::default(),
         ) else {
             return;
         };
-        let scalar = complex_pair(provider, &[2.0], &[-3.0], &[1, 1]).await;
+        let scalar = complex_pair(provider.provider(), &[2.0], &[-3.0], &[1, 1]).await;
         let tiled = provider.repmat(&scalar, &[3, 1]).expect("complex repmat");
 
         assert_eq!(tiled.shape, vec![3, 1]);
@@ -3762,7 +3768,7 @@ mod tests {
         };
         assert!((host.data[0] - expected).abs() <= tolerance);
 
-        let complex = complex_pair(provider, &[1.0], &[2.0], &shape).await;
+        let complex = complex_pair(provider.provider(), &[1.0], &[2.0], &shape).await;
         assert!(provider.unary_exp(&complex).await.is_err());
         assert!(provider.unary_expm1(&complex).await.is_err());
     }

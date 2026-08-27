@@ -9,6 +9,92 @@ mod backend;
 pub(crate) use backend::backend_shared::host_tensor_from_value;
 pub use backend::backend_types::{WgpuProvider, WgpuProviderOptions};
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod test_session {
+    use std::ops::Deref;
+    use std::sync::{LazyLock, Mutex, MutexGuard};
+
+    use super::{register_wgpu_provider, WgpuProvider, WgpuProviderOptions};
+
+    static TEST_PROVIDER_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    /// Exclusive access to the process-wide test provider.
+    ///
+    /// Production keeps the WGPU provider alive for the runtime session. Unit
+    /// tests instead execute many independent workloads through that singleton;
+    /// this scope prevents those workloads from overlapping and releases every
+    /// provider-owned test buffer when each workload ends.
+    pub(crate) struct WgpuTestSession {
+        provider: &'static WgpuProvider,
+        _guard: MutexGuard<'static, ()>,
+    }
+
+    impl Deref for WgpuTestSession {
+        type Target = WgpuProvider;
+
+        fn deref(&self) -> &Self::Target {
+            self.provider
+        }
+    }
+
+    impl WgpuTestSession {
+        pub(crate) fn provider(&self) -> &'static WgpuProvider {
+            self.provider
+        }
+    }
+
+    impl Drop for WgpuTestSession {
+        fn drop(&mut self) {
+            self.provider.clear_test_state();
+            runmat_accelerate_api::set_thread_provider(None);
+        }
+    }
+
+    pub(crate) fn register_test_wgpu_provider(
+        options: WgpuProviderOptions,
+    ) -> anyhow::Result<WgpuTestSession> {
+        let guard = TEST_PROVIDER_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let provider = register_wgpu_provider(options)?;
+        provider.clear_test_state();
+        Ok(WgpuTestSession {
+            provider,
+            _guard: guard,
+        })
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) use test_session::{register_test_wgpu_provider, WgpuTestSession};
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod test_session_tests {
+    use runmat_accelerate_api::{AccelProvider as _, HostTensorView};
+
+    use super::{register_test_wgpu_provider, WgpuProviderOptions};
+
+    #[test]
+    fn test_sessions_release_provider_owned_buffers() {
+        let Ok(first) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
+            return;
+        };
+        let handle = first
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0],
+                shape: &[2, 1],
+            })
+            .expect("upload test buffer");
+        assert!(first.test_buffer_count() > 0);
+        drop(handle);
+        drop(first);
+
+        let second = register_test_wgpu_provider(WgpuProviderOptions::default())
+            .expect("reopen test provider session");
+        assert_eq!(second.test_buffer_count(), 0);
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub fn register_wgpu_provider(opts: WgpuProviderOptions) -> Result<&'static WgpuProvider> {
     static INSTANCE: OnceCell<&'static WgpuProvider> = OnceCell::new();

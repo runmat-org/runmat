@@ -1170,9 +1170,9 @@ mod tests {
         AccelProvider, HostTensorView, ProviderNdgridAxis, ProviderNdgridRequest,
     };
 
-    fn register_wgpu_provider_for_test(
-    ) -> Option<&'static crate::backend::wgpu::provider::WgpuProvider> {
-        match crate::backend::wgpu::provider::register_wgpu_provider(
+    fn register_wgpu_provider_for_test() -> Option<crate::backend::wgpu::provider::WgpuTestSession>
+    {
+        match crate::backend::wgpu::provider::register_test_wgpu_provider(
             crate::backend::wgpu::provider::WgpuProviderOptions::default(),
         ) {
             Ok(provider) => Some(provider),

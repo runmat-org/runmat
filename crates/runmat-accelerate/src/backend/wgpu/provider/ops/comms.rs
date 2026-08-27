@@ -633,12 +633,12 @@ impl WgpuProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
+    use crate::backend::wgpu::provider::{register_test_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::{AccelProvider, ProviderModulationRequest};
 
     #[test]
     fn modulate_constellation_provider_matches_table() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let symbols = [0.0, 1.0, 2.0, 3.0];
@@ -672,7 +672,7 @@ mod tests {
 
     #[test]
     fn modulate_constellation_provider_rejects_invalid_symbols() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let symbols = [0.0, 1.01];
@@ -695,7 +695,7 @@ mod tests {
 
     #[test]
     fn modulate_bits_constellation_provider_groups_bit_rows() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let bits = [0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0];

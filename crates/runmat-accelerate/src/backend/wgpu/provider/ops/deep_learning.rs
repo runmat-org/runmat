@@ -1281,7 +1281,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
 
 #[cfg(test)]
 mod tests {
-    use crate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
+    use crate::backend::wgpu::provider::{register_test_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::{
         AccelProvider, HostTensorView, ProviderAdamUpdateRequest, ProviderCrossentropyMode,
         ProviderCrossentropyRequest,
@@ -1289,7 +1289,7 @@ mod tests {
 
     #[test]
     fn adam_update_wgpu_returns_resident_outputs() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
 
@@ -1372,7 +1372,7 @@ mod tests {
 
     #[test]
     fn elu_wgpu_matches_cpu_branch_semantics() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let shape = [2usize, 2usize];
@@ -1403,7 +1403,7 @@ mod tests {
 
     #[test]
     fn softmax_rows_wgpu_is_stable_and_resident() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let shape = [2usize, 3usize];
@@ -1443,7 +1443,7 @@ mod tests {
 
     #[test]
     fn softmax_rows_wgpu_reports_invalid_normalization() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let shape = [1usize, 2usize];
@@ -1463,7 +1463,7 @@ mod tests {
 
     #[test]
     fn crossentropy_wgpu_returns_resident_loss_terms() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
 

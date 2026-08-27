@@ -2796,7 +2796,7 @@ fn spectral_range_shader_mode(range: ProviderSpectralRange) -> SpectralRangeShad
 #[cfg(test)]
 mod tests {
     use crate::backend::wgpu::provider::{
-        register_wgpu_provider, WgpuProvider, WgpuProviderOptions,
+        register_test_wgpu_provider, WgpuProvider, WgpuProviderOptions,
     };
     use num_complex::Complex;
     use runmat_accelerate_api::{
@@ -2811,21 +2811,15 @@ mod tests {
     };
     use runmat_value::{ComplexTensor, Tensor};
     use rustfft::FftPlanner;
-    use std::sync::{Mutex, OnceLock};
 
     fn with_wgpu_provider<F, R>(f: F) -> Option<R>
     where
         F: FnOnce(&'static dyn AccelProvider) -> R,
     {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        let _guard = LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return None;
         };
-        Some(f(provider))
+        Some(f(provider.provider()))
     }
 
     fn run_envelope(method: ProviderEnvelopeMethod, values: &[f64], shape: &[usize]) -> Vec<f64> {

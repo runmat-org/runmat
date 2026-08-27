@@ -1,14 +1,27 @@
-#[cfg(unix)]
 use runmat_process_host::{terminate_process_tree, ChildLifetime, HostCommand, StdioPolicy};
 
-#[cfg(unix)]
 #[tokio::test]
 async fn detached_file_backed_child_survives_its_host_handle() {
     let temp = tempfile::tempdir().unwrap();
     let stdout = temp.path().join("stdout.log");
     let stderr = temp.path().join("stderr.log");
-    let mut spec = HostCommand::new("/bin/sh");
-    spec.arguments = vec!["-c".into(), "sleep 0.1; printf detached".into()];
+    #[cfg(unix)]
+    let mut spec = {
+        let mut spec = HostCommand::new("/bin/sh");
+        spec.arguments = vec!["-c".into(), "sleep 0.1; printf detached".into()];
+        spec
+    };
+    #[cfg(windows)]
+    let mut spec = {
+        let mut spec = HostCommand::new("cmd.exe");
+        spec.arguments = vec![
+            "/D".into(),
+            "/S".into(),
+            "/C".into(),
+            "ping -n 2 127.0.0.1 >NUL && <NUL set /p =detached".into(),
+        ];
+        spec
+    };
     spec.lifetime = ChildLifetime::Detached;
     spec.stdio = StdioPolicy::Files {
         stdout: stdout.clone(),
