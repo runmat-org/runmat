@@ -7,8 +7,9 @@ use runmat_value::Value;
 use thiserror::Error;
 
 use crate::{
-    value_from_mx, value_to_mx, MexArtifactManifest, MexCallState, MexHostApiV1, MexHostServices,
-    MxApiMode, MxArray, UnavailableMexHostServices,
+    value_from_mx, value_to_mx_for_interface, MexArtifactManifest, MexCallState, MexHostApiV1,
+    MexHostServices, MexSourceLanguage, MxApiMode, MxArray, MxBoundaryInterface,
+    UnavailableMexHostServices,
 };
 
 type BindHost = unsafe extern "C" fn(*const MexHostApiV1) -> i32;
@@ -113,6 +114,7 @@ pub struct MexModule {
     invoke: InvokeMex,
     is_locked: IsLocked,
     mode: MxApiMode,
+    interface: MxBoundaryInterface,
     unload: Unload,
     state: Mutex<Option<MexCallState>>,
 }
@@ -145,9 +147,14 @@ impl MexModule {
 
     fn load_inner(path: &Path, require_manifest: bool) -> Result<Self, MexLoadError> {
         let _process_guard = MEX_PROCESS_GATE.lock();
-        if require_manifest {
-            admit_artifact(path)?;
-        }
+        let interface = if require_manifest {
+            match admit_artifact(path)?.source_language {
+                MexSourceLanguage::C => MxBoundaryInterface::CMatrix,
+                MexSourceLanguage::Cxx => MxBoundaryInterface::CxxData,
+            }
+        } else {
+            MxBoundaryInterface::CMatrix
+        };
         // SAFETY: the library remains owned by `Self`; all resolved function
         // pointers are copied only after their exact C signatures are checked.
         let library = unsafe { Library::new(path) }.map_err(|source| MexLoadError::Load {
@@ -240,6 +247,7 @@ impl MexModule {
             invoke,
             is_locked,
             mode,
+            interface,
             unload,
             state: Mutex::new(None),
         })
@@ -282,8 +290,9 @@ impl MexModule {
             Err(std::sync::TryLockError::WouldBlock) => return Err(MexLoadError::ReentrantModule),
             Err(std::sync::TryLockError::Poisoned(_)) => return Err(MexLoadError::Poisoned),
         };
-        let state =
-            state_slot.get_or_insert_with(|| MexCallState::with_services(mode, services.clone()));
+        let state = state_slot.get_or_insert_with(|| {
+            MexCallState::with_services_for_interface(mode, self.interface, services.clone())
+        });
         if state.mx.mode() != mode {
             return Err(MexLoadError::Input(
                 "a loaded MEX module cannot switch complex API mode".into(),
@@ -294,8 +303,8 @@ impl MexModule {
         let result = (|| {
             let mut input_pointers = Vec::with_capacity(inputs.len());
             for input in inputs {
-                let value =
-                    value_to_mx(input, mode).map_err(|error| MexLoadError::Input(error.message))?;
+                let value = value_to_mx_for_interface(input, mode, self.interface)
+                    .map_err(|error| MexLoadError::Input(error.message))?;
                 input_pointers.push(state.mx.allocate(value).cast_const());
             }
             let mut outputs = vec![std::ptr::null_mut(); output_count];
@@ -431,7 +440,7 @@ fn invocation_error(error: crate::MexDiagnostic) -> MexLoadError {
     }
 }
 
-fn admit_artifact(path: &Path) -> Result<(), MexLoadError> {
+fn admit_artifact(path: &Path) -> Result<MexArtifactManifest, MexLoadError> {
     let manifest_path = MexArtifactManifest::path_for_module(path);
     let manifest_bytes =
         std::fs::read(&manifest_path).map_err(|source| MexLoadError::ArtifactManifestRead {
@@ -453,7 +462,8 @@ fn admit_artifact(path: &Path) -> Result<(), MexLoadError> {
         .map_err(|error| MexLoadError::ArtifactManifest {
             path: manifest_path.display().to_string(),
             message: error.to_string(),
-        })
+        })?;
+    Ok(manifest)
 }
 
 impl Drop for MexModule {

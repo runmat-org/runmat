@@ -13,8 +13,9 @@
 extern "C" {
 #endif
 
-#define RUNMAT_MEX_HOST_ABI_VERSION 5u
+#define RUNMAT_MEX_HOST_ABI_VERSION 6u
 #define RUNMAT_HOST_COPY_MEMORY_LAYOUT 8u
+#define RUNMAT_HOST_COPY_SPARSE_LAYOUT 4u
 
 typedef struct RunMatMexHostApiV1 {
     uint32_t abi_version;
@@ -99,6 +100,15 @@ typedef struct RunMatMexHostApiV1 {
     /* ABI v5 append-only host-copy accounting authority. */
     void (*record_host_copy)(void *host, unsigned int reason,
                              size_t byte_length);
+    /* ABI v6 append-only C++ Data API string/type authority. */
+    int (*data_array_type)(void *host, const mxArray *array);
+    mxArray *(*create_string_array)(void *host, size_t ndim,
+                                    const size_t *dims);
+    size_t (*string_length)(void *host, const mxArray *array, size_t index);
+    int (*copy_string)(void *host, const mxArray *array, size_t index,
+                       unsigned short *output, size_t output_length);
+    int (*set_string)(void *host, mxArray *array, size_t index,
+                      const unsigned short *input, size_t input_length);
 } RunMatMexHostApiV1;
 
 RUNMAT_MEX_HOST_EXPORT int runmatMexBindHost(const RunMatMexHostApiV1 *api);
@@ -111,8 +121,22 @@ RUNMAT_MEX_HOST_EXPORT void runmatMexUnload(void);
 RUNMAT_MEX_LOCAL mxArray *runmatDataArrayShare(const mxArray *array);
 RUNMAT_MEX_LOCAL void
 runmatDataArrayRecordMemoryLayoutCopy(size_t byte_length);
+RUNMAT_MEX_LOCAL void
+runmatDataArrayRecordSparseLayoutCopy(size_t byte_length);
 RUNMAT_MEX_LOCAL void runmatDataArraySetError(const char *identifier,
                                               const char *message);
+RUNMAT_MEX_LOCAL int runmatDataArrayType(const mxArray *array);
+RUNMAT_MEX_LOCAL mxArray *runmatDataArrayCreateStringArray(
+    size_t ndim, const size_t *dims);
+RUNMAT_MEX_LOCAL size_t runmatDataArrayStringLength(const mxArray *array,
+                                                    size_t index);
+RUNMAT_MEX_LOCAL int runmatDataArrayCopyString(const mxArray *array,
+                                               size_t index,
+                                               unsigned short *output,
+                                               size_t output_length);
+RUNMAT_MEX_LOCAL int runmatDataArraySetString(mxArray *array, size_t index,
+                                              const unsigned short *input,
+                                              size_t input_length);
 
 #ifdef __cplusplus
 }

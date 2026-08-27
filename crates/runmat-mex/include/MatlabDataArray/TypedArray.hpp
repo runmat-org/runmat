@@ -158,6 +158,9 @@ public:
     bool operator>(const TypedIterator &other) const { return other < *this; }
     bool operator<=(const TypedIterator &other) const { return !(other < *this); }
     bool operator>=(const TypedIterator &other) const { return !(*this < other); }
+    difference_type positionFrom(const Storage *base) const {
+        return pointer_ - base;
+    }
 
 private:
     typename std::conditional<Constant, const Storage *, Storage *>::type pointer_;

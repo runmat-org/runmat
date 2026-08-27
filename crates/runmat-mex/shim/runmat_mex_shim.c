@@ -542,9 +542,45 @@ void runmatDataArrayRecordMemoryLayoutCopy(size_t byte_length) {
                                  RUNMAT_HOST_COPY_MEMORY_LAYOUT, byte_length);
 }
 
+void runmatDataArrayRecordSparseLayoutCopy(size_t byte_length) {
+    runmat_require_host();
+    runmat_host->record_host_copy(runmat_host->host,
+                                 RUNMAT_HOST_COPY_SPARSE_LAYOUT, byte_length);
+}
+
 void runmatDataArraySetError(const char *identifier, const char *message) {
     runmat_require_host();
     runmat_host->set_error(runmat_host->host, identifier, message);
+}
+
+int runmatDataArrayType(const mxArray *array) {
+    runmat_require_host();
+    return runmat_host->data_array_type(runmat_host->host, array);
+}
+
+mxArray *runmatDataArrayCreateStringArray(size_t ndim, const size_t *dims) {
+    runmat_require_host();
+    return runmat_host->create_string_array(runmat_host->host, ndim, dims);
+}
+
+size_t runmatDataArrayStringLength(const mxArray *array, size_t index) {
+    runmat_require_host();
+    return runmat_host->string_length(runmat_host->host, array, index);
+}
+
+int runmatDataArrayCopyString(const mxArray *array, size_t index,
+                              unsigned short *output, size_t output_length) {
+    runmat_require_host();
+    return runmat_host->copy_string(runmat_host->host, array, index, output,
+                                    output_length);
+}
+
+int runmatDataArraySetString(mxArray *array, size_t index,
+                             const unsigned short *input,
+                             size_t input_length) {
+    runmat_require_host();
+    return runmat_host->set_string(runmat_host->host, array, index, input,
+                                   input_length);
 }
 
 void mxDestroyArray(mxArray *array) {

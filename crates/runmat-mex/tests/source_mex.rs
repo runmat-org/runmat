@@ -144,6 +144,16 @@ public:
         }
         outputs[3] = factory.createArrayFromBuffer<double>(
             {2, 3}, std::move(rowMajor), matlab::data::MemoryLayout::ROW_MAJOR);
+
+        auto complexBuffer = factory.createBuffer<std::complex<double>>(2);
+        std::complex<double> *complexAllocation = complexBuffer.get();
+        complexBuffer.get()[0] = {2.0, -3.0};
+        complexBuffer.get()[1] = {5.0, 7.0};
+        outputs[4] = factory.createArrayFromBuffer<std::complex<double>>(
+            {1, 2}, std::move(complexBuffer));
+        outputs[5] = factory.createScalar<std::uint64_t>(
+            static_cast<std::uint64_t>(
+                reinterpret_cast<std::uintptr_t>(complexAllocation)));
     }
 };
 "#,
@@ -154,7 +164,7 @@ public:
     let module = MexModule::load(&artifact.module).unwrap();
     let layout_copies_before =
         runmat_value::host_copy_metrics(runmat_value::HostCopyReason::MemoryLayoutConversion);
-    let result = module.invoke(&[], 4, module.api_mode()).unwrap();
+    let result = module.invoke(&[], 6, module.api_mode()).unwrap();
     let layout_copies_after =
         runmat_value::host_copy_metrics(runmat_value::HostCopyReason::MemoryLayoutConversion);
     assert_eq!(
@@ -204,6 +214,295 @@ public:
     assert_eq!(
         row_major.materialize_f64(),
         vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]
+    );
+
+    let Value::ComplexTensor(adopted_complex) = &result.outputs[4] else {
+        panic!("buffer-created C++ complex output must remain complex");
+    };
+    assert_eq!(
+        adopted_complex.materialize_f64(),
+        vec![(2.0, -3.0), (5.0, 7.0)]
+    );
+    let Value::Int(recorded_address) = &result.outputs[5] else {
+        panic!("recorded complex buffer address must remain uint64");
+    };
+    let adopted_address = adopted_complex
+        .as_f64_slice()
+        .expect("double-complex host buffer")
+        .as_ptr() as usize as u64;
+    assert_eq!(recorded_address.try_to_u64(), Some(adopted_address));
+}
+
+#[test]
+fn modern_cpp_string_arrays_remain_distinct_from_character_arrays() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("modern_strings.cpp");
+    fs::write(
+        &source,
+        r#"
+#include "mex.hpp"
+#include "mexAdapter.hpp"
+
+class MexFunction : public matlab::mex::Function {
+public:
+    void operator()(matlab::mex::ArgumentList outputs,
+                    matlab::mex::ArgumentList inputs) override {
+        matlab::data::StringArray strings(inputs[0]);
+        matlab::data::MATLABString first = strings[0];
+        if (strings.getType() != matlab::data::ArrayType::MATLAB_STRING ||
+            !first || first.value() != u"alpha") {
+            throw matlab::Exception("string input did not retain its Data API type");
+        }
+        outputs[0] = inputs[0];
+        strings[1] = matlab::data::String(u"changed");
+        outputs[1] = strings;
+
+        matlab::data::ArrayFactory factory;
+        outputs[2] = factory.createArray<matlab::data::MATLABString>(
+            {1, 2}, {matlab::data::MATLABString(u"βeta"),
+                     matlab::data::MATLABString(u"雪")});
+        outputs[3] = factory.createCharArray(u"chars");
+        auto missing = factory.createArray<matlab::data::MATLABString>({1, 2});
+        if (static_cast<matlab::data::MATLABString>(missing[0])) {
+            throw matlab::Exception("default string element is not missing");
+        }
+        missing[1] = matlab::data::String(u"value");
+        outputs[4] = missing;
+        outputs[5] = factory.createScalar(matlab::data::MATLABString());
+        outputs[6] = factory.createCellArray({1, 1}, std::string("text"));
+    }
+};
+"#,
+    )
+    .unwrap();
+
+    let input = Value::StringArray(
+        runmat_value::StringArray::new(vec!["alpha".into(), "untouched".into()], vec![1, 2])
+            .unwrap(),
+    );
+    let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+    let module = MexModule::load(&artifact.module).unwrap();
+    let result = module
+        .invoke(std::slice::from_ref(&input), 7, module.api_mode())
+        .unwrap();
+    assert_eq!(result.outputs[0], input);
+    assert_eq!(
+        result.outputs[1],
+        Value::StringArray(
+            runmat_value::StringArray::new(vec!["alpha".into(), "changed".into()], vec![1, 2],)
+                .unwrap()
+        )
+    );
+    assert_eq!(
+        result.outputs[2],
+        Value::StringArray(
+            runmat_value::StringArray::new(vec!["βeta".into(), "雪".into()], vec![1, 2]).unwrap()
+        )
+    );
+    assert_eq!(
+        result.outputs[3],
+        Value::CharArray(runmat_value::CharArray::new_row("chars"))
+    );
+    assert_eq!(
+        result.outputs[4],
+        Value::StringArray(
+            runmat_value::StringArray::new(vec!["<missing>".into(), "value".into()], vec![1, 2])
+                .unwrap()
+        )
+    );
+    assert_eq!(result.outputs[5], Value::String("<missing>".into()));
+    let Value::Cell(string_cell) = &result.outputs[6] else {
+        panic!("C++ string cell output must remain a cell");
+    };
+    assert_eq!(string_cell.get(0, 0).unwrap(), Value::String("text".into()));
+}
+
+#[test]
+fn modern_cpp_sparse_factory_adopts_ordered_buffers_and_classifies_reordering() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("modern_sparse.cpp");
+    fs::write(
+        &source,
+        r#"
+#include "mex.hpp"
+#include "mexAdapter.hpp"
+#include <cstdint>
+
+class MexFunction : public matlab::mex::Function {
+public:
+    void operator()(matlab::mex::ArgumentList outputs,
+                    matlab::mex::ArgumentList inputs) override {
+        (void)inputs;
+        matlab::data::ArrayFactory factory;
+        auto data = factory.createBuffer<double>(3);
+        auto rows = factory.createBuffer<std::size_t>(3);
+        auto columns = factory.createBuffer<std::size_t>(3);
+        double *dataAddress = data.get();
+        std::size_t *rowAddress = rows.get();
+        data.get()[0] = 2.0; data.get()[1] = 4.0; data.get()[2] = 6.0;
+        rows.get()[0] = 0; rows.get()[1] = 2; rows.get()[2] = 1;
+        columns.get()[0] = 0; columns.get()[1] = 0; columns.get()[2] = 2;
+        auto sparse = factory.createSparseArray<double>(
+            {3, 3}, 3, std::move(data), std::move(rows), std::move(columns));
+        auto position = sparse.begin();
+        if (sparse.getNumberOfNonZeroElements() != 3 ||
+            sparse.getIndex(position) != matlab::data::SparseIndex(0, 0) ||
+            static_cast<double>(*position) != 2.0) {
+            throw matlab::Exception("ordered sparse data was not retained");
+        }
+        outputs[0] = sparse;
+        outputs[1] = factory.createScalar<std::uint64_t>(
+            reinterpret_cast<std::uintptr_t>(dataAddress));
+        outputs[2] = factory.createScalar<std::uint64_t>(
+            reinterpret_cast<std::uintptr_t>(rowAddress));
+
+        auto unorderedData = factory.createBuffer<double>(3);
+        auto unorderedRows = factory.createBuffer<std::size_t>(3);
+        auto unorderedColumns = factory.createBuffer<std::size_t>(3);
+        unorderedData.get()[0] = 6.0; unorderedData.get()[1] = 2.0;
+        unorderedData.get()[2] = 4.0;
+        unorderedRows.get()[0] = 1; unorderedRows.get()[1] = 0;
+        unorderedRows.get()[2] = 2;
+        unorderedColumns.get()[0] = 2; unorderedColumns.get()[1] = 0;
+        unorderedColumns.get()[2] = 0;
+        outputs[3] = factory.createSparseArray<double>(
+            {3, 3}, 3, std::move(unorderedData), std::move(unorderedRows),
+            std::move(unorderedColumns));
+    }
+};
+"#,
+    )
+    .unwrap();
+
+    let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+    let module = MexModule::load(&artifact.module).unwrap();
+    let copies_before =
+        runmat_value::host_copy_metrics(runmat_value::HostCopyReason::SparseLayoutConversion);
+    let result = module.invoke(&[], 4, module.api_mode()).unwrap();
+    let copies_after =
+        runmat_value::host_copy_metrics(runmat_value::HostCopyReason::SparseLayoutConversion);
+    assert!(copies_after.operations >= copies_before.operations + 3);
+    assert!(
+        copies_after.bytes
+            >= copies_before.bytes
+                + 3 * 3 * std::mem::size_of::<usize>() as u64
+                + 3 * std::mem::size_of::<f64>() as u64
+    );
+
+    let Value::SparseTensor(ordered) = &result.outputs[0] else {
+        panic!("ordered C++ sparse output must remain sparse");
+    };
+    assert_eq!(&ordered.col_ptrs[..], &[0, 2, 2, 3]);
+    assert_eq!(&ordered.row_indices[..], &[0, 2, 1]);
+    assert_eq!(
+        ordered.to_dense().unwrap().materialize_f64(),
+        vec![2.0, 0.0, 4.0, 0.0, 0.0, 0.0, 0.0, 6.0, 0.0]
+    );
+    let data_address = unsafe {
+        ordered
+            .numeric_host_buffer()
+            .unwrap()
+            .foreign_data_pointer()
+    } as usize as u64;
+    let row_address = ordered.row_indices.as_ptr() as usize as u64;
+    let Value::Int(recorded_data) = &result.outputs[1] else {
+        panic!("data address must remain uint64");
+    };
+    let Value::Int(recorded_rows) = &result.outputs[2] else {
+        panic!("row address must remain uint64");
+    };
+    assert_eq!(recorded_data.try_to_u64(), Some(data_address));
+    assert_eq!(recorded_rows.try_to_u64(), Some(row_address));
+
+    let Value::SparseTensor(unordered) = &result.outputs[3] else {
+        panic!("reordered C++ sparse output must remain sparse");
+    };
+    assert_eq!(unordered, ordered);
+}
+
+#[test]
+fn modern_cpp_object_properties_and_enumerations_use_data_api_types() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("modern_objects.cpp");
+    fs::write(
+        &source,
+        r#"
+#include "mex.hpp"
+#include "mexAdapter.hpp"
+
+class MexFunction : public matlab::mex::Function {
+public:
+    void operator()(matlab::mex::ArgumentList outputs,
+                    matlab::mex::ArgumentList inputs) override {
+        matlab::data::Array object = inputs[0];
+        if (object.getType() != matlab::data::ArrayType::VALUE_OBJECT) {
+            throw matlab::Exception("input is not a Data API value object");
+        }
+        auto engine = getEngine();
+        matlab::data::TypedArray<double> value =
+            engine->getProperty(object, u"Value");
+        if (static_cast<double>(value[0]) != 4.0) {
+            throw matlab::Exception("object property value was not retained");
+        }
+        matlab::data::ArrayFactory factory;
+        auto replacement = factory.createScalar<double>(9.0);
+        engine->setProperty(object, u"Value", replacement);
+        outputs[0] = object;
+
+        auto state = factory.createEnumArray({1, 2}, "FixtureState",
+                                             {u8"Réady", "Done"});
+        if (state.getType() != matlab::data::ArrayType::ENUM ||
+            state.getClassName() != "FixtureState" ||
+            static_cast<std::string>(state[1]) != "Done" ||
+            static_cast<std::string>(*state.cbegin()) != u8"Réady") {
+            throw matlab::Exception("enumeration metadata was not retained");
+        }
+        outputs[1] = state;
+    }
+};
+"#,
+    )
+    .unwrap();
+
+    let mut object = runmat_value::ObjectInstance::new("FixtureObject".into());
+    object.properties.insert("Value".into(), Value::Num(4.0));
+    object
+        .properties
+        .insert("Untouched".into(), Value::String("shared".into()));
+    let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+    let module = MexModule::load(&artifact.module).unwrap();
+    let result = module
+        .invoke(&[Value::Object(object.clone())], 2, module.api_mode())
+        .unwrap();
+    assert_eq!(object.properties.get("Value"), Some(&Value::Num(4.0)));
+    let Value::Object(changed) = &result.outputs[0] else {
+        panic!("C++ object output must remain an object");
+    };
+    assert_eq!(changed.properties.get("Value"), Some(&Value::Num(9.0)));
+    assert_eq!(
+        changed.properties.get("Untouched"),
+        Some(&Value::String("shared".into()))
+    );
+    let Value::ObjectArray(states) = &result.outputs[1] else {
+        panic!("C++ enum output must remain a homogeneous object array");
+    };
+    assert_eq!(states.class_name(), "FixtureState");
+    let members = states
+        .data()
+        .iter()
+        .map(|value| {
+            let Value::Object(value) = value else {
+                panic!("enum element must remain an object");
+            };
+            value.properties.get("__enum_member__").cloned()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        members,
+        vec![
+            Some(Value::String("Réady".into())),
+            Some(Value::String("Done".into()))
+        ]
     );
 }
 

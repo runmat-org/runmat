@@ -252,6 +252,7 @@ fn cxx_gnu_steps(
         let mut arguments = vec![
             "-fPIC".into(),
             "-O2".into(),
+            "-pthread".into(),
             "-x".into(),
             match language {
                 MexSourceLanguage::C => "c",
@@ -308,6 +309,7 @@ fn cxx_gnu_steps(
     } else {
         "-shared".into()
     }];
+    link_arguments.push("-pthread".into());
     link_arguments.extend((0..build.sources.len()).map(|index| {
         object_path(object_directory, index, &build.sources[index], "o")
             .display()
