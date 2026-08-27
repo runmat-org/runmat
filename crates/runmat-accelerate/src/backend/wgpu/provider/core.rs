@@ -69,6 +69,7 @@ impl WgpuProvider {
         }
     }
     pub(super) const BUFFER_RESIDENCY_MAX_PER_KEY: usize = 8;
+    pub(super) const BUFFER_RESIDENCY_MAX_TOTAL: usize = 64;
     pub(super) const IMAGE_NORMALIZE_AUTOTUNE_VERSION: u8 = 1;
     pub(super) const IMAGE_NORMALIZE_STREAM_COLD_CAP: u32 = 8;
     pub(super) const IMAGE_NORMALIZE_TARGET_SAMPLES_PER_LANE: f64 = 256.0;
@@ -90,6 +91,14 @@ impl WgpuProvider {
             .ok()
             .and_then(|buffers| buffers.get(&handle.buffer_id).cloned())
             .map(|entry| Arc::as_ptr(&entry.buffer) as usize)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_pooled_buffer_counts(&self) -> (usize, usize) {
+        (
+            self.buffer_residency.pooled_count(),
+            self.buffer_residency.max_total(),
+        )
     }
 
     /// Close the logical session and return unaliased storage allocations to

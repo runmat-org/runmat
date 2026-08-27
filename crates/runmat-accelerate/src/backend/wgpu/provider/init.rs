@@ -50,6 +50,33 @@ impl WgpuProvider {
         }
     }
 
+    pub(super) fn buffer_residency_total_limit() -> usize {
+        const VAR: &str = "RUNMAT_WGPU_POOL_MAX_BUFFERS";
+        match std::env::var(VAR) {
+            Ok(raw) => match raw.parse::<usize>() {
+                Ok(value) => {
+                    log::info!(
+                        "RunMat Accelerate: total buffer residency pool capacity set to {} via {}",
+                        value,
+                        VAR
+                    );
+                    value
+                }
+                Err(err) => {
+                    log::warn!(
+                        "RunMat Accelerate: failed to parse {}='{}' ({}); using default {}",
+                        VAR,
+                        raw,
+                        err,
+                        Self::BUFFER_RESIDENCY_MAX_TOTAL
+                    );
+                    Self::BUFFER_RESIDENCY_MAX_TOTAL
+                }
+            },
+            Err(_) => Self::BUFFER_RESIDENCY_MAX_TOTAL,
+        }
+    }
+
     pub(super) fn parse_buffer_residency_max_poolable_bytes(
         raw_override: Option<&str>,
         adapter_max_buffer_size: u64,
@@ -375,6 +402,7 @@ impl WgpuProvider {
         let pipelines = Arc::new(WgpuPipelines::new(&device, precision, image_norm_bootstrap));
 
         let buffer_pool_limit = Self::buffer_residency_pool_limit();
+        let buffer_pool_total_limit = Self::buffer_residency_total_limit();
         let max_poolable_bytes =
             Self::buffer_residency_max_poolable_bytes(satisfied_limits.max_buffer_size);
 
@@ -387,7 +415,10 @@ impl WgpuProvider {
             adapter_limits: satisfied_limits,
             workgroup_config,
             buffers: Mutex::new(HashMap::new()),
-            buffer_residency: Arc::new(BufferResidency::new(buffer_pool_limit)),
+            buffer_residency: Arc::new(BufferResidency::new(
+                buffer_pool_limit,
+                buffer_pool_total_limit,
+            )),
             buffer_residency_max_poolable_bytes: max_poolable_bytes,
             next_id: AtomicU64::new(1),
             pipelines,

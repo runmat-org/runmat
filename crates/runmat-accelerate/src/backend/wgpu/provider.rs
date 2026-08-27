@@ -221,4 +221,32 @@ mod test_session_tests {
             "uploads should consume storage returned by the previous logical session"
         );
     }
+
+    #[test]
+    fn test_session_residency_is_globally_bounded() {
+        const BASE_LEN: usize = 8_101;
+        let Ok(session) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
+            return;
+        };
+        let (_, max_total) = session.test_pooled_buffer_counts();
+        let mut handles = Vec::with_capacity(max_total + 8);
+        for offset in 0..(max_total + 8) {
+            handles.push(
+                session
+                    .zeros(&[BASE_LEN + offset, 1])
+                    .expect("allocate unique session buffer"),
+            );
+        }
+        drop(handles);
+        drop(session);
+
+        let next = register_test_wgpu_provider(WgpuProviderOptions::default())
+            .expect("reopen provider after returning unique allocations");
+        let (pooled, configured_max) = next.test_pooled_buffer_counts();
+        assert_eq!(configured_max, max_total);
+        assert!(
+            pooled <= configured_max,
+            "physical residency pool retained {pooled} buffers with a configured maximum of {configured_max}"
+        );
+    }
 }
