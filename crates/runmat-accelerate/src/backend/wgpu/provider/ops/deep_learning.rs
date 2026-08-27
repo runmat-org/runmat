@@ -186,12 +186,7 @@ impl WgpuProvider {
             );
         }
         let error_size = std::mem::size_of::<u32>() as u64;
-        let staging = self.device_ref().create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-softmax-rows-error-staging"),
-            size: error_size,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let staging = self.create_readback_buffer(error_size, "runmat-softmax-rows-error-staging");
         let mut encoder =
             self.device_ref()
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -398,12 +393,7 @@ impl WgpuProvider {
         }
 
         let error_size = std::mem::size_of::<u32>() as u64;
-        let staging = self.device_ref().create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-crossentropy-error-staging"),
-            size: error_size,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let staging = self.create_readback_buffer(error_size, "runmat-crossentropy-error-staging");
         let mut encoder =
             self.device_ref()
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -696,12 +686,8 @@ impl WgpuProvider {
             }
 
             let error_size = std::mem::size_of::<u32>() as u64;
-            let staging = self.device_ref().create_buffer(&wgpu::BufferDescriptor {
-                label: Some("runmat-adamupdate-error-staging"),
-                size: error_size,
-                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
+            let staging =
+                self.create_readback_buffer(error_size, "runmat-adamupdate-error-staging");
             let mut encoder =
                 self.device_ref()
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {

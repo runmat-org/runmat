@@ -238,12 +238,7 @@ impl WgpuProvider {
                 entry.len
             ));
         }
-        let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-read-scalar-staging"),
-            size: elem_size,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let staging = self.create_readback_buffer(elem_size, "runmat-read-scalar-staging");
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -444,12 +439,8 @@ impl WgpuProvider {
         let bytes = if entry.allocated_bytes == 0 {
             Vec::new()
         } else {
-            let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("runmat-numeric-download-staging"),
-                size: entry.allocated_bytes,
-                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
+            let staging = self
+                .create_readback_buffer(entry.allocated_bytes, "runmat-numeric-download-staging");
             let mut encoder = self
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -544,90 +535,87 @@ impl WgpuProvider {
         }
 
         let size_bytes = entry.allocated_bytes;
-        let finish_readback = |staging: wgpu::Buffer, size_bytes: u64| -> Result<HostTensorOwned> {
-            let slice = staging.slice(..);
-            let data = slice.get_mapped_range();
-            log::trace!(
-                "wgpu download copying data id={} len={} bytes={}",
-                handle.buffer_id,
-                entry.len,
-                size_bytes
-            );
+        let finish_readback =
+            |staging: Arc<wgpu::Buffer>, size_bytes: u64| -> Result<HostTensorOwned> {
+                let slice = staging.slice(..);
+                let data = slice.get_mapped_range();
+                log::trace!(
+                    "wgpu download copying data id={} len={} bytes={}",
+                    handle.buffer_id,
+                    entry.len,
+                    size_bytes
+                );
 
-            let mut out = vec![0.0f64; entry.len];
-            match entry.precision {
-                NumericPrecision::F64 => out.copy_from_slice(cast_slice(&data)),
-                NumericPrecision::F32 => {
-                    let f32_slice: &[f32] = cast_slice(&data);
-                    for (dst, src) in out.iter_mut().zip(f32_slice.iter()) {
-                        *dst = *src as f64;
-                    }
-                }
-            }
-            drop(data);
-            staging.unmap();
-            log::trace!("wgpu download finished copy id={}", handle.buffer_id);
-            self.telemetry.record_download_bytes(size_bytes);
-
-            let lane_factor = match storage {
-                GpuTensorStorage::Real => 1usize,
-                GpuTensorStorage::ComplexInterleaved => 2usize,
-            };
-            let mut shape = handle.shape.clone();
-            if let Some(info) = runmat_accelerate_api::handle_transpose_info(handle) {
-                let base_rows = info.base_rows;
-                let base_cols = info.base_cols;
-                let logical_len = out.len() / lane_factor;
-                if out.len() % lane_factor != 0
-                    || base_rows.checked_mul(base_cols) != Some(logical_len)
-                {
-                    return Err(anyhow!(
-                        "download: transpose metadata mismatch for buffer {}",
-                        handle.buffer_id
-                    ));
-                }
-                if shape.len() == 2 {
-                    let rows_t = base_cols;
-                    let cols_t = base_rows;
-                    let mut transposed = vec![0.0f64; out.len()];
-                    for col in 0..base_cols {
-                        for row in 0..base_rows {
-                            let src_idx = (row + col * base_rows) * lane_factor;
-                            let dst_idx = (col + row * base_cols) * lane_factor;
-                            transposed[dst_idx..dst_idx + lane_factor]
-                                .copy_from_slice(&out[src_idx..src_idx + lane_factor]);
+                let mut out = vec![0.0f64; entry.len];
+                match entry.precision {
+                    NumericPrecision::F64 => out.copy_from_slice(cast_slice(&data)),
+                    NumericPrecision::F32 => {
+                        let f32_slice: &[f32] = cast_slice(&data);
+                        for (dst, src) in out.iter_mut().zip(f32_slice.iter()) {
+                            *dst = *src as f64;
                         }
                     }
-                    out = transposed;
-                    shape[0] = rows_t;
-                    shape[1] = cols_t;
                 }
-            }
+                drop(data);
+                staging.unmap();
+                self.recycle_readback_buffer(size_bytes, staging);
+                log::trace!("wgpu download finished copy id={}", handle.buffer_id);
+                self.telemetry.record_download_bytes(size_bytes);
 
-            log::trace!(
-                "wgpu download complete id={} final_shape={:?}",
-                handle.buffer_id,
-                shape
-            );
+                let lane_factor = match storage {
+                    GpuTensorStorage::Real => 1usize,
+                    GpuTensorStorage::ComplexInterleaved => 2usize,
+                };
+                let mut shape = handle.shape.clone();
+                if let Some(info) = runmat_accelerate_api::handle_transpose_info(handle) {
+                    let base_rows = info.base_rows;
+                    let base_cols = info.base_cols;
+                    let logical_len = out.len() / lane_factor;
+                    if out.len() % lane_factor != 0
+                        || base_rows.checked_mul(base_cols) != Some(logical_len)
+                    {
+                        return Err(anyhow!(
+                            "download: transpose metadata mismatch for buffer {}",
+                            handle.buffer_id
+                        ));
+                    }
+                    if shape.len() == 2 {
+                        let rows_t = base_cols;
+                        let cols_t = base_rows;
+                        let mut transposed = vec![0.0f64; out.len()];
+                        for col in 0..base_cols {
+                            for row in 0..base_rows {
+                                let src_idx = (row + col * base_rows) * lane_factor;
+                                let dst_idx = (col + row * base_cols) * lane_factor;
+                                transposed[dst_idx..dst_idx + lane_factor]
+                                    .copy_from_slice(&out[src_idx..src_idx + lane_factor]);
+                            }
+                        }
+                        out = transposed;
+                        shape[0] = rows_t;
+                        shape[1] = cols_t;
+                    }
+                }
 
-            Ok(HostTensorOwned {
-                data: out,
-                shape,
-                storage,
-            })
-        };
+                log::trace!(
+                    "wgpu download complete id={} final_shape={:?}",
+                    handle.buffer_id,
+                    shape
+                );
+
+                Ok(HostTensorOwned {
+                    data: out,
+                    shape,
+                    storage,
+                })
+            };
 
         log::trace!(
             "wgpu download creating staging buffer id={} bytes={}",
             handle.buffer_id,
             size_bytes
         );
-        let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-download-staging"),
-            size: size_bytes,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let staging = self.create_readback_buffer(size_bytes, "runmat-download-staging");
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {

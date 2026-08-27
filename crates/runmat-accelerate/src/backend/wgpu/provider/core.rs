@@ -24,7 +24,7 @@ use crate::fusion::active_fusion;
 impl WgpuProvider {
     pub(super) async fn map_readback_bytes(
         &self,
-        staging: wgpu::Buffer,
+        staging: Arc<wgpu::Buffer>,
         size_bytes: u64,
         context: &str,
     ) -> Result<Vec<u8>> {
@@ -48,12 +48,13 @@ impl WgpuProvider {
         out.copy_from_slice(&data);
         drop(data);
         staging.unmap();
+        self.recycle_readback_buffer(size_bytes, staging);
         Ok(out)
     }
 
     pub(super) fn map_readback_bytes_sync(
         &self,
-        staging: wgpu::Buffer,
+        staging: Arc<wgpu::Buffer>,
         size_bytes: u64,
         context: &str,
     ) -> Result<Vec<u8>> {
@@ -327,6 +328,21 @@ impl WgpuProvider {
     pub(super) fn create_storage_buffer(&self, len: usize, label: &str) -> Arc<wgpu::Buffer> {
         self.create_storage_buffer_for_usage(BufferUsageClass::Generic, len, label)
             .0
+    }
+
+    pub(super) fn create_readback_buffer(&self, size_bytes: u64, label: &str) -> Arc<wgpu::Buffer> {
+        self.buffer_residency
+            .acquire_readback(self.device_ref(), size_bytes, label)
+            .0
+    }
+
+    pub(super) fn recycle_readback_buffer(&self, size_bytes: u64, buffer: Arc<wgpu::Buffer>) {
+        let poolable_by_size = self.buffer_residency_max_poolable_bytes > 0
+            && size_bytes <= self.buffer_residency_max_poolable_bytes;
+        if poolable_by_size && Arc::strong_count(&buffer) == 1 {
+            self.buffer_residency
+                .release(BufferUsageClass::Readback, size_bytes, buffer);
+        }
     }
 
     /// Allocate a raw-word buffer used by exact integer kernels. Integer

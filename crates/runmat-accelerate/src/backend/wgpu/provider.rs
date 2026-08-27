@@ -154,13 +154,17 @@ mod test_session_tests {
 
     #[test]
     fn test_sessions_use_fresh_provider_state() {
+        // Use a size dedicated to this lifecycle test so unrelated tests cannot
+        // pre-populate the same physical residency key.
+        const TEST_LEN: usize = 7_919;
+        let first_values = vec![1.0; TEST_LEN];
         let Ok(first) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let handle = first
             .upload(&HostTensorView {
-                data: &[1.0, 2.0],
-                shape: &[2, 1],
+                data: &first_values,
+                shape: &[TEST_LEN, 1],
             })
             .expect("upload test buffer");
         let first_buffer_ptr = first
@@ -173,16 +177,19 @@ mod test_session_tests {
         let second = register_test_wgpu_provider(WgpuProviderOptions::default())
             .expect("reopen test provider session");
         assert_eq!(second.test_buffer_count(), 0);
+        let second_values = vec![2.0; TEST_LEN];
         let second_handle = second
             .upload(&HostTensorView {
-                data: &[3.0, 4.0],
-                shape: &[2, 1],
+                data: &second_values,
+                shape: &[TEST_LEN, 1],
             })
-            .expect("upload same-sized test buffer in second session");
+            .expect("upload lifecycle test buffer in second session");
+        assert_eq!(second.test_buffer_count(), 1);
         assert_eq!(
             second.test_buffer_ptr(&second_handle),
             Some(first_buffer_ptr),
-            "logical sessions should reuse physical storage allocations"
+            "logical sessions should reuse released physical storage"
         );
+        drop(second_handle);
     }
 }

@@ -266,12 +266,8 @@ impl WgpuProvider {
             });
 
         let error_size = (std::mem::size_of::<u32>() * 4) as u64;
-        let staging = self.device_ref().create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-modulate-constellation-error-staging"),
-            size: error_size,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let staging =
+            self.create_readback_buffer(error_size, "runmat-modulate-constellation-error-staging");
         let mut encoder =
             self.device_ref()
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -569,12 +565,10 @@ impl WgpuProvider {
             });
 
         let error_size = (std::mem::size_of::<u32>() * 4) as u64;
-        let staging = self.device_ref().create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-modulate-bits-constellation-error-staging"),
-            size: error_size,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let staging = self.create_readback_buffer(
+            error_size,
+            "runmat-modulate-bits-constellation-error-staging",
+        );
         let mut encoder =
             self.device_ref()
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {

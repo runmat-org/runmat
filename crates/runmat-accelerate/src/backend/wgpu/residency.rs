@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum BufferUsageClass {
     Generic,
+    Readback,
     MatmulPartial,
     MatmulOut,
     SyrkOut,
@@ -67,16 +68,49 @@ impl BufferResidency {
                 false,
             );
         }
-
         let size_bytes = (len as u64).max(1) * element_size as u64;
+        self.acquire_bytes(
+            device,
+            usage,
+            size_bytes,
+            wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
+            label,
+        )
+    }
+
+    pub fn acquire_readback(
+        &self,
+        device: &wgpu::Device,
+        size_bytes: u64,
+        label: &str,
+    ) -> (Arc<wgpu::Buffer>, bool) {
+        self.acquire_bytes(
+            device,
+            BufferUsageClass::Readback,
+            size_bytes.max(1),
+            wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            label,
+        )
+    }
+
+    fn acquire_bytes(
+        &self,
+        device: &wgpu::Device,
+        usage: BufferUsageClass,
+        size_bytes: u64,
+        buffer_usages: wgpu::BufferUsages,
+        label: &str,
+    ) -> (Arc<wgpu::Buffer>, bool) {
         let key = ResidencyKey::new(usage, size_bytes);
         if let Ok(mut guard) = self.pools.lock() {
             if let Some(queue) = guard.get_mut(&key) {
                 if let Some(buffer) = queue.pop_front() {
                     log::trace!(
-                        "buffer_residency: reuse {:?} len={} ptr={:p}",
+                        "buffer_residency: reuse {:?} bytes={} ptr={:p}",
                         usage,
-                        len,
+                        size_bytes,
                         Arc::as_ptr(&buffer)
                     );
                     return (buffer, true);
@@ -87,15 +121,13 @@ impl BufferResidency {
         let buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(label),
             size: size_bytes,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_SRC
-                | wgpu::BufferUsages::COPY_DST,
+            usage: buffer_usages,
             mapped_at_creation: false,
         }));
         log::trace!(
-            "buffer_residency: new {:?} len={} ptr={:p}",
+            "buffer_residency: new {:?} bytes={} ptr={:p}",
             usage,
-            len,
+            size_bytes,
             Arc::as_ptr(&buffer)
         );
         (buffer, false)

@@ -331,12 +331,7 @@ impl WgpuProvider {
         );
 
         let error_size = (std::mem::size_of::<u32>() * 4) as u64;
-        let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-sub2ind-error-staging"),
-            size: error_size,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let staging = self.create_readback_buffer(error_size, "runmat-sub2ind-error-staging");
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -540,12 +535,7 @@ impl WgpuProvider {
         );
 
         let error_size = (std::mem::size_of::<u32>() * 4) as u64;
-        let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-ind2sub-error-staging"),
-            size: error_size,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let staging = self.create_readback_buffer(error_size, "runmat-ind2sub-error-staging");
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -1118,12 +1108,7 @@ impl WgpuProvider {
         });
         self.queue
             .write_buffer(&count_storage, 0, bytemuck::cast_slice(&[0u32, 0u32]));
-        let count_staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-find-count-staging"),
-            size: 8,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let count_staging = self.create_readback_buffer(8, "runmat-find-count-staging");
 
         let params = crate::backend::wgpu::params::FindParams {
             len: total as u32,
