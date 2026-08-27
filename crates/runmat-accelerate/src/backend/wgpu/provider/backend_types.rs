@@ -32,7 +32,7 @@ pub struct WgpuProvider {
     pub(super) buffer_residency: BufferResidency,
     pub(super) buffer_residency_max_poolable_bytes: u64,
     pub(super) next_id: AtomicU64,
-    pub(super) pipelines: WgpuPipelines,
+    pub(super) pipelines: Arc<WgpuPipelines>,
     pub(super) runtime_device_id: u32,
     pub(super) cache_device_id: u32,
     pub(super) precision: NumericPrecision,

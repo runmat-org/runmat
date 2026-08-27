@@ -3,3 +3,7 @@
 # Linux, macOS, and Windows.
 *.brep text eol=lf
 *.step text eol=lf
+
+# Canonical package fixtures are compared byte-for-byte with serializer output.
+# Keep their wire-format line endings stable on Windows checkouts as well.
+crates/runmat-package/tests/fixtures/*.lock text eol=lf

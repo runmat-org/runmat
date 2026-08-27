@@ -84,15 +84,19 @@ mod test_session {
     use std::ops::Deref;
     use std::sync::{LazyLock, Mutex, MutexGuard};
 
+    use once_cell::sync::OnceCell;
+
     use super::{WgpuProvider, WgpuProviderOptions};
 
     static TEST_PROVIDER_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+    static TEST_GPU_RUNTIME: OnceCell<WgpuProvider> = OnceCell::new();
 
     /// Exclusive access to a scoped test provider.
     ///
     /// Production keeps the WGPU provider alive for the runtime session. Unit
-    /// tests need independent device and cache lifecycles so one workload cannot
-    /// exhaust or contaminate the next one, particularly on software adapters.
+    /// tests need independent provider state so one workload cannot contaminate
+    /// the next. The physical device remains stable across sessions because
+    /// repeatedly creating native devices can itself exhaust a backend.
     pub(crate) struct WgpuTestSession {
         provider: WgpuProvider,
         _guard: MutexGuard<'static, ()>,
@@ -124,7 +128,8 @@ mod test_session {
         let guard = TEST_PROVIDER_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let provider = WgpuProvider::new(options)?;
+        let runtime = TEST_GPU_RUNTIME.get_or_try_init(|| WgpuProvider::new(options))?;
+        let provider = runtime.new_session();
         Ok(WgpuTestSession {
             provider,
             _guard: guard,

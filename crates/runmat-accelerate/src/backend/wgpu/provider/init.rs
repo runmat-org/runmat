@@ -372,7 +372,7 @@ impl WgpuProvider {
             lane_count: sanitized_bootstrap.lane_count,
             spatial_tile: sanitized_bootstrap.spatial_tile,
         };
-        let pipelines = WgpuPipelines::new(&device, precision, image_norm_bootstrap);
+        let pipelines = Arc::new(WgpuPipelines::new(&device, precision, image_norm_bootstrap));
 
         let buffer_pool_limit = Self::buffer_residency_pool_limit();
         let max_poolable_bytes =
@@ -420,6 +420,66 @@ impl WgpuProvider {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn new(opts: WgpuProviderOptions) -> Result<Self> {
         block_on(Self::new_async(opts))
+    }
+
+    /// Create an independent runtime session on this provider's physical GPU context.
+    ///
+    /// Device-level objects and immutable pipeline definitions are shared, while
+    /// handle ownership, residency, operation caches, metrics, and telemetry begin
+    /// empty. This is the same boundary a caller needs when multiple logical
+    /// sessions use one adapter without repeatedly creating native GPU devices.
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn new_session(&self) -> Self {
+        let reduction_autotune = AutotuneController::new_from_env(
+            "RUNMAT_REDUCTION_AUTOTUNE",
+            "fused_reduction",
+            self.autotune_base_dir.clone(),
+            &self.autotune_device_tag,
+        );
+        let image_norm_autotune = AutotuneController::new_from_env(
+            "RUNMAT_IMAGE_NORMALIZE_AUTOTUNE",
+            "image_normalize",
+            self.autotune_base_dir.clone(),
+            &self.autotune_device_tag,
+        );
+
+        Self {
+            instance: self.instance.clone(),
+            device: self.device.clone(),
+            queue: self.queue.clone(),
+            adapter: self.adapter.clone(),
+            adapter_info: self.adapter_info.clone(),
+            adapter_limits: self.adapter_limits.clone(),
+            workgroup_config: self.workgroup_config,
+            buffers: Mutex::new(HashMap::new()),
+            buffer_residency: BufferResidency::new(Self::buffer_residency_pool_limit()),
+            buffer_residency_max_poolable_bytes: self.buffer_residency_max_poolable_bytes,
+            next_id: AtomicU64::new(1),
+            pipelines: self.pipelines.clone(),
+            runtime_device_id: runmat_accelerate_api::next_device_id(),
+            cache_device_id: self.cache_device_id,
+            precision: self.precision,
+            element_size: self.element_size,
+            fused_pipeline_cache: Mutex::new(HashMap::new()),
+            bind_group_layout_cache: Mutex::new(HashMap::new()),
+            bind_group_layout_tags: Mutex::new(HashMap::new()),
+            bind_group_cache: BindGroupCache::default(),
+            kernel_resources: KernelResourceRegistry::default(),
+            metrics: crate::backend::wgpu::metrics::WgpuMetrics::default(),
+            telemetry: AccelTelemetry::default(),
+            reduction_two_pass_mode: self.reduction_two_pass_mode,
+            reduction_two_pass_threshold: self.reduction_two_pass_threshold,
+            reduction_workgroup_size_default: self.reduction_workgroup_size_default,
+            pipeline_cache_dir: self.pipeline_cache_dir.clone(),
+            reduction_autotune,
+            image_norm_autotune,
+            image_norm_pipeline_cache: Mutex::new(HashMap::new()),
+            autotune_base_dir: self.autotune_base_dir.clone(),
+            autotune_device_tag: self.autotune_device_tag.clone(),
+            pow2_of: Mutex::new(HashMap::new()),
+            moments_cache: Mutex::new(HashMap::new()),
+            fft_twiddle_cache: Mutex::new(HashMap::new()),
+        }
     }
 
     #[cfg(target_arch = "wasm32")]
