@@ -23,7 +23,7 @@ jobs:
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)
     strategy:
       fail-fast: false
-      max-parallel: 9
+      max-parallel: 14
       matrix:
         include:
           - runner: warp-ubuntu-latest-x64-16x
@@ -70,6 +70,30 @@ jobs:
             task: test
             test_group: tooling-distributed
             needs_occt: false
+          - runner: warp-windows-latest-x64-8x
+            name: windows-quality
+            task: quality
+            needs_occt: true
+          - runner: warp-windows-latest-x64-8x
+            name: windows-tests-language
+            task: test
+            test_group: language
+            needs_occt: false
+          - runner: warp-windows-latest-x64-8x
+            name: windows-tests-runtime
+            task: test
+            test_group: runtime
+            needs_occt: true
+          - runner: warp-windows-latest-x64-8x
+            name: windows-tests-geometry-analysis
+            task: test
+            test_group: geometry-analysis
+            needs_occt: true
+          - runner: warp-windows-latest-x64-8x
+            name: windows-tests-tooling-distributed
+            task: test
+            test_group: tooling-distributed
+            needs_occt: true
     runs-on: ${{ matrix.runner }}
     env:
       # Enable backtraces on CI to aid debugging of panics/segfaults
@@ -139,12 +163,25 @@ jobs:
           brew update
           brew install hdf5 zeromq
 
+      - name: Restore Windows native dependency cache
+        if: runner.os == 'Windows' && matrix.needs_occt
+        uses: actions/cache@v5
+        with:
+          path: ~/vcpkg-runmat/installed
+          key: windows-vcpkg-a7eda31-x86_64-pc-windows-msvc-${{ hashFiles('infra/vcpkg-ports/**', 'infra/scripts/ensure-windows-vcpkg-dependencies.ps1', 'infra/scripts/prepare-windows-cross-dependencies.ps1') }}
+
+      - name: Install Windows MSVC native dependencies
+        if: runner.os == 'Windows' && matrix.needs_occt
+        shell: pwsh
+        run: ./infra/scripts/prepare-windows-cross-dependencies.ps1 -Target x86_64-pc-windows-msvc
+
       - name: Format
         if: matrix.task == 'quality'
         run: cargo fmt -- --check
 
       - name: Validate crate architecture boundaries
         if: matrix.task == 'quality'
+        shell: bash
         run: scripts/development/check-architecture-boundaries.sh
 
       - name: Validate public FEA field ids
@@ -180,6 +217,17 @@ jobs:
         run: |
           set -o pipefail
           python3 scripts/development/run-workspace-test-group.py "${{ matrix.test_group }}" 2>&1 | tee test.log
+
+      - name: Test (Windows)
+        if: matrix.task == 'test' && runner.os == 'Windows'
+        shell: pwsh
+        env:
+          RUST_BACKTRACE: 1
+          RUST_TEST_THREADS: 1
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python scripts/development/run-workspace-test-group.py "${{ matrix.test_group }}" 2>&1 | Tee-Object -FilePath test.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload analysis benchmark artifacts
         if: always() && ((github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/heads/release/'))) || (github.event_name == 'pull_request' && failure()))
