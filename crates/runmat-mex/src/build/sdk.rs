@@ -7,7 +7,7 @@ use sha2::{Digest as _, Sha256};
 
 use super::MexBuildError;
 
-const FILES: [(&str, &[u8]); 20] = [
+const FILES: [(&str, &[u8]); 21] = [
     ("include/matrix.h", include_bytes!("../../include/matrix.h")),
     ("include/mex.h", include_bytes!("../../include/mex.h")),
     ("include/mex.hpp", include_bytes!("../../include/mex.hpp")),
@@ -76,8 +76,12 @@ const FILES: [(&str, &[u8]); 20] = [
         include_bytes!("../../include/runmat_mex_host.h"),
     ),
     (
-        "shim/runmat_mex_shim.c",
-        include_bytes!("../../shim/runmat_mex_shim.c"),
+        "native/runmat_mex_shim.c",
+        include_bytes!("../../native/runmat_mex_shim.c"),
+    ),
+    (
+        "native/data_engine.inc",
+        include_bytes!("../../native/data_engine.inc"),
     ),
 ];
 
@@ -97,7 +101,7 @@ pub(super) fn prepare() -> Result<MexSdk, MexBuildError> {
     }
     Ok(MexSdk {
         include_directory: root.join("include"),
-        shim: root.join("shim/runmat_mex_shim.c"),
+        shim: root.join("native/runmat_mex_shim.c"),
     })
 }
 
