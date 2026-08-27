@@ -5,9 +5,9 @@ use std::thread::{self, ThreadId};
 
 use runmat_value::{
     record_host_copy, CellArray, CharArray, ComplexElement, ComplexStorage, ComplexTensor,
-    HandleRef, HostCopyReason, HostIndexBuffer, HostNumericBuffer, IntegerComplexStorage,
-    IntegerStorage, LogicalArray, NumericScalar, NumericStorage, ObjectArray, ObjectInstance,
-    SparseTensor, StructValue, Tensor, Value,
+    HandleRef, HostComplexBuffer, HostCopyReason, HostIndexBuffer, HostNumericBuffer,
+    IntegerComplexStorage, IntegerStorage, LogicalArray, NumericScalar, NumericStorage,
+    ObjectArray, ObjectInstance, SparseTensor, StructValue, Tensor, Value,
 };
 
 use crate::mxarray::{
@@ -182,7 +182,7 @@ pub(crate) fn value_to_mx_for_interface_in_context(
                 .map_err(MxConversionError::new)
         }
         Value::ComplexTensor(value) => complex_tensor_to_mx(value, mode),
-        Value::SparseTensor(value) => sparse_to_mx(value),
+        Value::SparseTensor(value) => sparse_to_mx(value, mode),
         Value::Cell(value) => cell_to_mx(value, mode, interface, context),
         Value::Struct(value) => struct_to_mx(value, mode, interface, context),
         Value::Object(value) => object_to_mx(
@@ -391,10 +391,34 @@ fn char_to_mx(value: &CharArray) -> Result<MxArray, MxConversionError> {
     MxArray::character(encoded, value.shape().to_vec()).map_err(MxConversionError::new)
 }
 
-fn sparse_to_mx(value: &SparseTensor) -> Result<MxArray, MxConversionError> {
+fn sparse_to_mx(value: &SparseTensor, mode: MxApiMode) -> Result<MxArray, MxConversionError> {
     let values = if value.is_logical() {
         record_host_copy(HostCopyReason::SparseLayoutConversion, value.nnz());
         MxSparseValues::Logical(vec![1; value.nnz()].into())
+    } else if let Some(values) = value.complex_host_buffer() {
+        match mode {
+            MxApiMode::InterleavedComplex => MxSparseValues::InterleavedComplex(values.clone()),
+            MxApiMode::SeparateComplex => {
+                let mut real = Vec::with_capacity(values.len());
+                let mut imaginary = Vec::with_capacity(values.len());
+                for ComplexElement(real_value, imaginary_value) in values.iter().copied() {
+                    real.push(real_value);
+                    imaginary.push(imaginary_value);
+                }
+                record_host_copy(
+                    HostCopyReason::SparseLayoutConversion,
+                    values
+                        .len()
+                        .saturating_mul(std::mem::size_of::<ComplexElement<f64>>()),
+                );
+                MxSparseValues::SeparateComplex {
+                    real: HostNumericBuffer::from_numeric_storage(NumericStorage::F64(real)),
+                    imaginary: HostNumericBuffer::from_numeric_storage(NumericStorage::F64(
+                        imaginary,
+                    )),
+                }
+            }
+        }
     } else {
         MxSparseValues::Numeric(
             value
@@ -772,6 +796,59 @@ fn sparse_from_mx(value: &MxSparse) -> Result<Value, MxConversionError> {
                 HostNumericBuffer::from_numeric_storage(compact),
             )
         }
+        MxSparseValues::InterleavedComplex(values) if exact_capacity && values.len() == nnz => {
+            SparseTensor::from_host_complex_buffers(
+                value.rows,
+                value.cols,
+                value.col_ptrs.clone(),
+                row_indices,
+                values.clone(),
+            )
+        }
+        MxSparseValues::InterleavedComplex(values) => {
+            record_host_copy(
+                HostCopyReason::SparseLayoutConversion,
+                nnz.saturating_mul(std::mem::size_of::<ComplexElement<f64>>()),
+            );
+            SparseTensor::from_host_complex_buffers(
+                value.rows,
+                value.cols,
+                value.col_ptrs.clone(),
+                row_indices,
+                HostComplexBuffer::from_elements(values[..nnz].to_vec()),
+            )
+        }
+        MxSparseValues::SeparateComplex { real, imaginary } => {
+            let mut interleaved = Vec::with_capacity(nnz);
+            for index in 0..nnz {
+                let real = real
+                    .as_f64_slice()
+                    .and_then(|values| values.get(index))
+                    .copied()
+                    .ok_or_else(|| MxConversionError::new("sparse real storage is incomplete"))?;
+                let imaginary = imaginary
+                    .as_f64_slice()
+                    .and_then(|values| values.get(index))
+                    .copied()
+                    .ok_or_else(|| {
+                        MxConversionError::new("sparse imaginary storage is incomplete")
+                    })?;
+                interleaved.push(ComplexElement(real, imaginary));
+            }
+            record_host_copy(
+                HostCopyReason::SparseLayoutConversion,
+                interleaved
+                    .len()
+                    .saturating_mul(std::mem::size_of::<ComplexElement<f64>>()),
+            );
+            SparseTensor::from_host_complex_buffers(
+                value.rows,
+                value.cols,
+                value.col_ptrs.clone(),
+                row_indices,
+                HostComplexBuffer::from_elements(interleaved),
+            )
+        }
     };
     result
         .map(Value::SparseTensor)
@@ -879,6 +956,52 @@ mod tests {
             panic!("double complex output must retain its class");
         };
         assert!(source.shares_allocation_with(output_values));
+    }
+
+    #[test]
+    fn sparse_complex_boundary_is_zero_copy_when_interleaved_and_explicit_when_separate() {
+        let sparse = SparseTensor::new_complex(
+            3,
+            2,
+            vec![0, 2, 3],
+            vec![0, 2, 1],
+            vec![(1.0, -2.0), (3.0, 4.0), (-5.0, 6.0)],
+        )
+        .unwrap();
+        let source = sparse.complex_host_buffer().unwrap();
+        let original = Value::SparseTensor(sparse.clone());
+
+        let mut interleaved = value_to_mx(&original, MxApiMode::InterleavedComplex).unwrap();
+        let MxArrayData::Sparse(MxSparse {
+            values: MxSparseValues::InterleavedComplex(boundary_values),
+            ..
+        }) = interleaved.data()
+        else {
+            panic!("interleaved mode must retain sparse interleaved storage");
+        };
+        assert!(source.shares_allocation_with(boundary_values));
+        // SAFETY: both owners remain alive and the addresses are not dereferenced.
+        assert_eq!(interleaved.data_pointer(), unsafe {
+            source.foreign_data_pointer()
+        });
+        let Value::SparseTensor(round_trip) = value_from_mx(&interleaved).unwrap() else {
+            panic!("sparse complex output expected");
+        };
+        assert!(source.shares_allocation_with(round_trip.complex_host_buffer().unwrap()));
+
+        let mut separate = value_to_mx(&original, MxApiMode::SeparateComplex).unwrap();
+        let MxArrayData::Sparse(MxSparse {
+            values: MxSparseValues::SeparateComplex { real, imaginary },
+            ..
+        }) = separate.data()
+        else {
+            panic!("separate mode must expose sparse component storage");
+        };
+        assert_eq!(real.as_f64_slice(), Some(&[1.0, 3.0, -5.0][..]));
+        assert_eq!(imaginary.as_f64_slice(), Some(&[-2.0, 4.0, 6.0][..]));
+        assert!(!separate.data_pointer().is_null());
+        assert!(!separate.imaginary_pointer().is_null());
+        assert_eq!(value_from_mx(&separate).unwrap(), original);
     }
 
     #[test]

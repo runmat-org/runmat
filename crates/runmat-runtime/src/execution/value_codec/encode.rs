@@ -208,11 +208,24 @@ fn encode_sparse(value: &SparseTensor, path: &str) -> Result<SparseValue, ValueC
                 .flat_map(|value| value.to_bits().to_le_bytes())
                 .collect(),
         )
+    } else if let Some(values) = value.as_complex_f64_slice() {
+        (
+            ElementType::ComplexF64,
+            values
+                .iter()
+                .flat_map(|value| {
+                    let (real, imaginary) = (*value).into();
+                    real.to_bits()
+                        .to_le_bytes()
+                        .into_iter()
+                        .chain(imaginary.to_bits().to_le_bytes())
+                })
+                .collect(),
+        )
+    } else if value.is_logical() {
+        (ElementType::Logical, vec![1; value.nnz()])
     } else {
-        return Err(ValueCodecError::unsupported(
-            path,
-            "logical sparse transport",
-        ));
+        return Err(ValueCodecError::invalid(path, "unknown sparse storage"));
     };
     Ok(SparseValue {
         element_type,

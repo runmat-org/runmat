@@ -1,7 +1,10 @@
-use runmat_value::{HostNumericBuffer, NumericStorage};
+use runmat_value::{
+    record_host_copy, ComplexElement, HostComplexBuffer, HostCopyReason, HostNumericBuffer,
+    NumericDType, NumericStorage,
+};
 
 use crate::mxarray::MxArrayData;
-use crate::{MxApiMode, MxArray, MxInterleaved, MxNumeric};
+use crate::{MxApiMode, MxArray, MxInterleaved, MxNumeric, MxSparseValues};
 
 use super::MxApi;
 
@@ -33,6 +36,41 @@ impl MxApi {
                 Ok(())
             }
             MxArrayData::Numeric(_) | MxArrayData::Interleaved(_) => Ok(()),
+            MxArrayData::Sparse(sparse) => match &mut sparse.values {
+                MxSparseValues::Numeric(real) if real.numeric_dtype() == NumericDType::F64 => {
+                    if mode == MxApiMode::InterleavedComplex {
+                        let values = real
+                            .as_f64_slice()
+                            .expect("double sparse storage")
+                            .iter()
+                            .map(|value| ComplexElement(*value, 0.0))
+                            .collect::<Vec<_>>();
+                        record_host_copy(
+                            HostCopyReason::SparseLayoutConversion,
+                            values
+                                .len()
+                                .saturating_mul(std::mem::size_of::<ComplexElement<f64>>()),
+                        );
+                        sparse.values = MxSparseValues::InterleavedComplex(
+                            HostComplexBuffer::from_elements(values),
+                        );
+                    } else {
+                        sparse.values = MxSparseValues::SeparateComplex {
+                            real: real.clone(),
+                            imaginary: HostNumericBuffer::from_numeric_storage(
+                                NumericStorage::F64(vec![0.0; real.len()]),
+                            ),
+                        };
+                    }
+                    Ok(())
+                }
+                MxSparseValues::InterleavedComplex(_) | MxSparseValues::SeparateComplex { .. } => {
+                    Ok(())
+                }
+                MxSparseValues::Numeric(_) | MxSparseValues::Logical(_) => {
+                    Err("only double sparse mxArrays can be made complex".into())
+                }
+            },
             _ => Err("only numeric mxArrays can be made complex".into()),
         }
     }
@@ -55,6 +93,25 @@ impl MxApi {
                 });
                 Ok(())
             }
+            MxArrayData::Sparse(sparse) => match &mut sparse.values {
+                MxSparseValues::SeparateComplex { real, .. } => {
+                    sparse.values = MxSparseValues::Numeric(real.clone());
+                    Ok(())
+                }
+                MxSparseValues::InterleavedComplex(values) => {
+                    let real = values.iter().map(|value| value.0).collect::<Vec<_>>();
+                    record_host_copy(
+                        HostCopyReason::SparseLayoutConversion,
+                        real.len().saturating_mul(std::mem::size_of::<f64>()),
+                    );
+                    sparse.values = MxSparseValues::Numeric(
+                        HostNumericBuffer::from_numeric_storage(NumericStorage::F64(real)),
+                    );
+                    Ok(())
+                }
+                MxSparseValues::Numeric(_) => Ok(()),
+                MxSparseValues::Logical(_) => Err("only numeric mxArrays can be made real".into()),
+            },
             _ => Err("only numeric mxArrays can be made real".into()),
         }
     }

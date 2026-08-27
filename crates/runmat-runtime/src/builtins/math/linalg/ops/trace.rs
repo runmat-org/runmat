@@ -244,6 +244,13 @@ fn trace_sparse(sparse: SparseTensor) -> BuiltinResult<Value> {
         }
         return exact_integer_sum_to_double(sum);
     }
+    if sparse.is_complex() {
+        let (real, imaginary) = (0..sparse.rows).fold((0.0, 0.0), |sum, index| {
+            let value = sparse.complex_at(index, index).unwrap_or((0.0, 0.0));
+            (sum.0 + value.0, sum.1 + value.1)
+        });
+        return Ok(Value::Complex(real, imaginary));
+    }
     let sum = (0..sparse.rows)
         .map(|index| sparse.get(index, index).unwrap_or(0.0))
         .sum::<f64>();
@@ -746,5 +753,21 @@ pub(crate) mod tests {
         .unwrap();
         let error = trace_builtin(Value::SparseTensor(sparse)).unwrap_err();
         assert!(error.message().contains("exactly representable"));
+    }
+
+    #[test]
+    fn trace_preserves_complex_sparse_diagonal() {
+        let sparse = SparseTensor::new_complex(
+            2,
+            2,
+            vec![0, 1, 2],
+            vec![0, 1],
+            vec![(2.5, -1.0), (3.5, 4.0)],
+        )
+        .expect("complex sparse");
+        assert_eq!(
+            trace_builtin(Value::SparseTensor(sparse)).expect("trace"),
+            Value::Complex(6.0, 3.0)
+        );
     }
 }

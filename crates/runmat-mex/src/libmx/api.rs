@@ -135,14 +135,27 @@ impl MxApi {
         rows: usize,
         cols: usize,
         nzmax: usize,
-        logical: bool,
+        storage_kind: i32,
     ) -> Result<*mut MxArray, String> {
-        let values = if logical {
-            MxSparseValues::Logical(vec![0; nzmax].into())
-        } else {
-            MxSparseValues::Numeric(HostNumericBuffer::from_numeric_storage(
+        let values = match (storage_kind, self.mode) {
+            (0, _) => MxSparseValues::Numeric(HostNumericBuffer::from_numeric_storage(
                 NumericStorage::F64(vec![0.0; nzmax]),
-            ))
+            )),
+            (1, _) => MxSparseValues::Logical(vec![0; nzmax].into()),
+            (2, MxApiMode::InterleavedComplex) => {
+                MxSparseValues::InterleavedComplex(vec![(0.0, 0.0); nzmax].into())
+            }
+            (2, MxApiMode::SeparateComplex) => MxSparseValues::SeparateComplex {
+                real: HostNumericBuffer::from_numeric_storage(NumericStorage::F64(vec![
+                    0.0;
+                    nzmax
+                ])),
+                imaginary: HostNumericBuffer::from_numeric_storage(NumericStorage::F64(vec![
+                    0.0;
+                    nzmax
+                ])),
+            },
+            _ => return Err(format!("unsupported sparse storage kind {storage_kind}")),
         };
         Ok(self.arena.allocate(MxArray::sparse(MxSparse {
             rows,
@@ -614,6 +627,13 @@ impl MxApi {
         value.row_indices.resize(nzmax, 0);
         match &mut value.values {
             MxSparseValues::Numeric(values) => values.resize_zeroed(nzmax),
+            MxSparseValues::InterleavedComplex(values) => {
+                values.resize(nzmax, runmat_value::ComplexElement(0.0, 0.0))
+            }
+            MxSparseValues::SeparateComplex { real, imaginary } => {
+                real.resize_zeroed(nzmax);
+                imaginary.resize_zeroed(nzmax);
+            }
             MxSparseValues::Logical(values) => values.resize(nzmax, 0),
         }
         value.nzmax = nzmax;

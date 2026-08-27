@@ -152,8 +152,9 @@ public:
         buffer_ptr_t<T> data, buffer_ptr_t<std::size_t> rows,
         buffer_ptr_t<std::size_t> columns) const {
         static_assert(std::is_same<T, double>::value ||
-                          std::is_same<T, bool>::value,
-                      "this compatibility level supports real double and logical sparse arrays");
+                          std::is_same<T, bool>::value ||
+                          std::is_same<T, std::complex<double>>::value,
+                      "sparse arrays support double, complex double, and logical elements");
         if (dimensions.size() != 2) {
             throw std::invalid_argument("sparse arrays must have two dimensions");
         }
@@ -208,7 +209,10 @@ public:
                               ? mxCreateSparseLogicalMatrix(
                                     dimensions[0], dimensions[1], nonzeroCount)
                               : mxCreateSparse(dimensions[0], dimensions[1],
-                                               nonzeroCount, mxREAL);
+                                               nonzeroCount,
+                                               std::is_same<T, std::complex<double>>::value
+                                                   ? mxCOMPLEX
+                                                   : mxREAL);
         if (native == nullptr) throw std::bad_alloc();
         mxSetData(native, data.get());
         (void)data.release();

@@ -1051,6 +1051,16 @@ fn sparse_tensors_equal(a: &SparseTensor, b: &SparseTensor) -> bool {
         (Some(_), None) | (None, Some(_)) => return false,
         (None, None) => {}
     }
+    match (a.as_complex_f64_slice(), b.as_complex_f64_slice()) {
+        (Some(a), Some(b)) => {
+            return a
+                .iter()
+                .zip(b)
+                .all(|(a, b)| floats_equal_nan(a.0, b.0) && floats_equal_nan(a.1, b.1))
+        }
+        (Some(_), None) | (None, Some(_)) => return false,
+        (None, None) => {}
+    }
     if a.numeric_dtype() != b.numeric_dtype() {
         return false;
     }
@@ -1163,6 +1173,16 @@ fn value_fingerprint(value: &Value) -> String {
             Some(storage) => format!(
                 "sparse:{}x{}:{:?}:{:?}:{storage:?}",
                 tensor.rows, tensor.cols, tensor.col_ptrs, tensor.row_indices
+            ),
+            None if tensor.is_complex() => format!(
+                "sparse-complex:{}x{}:{:?}:{:?}:{:?}",
+                tensor.rows,
+                tensor.cols,
+                tensor.col_ptrs,
+                tensor.row_indices,
+                tensor
+                    .as_complex_f64_slice()
+                    .expect("complex sparse storage")
             ),
             None => format!(
                 "sparse:{}x{}:{:?}:{:?}:{:?}:{:?}",
@@ -1424,6 +1444,29 @@ mod tests {
             value_fingerprint(&left),
             value_fingerprint(&rounded_collision)
         );
+    }
+
+    #[test]
+    fn cache_value_equality_and_fingerprint_preserve_complex_sparse_components() {
+        let sparse = |imaginary| {
+            Value::SparseTensor(
+                SparseTensor::new_complex(
+                    2,
+                    2,
+                    vec![0, 1, 2],
+                    vec![0, 1],
+                    vec![(1.0, imaginary), (f64::NAN, 4.0)],
+                )
+                .expect("complex sparse"),
+            )
+        };
+        let left = sparse(-2.0);
+        let same = sparse(-2.0);
+        let different = sparse(2.0);
+        assert!(value_equal_for_cache(&left, &same));
+        assert!(!value_equal_for_cache(&left, &different));
+        assert_eq!(value_fingerprint(&left), value_fingerprint(&same));
+        assert_ne!(value_fingerprint(&left), value_fingerprint(&different));
     }
 
     #[test]

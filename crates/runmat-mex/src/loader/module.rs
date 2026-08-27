@@ -216,7 +216,7 @@ impl MexModule {
     unsafe fn unload_bound(&self, state: Option<&MexModuleState>) {
         if let Some(state) = state {
             // SAFETY: the module state and its pointer-stable vtable outlive
-            // C++ gateway destruction and the shim's synchronous exit hook.
+            // C++ gateway destruction and the native support layer's synchronous exit hook.
             unsafe {
                 let _ = (self.bind)(state.api.as_ref());
                 if let Some(cpp_unload) = self.cpp_unload {
@@ -306,7 +306,7 @@ impl MexModule {
                 ),
             });
         }
-        // SAFETY: these symbols are supplied by RunMat's compiled C shim and
+        // SAFETY: these symbols are supplied by RunMat's compiled native support source and
         // have signatures fixed by RunMat's private host ABI.
         let bind =
             *unsafe { library.get::<BindHost>(b"runmatMexBindHost\0") }.map_err(|source| {
@@ -323,7 +323,7 @@ impl MexModule {
                     source,
                 }
             })?;
-        // SAFETY: lifecycle symbols are emitted by the same private shim.
+        // SAFETY: lifecycle symbols are emitted by the same private support source.
         let is_locked =
             *unsafe { library.get::<IsLocked>(b"runmatMexIsLocked\0") }.map_err(|source| {
                 MexLoadError::Symbol {
@@ -338,7 +338,7 @@ impl MexModule {
                     source,
                 }
             })?;
-        // SAFETY: the shim returns one of its fixed Matrix API mode tags.
+        // SAFETY: the support source returns one of its fixed Matrix API mode tags.
         let mode = match unsafe { api_mode() } {
             0 => MxApiMode::SeparateComplex,
             1 => MxApiMode::InterleavedComplex,
@@ -348,7 +348,7 @@ impl MexModule {
                 ));
             }
         };
-        // SAFETY: lifecycle symbols are emitted by the same private shim.
+        // SAFETY: lifecycle symbols are emitted by the same private support source.
         let unload = *unsafe { library.get::<Unload>(b"runmatMexUnload\0") }.map_err(|source| {
             MexLoadError::Symbol {
                 symbol: "runmatMexUnload",
@@ -567,7 +567,7 @@ impl MexModule {
     }
 
     pub fn is_locked(&self) -> bool {
-        // SAFETY: the no-argument shim query has no memory preconditions.
+        // SAFETY: the no-argument support query has no memory preconditions.
         unsafe { (self.is_locked)() != 0 }
     }
 

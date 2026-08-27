@@ -47,6 +47,11 @@ pub struct MxInterleaved {
 #[derive(Debug, Clone, PartialEq)]
 pub enum MxSparseValues {
     Numeric(HostNumericBuffer),
+    InterleavedComplex(HostComplexBuffer<f64>),
+    SeparateComplex {
+        real: HostNumericBuffer,
+        imaginary: HostNumericBuffer,
+    },
     Logical(HostLogicalBuffer),
 }
 
@@ -135,6 +140,27 @@ impl MxArray {
                 col_ptrs.make_unique();
                 row_indices.make_unique();
                 values.make_unique();
+            }
+            MxArrayData::Sparse(MxSparse {
+                col_ptrs,
+                row_indices,
+                values: MxSparseValues::InterleavedComplex(values),
+                ..
+            }) => {
+                col_ptrs.make_unique();
+                row_indices.make_unique();
+                values.make_unique();
+            }
+            MxArrayData::Sparse(MxSparse {
+                col_ptrs,
+                row_indices,
+                values: MxSparseValues::SeparateComplex { real, imaginary },
+                ..
+            }) => {
+                col_ptrs.make_unique();
+                row_indices.make_unique();
+                real.make_unique();
+                imaginary.make_unique();
             }
             MxArrayData::Interleaved(value) => match &mut value.values {
                 MxInterleavedStorage::F64(values) => values.make_unique(),
@@ -367,6 +393,18 @@ impl MxArray {
         }
         let value_count = match &value.values {
             MxSparseValues::Numeric(values) => values.len(),
+            MxSparseValues::InterleavedComplex(values) => values.len(),
+            MxSparseValues::SeparateComplex { real, imaginary } => {
+                if real.numeric_dtype() != NumericDType::F64
+                    || imaginary.numeric_dtype() != NumericDType::F64
+                    || real.len() != imaginary.len()
+                {
+                    return Err(
+                        "separate sparse complex components must be matching doubles".into(),
+                    );
+                }
+                real.len()
+            }
             MxSparseValues::Logical(values) => values.len(),
         };
         if value_count != value.nzmax || value.row_indices.len() != value.nzmax {
@@ -382,6 +420,9 @@ impl MxArray {
         let class_id = match &value.values {
             MxSparseValues::Numeric(values) => {
                 MxClassId::from_numeric_dtype(values.numeric_dtype())
+            }
+            MxSparseValues::InterleavedComplex(_) | MxSparseValues::SeparateComplex { .. } => {
+                MxClassId::Double
             }
             MxSparseValues::Logical(_) => MxClassId::Logical,
         };
@@ -420,7 +461,13 @@ impl MxArray {
     pub fn is_complex(&self) -> bool {
         matches!(
             &self.data,
-            MxArrayData::Numeric(MxNumeric { imag: Some(_), .. }) | MxArrayData::Interleaved(_)
+            MxArrayData::Numeric(MxNumeric { imag: Some(_), .. })
+                | MxArrayData::Interleaved(_)
+                | MxArrayData::Sparse(MxSparse {
+                    values: MxSparseValues::InterleavedComplex(_)
+                        | MxSparseValues::SeparateComplex { .. },
+                    ..
+                })
         )
     }
 
@@ -464,6 +511,14 @@ impl MxArray {
                     // SAFETY: the sparse mxArray retains the invocation lease.
                     unsafe { values.foreign_data_pointer() }
                 }
+                MxSparseValues::InterleavedComplex(values) => {
+                    // SAFETY: the sparse mxArray retains the invocation lease.
+                    unsafe { values.foreign_data_pointer() }
+                }
+                MxSparseValues::SeparateComplex { real, .. } => {
+                    // SAFETY: the sparse mxArray retains the invocation lease.
+                    unsafe { real.foreign_data_pointer() }
+                }
                 MxSparseValues::Logical(values) => {
                     // SAFETY: the sparse mxArray retains the invocation lease.
                     unsafe { values.foreign_data_pointer() }
@@ -493,6 +548,14 @@ impl MxArray {
                     // SAFETY: the mutable mxArray borrow spans the synchronous write.
                     unsafe { values.foreign_data_pointer_mut() }
                 }
+                MxSparseValues::InterleavedComplex(values) => {
+                    // SAFETY: the mutable mxArray borrow spans the synchronous write.
+                    unsafe { values.foreign_data_pointer_mut() }
+                }
+                MxSparseValues::SeparateComplex { real, .. } => {
+                    // SAFETY: the mutable mxArray borrow spans the synchronous write.
+                    unsafe { real.foreign_data_pointer_mut() }
+                }
                 MxSparseValues::Logical(values) => {
                     // SAFETY: the mutable mxArray borrow spans the synchronous write.
                     unsafe { values.foreign_data_pointer_mut() }
@@ -507,6 +570,10 @@ impl MxArray {
             MxArrayData::Numeric(MxNumeric {
                 imag: Some(values), ..
             }) => numeric_pointer(values),
+            MxArrayData::Sparse(MxSparse {
+                values: MxSparseValues::SeparateComplex { imaginary, .. },
+                ..
+            }) => numeric_pointer(imaginary),
             _ => std::ptr::null_mut(),
         }
     }
@@ -519,6 +586,13 @@ impl MxArray {
                 // SAFETY: the mutable array borrow is retained for the duration
                 // of the caller's synchronous write and COW has already detached.
                 unsafe { values.foreign_data_pointer_mut() }
+            }
+            MxArrayData::Sparse(MxSparse {
+                values: MxSparseValues::SeparateComplex { imaginary, .. },
+                ..
+            }) => {
+                // SAFETY: the mutable mxArray borrow spans the synchronous write.
+                unsafe { imaginary.foreign_data_pointer_mut() }
             }
             _ => std::ptr::null_mut(),
         }
@@ -536,6 +610,10 @@ impl MxArray {
             MxArrayData::Char(values) => values.len().checked_mul(std::mem::size_of::<u16>()),
             MxArrayData::Sparse(value) => match &value.values {
                 MxSparseValues::Numeric(values) => values.checked_byte_len(),
+                MxSparseValues::InterleavedComplex(values) => values
+                    .len()
+                    .checked_mul(std::mem::size_of::<runmat_value::ComplexElement<f64>>()),
+                MxSparseValues::SeparateComplex { real, .. } => real.checked_byte_len(),
                 MxSparseValues::Logical(values) => Some(values.len()),
             },
             MxArrayData::String(_)
@@ -551,6 +629,10 @@ impl MxArray {
             MxArrayData::Numeric(MxNumeric {
                 imag: Some(values), ..
             }) => values.checked_byte_len(),
+            MxArrayData::Sparse(MxSparse {
+                values: MxSparseValues::SeparateComplex { imaginary, .. },
+                ..
+            }) => imaginary.checked_byte_len(),
             _ => None,
         }
     }
@@ -561,20 +643,30 @@ impl MxArray {
         imaginary: bool,
     ) -> Result<(), (AdoptedHostAllocation, String)> {
         if imaginary {
-            let MxArrayData::Numeric(MxNumeric {
-                real,
-                imag: Some(values),
-            }) = &mut self.data
-            else {
-                return Err((
+            return match &mut self.data {
+                MxArrayData::Numeric(MxNumeric {
+                    real,
+                    imag: Some(values),
+                }) => {
+                    let replacement =
+                        HostNumericBuffer::try_adopt(allocation, real.numeric_dtype(), real.len())?;
+                    *values = replacement;
+                    Ok(())
+                }
+                MxArrayData::Sparse(MxSparse {
+                    values: MxSparseValues::SeparateComplex { real, imaginary },
+                    ..
+                }) => {
+                    let replacement =
+                        HostNumericBuffer::try_adopt(allocation, real.numeric_dtype(), real.len())?;
+                    *imaginary = replacement;
+                    Ok(())
+                }
+                _ => Err((
                     allocation,
                     "mxArray does not expose separate imaginary storage".into(),
-                ));
+                )),
             };
-            let replacement =
-                HostNumericBuffer::try_adopt(allocation, real.numeric_dtype(), real.len())?;
-            *values = replacement;
-            return Ok(());
         }
 
         match &mut self.data {
@@ -613,6 +705,15 @@ impl MxArray {
                         values.numeric_dtype(),
                         values.len(),
                     )?;
+                    Ok(())
+                }
+                MxSparseValues::InterleavedComplex(values) => {
+                    *values = HostComplexBuffer::try_adopt(allocation, values.len())?;
+                    Ok(())
+                }
+                MxSparseValues::SeparateComplex { real, .. } => {
+                    *real =
+                        HostNumericBuffer::try_adopt(allocation, real.numeric_dtype(), real.len())?;
                     Ok(())
                 }
                 MxSparseValues::Logical(values) => {
@@ -850,6 +951,38 @@ mod tests {
         };
         assert!(!columns.shares_allocation_with(&duplicate.col_ptrs));
         assert!(!rows.shares_allocation_with(&duplicate.row_indices));
+        assert!(!values.shares_allocation_with(duplicate_values));
+    }
+
+    #[test]
+    fn sparse_complex_storage_reports_layout_and_detaches_on_duplicate() {
+        let values: HostComplexBuffer<f64> = vec![(1.0, -2.0), (3.0, 4.0)].into();
+        let mut source = MxArray::sparse(MxSparse {
+            rows: 2,
+            cols: 2,
+            col_ptrs: vec![0, 1, 2].into(),
+            row_indices: vec![0, 1].into(),
+            values: MxSparseValues::InterleavedComplex(values.clone()),
+            nzmax: 2,
+        })
+        .unwrap();
+        assert!(source.is_complex());
+        assert_eq!(source.class_id(), MxClassId::Double);
+        assert_eq!(source.data_byte_len(), Some(32));
+        assert_eq!(source.imaginary_byte_len(), None);
+        // SAFETY: both owners remain alive and the addresses are not dereferenced.
+        assert_eq!(source.data_pointer(), unsafe {
+            values.foreign_data_pointer()
+        });
+
+        let duplicate = source.deep_duplicate();
+        let MxArrayData::Sparse(MxSparse {
+            values: MxSparseValues::InterleavedComplex(duplicate_values),
+            ..
+        }) = duplicate.data()
+        else {
+            panic!("duplicate must remain sparse complex");
+        };
         assert!(!values.shares_allocation_with(duplicate_values));
     }
 }

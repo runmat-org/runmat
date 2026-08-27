@@ -224,6 +224,11 @@ fn sparse_all_finite(sparse: &SparseTensor) -> bool {
     if sparse.integer_storage().is_some() || sparse.is_logical() {
         return true;
     }
+    if let Some(values) = sparse.as_complex_f64_slice() {
+        return values
+            .iter()
+            .all(|value| value.0.is_finite() && value.1.is_finite());
+    }
     sparse
         .materialize_f64()
         .iter()
@@ -361,6 +366,30 @@ mod tests {
 
         let nonfinite =
             SparseTensor::new(3, 2, vec![0, 1, 2], vec![0, 2], vec![1.0, f64::NAN]).unwrap();
+        assert_eq!(
+            call(Value::SparseTensor(nonfinite)).unwrap(),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn complex_sparse_checks_both_components() {
+        let finite =
+            SparseTensor::new_complex(2, 1, vec![0, 2], vec![0, 1], vec![(1.0, -2.0), (3.0, 4.0)])
+                .expect("finite complex sparse");
+        assert_eq!(
+            call(Value::SparseTensor(finite)).unwrap(),
+            Value::Bool(true)
+        );
+
+        let nonfinite = SparseTensor::new_complex(
+            2,
+            1,
+            vec![0, 2],
+            vec![0, 1],
+            vec![(1.0, -2.0), (3.0, f64::INFINITY)],
+        )
+        .expect("nonfinite complex sparse");
         assert_eq!(
             call(Value::SparseTensor(nonfinite)).unwrap(),
             Value::Bool(false)

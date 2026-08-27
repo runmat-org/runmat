@@ -155,7 +155,8 @@ pub fn preview_numeric_values(
             false,
         )),
         Value::Tensor(t) => Some(preview_tensor(t, limit)),
-        Value::SparseTensor(s) => Some(preview_sparse_tensor(s, limit)),
+        Value::SparseTensor(s) if !s.is_complex() => Some(preview_sparse_tensor(s, limit)),
+        Value::SparseTensor(_) => None,
         Value::LogicalArray(arr) => Some(preview_logical_slice(arr, limit)),
         Value::StringArray(_) | Value::String(_) | Value::CharArray(_) => None,
         Value::ComplexTensor(_) | Value::Complex(_, _) => None,
@@ -370,6 +371,16 @@ mod tests {
                     .collect(),
                 true
             ))
+        );
+    }
+
+    #[test]
+    fn complex_sparse_values_do_not_claim_a_real_numeric_preview() {
+        let sparse = SparseTensor::new_complex(1, 1, vec![0, 1], vec![0], vec![(1.0, 2.0)])
+            .expect("complex sparse");
+        assert_eq!(
+            preview_numeric_values(&Value::SparseTensor(sparse), 1),
+            None
         );
     }
 
