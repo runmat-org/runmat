@@ -82,6 +82,58 @@ impl WgpuProvider {
         self.buffers.lock().expect("buffer mutex poisoned").len()
     }
 
+    #[cfg(test)]
+    pub(crate) fn test_buffer_ptr(&self, handle: &GpuTensorHandle) -> Option<usize> {
+        self.buffers
+            .lock()
+            .ok()
+            .and_then(|buffers| buffers.get(&handle.buffer_id).cloned())
+            .map(|entry| Arc::as_ptr(&entry.buffer) as usize)
+    }
+
+    /// Close the logical session and return unaliased storage allocations to
+    /// the physical device pool.
+    ///
+    /// Buffer-backed caches are cleared first so their `Arc` references cannot
+    /// prevent reclamation. This is also invoked from `Drop`, making cleanup
+    /// independent of whether every caller explicitly freed every handle.
+    pub(super) fn recycle_session_buffers(&self) {
+        self.bind_group_cache.clear();
+        self.kernel_resources.clear();
+        if let Ok(mut cache) = self.pow2_of.lock() {
+            cache.clear();
+        }
+        if let Ok(mut cache) = self.moments_cache.lock() {
+            cache.clear();
+        }
+
+        let entries = self
+            .buffers
+            .lock()
+            .map(|mut buffers| buffers.drain().collect::<Vec<_>>())
+            .unwrap_or_default();
+        for (buffer_id, entry) in entries {
+            let handle = GpuTensorHandle {
+                shape: entry.shape.clone(),
+                device_id: self.runtime_device_id,
+                buffer_id,
+                descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
+                    entry.element_type,
+                    entry.storage,
+                ),
+            };
+            runmat_accelerate_api::clear_handle_metadata(&handle);
+
+            let poolable_by_size = entry.len > 0
+                && self.buffer_residency_max_poolable_bytes > 0
+                && entry.allocated_bytes <= self.buffer_residency_max_poolable_bytes;
+            if poolable_by_size && Arc::strong_count(&entry.buffer) == 1 {
+                self.buffer_residency
+                    .release(entry.usage, entry.allocated_bytes, entry.buffer);
+            }
+        }
+    }
+
     pub(crate) fn queue_ref(&self) -> &wgpu::Queue {
         self.queue.as_ref()
     }

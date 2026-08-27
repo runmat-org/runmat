@@ -163,6 +163,9 @@ mod test_session_tests {
                 shape: &[2, 1],
             })
             .expect("upload test buffer");
+        let first_buffer_ptr = first
+            .test_buffer_ptr(&handle)
+            .expect("first session owns uploaded buffer");
         assert_eq!(first.test_buffer_count(), 1);
         drop(handle);
         drop(first);
@@ -170,5 +173,16 @@ mod test_session_tests {
         let second = register_test_wgpu_provider(WgpuProviderOptions::default())
             .expect("reopen test provider session");
         assert_eq!(second.test_buffer_count(), 0);
+        let second_handle = second
+            .upload(&HostTensorView {
+                data: &[3.0, 4.0],
+                shape: &[2, 1],
+            })
+            .expect("upload same-sized test buffer in second session");
+        assert_eq!(
+            second.test_buffer_ptr(&second_handle),
+            Some(first_buffer_ptr),
+            "logical sessions should reuse physical storage allocations"
+        );
     }
 }

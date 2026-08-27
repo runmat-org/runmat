@@ -55,7 +55,9 @@ pub struct WgpuProvider {
     pub(super) adapter_limits: wgpu::Limits,
     pub(super) workgroup_config: WorkgroupConfig,
     pub(super) buffers: Mutex<HashMap<u64, BufferEntry>>, // in-memory handle table
-    pub(super) buffer_residency: BufferResidency,
+    /// Physical storage allocation pool shared by logical sessions on this
+    /// device. Handle ownership remains session-local in `buffers`.
+    pub(super) buffer_residency: Arc<BufferResidency>,
     pub(super) buffer_residency_max_poolable_bytes: u64,
     pub(super) next_id: AtomicU64,
     pub(super) pipelines: Arc<WgpuPipelines>,
@@ -81,6 +83,12 @@ pub struct WgpuProvider {
     // Optimization caches
     pub(super) pow2_of: Mutex<HashMap<u64, u64>>, // squared_buffer_id -> base_buffer_id
     pub(super) moments_cache: Mutex<MomentsCache>, // (base_buffer_id, dims) -> (mean, ex2)
+}
+
+impl Drop for WgpuProvider {
+    fn drop(&mut self) {
+        self.recycle_session_buffers();
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
