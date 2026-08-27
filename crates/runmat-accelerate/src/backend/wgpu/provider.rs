@@ -148,7 +148,7 @@ pub(crate) use test_session::{register_test_wgpu_provider, WgpuTestSession};
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod test_session_tests {
-    use runmat_accelerate_api::{AccelProvider as _, HostTensorView};
+    use runmat_accelerate_api::AccelProvider as _;
 
     use super::{register_test_wgpu_provider, WgpuProviderOptions};
 
@@ -157,16 +157,12 @@ mod test_session_tests {
         // Use a size dedicated to this lifecycle test so unrelated tests cannot
         // pre-populate the same physical residency key.
         const TEST_LEN: usize = 7_919;
-        let first_values = vec![1.0; TEST_LEN];
         let Ok(first) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let handle = first
-            .upload(&HostTensorView {
-                data: &first_values,
-                shape: &[TEST_LEN, 1],
-            })
-            .expect("upload test buffer");
+            .zeros(&[TEST_LEN, 1])
+            .expect("allocate first session buffer through provider residency");
         let first_buffer_ptr = first
             .test_buffer_ptr(&handle)
             .expect("first session owns uploaded buffer");
@@ -177,13 +173,9 @@ mod test_session_tests {
         let second = register_test_wgpu_provider(WgpuProviderOptions::default())
             .expect("reopen test provider session");
         assert_eq!(second.test_buffer_count(), 0);
-        let second_values = vec![2.0; TEST_LEN];
         let second_handle = second
-            .upload(&HostTensorView {
-                data: &second_values,
-                shape: &[TEST_LEN, 1],
-            })
-            .expect("upload lifecycle test buffer in second session");
+            .zeros(&[TEST_LEN, 1])
+            .expect("allocate second session buffer through provider residency");
         assert_eq!(second.test_buffer_count(), 1);
         assert_eq!(
             second.test_buffer_ptr(&second_handle),
