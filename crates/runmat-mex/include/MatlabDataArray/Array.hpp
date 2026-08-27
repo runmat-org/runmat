@@ -27,6 +27,8 @@ runmatDataArrayCopyString(const mxArray *array, std::size_t index,
 extern "C" RUNMAT_MEX_LOCAL int
 runmatDataArraySetString(mxArray *array, std::size_t index,
                         const unsigned short *input, std::size_t inputLength);
+extern "C" RUNMAT_MEX_LOCAL int runmatDataArrayRetain(const mxArray *array);
+extern "C" RUNMAT_MEX_LOCAL int runmatDataArrayRelease(mxArray *array, int owned);
 
 namespace matlab {
 namespace data {
@@ -88,11 +90,13 @@ struct ArrayControl {
     mxArray *value;
     bool owned;
 
-    ArrayControl(mxArray *value, bool owned) : value(value), owned(owned) {}
-    ~ArrayControl() {
-        if (owned && value != nullptr) {
-            mxDestroyArray(value);
+    ArrayControl(mxArray *value, bool owned) : value(value), owned(owned) {
+        if (value != nullptr && runmatDataArrayRetain(value) != 0) {
+            throw InvalidArrayTypeException("array is not owned by this MEX host");
         }
+    }
+    ~ArrayControl() {
+        if (value != nullptr) (void)runmatDataArrayRelease(value, owned ? 1 : 0);
     }
 };
 } // namespace detail
@@ -168,8 +172,11 @@ public:
     mxArray *releaseForOutput() {
         requireValue();
         if (control_.use_count() == 1 && control_->owned) {
+            mxArray *released = control_->value;
+            (void)runmatDataArrayRelease(released, 0);
+            control_->value = nullptr;
             control_->owned = false;
-            return control_->value;
+            return released;
         }
         return runmatDataArrayShare(control_->value);
     }

@@ -1,5 +1,7 @@
-use runmat_mex::{MexDiagnostic, MexHostServices};
+use runmat_mex::{MexCancellationScope, MexDiagnostic, MexEngineCompletion, MexHostServices};
 use runmat_value::Value;
+use std::rc::Rc;
+use std::sync::{atomic::AtomicBool, Arc};
 
 use crate::context::RuntimeContext;
 
@@ -19,6 +21,14 @@ impl RuntimeMexHostServices {
 }
 
 impl MexHostServices for RuntimeMexHostServices {
+    fn cancellation_scope(&self, cancellation: Arc<AtomicBool>) -> Box<dyn MexCancellationScope> {
+        let previous = self.runtime.state().cancellation.replace(cancellation);
+        Box::new(RuntimeMexCancellationScope {
+            state: Rc::clone(self.runtime.state()),
+            previous: Some(previous),
+        })
+    }
+
     fn eval(&self, command: &str) -> Result<(), MexDiagnostic> {
         pollster::block_on(self.runtime.scope(crate::call_builtin_async_with_outputs(
             "eval",
@@ -27,6 +37,10 @@ impl MexHostServices for RuntimeMexHostServices {
         )))
         .map(|_| ())
         .map_err(runtime_diagnostic)
+    }
+
+    fn eval_captured(&self, command: &str) -> MexEngineCompletion<()> {
+        captured_completion(|| self.eval(command))
     }
 
     fn call(
@@ -50,6 +64,15 @@ impl MexHostServices for RuntimeMexHostServices {
                 message: format!("callback did not produce the requested {count} outputs"),
             }),
         }
+    }
+
+    fn call_captured(
+        &self,
+        function: &str,
+        arguments: Vec<Value>,
+        requested_outputs: usize,
+    ) -> MexEngineCompletion<Vec<Value>> {
+        captured_completion(|| self.call(function, arguments, requested_outputs))
     }
 
     fn get_variable(&self, workspace: &str, name: &str) -> Result<Option<Value>, MexDiagnostic> {
@@ -94,6 +117,16 @@ impl MexHostServices for RuntimeMexHostServices {
         .map_err(runtime_diagnostic)
     }
 
+    fn get_object_property_at(
+        &self,
+        object: Value,
+        index: usize,
+        name: &str,
+    ) -> Result<Value, MexDiagnostic> {
+        let object = select_object_element(object, index)?;
+        self.get_object_property(object, name)
+    }
+
     fn set_object_property(
         &self,
         object: Value,
@@ -109,6 +142,92 @@ impl MexHostServices for RuntimeMexHostServices {
             |_, _| {},
         )))
         .map_err(runtime_diagnostic)
+    }
+
+    fn set_object_property_at(
+        &self,
+        object: Value,
+        index: usize,
+        name: &str,
+        value: Value,
+    ) -> Result<Value, MexDiagnostic> {
+        match object {
+            Value::ObjectArray(array) => {
+                let class_name = array.class_name().to_string();
+                let shape = array.shape().to_vec();
+                let mut elements = array.into_data();
+                let selected = elements
+                    .get(index)
+                    .cloned()
+                    .ok_or_else(|| object_index_diagnostic(index, elements.len()))?;
+                elements[index] = self.set_object_property(selected, name, value)?;
+                runmat_value::ObjectArray::new(class_name, elements, shape)
+                    .map(Value::ObjectArray)
+                    .map_err(|message| MexDiagnostic {
+                        identifier: Some("RunMat:MEX:ObjectArray".into()),
+                        message,
+                    })
+            }
+            object if index == 0 => self.set_object_property(object, name, value),
+            _ => Err(object_index_diagnostic(index, 1)),
+        }
+    }
+}
+
+fn captured_completion<T>(
+    operation: impl FnOnce() -> Result<T, MexDiagnostic>,
+) -> MexEngineCompletion<T> {
+    let capture = crate::console::begin_capture();
+    let result = operation();
+    let entries = capture.finish_entries();
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    for entry in entries {
+        match entry.stream {
+            crate::console::ConsoleStream::Stdout => stdout.push_str(&entry.text),
+            crate::console::ConsoleStream::Stderr => stderr.push_str(&entry.text),
+            crate::console::ConsoleStream::ClearScreen => {}
+        }
+    }
+    MexEngineCompletion {
+        result,
+        stdout,
+        stderr,
+    }
+}
+
+struct RuntimeMexCancellationScope {
+    state: Rc<crate::context::RuntimeContextState>,
+    previous: Option<Arc<AtomicBool>>,
+}
+
+impl MexCancellationScope for RuntimeMexCancellationScope {}
+
+impl Drop for RuntimeMexCancellationScope {
+    fn drop(&mut self) {
+        if let Some(previous) = self.previous.take() {
+            self.state.cancellation.replace(previous);
+        }
+    }
+}
+
+fn select_object_element(object: Value, index: usize) -> Result<Value, MexDiagnostic> {
+    match object {
+        Value::ObjectArray(array) => array
+            .get_linear(index)
+            .cloned()
+            .ok_or_else(|| object_index_diagnostic(index, array.len())),
+        object if index == 0 => Ok(object),
+        _ => Err(object_index_diagnostic(index, 1)),
+    }
+}
+
+fn object_index_diagnostic(index: usize, length: usize) -> MexDiagnostic {
+    MexDiagnostic {
+        identifier: Some("RunMat:MEX:ObjectIndex".into()),
+        message: format!(
+            "zero-based object index {index} is outside an object array with {length} elements"
+        ),
     }
 }
 
@@ -210,6 +329,27 @@ mod tests {
     }
 
     #[test]
+    fn asynchronous_callback_cancellation_is_scoped_and_restored() {
+        let original = Arc::new(AtomicBool::new(false));
+        let runtime = RuntimeContext::with_cancellation(
+            Rc::new(RuntimeExecutionService::new()),
+            Arc::clone(&original),
+        );
+        let services = RuntimeMexHostServices::new(runtime.clone());
+        let request = Arc::new(AtomicBool::new(false));
+
+        {
+            let _scope = services.cancellation_scope(Arc::clone(&request));
+            assert!(Arc::ptr_eq(&runtime.cancellation(), &request));
+            request.store(true, std::sync::atomic::Ordering::Release);
+            assert!(runtime.state().is_cancelled());
+        }
+
+        assert!(Arc::ptr_eq(&runtime.cancellation(), &original));
+        assert!(!runtime.state().is_cancelled());
+    }
+
+    #[test]
     fn object_callbacks_preserve_handle_identity_and_mutate_its_target() {
         let mut target = ObjectInstance::new("FixtureHandle".into());
         target.properties.insert("Value".into(), Value::Num(4.0));
@@ -245,6 +385,59 @@ mod tests {
                 .expect("read updated handle property"),
             Value::Num(9.0)
         );
+    }
+
+    #[test]
+    fn indexed_object_callbacks_select_exact_zero_based_element() {
+        let make_handle = |value| {
+            let mut target = ObjectInstance::new("FixtureHandle".into());
+            target.properties.insert("Value".into(), Value::Num(value));
+            let target = runmat_gc::gc_allocate(Value::Object(target))
+                .expect("allocate indexed handle target");
+            HandleRef {
+                class_name: "FixtureHandle".into(),
+                target,
+                valid: true,
+            }
+        };
+        let first = make_handle(2.0);
+        let second = make_handle(4.0);
+        let array = runmat_value::ObjectArray::from_handles(
+            "FixtureHandle",
+            vec![first.clone(), second.clone()],
+            vec![1, 2],
+        )
+        .expect("valid handle array");
+        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        let services = RuntimeMexHostServices::new(runtime);
+
+        assert_eq!(
+            services
+                .get_object_property_at(Value::ObjectArray(array.clone()), 1, "Value")
+                .expect("read indexed property"),
+            Value::Num(4.0)
+        );
+        let updated = services
+            .set_object_property_at(Value::ObjectArray(array), 1, "Value", Value::Num(9.0))
+            .expect("write indexed property");
+        let Value::ObjectArray(updated) = updated else {
+            panic!("indexed property write must preserve the object array");
+        };
+        assert_eq!(updated.shape(), &[1, 2]);
+        runmat_gc::gc_with_value(&first.target, |value| {
+            let Value::Object(value) = value else {
+                panic!("first indexed target must remain an object");
+            };
+            assert_eq!(value.properties.get("Value"), Some(&Value::Num(2.0)));
+        })
+        .expect("inspect first indexed target");
+        runmat_gc::gc_with_value(&second.target, |value| {
+            let Value::Object(value) = value else {
+                panic!("second indexed target must remain an object");
+            };
+            assert_eq!(value.properties.get("Value"), Some(&Value::Num(9.0)));
+        })
+        .expect("inspect second indexed target");
     }
 
     #[test]

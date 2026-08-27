@@ -135,6 +135,15 @@ pub struct RunMatSession {
     pending_companion_source_discovery: Option<compile::CompanionSourceDiscovery>,
 }
 
+impl RunMatSession {
+    /// Drive one callback from session-owned native work. Interactive hosts
+    /// poll this future alongside their next command or input event.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub async fn service_background_once(&self) -> bool {
+        self.mex_runtime.service_background_once().await
+    }
+}
+
 pub(crate) struct PreparedExecution {
     ast: runmat_parser::Program,
     lowering: LoweringResult,

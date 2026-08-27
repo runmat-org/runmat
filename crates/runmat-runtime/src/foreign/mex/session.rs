@@ -5,13 +5,14 @@ use std::rc::Rc;
 use std::sync::atomic::Ordering;
 
 use runmat_mex::{
-    DirectMexBoundaryHostServices, MexInvocation, MexNativeInvocation, MxValueContext,
+    DirectMexBoundaryHostServices, MexApi, MexInvocation, MexNativeInvocation, MxValueContext,
 };
 use runmat_value::Value;
 
 use super::{
-    native_lane::NativeMexLane, IsolatedMexClient, MexBinaryTier, MexIsolationPolicy,
-    MexLifecycleOutcome, MexWireError, RuntimeMexHostServices, UnmanifestedMexPolicy,
+    native_lane::{NativeMexLane, NativeModuleLoadError},
+    IsolatedMexClient, MexBinaryTier, MexIsolationPolicy, MexLifecycleOutcome, MexWireError,
+    RuntimeMexHostServices, UnmanifestedMexPolicy,
 };
 use crate::context::RuntimeContext;
 use crate::user_functions::DynamicFunctionClearRequest;
@@ -40,6 +41,16 @@ impl MexRuntimeSession {
 
     pub fn set_isolation_policy(&self, policy: MexIsolationPolicy) {
         *self.isolation_policy.borrow_mut() = policy;
+    }
+
+    /// Service one callback submitted by native MEX work after its gateway
+    /// returned. Session hosts poll this alongside their command/input loop.
+    pub async fn service_background_once(&self) -> bool {
+        let lane = self.native_lane.borrow().as_ref().cloned();
+        match lane {
+            Some(lane) => lane.service_background_once().await,
+            None => futures::future::pending().await,
+        }
     }
 
     pub async fn load_and_call(
@@ -88,28 +99,18 @@ impl MexRuntimeSession {
                     ),
                 )));
             }
-            let mut client = match self.take_isolated_module(&canonical).await {
-                Ok(client) => client,
-                Err(error) => return Some(Err(error)),
-            };
-            let result = client
-                .invoke(
+            return Some(
+                self.invoke_isolated(
+                    &canonical,
                     &arguments,
                     requested_outputs,
                     None,
                     MexBinaryTier::RunMatCompatibleIsolated,
-                    runtime.clone(),
+                    runtime,
                     policy.invocation_timeout,
                 )
-                .await;
-            self.active_isolated.borrow_mut().remove(&canonical);
-            if result.is_ok() {
-                self.isolated.borrow_mut().insert(canonical.clone(), client);
-            }
-            return Some(match result {
-                Ok(invocation) => finish_invocation(invocation, requested_outputs),
-                Err(error) => Err(wire_runtime_error(error)),
-            });
+                .await,
+            );
         }
         if runtime.execution_stack() != crate::context::RuntimeExecutionStack::Process {
             return Some(Err(runtime_error(
@@ -123,6 +124,21 @@ impl MexRuntimeSession {
         };
         let metadata = match lane.load(&canonical).await {
             Ok(metadata) => metadata,
+            Err(NativeModuleLoadError::IsolatedHostRequired) => {
+                let policy = *self.isolation_policy.borrow();
+                return Some(
+                    self.invoke_isolated(
+                        &canonical,
+                        &arguments,
+                        requested_outputs,
+                        None,
+                        MexBinaryTier::RunMatExact,
+                        runtime,
+                        policy.invocation_timeout,
+                    )
+                    .await,
+                );
+            }
             Err(error) => {
                 return Some(Err(runtime_error(
                     "MexLoad",
@@ -151,14 +167,14 @@ impl MexRuntimeSession {
                 Err(error) => return Some(Err(runtime_error("MEX:Conversion", error.to_string()))),
             }
         }
-        let services = DirectMexBoundaryHostServices::new(
+        let services = Rc::new(DirectMexBoundaryHostServices::new(
             Rc::new(RuntimeMexHostServices::new(runtime)),
             values.clone(),
             metadata.mode,
             metadata.interface,
-        );
+        ));
         let result = lane
-            .invoke(&canonical, inputs, requested_outputs, &services)
+            .invoke(&canonical, inputs, requested_outputs, services)
             .await;
         Some(match result {
             Ok(invocation) => decode_native_invocation(invocation, &values)
@@ -297,6 +313,32 @@ impl MexRuntimeSession {
         }
     }
 
+    async fn invoke_isolated(
+        &self,
+        path: &Path,
+        arguments: &[Value],
+        requested_outputs: usize,
+        api: Option<MexApi>,
+        tier: MexBinaryTier,
+        runtime: RuntimeContext,
+        timeout: Option<std::time::Duration>,
+    ) -> Result<Value, RuntimeError> {
+        let mut client = self.take_isolated_module(path).await?;
+        let result = client
+            .invoke(arguments, requested_outputs, api, tier, runtime, timeout)
+            .await;
+        self.active_isolated.borrow_mut().remove(path);
+        if result.is_ok() {
+            self.isolated
+                .borrow_mut()
+                .insert(path.to_path_buf(), client);
+        }
+        match result {
+            Ok(invocation) => finish_invocation(invocation, requested_outputs),
+            Err(error) => Err(wire_runtime_error(error)),
+        }
+    }
+
     fn clear_in_process(
         &self,
         request: &DynamicFunctionClearRequest,
@@ -320,17 +362,17 @@ impl MexRuntimeSession {
             let metadata = match futures::executor::block_on(lane.load(&path)) {
                 Ok(metadata) => metadata,
                 Err(error) => {
-                    first_error.get_or_insert_with(|| runtime_error("MexClear", error));
+                    first_error.get_or_insert_with(|| runtime_error("MexClear", error.to_string()));
                     continue;
                 }
             };
-            let services = DirectMexBoundaryHostServices::new(
+            let services = Rc::new(DirectMexBoundaryHostServices::new(
                 Rc::new(RuntimeMexHostServices::new(runtime.clone())),
                 values,
                 metadata.mode,
                 metadata.interface,
-            );
-            match futures::executor::block_on(lane.clear(&path, &services)) {
+            ));
+            match futures::executor::block_on(lane.clear(&path, services)) {
                 Ok(true) => {
                     self.native_modules.borrow_mut().remove(&path);
                     self.native_values.borrow_mut().remove(&path);
@@ -367,18 +409,18 @@ impl MexRuntimeSession {
             let metadata = match futures::executor::block_on(lane.load(&path)) {
                 Ok(metadata) => metadata,
                 Err(error) => {
-                    first_error.get_or_insert_with(|| runtime_error("MexShutdown", error));
+                    first_error
+                        .get_or_insert_with(|| runtime_error("MexShutdown", error.to_string()));
                     continue;
                 }
             };
-            let services = DirectMexBoundaryHostServices::new(
+            let services = Rc::new(DirectMexBoundaryHostServices::new(
                 Rc::new(RuntimeMexHostServices::new(runtime.clone())),
                 values,
                 metadata.mode,
                 metadata.interface,
-            );
-            if let Err(error) = futures::executor::block_on(lane.shutdown_module(&path, &services))
-            {
+            ));
+            if let Err(error) = futures::executor::block_on(lane.shutdown_module(&path, services)) {
                 first_error.get_or_insert_with(|| {
                     runtime_error(
                         "MexShutdown",

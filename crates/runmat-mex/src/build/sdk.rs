@@ -7,7 +7,7 @@ use sha2::{Digest as _, Sha256};
 
 use super::MexBuildError;
 
-const FILES: [(&str, &[u8]); 16] = [
+const FILES: [(&str, &[u8]); 20] = [
     ("include/matrix.h", include_bytes!("../../include/matrix.h")),
     ("include/mex.h", include_bytes!("../../include/mex.h")),
     ("include/mex.hpp", include_bytes!("../../include/mex.hpp")),
@@ -18,6 +18,22 @@ const FILES: [(&str, &[u8]); 16] = [
     (
         "include/MatlabDataArray.hpp",
         include_bytes!("../../include/MatlabDataArray.hpp"),
+    ),
+    (
+        "include/MatlabEngine/Exception.hpp",
+        include_bytes!("../../include/MatlabEngine/Exception.hpp"),
+    ),
+    (
+        "include/MatlabEngine/FutureResult.hpp",
+        include_bytes!("../../include/MatlabEngine/FutureResult.hpp"),
+    ),
+    (
+        "include/MatlabEngine/StreamBuffer.hpp",
+        include_bytes!("../../include/MatlabEngine/StreamBuffer.hpp"),
+    ),
+    (
+        "include/MatlabEngine/TypeConversion.hpp",
+        include_bytes!("../../include/MatlabEngine/TypeConversion.hpp"),
     ),
     (
         "include/MatlabDataArray/Array.hpp",

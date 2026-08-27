@@ -1,15 +1,21 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::rc::Rc;
+use std::sync::{Arc, Mutex, MutexGuard};
 
-use super::{DirectMexBoundaryHostServices, MexBoundaryHostServices};
+#[cfg(not(target_family = "wasm"))]
+use super::ConcurrentMexBoundaryHostServices;
+use super::{
+    async_abi, BoundaryServiceSlot, DirectMexBoundaryHostServices, LocalBoundaryServiceGuard,
+    MexBoundaryHostServices,
+};
 use crate::mxarray::{MxArrayData, MxSparse, MxSparseValues};
 use crate::{
-    value_to_mx_for_interface_in_context, MexHostServices, MxApi, MxApiMode, MxArray,
-    MxBoundaryInterface, MxClassId, MxValueContext,
+    value_to_mx_for_interface_in_context, MexAsyncResult, MexHostServices, MxApi, MxApiMode,
+    MxArray, MxBoundaryInterface, MxClassId,
 };
 
-pub const MEX_HOST_ABI_VERSION: u32 = 6;
+pub const MEX_HOST_ABI_VERSION: u32 = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MexDiagnostic {
@@ -18,41 +24,69 @@ pub struct MexDiagnostic {
 }
 
 pub struct MexCallState {
+    inner: Mutex<MexCallStateInner>,
+}
+
+pub(crate) struct MexCallStateInner {
     pub mx: MxApi,
     pub error: Option<MexDiagnostic>,
     pub warnings: Vec<MexDiagnostic>,
     pub console: String,
     field_name_cache: Vec<CString>,
-    services: Rc<dyn MexBoundaryHostServices>,
+    pub(crate) services: BoundaryServiceSlot,
+    local_service_guard: Option<LocalBoundaryServiceGuard>,
     global_arrays: BTreeSet<usize>,
     interface: MxBoundaryInterface,
-    value_context: Rc<MxValueContext>,
+    pub(crate) async_requests: BTreeMap<u64, Arc<dyn MexAsyncResult>>,
+    pub(crate) async_property_targets: BTreeMap<u64, usize>,
+    pub(crate) next_async_request: u64,
+    pub(crate) engine_contexts: BTreeMap<u64, BoundaryServiceSlot>,
+    pub(crate) next_engine_context: u64,
 }
 
 impl MexCallState {
     pub fn new(mode: MxApiMode) -> Self {
         let interface = MxBoundaryInterface::CMatrix;
-        let value_context = Rc::new(MxValueContext::new());
-        Self {
+        Self::from_inner(MexCallStateInner {
             mx: MxApi::new(mode),
             error: None,
             warnings: Vec::new(),
             console: String::new(),
             field_name_cache: Vec::new(),
-            services: Rc::new(DirectMexBoundaryHostServices::new(
-                Rc::new(super::UnavailableMexHostServices),
-                Rc::clone(&value_context),
-                mode,
-                interface,
-            )),
+            services: BoundaryServiceSlot::Unavailable,
+            local_service_guard: None,
             global_arrays: BTreeSet::new(),
             interface,
-            value_context,
-        }
+            async_requests: BTreeMap::new(),
+            async_property_targets: BTreeMap::new(),
+            next_async_request: 1,
+            engine_contexts: BTreeMap::new(),
+            next_engine_context: 1,
+        })
     }
 
     pub fn with_services(mode: MxApiMode, services: Rc<dyn MexHostServices>) -> Self {
         Self::with_services_for_interface(mode, MxBoundaryInterface::CMatrix, services)
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    pub(crate) fn for_interface(mode: MxApiMode, interface: MxBoundaryInterface) -> Self {
+        Self::from_inner(MexCallStateInner {
+            mx: MxApi::new(mode),
+            error: None,
+            warnings: Vec::new(),
+            console: String::new(),
+            field_name_cache: Vec::new(),
+            services: BoundaryServiceSlot::Unavailable,
+            local_service_guard: None,
+            global_arrays: BTreeSet::new(),
+            interface,
+            async_requests: BTreeMap::new(),
+            async_property_targets: BTreeMap::new(),
+            next_async_request: 1,
+            engine_contexts: BTreeMap::new(),
+            next_engine_context: 1,
+        })
     }
 
     pub(crate) fn with_services_for_interface(
@@ -60,66 +94,112 @@ impl MexCallState {
         interface: MxBoundaryInterface,
         services: Rc<dyn MexHostServices>,
     ) -> Self {
-        let value_context = Rc::new(MxValueContext::new());
+        let value_context = Rc::new(crate::MxValueContext::new());
         let services = Rc::new(DirectMexBoundaryHostServices::new(
             services,
             Rc::clone(&value_context),
             mode,
             interface,
         ));
-        Self {
+        let (local_service_guard, services) = LocalBoundaryServiceGuard::register(services);
+        Self::from_inner(MexCallStateInner {
             mx: MxApi::new(mode),
             error: None,
             warnings: Vec::new(),
             console: String::new(),
             field_name_cache: Vec::new(),
             services,
+            local_service_guard: Some(local_service_guard),
             global_arrays: BTreeSet::new(),
             interface,
-            value_context,
-        }
+            async_requests: BTreeMap::new(),
+            async_property_targets: BTreeMap::new(),
+            next_async_request: 1,
+            engine_contexts: BTreeMap::new(),
+            next_engine_context: 1,
+        })
     }
 
-    pub fn set_services(&mut self, services: Rc<dyn MexHostServices>) {
-        self.services = Rc::new(DirectMexBoundaryHostServices::new(
+    pub fn set_services(&self, services: Rc<dyn MexHostServices>) {
+        self.set_services_for_context(services, Rc::new(crate::MxValueContext::new()));
+    }
+
+    pub(crate) fn set_services_for_context(
+        &self,
+        services: Rc<dyn MexHostServices>,
+        values: Rc<crate::MxValueContext>,
+    ) {
+        let mut state = self.inner.lock().expect("MEX state is not poisoned");
+        let services = Rc::new(DirectMexBoundaryHostServices::new(
             services,
-            Rc::clone(&self.value_context),
-            self.mx.mode(),
-            self.interface,
+            values,
+            state.mx.mode(),
+            state.interface,
         ));
+        let (guard, services) = LocalBoundaryServiceGuard::register(services);
+        state.local_service_guard = Some(guard);
+        state.services = services;
     }
 
-    pub(crate) fn set_boundary_services(&mut self, services: Rc<dyn MexBoundaryHostServices>) {
-        self.services = services;
+    #[cfg(not(target_family = "wasm"))]
+    pub(crate) fn set_boundary_services(
+        &self,
+        services: std::sync::Arc<dyn ConcurrentMexBoundaryHostServices>,
+    ) {
+        let mut state = self.inner.lock().expect("MEX state is not poisoned");
+        state.local_service_guard = None;
+        state.services = BoundaryServiceSlot::concurrent(services);
     }
 
     #[cfg(not(target_family = "wasm"))]
     pub(crate) fn with_boundary_services_for_interface(
         mode: MxApiMode,
         interface: MxBoundaryInterface,
-        services: Rc<dyn MexBoundaryHostServices>,
+        services: std::sync::Arc<dyn ConcurrentMexBoundaryHostServices>,
     ) -> Self {
-        Self {
+        Self::from_inner(MexCallStateInner {
             mx: MxApi::new(mode),
             error: None,
             warnings: Vec::new(),
             console: String::new(),
             field_name_cache: Vec::new(),
-            services,
+            services: BoundaryServiceSlot::concurrent(services),
+            local_service_guard: None,
             global_arrays: BTreeSet::new(),
             interface,
-            value_context: Rc::new(MxValueContext::new()),
+            async_requests: BTreeMap::new(),
+            async_property_targets: BTreeMap::new(),
+            next_async_request: 1,
+            engine_contexts: BTreeMap::new(),
+            next_engine_context: 1,
+        })
+    }
+
+    fn from_inner(inner: MexCallStateInner) -> Self {
+        Self {
+            inner: Mutex::new(inner),
         }
     }
 
-    pub(crate) fn value_context(&self) -> &MxValueContext {
-        &self.value_context
+    pub(crate) fn lock(&self) -> Result<MutexGuard<'_, MexCallStateInner>, ()> {
+        self.inner.lock().map_err(|_| ())
     }
 
-    pub fn host_api(&mut self) -> MexHostApiV1 {
+    #[cfg(not(target_family = "wasm"))]
+    pub(crate) fn has_pending_async_requests(&self) -> Result<bool, ()> {
+        let requests = self
+            .lock()?
+            .async_requests
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        Ok(requests.iter().any(|request| !request.is_ready()))
+    }
+
+    pub fn host_api(&self) -> MexHostApiV1 {
         MexHostApiV1 {
             abi_version: MEX_HOST_ABI_VERSION,
-            host: std::ptr::from_mut(self).cast(),
+            host: std::ptr::from_ref(self).cast_mut().cast(),
             create_numeric,
             create_double_scalar,
             create_logical,
@@ -183,30 +263,49 @@ impl MexCallState {
             string_length,
             copy_string,
             set_string,
+            retain_data_array,
+            release_data_array,
+            engine_context_create: async_abi::create_engine_context,
+            engine_context_release: async_abi::release_engine_context,
+            async_submit_eval: async_abi::submit_eval,
+            async_submit_call: async_abi::submit_call,
+            async_submit_get_variable: async_abi::submit_get_variable,
+            async_submit_put_variable: async_abi::submit_put_variable,
+            async_submit_get_property: async_abi::submit_get_property,
+            async_submit_set_property: async_abi::submit_set_property,
+            async_is_ready: async_abi::is_ready,
+            async_wait: async_abi::wait,
+            async_cancel: async_abi::cancel,
+            async_copy_result: async_abi::copy_result,
+            async_copy_text: async_abi::copy_text,
+            async_release: async_abi::release,
         }
     }
 
-    pub fn begin_call(&mut self) {
-        self.error = None;
-        self.warnings.clear();
-        self.console.clear();
-        self.field_name_cache.clear();
+    pub fn begin_call(&self) {
+        let mut state = self.inner.lock().expect("MEX state is not poisoned");
+        state.error = None;
+        state.warnings.clear();
+        state.console.clear();
+        state.field_name_cache.clear();
+        state.mx.begin_call();
     }
 
-    pub fn finish_call(&mut self) {
-        self.mx.finish_call();
-        self.error = None;
-        self.warnings.clear();
-        self.console.clear();
-        self.field_name_cache.clear();
-        self.services = Rc::new(DirectMexBoundaryHostServices::new(
-            Rc::new(super::UnavailableMexHostServices),
-            Rc::clone(&self.value_context),
-            self.mx.mode(),
-            self.interface,
-        ));
+    pub fn finish_call(&self) {
+        let mut state = self.inner.lock().expect("MEX state is not poisoned");
+        state.mx.finish_call();
+        state.error = None;
+        state.warnings.clear();
+        state.console.clear();
+        state.field_name_cache.clear();
+        if !state.services.is_concurrent() {
+            state.local_service_guard = None;
+            state.services = BoundaryServiceSlot::Unavailable;
+        }
     }
+}
 
+impl MexCallStateInner {
     fn fail(&mut self, message: impl Into<String>) {
         if self.error.is_none() {
             self.error = Some(MexDiagnostic {
@@ -312,12 +411,50 @@ pub struct MexHostApiV1 {
         unsafe extern "C" fn(*mut c_void, *const MxArray, usize, *mut u16, usize) -> i32,
     pub set_string:
         unsafe extern "C" fn(*mut c_void, *mut MxArray, usize, *const u16, usize) -> i32,
+    // ABI v7 fields are appended after the complete v6 prefix.
+    pub retain_data_array: unsafe extern "C" fn(*mut c_void, *const MxArray) -> i32,
+    pub release_data_array: unsafe extern "C" fn(*mut c_void, *mut MxArray, i32) -> i32,
+    // ABI v8 fields are appended after the complete v7 prefix.
+    pub engine_context_create: unsafe extern "C" fn(*mut c_void) -> u64,
+    pub engine_context_release: unsafe extern "C" fn(*mut c_void, u64),
+    pub async_submit_eval: unsafe extern "C" fn(*mut c_void, u64, *const c_char, i32, i32) -> u64,
+    pub async_submit_call: unsafe extern "C" fn(
+        *mut c_void,
+        u64,
+        *const c_char,
+        usize,
+        usize,
+        *const *const MxArray,
+        i32,
+        i32,
+    ) -> u64,
+    pub async_submit_get_variable:
+        unsafe extern "C" fn(*mut c_void, u64, *const c_char, *const c_char) -> u64,
+    pub async_submit_put_variable:
+        unsafe extern "C" fn(*mut c_void, u64, *const c_char, *const c_char, *const MxArray) -> u64,
+    pub async_submit_get_property:
+        unsafe extern "C" fn(*mut c_void, u64, *const MxArray, usize, *const c_char) -> u64,
+    pub async_submit_set_property: unsafe extern "C" fn(
+        *mut c_void,
+        u64,
+        *mut MxArray,
+        usize,
+        *const c_char,
+        *const MxArray,
+    ) -> u64,
+    pub async_is_ready: unsafe extern "C" fn(*mut c_void, u64) -> i32,
+    pub async_wait: unsafe extern "C" fn(*mut c_void, u64, i64) -> i32,
+    pub async_cancel: unsafe extern "C" fn(*mut c_void, u64, i32) -> i32,
+    pub async_copy_result: unsafe extern "C" fn(*mut c_void, u64, usize, *mut *mut MxArray) -> i32,
+    pub async_copy_text: unsafe extern "C" fn(*mut c_void, u64, u32, *mut c_char, usize) -> usize,
+    pub async_release: unsafe extern "C" fn(*mut c_void, u64),
 }
 
-unsafe fn state<'a>(host: *mut c_void) -> Option<&'a mut MexCallState> {
-    // SAFETY: every vtable is created by `MexCallState::host_api` and remains
-    // scoped to the synchronous invocation that owns this state.
-    unsafe { host.cast::<MexCallState>().as_mut() }
+unsafe fn state<'a>(host: *mut c_void) -> Option<MutexGuard<'a, MexCallStateInner>> {
+    // SAFETY: every vtable is created by `MexCallState::host_api`; the loader
+    // pins that state for the module lifetime and tears it down only after the
+    // module's retained Data API controls and asynchronous work have ended.
+    unsafe { host.cast::<MexCallState>().as_ref() }?.lock().ok()
 }
 
 unsafe fn shape(ndim: usize, dims: *const usize) -> Result<Vec<usize>, String> {
@@ -364,7 +501,7 @@ unsafe extern "C" fn create_numeric(
     class_id: i32,
     complexity: i32,
 ) -> *mut MxArray {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return std::ptr::null_mut();
     };
     let result = unsafe { shape(ndim, dims) }.and_then(|shape| {
@@ -385,7 +522,7 @@ unsafe extern "C" fn create_numeric(
 
 unsafe extern "C" fn create_double_scalar(host: *mut c_void, value: f64) -> *mut MxArray {
     unsafe { state(host) }
-        .map(|state| state.mx.create_double_scalar(value))
+        .map(|mut state| state.mx.create_double_scalar(value))
         .unwrap_or(std::ptr::null_mut())
 }
 
@@ -394,7 +531,7 @@ unsafe extern "C" fn create_logical(
     ndim: usize,
     dims: *const usize,
 ) -> *mut MxArray {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return std::ptr::null_mut();
     };
     match unsafe { shape(ndim, dims) }.and_then(|shape| state.mx.create_logical(shape)) {
@@ -411,7 +548,7 @@ unsafe extern "C" fn create_char(
     ndim: usize,
     dims: *const usize,
 ) -> *mut MxArray {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return std::ptr::null_mut();
     };
     match unsafe { shape(ndim, dims) }.and_then(|shape| state.mx.create_char(shape)) {
@@ -428,7 +565,7 @@ unsafe extern "C" fn create_cell(
     ndim: usize,
     dims: *const usize,
 ) -> *mut MxArray {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return std::ptr::null_mut();
     };
     match unsafe { shape(ndim, dims) }.and_then(|shape| state.mx.create_cell(shape)) {
@@ -447,7 +584,7 @@ unsafe extern "C" fn create_struct(
     field_count: i32,
     field_names: *const *const c_char,
 ) -> *mut MxArray {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return std::ptr::null_mut();
     };
     let result = unsafe { shape(ndim, dims) }.and_then(|shape| {
@@ -486,7 +623,7 @@ unsafe extern "C" fn create_sparse(
     nzmax: usize,
     logical: i32,
 ) -> *mut MxArray {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return std::ptr::null_mut();
     };
     match state.mx.create_sparse(rows, cols, nzmax, logical != 0) {
@@ -499,7 +636,7 @@ unsafe extern "C" fn create_sparse(
 }
 
 unsafe extern "C" fn duplicate_array(host: *mut c_void, value: *const MxArray) -> *mut MxArray {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return std::ptr::null_mut();
     };
     match state.mx.duplicate(value) {
@@ -512,7 +649,7 @@ unsafe extern "C" fn duplicate_array(host: *mut c_void, value: *const MxArray) -
 }
 
 unsafe extern "C" fn share_array(host: *mut c_void, value: *const MxArray) -> *mut MxArray {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return std::ptr::null_mut();
     };
     match state.mx.share(value) {
@@ -520,6 +657,32 @@ unsafe extern "C" fn share_array(host: *mut c_void, value: *const MxArray) -> *m
         Err(error) => {
             state.fail(error.to_string());
             std::ptr::null_mut()
+        }
+    }
+}
+
+unsafe extern "C" fn retain_data_array(host: *mut c_void, value: *const MxArray) -> i32 {
+    let Some(mut state) = (unsafe { state(host) }) else {
+        return 1;
+    };
+    match state.mx.retain_data_api(value) {
+        Ok(()) => 0,
+        Err(error) => {
+            state.fail(error.to_string());
+            1
+        }
+    }
+}
+
+unsafe extern "C" fn release_data_array(host: *mut c_void, value: *mut MxArray, owned: i32) -> i32 {
+    let Some(mut state) = (unsafe { state(host) }) else {
+        return 1;
+    };
+    match state.mx.release_data_api(value, owned != 0) {
+        Ok(()) => 0,
+        Err(error) => {
+            state.fail(error.to_string());
+            1
         }
     }
 }
@@ -540,7 +703,7 @@ unsafe extern "C" fn record_host_copy(_host: *mut c_void, reason: u32, byte_leng
 }
 
 unsafe extern "C" fn data_array_type(host: *mut c_void, value: *const MxArray) -> i32 {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return 0;
     };
     let Ok(value) = state.mx.arena().get(value) else {
@@ -573,7 +736,7 @@ unsafe extern "C" fn create_string_array(
     ndim: usize,
     dims: *const usize,
 ) -> *mut MxArray {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return std::ptr::null_mut();
     };
     let shape = match unsafe { shape(ndim, dims) } {
@@ -604,7 +767,7 @@ unsafe extern "C" fn string_length(
     value: *const MxArray,
     index: usize,
 ) -> usize {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return usize::MAX;
     };
     let Ok(value) = state.mx.arena().get(value) else {
@@ -629,7 +792,7 @@ unsafe extern "C" fn copy_string(
     output: *mut u16,
     output_length: usize,
 ) -> i32 {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return 1;
     };
     let Ok(value) = state.mx.arena().get(value) else {
@@ -667,7 +830,7 @@ unsafe extern "C" fn set_string(
     input: *const u16,
     input_length: usize,
 ) -> i32 {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return 1;
     };
     let units = if input_length == 0 {
@@ -707,7 +870,7 @@ unsafe extern "C" fn set_string(
 }
 
 unsafe extern "C" fn destroy_array(host: *mut c_void, value: *mut MxArray) -> i32 {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return 1;
     };
     match state.mx.destroy(value) {
@@ -727,7 +890,7 @@ unsafe extern "C" fn class_id(host: *mut c_void, value: *const MxArray) -> i32 {
 }
 
 unsafe extern "C" fn class_name(host: *mut c_void, value: *const MxArray) -> *const c_char {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return std::ptr::null();
     };
     let name = match state.mx.arena().get(value) {
@@ -773,7 +936,7 @@ unsafe extern "C" fn set_dimensions(
     ndim: usize,
     dims: *const usize,
 ) -> i32 {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return 1;
     };
     match unsafe { shape(ndim, dims) }.and_then(|shape| state.mx.set_shape(value, shape)) {
@@ -790,7 +953,7 @@ unsafe extern "C" fn data(
     value: *mut MxArray,
     expected_class: i32,
 ) -> *mut c_void {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return std::ptr::null_mut();
     };
     let expected = if expected_class == MxClassId::Unknown as i32 {
@@ -808,7 +971,7 @@ unsafe extern "C" fn data(
 }
 
 unsafe extern "C" fn imaginary_data(host: *mut c_void, value: *mut MxArray) -> *mut c_void {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return std::ptr::null_mut();
     };
     match state.mx.imaginary_pointer(value) {
@@ -837,7 +1000,7 @@ unsafe extern "C" fn replace_imaginary_data(
 }
 
 unsafe extern "C" fn make_complex(host: *mut c_void, value: *mut MxArray) -> i32 {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return 1;
     };
     match state.mx.make_complex(value) {
@@ -850,7 +1013,7 @@ unsafe extern "C" fn make_complex(host: *mut c_void, value: *mut MxArray) -> i32
 }
 
 unsafe extern "C" fn make_real(host: *mut c_void, value: *mut MxArray) -> i32 {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return 1;
     };
     match state.mx.make_real(value) {
@@ -868,7 +1031,7 @@ fn replace_data_component(
     source: *const c_void,
     imaginary: bool,
 ) -> i32 {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return 1;
     };
     // SAFETY: the C shim transfers a buffer matching the array's reported size.
@@ -900,7 +1063,7 @@ unsafe extern "C" fn get_cell(
     value: *const MxArray,
     index: usize,
 ) -> *mut MxArray {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return std::ptr::null_mut();
     };
     match state.mx.get_cell(value, index) {
@@ -918,7 +1081,7 @@ unsafe extern "C" fn set_cell(
     index: usize,
     child: *mut MxArray,
 ) -> i32 {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return 1;
     };
     match state.mx.set_cell(value, index, child) {
@@ -932,8 +1095,13 @@ unsafe extern "C" fn set_cell(
 
 unsafe extern "C" fn number_of_fields(host: *mut c_void, value: *const MxArray) -> i32 {
     unsafe { state(host) }
-        .and_then(|state| state.mx.field_names(value).ok())
-        .and_then(|fields| i32::try_from(fields.len()).ok())
+        .and_then(|state| {
+            state
+                .mx
+                .field_names(value)
+                .ok()
+                .and_then(|fields| i32::try_from(fields.len()).ok())
+        })
         .unwrap_or(0)
 }
 
@@ -942,7 +1110,7 @@ unsafe extern "C" fn field_name(
     value: *const MxArray,
     field: i32,
 ) -> *const c_char {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return std::ptr::null();
     };
     let Ok(field) = usize::try_from(field) else {
@@ -974,14 +1142,19 @@ unsafe extern "C" fn field_number(
         return -1;
     };
     unsafe { state(host) }
-        .and_then(|state| state.mx.field_names(value).ok())
-        .and_then(|fields| fields.iter().position(|field| field == &name))
-        .and_then(|index| i32::try_from(index).ok())
+        .and_then(|state| {
+            state
+                .mx
+                .field_names(value)
+                .ok()
+                .and_then(|fields| fields.iter().position(|field| field == &name))
+                .and_then(|index| i32::try_from(index).ok())
+        })
         .unwrap_or(-1)
 }
 
 unsafe extern "C" fn add_field(host: *mut c_void, value: *mut MxArray, name: *const c_char) -> i32 {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return -1;
     };
     let Some(name) = c_string(name) else {
@@ -998,7 +1171,7 @@ unsafe extern "C" fn add_field(host: *mut c_void, value: *mut MxArray, name: *co
 }
 
 unsafe extern "C" fn remove_field(host: *mut c_void, value: *mut MxArray, field: i32) -> i32 {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return 1;
     };
     let Ok(field) = usize::try_from(field) else {
@@ -1020,7 +1193,7 @@ unsafe extern "C" fn get_field(
     element: usize,
     field: i32,
 ) -> *mut MxArray {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return std::ptr::null_mut();
     };
     let Ok(field) = usize::try_from(field) else {
@@ -1043,7 +1216,7 @@ unsafe extern "C" fn set_field(
     field: i32,
     child: *mut MxArray,
 ) -> i32 {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return 1;
     };
     let Ok(field) = usize::try_from(field) else {
@@ -1064,7 +1237,7 @@ unsafe extern "C" fn set_class_name(
     value: *mut MxArray,
     class_name: *const c_char,
 ) -> i32 {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return 1;
     };
     let Some(class_name) = c_string(class_name) else {
@@ -1086,7 +1259,7 @@ unsafe extern "C" fn get_property(
     index: usize,
     property_name: *const c_char,
 ) -> *mut MxArray {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return std::ptr::null_mut();
     };
     let Some(property_name) = c_string(property_name) else {
@@ -1107,7 +1280,10 @@ unsafe extern "C" fn get_property(
             state.fail("handle object index is out of range");
             return std::ptr::null_mut();
         }
-        return match state.services.get_object_property(handle, &property_name) {
+        return match state
+            .services
+            .get_object_property(handle, index, &property_name)
+        {
             Ok(value) => state.mx.allocate(value),
             Err(error) => {
                 state.error = Some(error);
@@ -1131,7 +1307,7 @@ unsafe extern "C" fn set_property(
     property_name: *const c_char,
     child: *mut MxArray,
 ) -> i32 {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return 1;
     };
     let Some(property_name) = c_string(property_name) else {
@@ -1163,10 +1339,12 @@ unsafe extern "C" fn set_property(
             state.fail("could not consume handle property value");
             return 1;
         }
-        return match state
-            .services
-            .set_object_property(handle, &property_name, property_value)
-        {
+        return match state.services.set_object_property(
+            handle,
+            index,
+            &property_name,
+            property_value,
+        ) {
             Ok(updated) => match state.mx.arena_mut().get_mut(value) {
                 Ok(array) => {
                     *array = updated;
@@ -1193,7 +1371,7 @@ unsafe extern "C" fn set_property(
 }
 
 unsafe extern "C" fn sparse_row_indices(host: *mut c_void, value: *mut MxArray) -> *mut usize {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return std::ptr::null_mut();
     };
     match state.mx.sparse_indices(value) {
@@ -1206,7 +1384,7 @@ unsafe extern "C" fn sparse_row_indices(host: *mut c_void, value: *mut MxArray) 
 }
 
 unsafe extern "C" fn sparse_column_pointers(host: *mut c_void, value: *mut MxArray) -> *mut usize {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return std::ptr::null_mut();
     };
     match state.mx.sparse_indices(value) {
@@ -1220,13 +1398,13 @@ unsafe extern "C" fn sparse_column_pointers(host: *mut c_void, value: *mut MxArr
 
 unsafe extern "C" fn sparse_nzmax(host: *mut c_void, value: *mut MxArray) -> usize {
     unsafe { state(host) }
-        .and_then(|state| state.mx.sparse_indices(value).ok())
+        .and_then(|mut state| state.mx.sparse_indices(value).ok())
         .map(|(_, _, nzmax)| nzmax)
         .unwrap_or(0)
 }
 
 unsafe extern "C" fn set_sparse_nzmax(host: *mut c_void, value: *mut MxArray, nzmax: usize) -> i32 {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return 1;
     };
     match state.mx.set_nzmax(value, nzmax) {
@@ -1260,7 +1438,7 @@ fn replace_sparse_indices(
     source: *const usize,
     columns: bool,
 ) -> i32 {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return 1;
     };
     // SAFETY: the shim transfers the fixed row-capacity or column-pointer buffer.
@@ -1278,7 +1456,7 @@ unsafe extern "C" fn allocate_memory(
     byte_length: usize,
     zeroed: i32,
 ) -> *mut c_void {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return std::ptr::null_mut();
     };
     state.mx.allocate_memory(byte_length, zeroed != 0)
@@ -1289,28 +1467,28 @@ unsafe extern "C" fn reallocate_memory(
     pointer: *mut c_void,
     byte_length: usize,
 ) -> *mut c_void {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return std::ptr::null_mut();
     };
     state.mx.reallocate_memory(pointer, byte_length)
 }
 
 unsafe extern "C" fn free_memory(host: *mut c_void, pointer: *mut c_void) -> i32 {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return 1;
     };
     i32::from(!state.mx.free_memory(pointer))
 }
 
 unsafe extern "C" fn make_memory_persistent(host: *mut c_void, pointer: *mut c_void) -> i32 {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return 1;
     };
     i32::from(!state.mx.make_memory_persistent(pointer))
 }
 
 unsafe extern "C" fn make_array_persistent(host: *mut c_void, value: *mut MxArray) -> i32 {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return 1;
     };
     match state.mx.make_persistent(value) {
@@ -1323,7 +1501,7 @@ unsafe extern "C" fn make_array_persistent(host: *mut c_void, value: *mut MxArra
 }
 
 unsafe extern "C" fn eval(host: *mut c_void, command: *const c_char) -> i32 {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return 1;
     };
     let Some(command) = c_string(command) else {
@@ -1347,7 +1525,7 @@ unsafe extern "C" fn call(
     nrhs: i32,
     prhs: *const *const MxArray,
 ) -> i32 {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return 1;
     };
     let result = (|| {
@@ -1418,7 +1596,7 @@ unsafe extern "C" fn get_variable(
     workspace: *const c_char,
     name: *const c_char,
 ) -> *mut MxArray {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return std::ptr::null_mut();
     };
     let Some(workspace) = c_string(workspace) else {
@@ -1451,7 +1629,7 @@ unsafe extern "C" fn put_variable(
     name: *const c_char,
     value: *const MxArray,
 ) -> i32 {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return 1;
     };
     let result = (|| {
@@ -1484,7 +1662,7 @@ unsafe extern "C" fn is_global(host: *mut c_void, value: *const MxArray) -> i32 
 }
 
 unsafe extern "C" fn take_error(host: *mut c_void) -> *mut MxArray {
-    let Some(state) = (unsafe { state(host) }) else {
+    let Some(mut state) = (unsafe { state(host) }) else {
         return std::ptr::null_mut();
     };
     let Some(error) = state.error.take() else {
@@ -1495,13 +1673,13 @@ unsafe extern "C" fn take_error(host: *mut c_void) -> *mut MxArray {
         &runmat_value::Value::String(error.identifier.unwrap_or_default()),
         mode,
         state.interface,
-        Some(&state.value_context),
+        None,
     );
     let message = value_to_mx_for_interface_in_context(
         &runmat_value::Value::String(error.message),
         mode,
         state.interface,
-        Some(&state.value_context),
+        None,
     );
     match (identifier, message) {
         (Ok(identifier), Ok(message)) => {
@@ -1557,7 +1735,7 @@ unsafe extern "C" fn set_error(
     identifier: *const c_char,
     message: *const c_char,
 ) {
-    if let Some(state) = unsafe { state(host) } {
+    if let Some(mut state) = unsafe { state(host) } {
         state.error = Some(MexDiagnostic {
             identifier: c_string(identifier).filter(|value| !value.is_empty()),
             message: c_string(message).unwrap_or_else(|| "MEX function failed".into()),
@@ -1570,7 +1748,7 @@ unsafe extern "C" fn emit_warning(
     identifier: *const c_char,
     message: *const c_char,
 ) {
-    if let Some(state) = unsafe { state(host) } {
+    if let Some(mut state) = unsafe { state(host) } {
         state.warnings.push(MexDiagnostic {
             identifier: c_string(identifier).filter(|value| !value.is_empty()),
             message: c_string(message).unwrap_or_default(),
@@ -1579,7 +1757,7 @@ unsafe extern "C" fn emit_warning(
 }
 
 unsafe extern "C" fn write_console(host: *mut c_void, text: *const c_char) {
-    if let (Some(state), Some(text)) = (unsafe { state(host) }, c_string(text)) {
+    if let (Some(mut state), Some(text)) = (unsafe { state(host) }, c_string(text)) {
         state.console.push_str(&text);
     }
 }
@@ -1599,37 +1777,62 @@ mod tests {
         let pointer_size = std::mem::size_of::<usize>();
         assert_eq!(
             std::mem::offset_of!(MexHostApiV1, allocate_memory),
-            std::mem::size_of::<MexHostApiV1>() - 11 * pointer_size
+            std::mem::size_of::<MexHostApiV1>() - 27 * pointer_size
         );
         assert_eq!(
             std::mem::offset_of!(MexHostApiV1, make_memory_persistent),
-            std::mem::size_of::<MexHostApiV1>() - 8 * pointer_size
+            std::mem::size_of::<MexHostApiV1>() - 24 * pointer_size
         );
         assert_eq!(
             std::mem::offset_of!(MexHostApiV1, share_array),
-            std::mem::size_of::<MexHostApiV1>() - 7 * pointer_size
+            std::mem::size_of::<MexHostApiV1>() - 23 * pointer_size
         );
         assert_eq!(
             std::mem::offset_of!(MexHostApiV1, record_host_copy),
-            std::mem::size_of::<MexHostApiV1>() - 6 * pointer_size
+            std::mem::size_of::<MexHostApiV1>() - 22 * pointer_size
         );
         assert_eq!(
             std::mem::offset_of!(MexHostApiV1, data_array_type),
-            std::mem::size_of::<MexHostApiV1>() - 5 * pointer_size
+            std::mem::size_of::<MexHostApiV1>() - 21 * pointer_size
         );
         assert_eq!(
             std::mem::offset_of!(MexHostApiV1, set_string),
+            std::mem::size_of::<MexHostApiV1>() - 17 * pointer_size
+        );
+        assert_eq!(
+            std::mem::offset_of!(MexHostApiV1, engine_context_create),
+            std::mem::size_of::<MexHostApiV1>() - 14 * pointer_size
+        );
+        assert_eq!(
+            std::mem::offset_of!(MexHostApiV1, async_submit_eval),
+            std::mem::size_of::<MexHostApiV1>() - 12 * pointer_size
+        );
+        assert_eq!(
+            std::mem::offset_of!(MexHostApiV1, async_release),
             std::mem::size_of::<MexHostApiV1>() - pointer_size
         );
     }
 
     #[test]
     fn vtable_uses_opaque_host_and_reports_bad_class_without_unwinding() {
-        let mut state = MexCallState::new(MxApiMode::SeparateComplex);
+        let state = MexCallState::new(MxApiMode::SeparateComplex);
         let api = state.host_api();
         let dims = [1usize, 1];
         let value = unsafe { (api.create_numeric)(api.host, dims.len(), dims.as_ptr(), 999, 0) };
         assert!(value.is_null());
-        assert!(state.error.as_ref().unwrap().message.contains("mxClassID"));
+        assert!(state
+            .lock()
+            .unwrap()
+            .error
+            .as_ref()
+            .unwrap()
+            .message
+            .contains("mxClassID"));
+    }
+
+    #[test]
+    fn host_call_state_is_safe_for_data_api_worker_access() {
+        fn require_send_sync<T: Send + Sync>() {}
+        require_send_sync::<MexCallState>();
     }
 }

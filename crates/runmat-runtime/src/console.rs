@@ -232,8 +232,20 @@ pub fn begin_capture() -> ConsoleCaptureGuard {
 
 impl ConsoleCaptureGuard {
     pub fn finish(mut self) -> String {
+        captured_text(self.take_entries())
+    }
+
+    /// Finish this capture and retain the stream identity of every entry.
+    ///
+    /// Foreign engine adapters use this form when the caller supplied
+    /// distinct standard-output and standard-error stream buffers.
+    pub fn finish_entries(mut self) -> Vec<ConsoleEntry> {
+        self.take_entries()
+    }
+
+    fn take_entries(&mut self) -> Vec<ConsoleEntry> {
         self.active = false;
-        let entries = if let Some(state) = &self.state {
+        if let Some(state) = &self.state {
             state
                 .console
                 .borrow_mut()
@@ -242,8 +254,7 @@ impl ConsoleCaptureGuard {
                 .unwrap_or_default()
         } else {
             FALLBACK_STATE.with(|fallback| fallback.borrow_mut().captures.pop().unwrap_or_default())
-        };
-        captured_text(entries)
+        }
     }
 }
 
