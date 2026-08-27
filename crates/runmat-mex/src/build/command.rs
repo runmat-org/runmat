@@ -28,13 +28,38 @@ impl MexApi {
     }
 }
 
+/// Source-language ABI selected by the gateway translation units.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MexSourceLanguage {
+    C,
+    Cxx,
+}
+
+impl MexSourceLanguage {
+    pub(super) fn detect(path: &std::path::Path) -> Self {
+        match path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            Some("cc" | "cpp" | "cxx" | "c++") => Self::Cxx,
+            _ => Self::C,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MexBuild {
     pub(super) compiler: PathBuf,
+    pub(super) compiler_explicit: bool,
     pub(super) sources: Vec<PathBuf>,
     pub(super) output_directory: PathBuf,
     pub(super) output_name: String,
+    pub(super) language: MexSourceLanguage,
     pub(super) api: MexApi,
+    pub(super) api_explicit: bool,
     pub(super) include_directories: Vec<PathBuf>,
     pub(super) definitions: Vec<String>,
     pub(super) compiler_arguments: Vec<String>,
@@ -65,12 +90,22 @@ impl MexBuild {
             pointer_width: usize::BITS as u16,
             suffix: String::new(),
         });
+        let language = MexSourceLanguage::detect(&source);
         Self {
-            compiler: super::default_c_compiler(),
+            compiler: match language {
+                MexSourceLanguage::C => super::default_c_compiler(),
+                MexSourceLanguage::Cxx => super::default_cxx_compiler(),
+            },
+            compiler_explicit: false,
             sources: vec![source],
             output_directory: output_directory.into(),
             output_name,
-            api: MexApi::default(),
+            language,
+            api: match language {
+                MexSourceLanguage::C => MexApi::default(),
+                MexSourceLanguage::Cxx => MexApi::R2018a,
+            },
+            api_explicit: false,
             include_directories: Vec::new(),
             definitions: Vec::new(),
             compiler_arguments: Vec::new(),
@@ -81,11 +116,24 @@ impl MexBuild {
 
     pub fn compiler(mut self, compiler: impl Into<PathBuf>) -> Self {
         self.compiler = compiler.into();
+        self.compiler_explicit = true;
         self
     }
 
     pub fn source(mut self, source: impl Into<PathBuf>) -> Self {
-        self.sources.push(source.into());
+        let source = source.into();
+        if MexSourceLanguage::detect(&source) == MexSourceLanguage::Cxx
+            && self.language == MexSourceLanguage::C
+        {
+            self.language = MexSourceLanguage::Cxx;
+            if !self.compiler_explicit {
+                self.compiler = super::default_cxx_compiler();
+            }
+            if !self.api_explicit {
+                self.api = MexApi::R2018a;
+            }
+        }
+        self.sources.push(source);
         self
     }
 
@@ -96,6 +144,7 @@ impl MexBuild {
 
     pub fn api(mut self, api: MexApi) -> Self {
         self.api = api;
+        self.api_explicit = true;
         self
     }
 
@@ -141,7 +190,9 @@ impl MexBuild {
                 source,
             }
         })?;
-        let object_directory = if compiler_family(&self.compiler) == super::CCompilerFamily::Msvc {
+        let object_directory = if compiler_family(&self.compiler) == super::CCompilerFamily::Msvc
+            || self.language == MexSourceLanguage::Cxx
+        {
             Some(
                 tempfile::Builder::new()
                     .prefix(".runmat-mex-objects-")
@@ -159,24 +210,30 @@ impl MexBuild {
         } else {
             initial_plan
         };
-        let output = Command::new(&plan.compiler)
-            .args(&plan.arguments)
-            .output()
-            .map_err(|source| MexBuildError::CompilerLaunch {
-                compiler: plan.compiler.clone(),
-                source,
-            })?;
         let command = plan.command();
-        if !output.status.success() {
-            let diagnostics = format!(
-                "{}{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
-            return Err(MexBuildError::CompilerFailure {
-                command: command.join(" "),
-                diagnostics,
-            });
+        for step in &plan.steps {
+            let output = Command::new(&step.compiler)
+                .args(&step.arguments)
+                .output()
+                .map_err(|source| MexBuildError::CompilerLaunch {
+                    compiler: step.compiler.clone(),
+                    source,
+                })?;
+            if !output.status.success() {
+                let diagnostics = format!(
+                    "{}{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                let failed_command = std::iter::once(step.compiler.display().to_string())
+                    .chain(step.arguments.iter().cloned())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                return Err(MexBuildError::CompilerFailure {
+                    command: failed_command,
+                    diagnostics,
+                });
+            }
         }
         let module_bytes =
             std::fs::read(&plan.module).map_err(|source| MexBuildError::ReadCompiledModule {
@@ -187,6 +244,7 @@ impl MexBuild {
             &self.output_name,
             plan.target.clone(),
             self.api,
+            self.language,
             compiler_family(&plan.compiler),
             &module_bytes,
         )?;

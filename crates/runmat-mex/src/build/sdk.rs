@@ -7,9 +7,38 @@ use sha2::{Digest as _, Sha256};
 
 use super::MexBuildError;
 
-const FILES: [(&str, &[u8]); 4] = [
+const FILES: [(&str, &[u8]); 12] = [
     ("include/matrix.h", include_bytes!("../../include/matrix.h")),
     ("include/mex.h", include_bytes!("../../include/mex.h")),
+    ("include/mex.hpp", include_bytes!("../../include/mex.hpp")),
+    (
+        "include/mexAdapter.hpp",
+        include_bytes!("../../include/mexAdapter.hpp"),
+    ),
+    (
+        "include/MatlabDataArray.hpp",
+        include_bytes!("../../include/MatlabDataArray.hpp"),
+    ),
+    (
+        "include/MatlabDataArray/Array.hpp",
+        include_bytes!("../../include/MatlabDataArray/Array.hpp"),
+    ),
+    (
+        "include/MatlabDataArray/TypedArray.hpp",
+        include_bytes!("../../include/MatlabDataArray/TypedArray.hpp"),
+    ),
+    (
+        "include/MatlabDataArray/CellArray.hpp",
+        include_bytes!("../../include/MatlabDataArray/CellArray.hpp"),
+    ),
+    (
+        "include/MatlabDataArray/StructArray.hpp",
+        include_bytes!("../../include/MatlabDataArray/StructArray.hpp"),
+    ),
+    (
+        "include/MatlabDataArray/ArrayFactory.hpp",
+        include_bytes!("../../include/MatlabDataArray/ArrayFactory.hpp"),
+    ),
     (
         "include/runmat_mex_host.h",
         include_bytes!("../../include/runmat_mex_host.h"),
@@ -109,6 +138,12 @@ mod tests {
         let sdk = prepare().unwrap();
         assert!(sdk.include_directory.join("matrix.h").is_file());
         assert!(sdk.include_directory.join("mex.h").is_file());
+        assert!(sdk.include_directory.join("mex.hpp").is_file());
+        assert!(sdk.include_directory.join("mexAdapter.hpp").is_file());
+        assert!(sdk
+            .include_directory
+            .join("MatlabDataArray/ArrayFactory.hpp")
+            .is_file());
         assert!(sdk.include_directory.join("runmat_mex_host.h").is_file());
         assert!(sdk.shim.is_file());
     }

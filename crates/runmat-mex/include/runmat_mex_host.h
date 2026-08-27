@@ -13,7 +13,8 @@
 extern "C" {
 #endif
 
-#define RUNMAT_MEX_HOST_ABI_VERSION 3u
+#define RUNMAT_MEX_HOST_ABI_VERSION 5u
+#define RUNMAT_HOST_COPY_MEMORY_LAYOUT 8u
 
 typedef struct RunMatMexHostApiV1 {
     uint32_t abi_version;
@@ -93,6 +94,11 @@ typedef struct RunMatMexHostApiV1 {
     void *(*reallocate_memory)(void *host, void *pointer, size_t byte_length);
     int (*free_memory)(void *host, void *pointer);
     int (*make_memory_persistent)(void *host, void *pointer);
+    /* ABI v4 append-only shared Data API array authority. */
+    mxArray *(*share_array)(void *host, const mxArray *array);
+    /* ABI v5 append-only host-copy accounting authority. */
+    void (*record_host_copy)(void *host, unsigned int reason,
+                             size_t byte_length);
 } RunMatMexHostApiV1;
 
 RUNMAT_MEX_HOST_EXPORT int runmatMexBindHost(const RunMatMexHostApiV1 *api);
@@ -102,6 +108,11 @@ RUNMAT_MEX_HOST_EXPORT int runmatMexInvoke(int nlhs, mxArray *plhs[], int nrhs,
 RUNMAT_MEX_HOST_EXPORT int runmatMexIsLocked(void);
 RUNMAT_MEX_HOST_EXPORT int runmatMexApiMode(void);
 RUNMAT_MEX_HOST_EXPORT void runmatMexUnload(void);
+RUNMAT_MEX_LOCAL mxArray *runmatDataArrayShare(const mxArray *array);
+RUNMAT_MEX_LOCAL void
+runmatDataArrayRecordMemoryLayoutCopy(size_t byte_length);
+RUNMAT_MEX_LOCAL void runmatDataArraySetError(const char *identifier,
+                                              const char *message);
 
 #ifdef __cplusplus
 }

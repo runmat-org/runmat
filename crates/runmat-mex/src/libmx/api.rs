@@ -156,6 +156,11 @@ impl MxApi {
         Ok(self.arena.allocate(duplicate))
     }
 
+    pub fn share(&mut self, source: *const MxArray) -> Result<*mut MxArray, MxArenaError> {
+        let shared = self.arena.get(source)?.clone();
+        Ok(self.arena.allocate(shared))
+    }
+
     pub fn destroy(&mut self, value: *mut MxArray) -> Result<(), MxArenaError> {
         self.arena.destroy(value)
     }

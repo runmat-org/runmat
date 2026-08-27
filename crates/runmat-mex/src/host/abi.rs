@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use crate::{value_from_mx, value_to_mx, MexHostServices, MxApi, MxApiMode, MxArray, MxClassId};
 
-pub const MEX_HOST_ABI_VERSION: u32 = 3;
+pub const MEX_HOST_ABI_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MexDiagnostic {
@@ -106,6 +106,8 @@ impl MexCallState {
             reallocate_memory,
             free_memory,
             make_memory_persistent,
+            share_array,
+            record_host_copy,
         }
     }
 
@@ -218,6 +220,10 @@ pub struct MexHostApiV1 {
     pub reallocate_memory: unsafe extern "C" fn(*mut c_void, *mut c_void, usize) -> *mut c_void,
     pub free_memory: unsafe extern "C" fn(*mut c_void, *mut c_void) -> i32,
     pub make_memory_persistent: unsafe extern "C" fn(*mut c_void, *mut c_void) -> i32,
+    // ABI v4 field is appended after the complete v3 prefix.
+    pub share_array: unsafe extern "C" fn(*mut c_void, *const MxArray) -> *mut MxArray,
+    // ABI v5 field is appended after the complete v4 prefix.
+    pub record_host_copy: unsafe extern "C" fn(*mut c_void, u32, usize),
 }
 
 unsafe fn state<'a>(host: *mut c_void) -> Option<&'a mut MexCallState> {
@@ -414,6 +420,28 @@ unsafe extern "C" fn duplicate_array(host: *mut c_void, value: *const MxArray) -
             state.fail(error.to_string());
             std::ptr::null_mut()
         }
+    }
+}
+
+unsafe extern "C" fn share_array(host: *mut c_void, value: *const MxArray) -> *mut MxArray {
+    let Some(state) = (unsafe { state(host) }) else {
+        return std::ptr::null_mut();
+    };
+    match state.mx.share(value) {
+        Ok(value) => value,
+        Err(error) => {
+            state.fail(error.to_string());
+            std::ptr::null_mut()
+        }
+    }
+}
+
+unsafe extern "C" fn record_host_copy(_host: *mut c_void, reason: u32, byte_length: usize) {
+    if reason == runmat_value::HostCopyReason::MemoryLayoutConversion as u32 {
+        runmat_value::record_host_copy(
+            runmat_value::HostCopyReason::MemoryLayoutConversion,
+            byte_length,
+        );
     }
 }
 
@@ -1246,14 +1274,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn allocator_callbacks_extend_the_complete_previous_vtable_prefix() {
+    fn allocator_and_data_api_callbacks_extend_complete_previous_prefixes() {
         let pointer_size = std::mem::size_of::<usize>();
         assert_eq!(
             std::mem::offset_of!(MexHostApiV1, allocate_memory),
-            std::mem::size_of::<MexHostApiV1>() - 4 * pointer_size
+            std::mem::size_of::<MexHostApiV1>() - 6 * pointer_size
         );
         assert_eq!(
             std::mem::offset_of!(MexHostApiV1, make_memory_persistent),
+            std::mem::size_of::<MexHostApiV1>() - 3 * pointer_size
+        );
+        assert_eq!(
+            std::mem::offset_of!(MexHostApiV1, share_array),
+            std::mem::size_of::<MexHostApiV1>() - 2 * pointer_size
+        );
+        assert_eq!(
+            std::mem::offset_of!(MexHostApiV1, record_host_copy),
             std::mem::size_of::<MexHostApiV1>() - pointer_size
         );
     }
