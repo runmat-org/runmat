@@ -8,6 +8,28 @@ use std::sync::{
     Mutex, MutexGuard, OnceLock,
 };
 
+/// Cross-backend comparison budget for shader transcendental operations executed in f32.
+///
+/// WGSL transcendental intrinsics are implemented by the active graphics backend and can
+/// differ from the host libm result by more than basic arithmetic. This remains a strict
+/// 1e-4 absolute/relative bound while allowing the same conformance tests to run across
+/// Metal, Vulkan, and Direct3D implementations.
+pub const GPU_F32_TRANSCENDENTAL_TOLERANCE: f64 = 1.0e-4;
+
+/// Cross-backend comparison budget for shader transcendental operations executed in f64.
+pub const GPU_F64_TRANSCENDENTAL_TOLERANCE: f64 = 1.0e-12;
+
+/// Return the absolute and relative comparison bounds for the provider's shader precision.
+pub fn gpu_transcendental_tolerances(
+    precision: runmat_accelerate_api::ProviderPrecision,
+) -> (f64, f64) {
+    let tolerance = match precision {
+        runmat_accelerate_api::ProviderPrecision::F32 => GPU_F32_TRANSCENDENTAL_TOLERANCE,
+        runmat_accelerate_api::ProviderPrecision::F64 => GPU_F64_TRANSCENDENTAL_TOLERANCE,
+    };
+    (tolerance, tolerance)
+}
+
 pub mod fs {
     use std::io;
     use std::path::Path;
@@ -401,5 +423,50 @@ pub fn gather(value: Value) -> Result<Tensor, crate::RuntimeError> {
                 .map_err(|e| build_runtime_error(format!("gather: {e}")).build())
         }
         other => Err(build_runtime_error(format!("gather: unsupported value {other:?}")).build()),
+    }
+}
+
+/// Compare floating-point results with independent absolute and relative error bounds.
+///
+/// GPU transcendental implementations can differ slightly across shader backends. The
+/// absolute bound protects comparisons near zero, while the relative bound scales for
+/// outputs whose magnitude is greater than one.
+pub fn floats_match(
+    actual: f64,
+    expected: f64,
+    absolute_tolerance: f64,
+    relative_tolerance: f64,
+) -> bool {
+    if actual == expected {
+        return true;
+    }
+    if !actual.is_finite() || !expected.is_finite() {
+        return false;
+    }
+    let scale = actual.abs().max(expected.abs());
+    (actual - expected).abs() <= absolute_tolerance.max(relative_tolerance * scale)
+}
+
+#[cfg(test)]
+mod float_comparison_tests {
+    use super::floats_match;
+
+    #[test]
+    fn floating_comparison_uses_absolute_tolerance_near_zero() {
+        assert!(floats_match(4.0e-7, 0.0, 1.0e-6, 1.0e-8));
+        assert!(!floats_match(2.0e-6, 0.0, 1.0e-6, 1.0e-8));
+    }
+
+    #[test]
+    fn floating_comparison_scales_relative_tolerance_with_magnitude() {
+        assert!(floats_match(100.004, 100.0, 1.0e-6, 5.0e-5));
+        assert!(!floats_match(100.006, 100.0, 1.0e-6, 5.0e-5));
+    }
+
+    #[test]
+    fn floating_comparison_requires_nonfinite_values_to_match_exactly() {
+        assert!(floats_match(f64::INFINITY, f64::INFINITY, 0.0, 0.0));
+        assert!(!floats_match(f64::INFINITY, f64::MAX, 1.0, 1.0));
+        assert!(!floats_match(f64::NAN, f64::NAN, 1.0, 1.0));
     }
 }

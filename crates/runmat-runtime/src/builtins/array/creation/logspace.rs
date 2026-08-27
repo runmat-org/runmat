@@ -1247,12 +1247,25 @@ pub(crate) mod tests {
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
                 assert_eq!(ct.shape, gt.shape);
-                let tol = match runmat_accelerate_api::provider().unwrap().precision() {
-                    runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
-                    runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
-                };
-                for (a, b) in ct.materialize_f64().iter().zip(gt.materialize_f64().iter()) {
-                    assert!((a - b).abs() < tol);
+                let (absolute_tolerance, relative_tolerance) =
+                    test_support::gpu_transcendental_tolerances(
+                        runmat_accelerate_api::provider().unwrap().precision(),
+                    );
+                for (index, (actual, expected)) in ct
+                    .materialize_f64()
+                    .iter()
+                    .zip(gt.materialize_f64().iter())
+                    .enumerate()
+                {
+                    assert!(
+                        test_support::floats_match(
+                            *actual,
+                            *expected,
+                            absolute_tolerance,
+                            relative_tolerance,
+                        ),
+                        "logspace mismatch at {index}: cpu={actual} gpu={expected}"
+                    );
                 }
             }
             _ => panic!("unexpected value variants"),
