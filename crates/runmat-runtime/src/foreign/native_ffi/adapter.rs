@@ -1303,6 +1303,7 @@ impl ForeignAdapter for NativeFfiAdapter {
             artifact_identities,
             supports_wasm: false,
             supports_host_bridge: false,
+            execution_stack: runmat_types::ExecutionStackRequirement::Process,
         }
     }
 

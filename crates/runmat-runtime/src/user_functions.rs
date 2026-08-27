@@ -520,34 +520,24 @@ pub async fn try_call_semantic_descriptor(
         return None;
     }
     let name = fallback_policy.resolution_name_for(&identity)?;
-    if matches!(
-        identity,
-        CallableIdentity::ExternalName(_) | CallableIdentity::Imported(_)
-    ) {
-        let context = crate::context::legacy::active()?;
-        if let Some(result) =
-            crate::foreign::try_invoke_java(context.clone(), &name, args.clone(), requested_outputs)
-                .await
-        {
-            return Some(result);
-        }
-    }
     if matches!(identity, CallableIdentity::ExternalName(_)) {
-        let context = crate::context::legacy::active()?;
-        if let Some(result) = crate::foreign::try_invoke_clibgen(
-            context.clone(),
-            &name,
-            args.clone(),
-            requested_outputs,
-        )
-        .await
-        {
-            return Some(result);
-        }
-        if let Some(result) =
-            crate::foreign::try_invoke_clib(context, &name, args.clone(), requested_outputs).await
-        {
-            return Some(result);
+        if let Some(context) = crate::context::legacy::active() {
+            if let Some(result) = crate::foreign::try_invoke_clibgen(
+                context.clone(),
+                &name,
+                args.clone(),
+                requested_outputs,
+            )
+            .await
+            {
+                return Some(result);
+            }
+            if let Some(result) =
+                crate::foreign::try_invoke_clib(context, &name, args.clone(), requested_outputs)
+                    .await
+            {
+                return Some(result);
+            }
         }
     }
     if matches!(identity, CallableIdentity::DynamicName(_))
@@ -584,13 +574,28 @@ pub async fn try_call_semantic_descriptor(
             | CallableIdentity::Imported(_)
             | CallableIdentity::ExternalName(_)
     ) {
-        return try_load_and_call_dynamic_function(
-            name,
-            args,
+        if let Some(result) = try_load_and_call_dynamic_function(
+            name.clone(),
+            args.clone(),
             requested_outputs,
             DynamicFunctionLoadPhase::AfterSemantic,
         )
-        .await;
+        .await
+        {
+            return Some(result);
+        }
+    }
+    if matches!(
+        identity,
+        CallableIdentity::ExternalName(_) | CallableIdentity::Imported(_)
+    ) {
+        if let Some(context) = crate::context::legacy::active() {
+            if let Some(result) =
+                crate::foreign::try_invoke_java(context, &name, args, requested_outputs).await
+            {
+                return Some(result);
+            }
+        }
     }
     None
 }

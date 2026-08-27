@@ -213,6 +213,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "ode15s",
+    execution_stack = "process",
     category = "math/ode",
     summary = "Solve stiff ODE systems with adaptive implicit integration.",
     keywords = "ode15s,ode,stiff,implicit,adaptive step",

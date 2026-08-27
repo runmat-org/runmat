@@ -37,6 +37,7 @@ const PLACEMENT: BuiltinPlacementContract = BuiltinPlacementContract {
 const LINK: BuiltinLinkContract = BuiltinLinkContract {
     reachability: BuiltinReachability::Always,
     policy: BuiltinLinkPolicy::PortableRuntime,
+    execution_stack: runmat_types::ExecutionStackRequirement::Any,
     artifact_dependencies: &[],
 };
 const EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
@@ -330,6 +331,13 @@ fn feval_contract_preserves_known_callable_outputs_and_dynamic_effects() {
         CallRequest, CallableFact, EffectKind, LiteralContext, OutputSelection,
         RequestedOutputCount, ValueFact, ValueKindFact,
     };
+    assert_eq!(
+        builtin_catalog_entry_by_name("feval")
+            .expect("feval entry")
+            .link
+            .execution_stack,
+        runmat_types::ExecutionStackRequirement::Process
+    );
     let first_output = ValueFact::scalar(ValueKindFact::Logical);
     let second_output = ValueFact::scalar(ValueKindFact::String);
     let callable = ValueFact::scalar(ValueKindFact::Callable(CallableFact {

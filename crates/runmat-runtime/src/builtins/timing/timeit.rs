@@ -239,6 +239,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "timeit",
+    execution_stack = "process",
     category = "timing",
     summary = "Measure runtime of zero-argument function handles using repeated execution.",
     keywords = "timeit,benchmark,timing,performance,gpu",

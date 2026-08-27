@@ -398,6 +398,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "fsolve",
+    execution_stack = "process",
     category = "math/optim",
     summary = "Solve nonlinear equation systems.",
     keywords = "fsolve,nonlinear solve,root finding,levenberg-marquardt,jacobian",

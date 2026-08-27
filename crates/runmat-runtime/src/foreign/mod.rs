@@ -227,31 +227,64 @@ pub async fn try_invoke_java(
         return None;
     }
     let Some(service) = context.service_ports().foreign().cloned() else {
-        return Some(Err(foreign_error(
-            ForeignErrorKind::UnsupportedOnWasm,
-            format!("Java call `{name}` is unavailable on this host"),
-        )));
+        return (name.starts_with("java.") || name.starts_with("javax.")).then(|| {
+            Err(foreign_error(
+                ForeignErrorKind::UnsupportedOnWasm,
+                format!("Java call `{name}` is unavailable on this host"),
+            ))
+        });
     };
-    let mut call_arguments = Vec::with_capacity(arguments.len() + 1);
-    call_arguments.push(runmat_value::Value::String(name.into()));
-    call_arguments.extend(arguments);
-    Some(
-        context
+    if !name.starts_with("java.") && !name.starts_with("javax.") {
+        let configured = context
             .scope(service.invoke(
                 context.clone(),
                 crate::context::ForeignCall {
                     adapter: "java".into(),
-                    symbol: "invoke_qualified".into(),
-                    arguments: call_arguments,
-                    requested_outputs,
+                    symbol: "has_classpath".into(),
+                    arguments: Vec::new(),
+                    requested_outputs: 1,
                 },
             ))
-            .await,
-    )
+            .await;
+        if !matches!(configured, Ok(runmat_value::Value::Bool(true))) {
+            return None;
+        }
+    }
+    let mut call_arguments = Vec::with_capacity(arguments.len() + 1);
+    call_arguments.push(runmat_value::Value::String(name.into()));
+    call_arguments.extend(arguments);
+    let result = context
+        .scope(service.invoke(
+            context.clone(),
+            crate::context::ForeignCall {
+                adapter: "java".into(),
+                symbol: "invoke_qualified".into(),
+                arguments: call_arguments,
+                requested_outputs,
+            },
+        ))
+        .await;
+    if result
+        .as_ref()
+        .is_err_and(|error| error.identifier() == Some("RunMat:Java:ClassNotFound"))
+    {
+        None
+    } else {
+        Some(result)
+    }
 }
 
 fn is_java_qualified_candidate(name: &str) -> bool {
-    name.contains('.') && !name.starts_with("clib.") && !name.starts_with("clibgen.")
+    if !name.contains('.') || name.starts_with("clib.") || name.starts_with("clibgen.") {
+        return false;
+    }
+    if name
+        .rsplit_once('.')
+        .is_some_and(|(class_name, _)| crate::class_registry::get_class(class_name).is_some())
+    {
+        return false;
+    }
+    true
 }
 
 #[cfg(test)]
@@ -261,7 +294,9 @@ mod java_qualified_tests {
     #[test]
     fn accepts_custom_java_packages_without_claiming_native_namespaces() {
         assert!(is_java_qualified_candidate("fixture.dynamic.Value.create"));
+        assert!(is_java_qualified_candidate("fixture.dynamic.value.create"));
         assert!(is_java_qualified_candidate("java.util.ArrayList"));
+        assert!(is_java_qualified_candidate("unresolvedObject.verifyEqual"));
         assert!(!is_java_qualified_candidate("plain_name"));
         assert!(!is_java_qualified_candidate("clib.fixture.call"));
         assert!(!is_java_qualified_candidate("clibgen.buildInterface"));

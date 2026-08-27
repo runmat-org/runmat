@@ -427,6 +427,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "fzero",
+    execution_stack = "process",
     category = "math/optim",
     summary = "Find scalar function zeros with bracketed root-finding.",
     keywords = "fzero,root finding,zero,brent,optimization",

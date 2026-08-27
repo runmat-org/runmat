@@ -1553,6 +1553,7 @@ pub const SPLITAPPLY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 
 
 #[runtime_builtin(
     name = "splitapply",
+    execution_stack = "process",
     category = "array/grouping",
     summary = "Split data into groups and apply a function.",
     keywords = "splitapply,groups,apply,function,table",
@@ -1629,6 +1630,7 @@ pub(crate) async fn splitapply_builtin(
 
 #[runtime_builtin(
     name = "accumarray",
+    execution_stack = "process",
     category = "array/grouping",
     summary = "Accumulate values into an array by subscript groups.",
     keywords = "accumarray,accumulate,groups,sum,sparse",

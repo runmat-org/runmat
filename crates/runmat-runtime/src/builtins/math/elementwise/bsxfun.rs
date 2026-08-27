@@ -183,6 +183,7 @@ pub const BSXFUN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 
 #[runtime_builtin(
     name = "bsxfun",
+    execution_stack = "process",
     category = "math/elementwise",
     summary = "Apply a binary function with singleton expansion.",
     keywords = "bsxfun,binary singleton expansion,implicit expansion,function handle",

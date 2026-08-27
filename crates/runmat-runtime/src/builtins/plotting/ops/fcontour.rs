@@ -372,6 +372,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "fcontour",
+    execution_stack = "process",
     category = "plotting",
     summary = "Plot contour lines of a function over a 2-D domain.",
     keywords = "fcontour,function contour,contour,plotting",

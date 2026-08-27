@@ -95,6 +95,7 @@ pub const CLEARVARS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     keywords = "clearvars,workspace,variables,except",
     sink = true,
     suppress_auto_output = true,
+    execution_stack = "process",
     type_resolver(crate::builtins::introspection::type_resolvers::clearvars_type),
     descriptor(crate::builtins::introspection::clearvars::CLEARVARS_DESCRIPTOR),
     builtin_path = "crate::builtins::introspection::clearvars"

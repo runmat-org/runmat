@@ -451,6 +451,7 @@ pub(crate) async fn restore_value_from_mat_load(value: Value) -> crate::BuiltinR
 
 #[runtime_builtin(
     name = "saveobj",
+    execution_stack = "process",
     category = "introspection",
     summary = "Return the serialized representation for an object.",
     keywords = "saveobj,loadobj,object,serialization,mat",
@@ -477,6 +478,7 @@ pub async fn saveobj_builtin(value: Value) -> crate::BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "loadobj",
+    execution_stack = "process",
     category = "introspection",
     summary = "Restore an object from a serialized representation.",
     keywords = "loadobj,saveobj,object,serialization,mat",

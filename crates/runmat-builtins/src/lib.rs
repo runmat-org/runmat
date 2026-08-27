@@ -7,6 +7,7 @@ pub mod catalog;
 pub use catalog::*;
 mod catalog_fingerprint;
 pub use catalog_fingerprint::{builtin_catalog_fingerprint, BUILTIN_CATALOG_SCHEMA};
+pub use runmat_types::ExecutionStackRequirement;
 pub use runmat_types::{LiteralContext as ResolveContext, LiteralValue};
 use runmat_value::*;
 use serde::{Deserialize, Serialize};
@@ -546,6 +547,7 @@ pub struct BuiltinFunction {
     pub accel_tags: &'static [AccelTag],
     pub is_sink: bool,
     pub suppress_auto_output: bool,
+    pub execution_stack: ExecutionStackRequirement,
     pub descriptor: Option<&'static BuiltinDescriptor>,
     pub extensions: &'static [BuiltinExtensionDescriptor],
     pub integer_capabilities: &'static [BuiltinIntegerCapabilityDescriptor],
@@ -581,11 +583,17 @@ impl BuiltinFunction {
             accel_tags,
             is_sink,
             suppress_auto_output,
+            execution_stack: ExecutionStackRequirement::Any,
             descriptor: None,
             extensions: &[],
             integer_capabilities: &[],
             integer_audit: None,
         }
+    }
+
+    pub fn with_execution_stack(mut self, execution_stack: ExecutionStackRequirement) -> Self {
+        self.execution_stack = execution_stack;
+        self
     }
 
     pub fn with_descriptor(mut self, descriptor: &'static BuiltinDescriptor) -> Self {
@@ -705,6 +713,17 @@ pub fn builtin_function_by_name(name: &str) -> Option<&'static BuiltinFunction> 
 
 pub fn builtin_name_is_known(name: &str) -> bool {
     builtin_catalog_entry_by_name(name).is_some() || builtin_function_by_name(name).is_some()
+}
+
+/// Returns the physical-stack contract for a builtin call.
+///
+/// Canonical catalog declarations take precedence. Runtime registration remains
+/// the authority for builtins that have not yet migrated into the catalog.
+pub fn builtin_execution_stack_requirement(name: &str) -> runmat_types::ExecutionStackRequirement {
+    builtin_catalog_entry_by_name(name)
+        .map(|entry| entry.link.execution_stack)
+        .or_else(|| builtin_function_by_name(name).map(|function| function.execution_stack))
+        .unwrap_or(ExecutionStackRequirement::Any)
 }
 
 #[cfg(target_arch = "wasm32")]

@@ -172,6 +172,7 @@ pub(crate) async fn on_cleanup_builtin(callback: Value) -> BuiltinResult<Value> 
 
 #[runtime_builtin(
     name = "__runmat_oncleanup_delete",
+    execution_stack = "process",
     category = "introspection",
     summary = "Execute an onCleanup object callback once.",
     keywords = "onCleanup,delete,cleanup",

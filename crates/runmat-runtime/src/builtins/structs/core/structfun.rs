@@ -282,6 +282,7 @@ pub const STRUCTFUN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 
 #[runtime_builtin(
     name = "structfun",
+    execution_stack = "process",
     category = "structs/core",
     summary = "Apply a function to each field of a scalar struct.",
     keywords = "structfun,struct,functional,uniformoutput,errorhandler",

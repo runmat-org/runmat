@@ -552,13 +552,13 @@ pub async fn call_method_or_member_index_with_outputs(
             ),
         )
     })?;
-    call_method_or_member_index_named_with_outputs(
+    Box::pin(call_method_or_member_index_named_with_outputs(
         base,
         name,
         args,
         requested_outputs,
         caller_function_name,
-    )
+    ))
     .await
 }
 
@@ -572,26 +572,26 @@ pub async fn call_method_or_member_index_named_with_outputs(
     match base {
         Value::Object(obj) => {
             let class_name = obj.class_name.clone();
-            call_member_index_on_object_like(
+            Box::pin(call_member_index_on_object_like(
                 Value::Object(obj),
                 &class_name,
                 name,
                 args,
                 requested_outputs,
                 caller_function_name,
-            )
+            ))
             .await
         }
         Value::HandleObject(handle) => {
             let class_name = handle.class_name.clone();
-            call_member_index_on_object_like(
+            Box::pin(call_member_index_on_object_like(
                 Value::HandleObject(handle),
                 &class_name,
                 name,
                 args,
                 requested_outputs,
                 caller_function_name,
-            )
+            ))
             .await
         }
         Value::ClassRef(cls) => {

@@ -51,6 +51,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     let mut binding_variant_lit: Option<LitStr> = None;
     let mut sink_flag = false;
     let mut suppress_auto_output_flag = false;
+    let mut process_execution_stack = false;
     for arg in args {
         match arg {
             NestedMeta::Meta(Meta::NameValue(MetaNameValue { path, lit, .. })) => {
@@ -88,6 +89,18 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                 } else if path.is_ident("suppress_auto_output") {
                     if let Lit::Bool(lb) = lit {
                         suppress_auto_output_flag = lb.value;
+                    }
+                } else if path.is_ident("execution_stack") {
+                    if let Lit::Str(value) = lit {
+                        match value.value().as_str() {
+                            "process" => process_execution_stack = true,
+                            "any" => process_execution_stack = false,
+                            other => panic!(
+                                "execution_stack must be \"any\" or \"process\", got {other:?}"
+                            ),
+                        }
+                    } else {
+                        panic!("execution_stack must be a string literal");
                     }
                 } else if path.is_ident("builtin_path") {
                     if let Lit::Str(ls) = lit {
@@ -391,6 +404,11 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     };
     let sink_bool = sink_flag;
     let suppress_auto_output_bool = suppress_auto_output_flag;
+    let execution_stack_expr = if process_execution_stack {
+        quote! { runmat_builtins::ExecutionStackRequirement::Process }
+    } else {
+        quote! { runmat_builtins::ExecutionStackRequirement::Any }
+    };
     let descriptor_expr = if let Some(path) = descriptor_path.as_ref() {
         quote! { Some(&#path) }
     } else {
@@ -427,6 +445,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
             #sink_bool,
             #suppress_auto_output_bool,
         )
+        .with_execution_stack(#execution_stack_expr)
         .with_descriptor_option(#descriptor_expr)
         .with_extensions(#extensions_expr)
         .with_integer_capabilities(#integer_capabilities_expr)
@@ -450,7 +469,8 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
             || integer_capabilities_path.is_some()
             || integer_audit_path.is_some()
             || sink_flag
-            || suppress_auto_output_flag)
+            || suppress_auto_output_flag
+            || process_execution_stack)
     {
         panic!(
             "catalog-backed runtime bindings may declare only name, binding_variant, and builtin_path"

@@ -164,6 +164,7 @@ pub const GATHER_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     link: BuiltinLinkContract {
         reachability: BuiltinReachability::Always,
         policy: BuiltinLinkPolicy::PortableRuntime,
+        execution_stack: runmat_types::ExecutionStackRequirement::Any,
         artifact_dependencies: &[],
     },
     bindings: &BINDINGS,

@@ -379,6 +379,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "fsurf",
+    execution_stack = "process",
     category = "plotting",
     summary = "Plot a function surface over a 2-D domain.",
     keywords = "fsurf,function surface,parametric surface,plotting,3d",

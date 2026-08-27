@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use crate::{BuiltinEffects, BuiltinSemantics};
 
-pub const BUILTIN_CATALOG_SCHEMA_VERSION: u32 = 1;
+pub const BUILTIN_CATALOG_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct BuiltinCatalogIdentity {

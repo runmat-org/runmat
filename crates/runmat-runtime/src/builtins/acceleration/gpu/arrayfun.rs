@@ -469,6 +469,7 @@ fn format_handler_error(err: &RuntimeError) -> String {
 
 #[runtime_builtin(
     name = "arrayfun",
+    execution_stack = "process",
     category = "acceleration/gpu",
     summary = "Apply a function element-wise across array inputs.",
     keywords = "arrayfun,gpu,array,map,functional",

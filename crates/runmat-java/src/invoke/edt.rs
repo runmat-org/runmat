@@ -236,6 +236,10 @@ pub(super) fn dispatch(
 fn edt_task_class<'local>(
     environment: &mut JNIEnv<'local>,
 ) -> Result<JClass<'local>, JavaInvocationError> {
+    static CLASS_INSTALL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _installation = CLASS_INSTALL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let class = match environment.find_class(EDT_TASK_CLASS) {
         Ok(class) => class,
         Err(_) => {

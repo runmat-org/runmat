@@ -119,6 +119,15 @@ impl ForeignRuntime {
 }
 
 impl RuntimeForeignService for ForeignRuntime {
+    fn execution_stack_requirement(&self) -> runmat_types::ExecutionStackRequirement {
+        self.adapters
+            .borrow()
+            .values()
+            .map(|adapter| adapter.descriptor().execution_stack)
+            .max()
+            .unwrap_or(runmat_types::ExecutionStackRequirement::Any)
+    }
+
     fn invoke(&self, context: RuntimeContext, call: ForeignCall) -> ForeignAdapterFuture {
         let adapter = self.adapters.borrow().get(&call.adapter).cloned();
         let telemetry = Rc::clone(&self.telemetry);
@@ -139,6 +148,17 @@ impl RuntimeForeignService for ForeignRuntime {
                 ));
             }
             let descriptor = adapter.descriptor();
+            if descriptor.execution_stack == runmat_types::ExecutionStackRequirement::Process
+                && context.execution_stack() != crate::context::RuntimeExecutionStack::Process
+            {
+                return Err(foreign_error(
+                    ForeignErrorKind::ExecutionStackViolation,
+                    format!(
+                        "foreign adapter {} requires the process thread stack",
+                        descriptor.adapter
+                    ),
+                ));
+            }
             let isolated = adapter.is_isolated();
             let operation = call.symbol.clone();
             let result = context.scope(adapter.invoke(context.clone(), call)).await;
@@ -159,5 +179,62 @@ impl RuntimeForeignService for ForeignRuntime {
             });
             result
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::context::{RuntimeExecutionStack, RuntimeServicePorts};
+    use crate::execution::RuntimeExecutionService;
+    use runmat_types::{CapabilityRequirement, ExecutionStackRequirement, ForeignCapability};
+    use std::collections::BTreeSet;
+
+    struct ProcessStackAdapter;
+
+    impl ForeignAdapter for ProcessStackAdapter {
+        fn descriptor(&self) -> ForeignAdapterDescriptor {
+            ForeignAdapterDescriptor {
+                adapter: "process-stack-test".into(),
+                version: 1,
+                capabilities: BTreeSet::from([CapabilityRequirement::ForeignRuntime]),
+                foreign_capabilities: BTreeSet::from([ForeignCapability::Invoke]),
+                artifact_identities: BTreeSet::new(),
+                supports_wasm: false,
+                supports_host_bridge: false,
+                execution_stack: ExecutionStackRequirement::Process,
+            }
+        }
+
+        fn invoke(&self, _context: RuntimeContext, _call: ForeignCall) -> ForeignAdapterFuture {
+            Box::pin(async { Ok(Value::Num(1.0)) })
+        }
+    }
+
+    #[test]
+    fn process_stack_adapters_reject_segmented_stack_entry() {
+        let foreign = Rc::new(ForeignRuntime::new(ForeignPlatform::Native));
+        foreign
+            .register_adapter(Rc::new(ProcessStackAdapter))
+            .expect("register adapter");
+        let services = RuntimeServicePorts::default().with_foreign(foreign.clone());
+        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
+            .with_service_ports(services);
+        let _stack = runtime.enter_execution_stack(RuntimeExecutionStack::Segmented);
+        let error = futures::executor::block_on(foreign.invoke(
+            runtime.clone(),
+            ForeignCall {
+                adapter: "process-stack-test".into(),
+                symbol: "invoke".into(),
+                arguments: Vec::new(),
+                requested_outputs: 1,
+            },
+        ))
+        .expect_err("segmented stack must be rejected");
+
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:Foreign:ExecutionStackViolation")
+        );
     }
 }

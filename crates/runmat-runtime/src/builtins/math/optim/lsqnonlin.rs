@@ -352,6 +352,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "lsqnonlin",
+    execution_stack = "process",
     category = "math/optim",
     summary = "Solve nonlinear least-squares residual problems.",
     keywords = "lsqnonlin,least squares,optimization,levenberg-marquardt,bounds,residual,jacobian",

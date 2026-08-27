@@ -355,6 +355,7 @@ fn cellfun_error_with_message(
 
 #[runtime_builtin(
     name = "cellfun",
+    execution_stack = "process",
     category = "cells/core",
     summary = "Apply a function to each cell element.",
     keywords = "cellfun,cell,array,functional",

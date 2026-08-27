@@ -118,6 +118,10 @@ pub struct ForeignCall {
 }
 
 pub trait RuntimeForeignService {
+    fn execution_stack_requirement(&self) -> runmat_types::ExecutionStackRequirement {
+        runmat_types::ExecutionStackRequirement::Any
+    }
+
     fn invoke(
         &self,
         context: super::RuntimeContext,

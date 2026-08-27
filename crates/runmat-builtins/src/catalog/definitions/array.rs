@@ -228,6 +228,7 @@ pub const FULL_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     link: BuiltinLinkContract {
         reachability: BuiltinReachability::Always,
         policy: BuiltinLinkPolicy::PortableRuntime,
+        execution_stack: runmat_types::ExecutionStackRequirement::Any,
         artifact_dependencies: &[],
     },
     bindings: &FULL_BINDINGS,
@@ -426,6 +427,7 @@ pub const ZEROS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     link: BuiltinLinkContract {
         reachability: BuiltinReachability::Always,
         policy: BuiltinLinkPolicy::PortableRuntime,
+        execution_stack: runmat_types::ExecutionStackRequirement::Any,
         artifact_dependencies: &[],
     },
     bindings: &ZEROS_BINDINGS,

@@ -107,6 +107,12 @@ impl MexRuntimeSession {
                 Err(error) => Err(wire_runtime_error(error)),
             });
         }
+        if runtime.execution_stack() != crate::context::RuntimeExecutionStack::Process {
+            return Some(Err(runtime_error(
+                "Foreign:ExecutionStackViolation",
+                "in-process MEX invocation requires the process thread stack",
+            )));
+        }
         let module = match self.module(&canonical) {
             Ok(module) => module,
             Err(error) => return Some(Err(error)),
