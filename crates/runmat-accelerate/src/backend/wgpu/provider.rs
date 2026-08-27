@@ -14,18 +14,17 @@ mod test_session {
     use std::ops::Deref;
     use std::sync::{LazyLock, Mutex, MutexGuard};
 
-    use super::{register_wgpu_provider, WgpuProvider, WgpuProviderOptions};
+    use super::{WgpuProvider, WgpuProviderOptions};
 
     static TEST_PROVIDER_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
-    /// Exclusive access to the process-wide test provider.
+    /// Exclusive access to a scoped test provider.
     ///
     /// Production keeps the WGPU provider alive for the runtime session. Unit
-    /// tests instead execute many independent workloads through that singleton;
-    /// this scope prevents those workloads from overlapping and releases every
-    /// provider-owned test buffer when each workload ends.
+    /// tests need independent device and cache lifecycles so one workload cannot
+    /// exhaust or contaminate the next one, particularly on software adapters.
     pub(crate) struct WgpuTestSession {
-        provider: &'static WgpuProvider,
+        provider: WgpuProvider,
         _guard: MutexGuard<'static, ()>,
     }
 
@@ -33,20 +32,19 @@ mod test_session {
         type Target = WgpuProvider;
 
         fn deref(&self) -> &Self::Target {
-            self.provider
+            &self.provider
         }
     }
 
     impl WgpuTestSession {
-        pub(crate) fn provider(&self) -> &'static WgpuProvider {
-            self.provider
+        pub(crate) fn provider(&self) -> &WgpuProvider {
+            &self.provider
         }
     }
 
     impl Drop for WgpuTestSession {
         fn drop(&mut self) {
-            self.provider.clear_test_state();
-            runmat_accelerate_api::set_thread_provider(None);
+            self.provider.device_ref().poll(wgpu::Maintain::Wait);
         }
     }
 
@@ -56,8 +54,7 @@ mod test_session {
         let guard = TEST_PROVIDER_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let provider = register_wgpu_provider(options)?;
-        provider.clear_test_state();
+        let provider = WgpuProvider::new(options)?;
         Ok(WgpuTestSession {
             provider,
             _guard: guard,
@@ -75,7 +72,7 @@ mod test_session_tests {
     use super::{register_test_wgpu_provider, WgpuProviderOptions};
 
     #[test]
-    fn test_sessions_release_provider_owned_buffers() {
+    fn test_sessions_use_fresh_provider_state() {
         let Ok(first) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
@@ -85,7 +82,7 @@ mod test_session_tests {
                 shape: &[2, 1],
             })
             .expect("upload test buffer");
-        assert!(first.test_buffer_count() > 0);
+        assert_eq!(first.test_buffer_count(), 1);
         drop(handle);
         drop(first);
 

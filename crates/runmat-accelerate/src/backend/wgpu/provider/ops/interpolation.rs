@@ -177,7 +177,7 @@ mod tests {
 
     fn with_wgpu_provider<F, R>(f: F) -> Option<R>
     where
-        F: FnOnce(&'static dyn AccelProvider) -> R,
+        F: FnOnce(&dyn AccelProvider) -> R,
     {
         let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return None;

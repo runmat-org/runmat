@@ -49,9 +49,21 @@ pub(super) fn atomic_write(path: &Path, bytes: &[u8]) -> NativeExecutionResult<(
     file.write_all(bytes).map_err(io_error)?;
     file.sync_all().map_err(io_error)?;
     replace_file(&temporary, path)?;
+    sync_parent_directory(parent)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn sync_parent_directory(parent: &Path) -> NativeExecutionResult<()> {
     File::open(parent)
         .and_then(|directory| directory.sync_all())
-        .map_err(io_error)?;
+        .map_err(io_error)
+}
+
+#[cfg(not(unix))]
+fn sync_parent_directory(_parent: &Path) -> NativeExecutionResult<()> {
+    // Windows replacement uses MOVEFILE_WRITE_THROUGH below. Opening a
+    // directory through std::fs::File is rejected with ERROR_ACCESS_DENIED.
     Ok(())
 }
 

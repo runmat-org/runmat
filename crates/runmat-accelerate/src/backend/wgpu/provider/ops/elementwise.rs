@@ -2168,7 +2168,7 @@ mod tests {
     };
 
     async fn complex_pair(
-        provider: &'static dyn AccelProvider,
+        provider: &dyn AccelProvider,
         real: &[f64],
         imag: &[f64],
         shape: &[usize],
