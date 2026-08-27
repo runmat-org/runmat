@@ -148,7 +148,7 @@ pub(crate) use test_session::{register_test_wgpu_provider, WgpuTestSession};
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod test_session_tests {
-    use runmat_accelerate_api::AccelProvider as _;
+    use runmat_accelerate_api::{AccelProvider as _, HostTensorView};
 
     use super::{register_test_wgpu_provider, WgpuProviderOptions};
 
@@ -183,5 +183,42 @@ mod test_session_tests {
             "logical sessions should reuse released physical storage"
         );
         drop(second_handle);
+    }
+
+    #[test]
+    fn test_sessions_reuse_upload_allocations() {
+        // Keep this key independent from other tests so the assertion verifies
+        // the upload lifecycle itself rather than incidental cache contents.
+        const TEST_LEN: usize = 7_921;
+        let data = vec![1.0; TEST_LEN];
+        let shape = [TEST_LEN, 1];
+        let Ok(first) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
+            return;
+        };
+        let first_handle = first
+            .upload(&HostTensorView {
+                data: &data,
+                shape: &shape,
+            })
+            .expect("upload first session tensor");
+        let first_buffer_ptr = first
+            .test_buffer_ptr(&first_handle)
+            .expect("first session owns uploaded buffer");
+        drop(first_handle);
+        drop(first);
+
+        let second = register_test_wgpu_provider(WgpuProviderOptions::default())
+            .expect("reopen test provider session");
+        let second_handle = second
+            .upload(&HostTensorView {
+                data: &data,
+                shape: &shape,
+            })
+            .expect("upload second session tensor");
+        assert_eq!(
+            second.test_buffer_ptr(&second_handle),
+            Some(first_buffer_ptr),
+            "uploads should consume storage returned by the previous logical session"
+        );
     }
 }

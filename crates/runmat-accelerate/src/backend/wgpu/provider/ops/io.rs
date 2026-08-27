@@ -277,38 +277,21 @@ impl WgpuProvider {
                 self.adapter_limits.max_buffer_size,
             ));
         }
-        let buffer =
-            if len == 0 {
-                self.create_storage_buffer(0, "runmat-upload-empty")
-            } else {
-                match self.precision {
-                    NumericPrecision::F64 => {
-                        let contents = cast_slice(host.data);
-                        Arc::new(self.device.create_buffer_init(
-                            &wgpu::util::BufferInitDescriptor {
-                                label: Some("runmat-upload-buffer"),
-                                contents,
-                                usage: wgpu::BufferUsages::STORAGE
-                                    | wgpu::BufferUsages::COPY_DST
-                                    | wgpu::BufferUsages::COPY_SRC,
-                            },
-                        ))
-                    }
-                    NumericPrecision::F32 => {
-                        let data_f32: Vec<f32> = host.data.iter().map(|v| *v as f32).collect();
-                        let contents = cast_slice(&data_f32);
-                        Arc::new(self.device.create_buffer_init(
-                            &wgpu::util::BufferInitDescriptor {
-                                label: Some("runmat-upload-buffer"),
-                                contents,
-                                usage: wgpu::BufferUsages::STORAGE
-                                    | wgpu::BufferUsages::COPY_DST
-                                    | wgpu::BufferUsages::COPY_SRC,
-                            },
-                        ))
-                    }
+        let buffer = if len == 0 {
+            self.create_storage_buffer(0, "runmat-upload-empty")
+        } else {
+            let buffer = self.create_storage_buffer_bytes(bytes, "runmat-upload-buffer");
+            match self.precision {
+                NumericPrecision::F64 => {
+                    self.queue.write_buffer(&buffer, 0, cast_slice(host.data));
                 }
-            };
+                NumericPrecision::F32 => {
+                    let data_f32: Vec<f32> = host.data.iter().map(|v| *v as f32).collect();
+                    self.queue.write_buffer(&buffer, 0, cast_slice(&data_f32));
+                }
+            }
+            buffer
+        };
         self.telemetry.record_upload_bytes(bytes);
         Ok(self.register_existing_buffer(buffer, shape, len))
     }
@@ -376,16 +359,9 @@ impl WgpuProvider {
                         .expect("integer numeric upload words"),
                 ),
             };
-            Arc::new(
-                self.device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("runmat-numeric-upload-buffer"),
-                        contents,
-                        usage: wgpu::BufferUsages::STORAGE
-                            | wgpu::BufferUsages::COPY_DST
-                            | wgpu::BufferUsages::COPY_SRC,
-                    }),
-            )
+            let buffer = self.create_storage_buffer_bytes(bytes, "runmat-numeric-upload-buffer");
+            self.queue.write_buffer(&buffer, 0, contents);
+            buffer
         };
         self.telemetry.record_upload_bytes(bytes);
         Ok(self.register_numeric_buffer(

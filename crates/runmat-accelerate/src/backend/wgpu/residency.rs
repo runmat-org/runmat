@@ -95,6 +95,23 @@ impl BufferResidency {
         )
     }
 
+    pub fn acquire_storage_bytes(
+        &self,
+        device: &wgpu::Device,
+        size_bytes: u64,
+        label: &str,
+    ) -> (Arc<wgpu::Buffer>, bool) {
+        self.acquire_bytes(
+            device,
+            BufferUsageClass::Generic,
+            size_bytes.max(1),
+            wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
+            label,
+        )
+    }
+
     fn acquire_bytes(
         &self,
         device: &wgpu::Device,

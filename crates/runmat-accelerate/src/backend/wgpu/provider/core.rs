@@ -330,6 +330,16 @@ impl WgpuProvider {
             .0
     }
 
+    pub(super) fn create_storage_buffer_bytes(
+        &self,
+        size_bytes: u64,
+        label: &str,
+    ) -> Arc<wgpu::Buffer> {
+        self.buffer_residency
+            .acquire_storage_bytes(self.device_ref(), size_bytes, label)
+            .0
+    }
+
     pub(super) fn create_readback_buffer(&self, size_bytes: u64, label: &str) -> Arc<wgpu::Buffer> {
         self.buffer_residency
             .acquire_readback(self.device_ref(), size_bytes, label)
