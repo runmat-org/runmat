@@ -243,7 +243,7 @@ impl WgpuProvider {
         &self,
         tuning: &ImageNormalizeTuning,
     ) -> Result<Arc<wgpu::ComputePipeline>> {
-        if let Ok(cache) = self.image_norm_pipeline_cache.lock() {
+        if let Ok(cache) = self.device_caches.image_norm_pipelines.lock() {
             if let Some(existing) = cache.get(tuning) {
                 return Ok(existing.clone());
             }
@@ -280,7 +280,7 @@ impl WgpuProvider {
             &module,
         );
         let arc = Arc::new(pipeline);
-        if let Ok(mut cache) = self.image_norm_pipeline_cache.lock() {
+        if let Ok(mut cache) = self.device_caches.image_norm_pipelines.lock() {
             cache.insert(*tuning, arc.clone());
         }
         Ok(arc)
@@ -315,17 +315,17 @@ impl WgpuProvider {
     where
         F: FnOnce(&wgpu::Device) -> wgpu::BindGroupLayout,
     {
-        if let Ok(cache) = self.bind_group_layout_cache.lock() {
+        if let Ok(cache) = self.device_caches.bind_group_layouts.lock() {
             if let Some(layout) = cache.get(key).cloned() {
                 return layout;
             }
         }
         let layout = Arc::new(build(self.device_ref()));
         let ptr = layout.as_ref() as *const wgpu::BindGroupLayout as usize;
-        if let Ok(mut tags) = self.bind_group_layout_tags.lock() {
+        if let Ok(mut tags) = self.device_caches.bind_group_layout_tags.lock() {
             tags.entry(ptr).or_insert_with(|| key.to_string());
         }
-        if let Ok(mut cache) = self.bind_group_layout_cache.lock() {
+        if let Ok(mut cache) = self.device_caches.bind_group_layouts.lock() {
             cache.insert(key.to_string(), layout.clone());
         }
         layout
@@ -335,7 +335,7 @@ impl WgpuProvider {
         &self,
         tag: &str,
     ) -> Option<Arc<wgpu::BindGroupLayout>> {
-        if let Ok(cache) = self.bind_group_layout_cache.lock() {
+        if let Ok(cache) = self.device_caches.bind_group_layouts.lock() {
             if let Some(layout) = cache.get(tag).cloned() {
                 return Some(layout);
             }
@@ -344,10 +344,10 @@ impl WgpuProvider {
             crate::backend::wgpu::bindings::build_bgl_for_layout_tag(self.device_ref(), tag)?;
         let layout = Arc::new(layout);
         let ptr = layout.as_ref() as *const wgpu::BindGroupLayout as usize;
-        if let Ok(mut tags) = self.bind_group_layout_tags.lock() {
+        if let Ok(mut tags) = self.device_caches.bind_group_layout_tags.lock() {
             tags.entry(ptr).or_insert_with(|| tag.to_string());
         }
-        if let Ok(mut cache) = self.bind_group_layout_cache.lock() {
+        if let Ok(mut cache) = self.device_caches.bind_group_layouts.lock() {
             cache.insert(tag.to_string(), layout.clone());
         }
         Some(layout)
@@ -494,7 +494,8 @@ impl WgpuProvider {
         persist_workgroup_size: Option<u32>,
     ) -> Arc<wgpu::ComputePipeline> {
         if let Some(p) = self
-            .fused_pipeline_cache
+            .device_caches
+            .fused_pipelines
             .try_lock()
             .ok()
             .and_then(|guard| guard.get(&hash_key).cloned())
@@ -519,7 +520,7 @@ impl WgpuProvider {
                 entry_point: "main",
             },
         ));
-        if let Ok(mut guard) = self.fused_pipeline_cache.try_lock() {
+        if let Ok(mut guard) = self.device_caches.fused_pipelines.try_lock() {
             guard.insert(hash_key, p.clone());
         }
         p

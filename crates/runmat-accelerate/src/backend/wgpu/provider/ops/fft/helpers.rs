@@ -115,7 +115,7 @@ impl WgpuProvider {
         label: &str,
     ) -> Result<Arc<wgpu::Buffer>> {
         let mode = if half_only { 1u8 } else { 0u8 };
-        if let Ok(cache) = self.fft_twiddle_cache.lock() {
+        if let Ok(cache) = self.device_caches.fft_twiddles.lock() {
             if let Some(existing) = cache.get(&(len, mode)) {
                 return Ok(existing.clone());
             }
@@ -159,7 +159,7 @@ impl WgpuProvider {
             }
         }
 
-        if let Ok(mut cache) = self.fft_twiddle_cache.lock() {
+        if let Ok(mut cache) = self.device_caches.fft_twiddles.lock() {
             cache.insert((len, mode), twiddle.clone());
         }
         Ok(twiddle)

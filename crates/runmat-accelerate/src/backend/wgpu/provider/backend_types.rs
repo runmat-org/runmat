@@ -19,6 +19,32 @@ pub(super) type MomentsKey = (u64, Vec<usize>);
 pub(super) type MomentsValue = (GpuTensorHandle, GpuTensorHandle);
 pub(super) type MomentsCache = HashMap<MomentsKey, MomentsValue>;
 
+/// Immutable GPU resources cached for the lifetime of a physical device.
+///
+/// Logical runtime sessions share these resources because they are created for
+/// a specific `wgpu::Device`, while buffer-backed bind groups and handle tables
+/// remain session-local on `WgpuProvider`.
+pub(super) struct WgpuDeviceCaches {
+    pub(super) fused_pipelines: Mutex<HashMap<u64, Arc<wgpu::ComputePipeline>>>,
+    pub(super) bind_group_layouts: Mutex<HashMap<String, Arc<wgpu::BindGroupLayout>>>,
+    pub(super) bind_group_layout_tags: Mutex<HashMap<usize, String>>,
+    pub(super) image_norm_pipelines:
+        Mutex<HashMap<ImageNormalizeTuning, Arc<wgpu::ComputePipeline>>>,
+    pub(super) fft_twiddles: Mutex<HashMap<(usize, u8), Arc<wgpu::Buffer>>>,
+}
+
+impl Default for WgpuDeviceCaches {
+    fn default() -> Self {
+        Self {
+            fused_pipelines: Mutex::new(HashMap::new()),
+            bind_group_layouts: Mutex::new(HashMap::new()),
+            bind_group_layout_tags: Mutex::new(HashMap::new()),
+            image_norm_pipelines: Mutex::new(HashMap::new()),
+            fft_twiddles: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
 // Core WGPU provider state (device, caches, pipelines)
 pub struct WgpuProvider {
     pub(super) instance: Arc<wgpu::Instance>,
@@ -37,9 +63,7 @@ pub struct WgpuProvider {
     pub(super) cache_device_id: u32,
     pub(super) precision: NumericPrecision,
     pub(super) element_size: usize,
-    pub(super) fused_pipeline_cache: Mutex<HashMap<u64, Arc<wgpu::ComputePipeline>>>,
-    pub(super) bind_group_layout_cache: Mutex<HashMap<String, Arc<wgpu::BindGroupLayout>>>,
-    pub(super) bind_group_layout_tags: Mutex<HashMap<usize, String>>,
+    pub(super) device_caches: Arc<WgpuDeviceCaches>,
     pub(super) bind_group_cache: BindGroupCache,
     pub(super) kernel_resources: KernelResourceRegistry,
     pub(super) metrics: crate::backend::wgpu::metrics::WgpuMetrics,
@@ -50,8 +74,6 @@ pub struct WgpuProvider {
     pub(super) pipeline_cache_dir: Option<std::path::PathBuf>,
     pub(super) reduction_autotune: AutotuneController<ReductionAutotuneKey, ReductionTuning>,
     pub(super) image_norm_autotune: AutotuneController<ImageNormalizeKey, ImageNormalizeTuning>,
-    pub(super) image_norm_pipeline_cache:
-        Mutex<HashMap<ImageNormalizeTuning, Arc<wgpu::ComputePipeline>>>,
     #[allow(dead_code)]
     pub(super) autotune_base_dir: Option<PathBuf>,
     #[allow(dead_code)]
@@ -59,7 +81,6 @@ pub struct WgpuProvider {
     // Optimization caches
     pub(super) pow2_of: Mutex<HashMap<u64, u64>>, // squared_buffer_id -> base_buffer_id
     pub(super) moments_cache: Mutex<MomentsCache>, // (base_buffer_id, dims) -> (mean, ex2)
-    pub(super) fft_twiddle_cache: Mutex<HashMap<(usize, u8), Arc<wgpu::Buffer>>>, // (len, mode) -> twiddle buffer
 }
 
 #[cfg(target_arch = "wasm32")]

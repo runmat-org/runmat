@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use super::{
     canonical_vendor_name, install_device_error_handlers, parse_two_pass_mode,
-    ImageNormalizeTuning, NumericPrecision, ReductionTwoPassMode, WgpuProvider,
+    ImageNormalizeTuning, NumericPrecision, ReductionTwoPassMode, WgpuDeviceCaches, WgpuProvider,
     WgpuProviderOptions, WorkgroupConfig,
 };
 use crate::backend::wgpu::autotune::AutotuneController;
@@ -395,9 +395,7 @@ impl WgpuProvider {
             cache_device_id,
             precision,
             element_size,
-            fused_pipeline_cache: Mutex::new(HashMap::new()),
-            bind_group_layout_cache: Mutex::new(HashMap::new()),
-            bind_group_layout_tags: Mutex::new(HashMap::new()),
+            device_caches: Arc::new(WgpuDeviceCaches::default()),
             bind_group_cache: BindGroupCache::default(),
             kernel_resources: KernelResourceRegistry::default(),
             metrics: crate::backend::wgpu::metrics::WgpuMetrics::default(),
@@ -408,12 +406,10 @@ impl WgpuProvider {
             pipeline_cache_dir,
             reduction_autotune,
             image_norm_autotune,
-            image_norm_pipeline_cache: Mutex::new(HashMap::new()),
             autotune_base_dir,
             autotune_device_tag,
             pow2_of: Mutex::new(HashMap::new()),
             moments_cache: Mutex::new(HashMap::new()),
-            fft_twiddle_cache: Mutex::new(HashMap::new()),
         })
     }
 
@@ -460,9 +456,7 @@ impl WgpuProvider {
             cache_device_id: self.cache_device_id,
             precision: self.precision,
             element_size: self.element_size,
-            fused_pipeline_cache: Mutex::new(HashMap::new()),
-            bind_group_layout_cache: Mutex::new(HashMap::new()),
-            bind_group_layout_tags: Mutex::new(HashMap::new()),
+            device_caches: self.device_caches.clone(),
             bind_group_cache: BindGroupCache::default(),
             kernel_resources: KernelResourceRegistry::default(),
             metrics: crate::backend::wgpu::metrics::WgpuMetrics::default(),
@@ -473,12 +467,10 @@ impl WgpuProvider {
             pipeline_cache_dir: self.pipeline_cache_dir.clone(),
             reduction_autotune,
             image_norm_autotune,
-            image_norm_pipeline_cache: Mutex::new(HashMap::new()),
             autotune_base_dir: self.autotune_base_dir.clone(),
             autotune_device_tag: self.autotune_device_tag.clone(),
             pow2_of: Mutex::new(HashMap::new()),
             moments_cache: Mutex::new(HashMap::new()),
-            fft_twiddle_cache: Mutex::new(HashMap::new()),
         }
     }
 
