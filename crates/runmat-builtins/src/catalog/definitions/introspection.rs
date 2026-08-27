@@ -171,6 +171,7 @@ pub const FEVAL_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     link: BuiltinLinkContract {
         reachability: BuiltinReachability::Dynamic,
         policy: BuiltinLinkPolicy::PortableRuntime,
+        execution_stack: runmat_types::ExecutionStackRequirement::Process,
         artifact_dependencies: &[],
     },
     bindings: &FEVAL_BINDINGS,

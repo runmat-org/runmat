@@ -318,6 +318,7 @@ pub(crate) async fn memoize_builtin(function: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "MemoizedFunction.subsref",
+    execution_stack = "process",
     category = "introspection",
     summary = "Dispatch MemoizedFunction indexing and invocation.",
     keywords = "memoize,MemoizedFunction,subsref",

@@ -64,6 +64,7 @@ pub const CLEAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 
 #[runtime_builtin(
     name = "clear",
+    execution_stack = "process",
     category = "introspection",
     summary = "Clear variables from the active workspace.",
     keywords = "clear,workspace,variables",

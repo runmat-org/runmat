@@ -14,6 +14,7 @@ pub struct ForeignAdapterDescriptor {
     pub artifact_identities: BTreeSet<String>,
     pub supports_wasm: bool,
     pub supports_host_bridge: bool,
+    pub execution_stack: runmat_types::ExecutionStackRequirement,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -160,6 +161,7 @@ mod tests {
             artifact_identities: BTreeSet::from(["jre:21".into()]),
             supports_wasm: false,
             supports_host_bridge: true,
+            execution_stack: runmat_types::ExecutionStackRequirement::Any,
         }
     }
 

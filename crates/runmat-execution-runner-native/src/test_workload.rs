@@ -186,12 +186,14 @@ async fn execute_test_attempt(
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
+    use std::process::Command;
 
+    use runmat_execution::value::{InlineValue, ValuePayload};
     use runmat_execution::Digest;
     use runmat_execution_artifact::{
-        ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest,
-        ProgramExecutionResponse, ProgramTarget, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
-        PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        ExecutableForm, ExecutionBundleBuilder, LogicalObject, ObjectNamespace, ProgramArtifact,
+        ProgramBuildRecipe, ProgramExecutionRequest, ProgramExecutionResponse, ProgramTarget,
+        PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
     };
     use runmat_test::descriptor::TestSelector;
     use runmat_test::discovery::{FrozenTestRunSnapshot, SavedRunSource};
@@ -199,7 +201,7 @@ mod tests {
     use runmat_test_runner::worker::RunSubmission;
     use runmat_test_runner_execution::{decode_execution, TestAttemptWorkload};
 
-    use super::execute_host_program_request;
+    use super::{execute_host_program_request, execute_host_program_request_with_project};
 
     #[tokio::test]
     async fn host_executes_an_exact_test_workload_and_returns_canonical_result() {
@@ -305,5 +307,156 @@ mod tests {
             panic!("host executed a program before satisfying its native interface");
         };
         assert!(message.contains("missing-fixture"), "{message}");
+    }
+
+    #[tokio::test]
+    async fn host_executes_a_packaged_java_artifact_from_the_exact_bundle() {
+        let Some(java_home) =
+            std::env::var_os("RUNMAT_TEST_JAVA_HOME").map(std::path::PathBuf::from)
+        else {
+            eprintln!("RUNMAT_TEST_JAVA_HOME is unset; remote Java execution was not requested");
+            return;
+        };
+        let javac = java_home
+            .join("bin")
+            .join(if cfg!(windows) { "javac.exe" } else { "javac" });
+        let jar = java_home
+            .join("bin")
+            .join(if cfg!(windows) { "jar.exe" } else { "jar" });
+        if !javac.is_file() || !jar.is_file() {
+            eprintln!("remote Java execution requires javac and jar");
+            return;
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let project_root = temp.path().join("project");
+        let java_source = temp.path().join("java/fixture/packaged/Value.java");
+        let java_classes = temp.path().join("classes");
+        std::fs::create_dir_all(java_source.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(&java_classes).unwrap();
+        std::fs::create_dir_all(project_root.join("src")).unwrap();
+        std::fs::create_dir_all(project_root.join("lib")).unwrap();
+        std::fs::write(
+            &java_source,
+            "package fixture.packaged; public final class Value { private Value() {} public static int read() { return 73; } }",
+        )
+        .unwrap();
+        assert!(Command::new(&javac)
+            .args(["-d", java_classes.to_str().unwrap()])
+            .arg(&java_source)
+            .status()
+            .unwrap()
+            .success());
+        let jar_path = project_root.join("lib/fixture.jar");
+        assert!(Command::new(&jar)
+            .args(["--create", "--file"])
+            .arg(&jar_path)
+            .args(["-C", java_classes.to_str().unwrap(), "."])
+            .status()
+            .unwrap()
+            .success());
+        let source_text = "function value = main(); value = readPackaged() + readPackaged(); end\nfunction value = readPackaged(); value = fixture.packaged.Value.read(); end\n";
+        std::fs::write(project_root.join("src/main.m"), source_text).unwrap();
+        std::fs::write(
+            project_root.join("runmat.toml"),
+            "[package]\nname = \"remote-java-application\"\nversion = \"1.0.0\"\n[sources]\nroots = [\"src\"]\n[java-artifacts.fixture]\npath = \"lib/fixture.jar\"\n",
+        )
+        .unwrap();
+
+        let project = runmat_package::build_frozen_project(
+            &project_root.join("runmat.toml"),
+            BTreeSet::from([runmat_package::HostCapability::Jvm]),
+        )
+        .unwrap();
+        let project_revision = project.revision();
+        let revision = runmat_execution::ProgramRevision::new(
+            Digest::from_bytes(*project_revision.graph_digest.bytes()),
+            Digest::from_bytes(*project_revision.source_revision.bytes()),
+            runmat_core::program_environment(runmat_core::CompatMode::RunMat),
+        )
+        .unwrap();
+        let mut session = runmat_core::RunMatSession::with_options(false, false).unwrap();
+        session
+            .install_project_handoff(runmat_package::FrozenProjectHandoff::new(project.clone()))
+            .unwrap();
+        let unit = session
+            .compile_executable_unit(
+                runmat_core::ExecutableSource::new("root", "src/main.m", source_text),
+                Some(revision.clone()),
+            )
+            .await
+            .unwrap();
+        let jar_bytes = std::fs::read(&jar_path).unwrap();
+        let java_identity = runmat_java::JavaArtifactIdentity::for_bytes(&jar_bytes);
+        let interop = runmat_types::InteropManifest {
+            schema_version: runmat_types::INTEROP_MANIFEST_SCHEMA_VERSION,
+            foreign_types: Vec::new(),
+            adapters: vec![runmat_types::ForeignAdapterRequirement {
+                adapter: runmat_java::JAVA_ADAPTER_ID.into(),
+                minimum_version: runmat_java::JAVA_ADAPTER_VERSION,
+                capabilities: runmat_types::CapabilitySet(BTreeSet::from([
+                    runmat_types::CapabilityRequirement::ForeignRuntime,
+                ])),
+                artifact_identities: vec![java_identity.to_string()],
+            }],
+        };
+        let envelope = unit
+            .portable_envelope_for_with_interop(Some("main"), interop)
+            .unwrap();
+        let function = usize::try_from(envelope.manifest.identity.entrypoint_function.0).unwrap();
+        let recipe = ProgramBuildRecipe {
+            schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
+            program_revision: revision.clone(),
+            entrypoint: function.to_string(),
+            outputs: runmat_execution::OutputContract {
+                requested_outputs: 1,
+            },
+            execution_mode: "interpreter".into(),
+            target: ProgramTarget::portable("remote-java-execution"),
+            features: BTreeSet::new(),
+            compile_options: BTreeSet::new(),
+            source_objects: Vec::new(),
+            expected_artifact_id: None,
+        };
+        let java_object = LogicalObject::new(
+            ObjectNamespace::ForeignArtifact,
+            "java/fixture.jar",
+            runmat_java::JAVA_ARCHIVE_MEDIA_TYPE,
+            jar_bytes,
+        )
+        .unwrap();
+        let bundle = ExecutionBundleBuilder::native(&project, revision)
+            .unwrap()
+            .with_compiled_package_closure()
+            .with_foreign_artifact(java_object)
+            .unwrap()
+            .with_materialized_program(
+                recipe,
+                ExecutableForm::ExecutableUnitV3,
+                envelope.canonical_bytes().unwrap(),
+            )
+            .build()
+            .unwrap();
+        let materialized =
+            crate::materialized_project::MaterializedProject::from_bundle(&bundle).unwrap();
+        let recipe = bundle.manifest.recipes.first().cloned().unwrap();
+        let artifact = bundle.manifest.artifacts.first().cloned().unwrap();
+        let response = execute_host_program_request_with_project(
+            ProgramExecutionRequest {
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+                recipe,
+                artifact,
+                function,
+                arguments: Vec::new(),
+                requested_outputs: 1,
+            },
+            Some(&materialized),
+        )
+        .await;
+        assert_eq!(
+            response,
+            ProgramExecutionResponse::Success {
+                value: ValuePayload::Inline(Box::new(InlineValue::I32(146))),
+            }
+        );
     }
 }

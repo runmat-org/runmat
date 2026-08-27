@@ -8,7 +8,7 @@ use crate::{
 
 /// Bump when execution-relevant builtin behavior changes in a way the
 /// declarative catalog cannot observe, such as type-resolver semantics.
-pub const BUILTIN_CATALOG_SCHEMA: u32 = 3;
+pub const BUILTIN_CATALOG_SCHEMA: u32 = 4;
 
 /// Return a target-independent fingerprint of the builtin execution contract.
 ///
@@ -20,7 +20,7 @@ pub fn builtin_catalog_fingerprint() -> [u8; 32] {
     functions.sort_unstable_by_key(|function| function.name);
 
     let mut hash = Sha256::new();
-    field(&mut hash, b"runmat-builtin-catalog-v3");
+    field(&mut hash, b"runmat-builtin-catalog-v4");
     number(&mut hash, BUILTIN_CATALOG_SCHEMA as u64);
     field(
         &mut hash,
@@ -44,6 +44,13 @@ pub fn builtin_catalog_fingerprint() -> [u8; 32] {
             encode_type(&mut hash, ty);
         }
         encode_type(&mut hash, &function.return_type);
+        field(
+            &mut hash,
+            match function.execution_stack {
+                crate::ExecutionStackRequirement::Any => b"stack:any",
+                crate::ExecutionStackRequirement::Process => b"stack:process",
+            },
+        );
         field(
             &mut hash,
             match function.type_resolver {

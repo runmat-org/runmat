@@ -14,6 +14,7 @@ use runmat_types::{FunctionArgDefaultValue, FunctionArgSizeSpec, FunctionArgVali
 use runmat_value::Value;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
 
 use super::region::BytecodeRegion;
 
@@ -132,6 +133,8 @@ pub struct FunctionRegistry {
     pub names: HashMap<String, FunctionId>,
     #[serde(default)]
     pub source_functions: HashMap<runmat_hir::SourceId, Vec<FunctionId>>,
+    #[serde(skip)]
+    execution_stacks: OnceLock<HashMap<FunctionId, runmat_types::ExecutionStackRequirement>>,
 }
 
 impl FunctionRegistry {
@@ -152,6 +155,7 @@ impl FunctionRegistry {
             functions,
             names,
             source_functions,
+            execution_stacks: OnceLock::new(),
         }
     }
 
@@ -176,6 +180,7 @@ impl FunctionRegistry {
     }
 
     pub fn insert_replacing_name(&mut self, function: FunctionBytecode) {
+        self.execution_stacks.take();
         if let Some(previous) = self
             .names
             .insert(function.display_name.clone(), function.function)
@@ -193,6 +198,7 @@ impl FunctionRegistry {
     }
 
     pub fn remove(&mut self, function: FunctionId) -> Option<FunctionBytecode> {
+        self.execution_stacks.take();
         let removed = self.functions.remove(&function)?;
         if self.names.get(&removed.display_name) == Some(&function) {
             self.names.remove(&removed.display_name);
@@ -209,6 +215,7 @@ impl FunctionRegistry {
     }
 
     pub fn remove_source(&mut self, source: runmat_hir::SourceId) -> Vec<FunctionBytecode> {
+        self.execution_stacks.take();
         let ids = self.source_functions.remove(&source).unwrap_or_default();
         let mut removed = Vec::new();
         for id in ids {
@@ -228,6 +235,343 @@ impl FunctionRegistry {
             .map(Vec::as_slice)
             .unwrap_or(&[])
     }
+
+    /// Returns the stack required by this function and its reachable callees.
+    pub fn execution_stack(&self, function: FunctionId) -> runmat_types::ExecutionStackRequirement {
+        *self
+            .execution_stacks
+            .get_or_init(|| {
+                self.functions
+                    .keys()
+                    .copied()
+                    .map(|function| {
+                        (
+                            function,
+                            self.execution_stack_inner(function, &mut HashSet::new()),
+                        )
+                    })
+                    .collect()
+            })
+            .get(&function)
+            .unwrap_or(&runmat_types::ExecutionStackRequirement::Process)
+    }
+
+    fn execution_stack_inner(
+        &self,
+        function: FunctionId,
+        visiting: &mut HashSet<FunctionId>,
+    ) -> runmat_types::ExecutionStackRequirement {
+        if !visiting.insert(function) {
+            return runmat_types::ExecutionStackRequirement::Any;
+        }
+        let required = self
+            .functions
+            .get(&function)
+            .map(|bytecode| {
+                bytecode
+                    .instructions
+                    .iter()
+                    .map(|instruction| self.instruction_execution_stack(instruction, visiting))
+                    .max()
+                    .unwrap_or(runmat_types::ExecutionStackRequirement::Any)
+            })
+            .unwrap_or(runmat_types::ExecutionStackRequirement::Process);
+        visiting.remove(&function);
+        required
+    }
+
+    fn instruction_execution_stack(
+        &self,
+        instruction: &Instr,
+        visiting: &mut HashSet<FunctionId>,
+    ) -> runmat_types::ExecutionStackRequirement {
+        use runmat_types::CallableIdentity;
+
+        let identity_stack =
+            |identity: &CallableIdentity, registry: &Self, visiting: &mut HashSet<FunctionId>| {
+                match identity {
+                    CallableIdentity::BoundFunction(function)
+                    | CallableIdentity::AnonymousFunction(function)
+                    | CallableIdentity::ExternalFunction { function, .. } => {
+                        registry.execution_stack_inner(*function, visiting)
+                    }
+                    CallableIdentity::Builtin(builtin) => builtin_execution_stack(&builtin.0),
+                    CallableIdentity::DynamicName(name) => {
+                        if runmat_builtins::builtin_name_is_known(&name.0) {
+                            builtin_execution_stack(&name.0)
+                        } else {
+                            runmat_types::ExecutionStackRequirement::Process
+                        }
+                    }
+                    CallableIdentity::Method(method) => registry
+                        .registered_named_method_execution_stack(&method.0, visiting)
+                        .unwrap_or(runmat_types::ExecutionStackRequirement::Process),
+                    CallableIdentity::ExternalName(_) | CallableIdentity::Imported(_) => {
+                        runmat_types::ExecutionStackRequirement::Process
+                    }
+                }
+            };
+
+        match instruction {
+            Instr::CallBuiltinMulti(name, ..)
+            | Instr::CallBuiltinMultiUsingOutputSlot(name, ..)
+            | Instr::CallBuiltinExpandMultiOutput(name, ..) => builtin_execution_stack(name),
+            Instr::CallFunctionMulti { identity, .. }
+            | Instr::CallFunctionMultiUsingOutputSlot { identity, .. }
+            | Instr::CallWorkspaceFirstMulti { identity, .. }
+            | Instr::CallWorkspaceFirstMultiUsingOutputSlot { identity, .. }
+            | Instr::CallFunctionExpandMultiOutput { identity, .. }
+            | Instr::CallWorkspaceFirstExpandMultiOutput { identity, .. }
+            | Instr::CallWorkspaceFirstExpandMultiOutputUsingOutputSlot { identity, .. } => {
+                identity_stack(identity, self, visiting)
+            }
+            Instr::CallSemanticFunctionMulti(function, ..)
+            | Instr::CallSemanticFunctionMultiUsingOutputSlot(function, ..)
+            | Instr::CallSemanticFunctionExpandMultiOutput(function, ..)
+            | Instr::CreateSemanticFuture(function, ..)
+            | Instr::CreateSemanticFutureExpandMultiOutput(function, ..) => {
+                self.execution_stack_inner(*function, visiting)
+            }
+            Instr::CallSemanticNestedFunctionMulti { function, .. }
+            | Instr::CallSemanticNestedFunctionMultiUsingOutputSlot { function, .. }
+            | Instr::CallSemanticNestedFunctionExpandMultiOutput { function, .. } => {
+                self.execution_stack_inner(*function, visiting)
+            }
+            Instr::CallMethodOrMemberIndexMulti { identity, .. }
+            | Instr::CallMethodOrMemberIndexExpandMultiOutput { identity, .. } => identity
+                .display_name()
+                .and_then(|name| self.registered_member_or_method_execution_stack(&name, visiting))
+                .unwrap_or_else(|| identity_stack(identity, self, visiting)),
+            Instr::CallFevalMulti(..)
+            | Instr::CallFevalMultiUsingOutputSlot(..)
+            | Instr::CallFevalExpandMultiOutput(..)
+            | Instr::CallFevalExpandMultiOutputUsingOutputSlot(..)
+            | Instr::CallSuperConstructorMulti { .. }
+            | Instr::CallSuperMethodMulti { .. } => {
+                runmat_types::ExecutionStackRequirement::Process
+            }
+            instruction => self.registered_method_execution_stack(instruction, visiting),
+        }
+    }
+
+    fn registered_method_execution_stack(
+        &self,
+        instruction: &Instr,
+        visiting: &mut HashSet<FunctionId>,
+    ) -> runmat_types::ExecutionStackRequirement {
+        if !instruction_has_dynamic_dispatch(instruction) {
+            return runmat_types::ExecutionStackRequirement::Any;
+        }
+        let mut targets = HashSet::new();
+        for function in self.functions.values() {
+            for candidate in &function.instructions {
+                let Instr::RegisterClass { methods, .. } = candidate else {
+                    continue;
+                };
+                for (method_name, target, _, _, _, _) in methods {
+                    if instruction_may_dispatch_method(instruction, method_name) {
+                        targets.insert(target.as_str());
+                    }
+                }
+            }
+        }
+        self.registered_targets_execution_stack(targets, visiting)
+            .unwrap_or(runmat_types::ExecutionStackRequirement::Any)
+    }
+
+    fn registered_named_method_execution_stack(
+        &self,
+        requested_name: &str,
+        visiting: &mut HashSet<FunctionId>,
+    ) -> Option<runmat_types::ExecutionStackRequirement> {
+        let mut targets = HashSet::new();
+        for function in self.functions.values() {
+            for candidate in &function.instructions {
+                let Instr::RegisterClass { methods, .. } = candidate else {
+                    continue;
+                };
+                for (method_name, target, _, _, _, _) in methods {
+                    if method_name.eq_ignore_ascii_case(requested_name) {
+                        targets.insert(target.as_str());
+                    }
+                }
+            }
+        }
+        self.registered_targets_execution_stack(targets, visiting)
+    }
+
+    fn registered_member_or_method_execution_stack(
+        &self,
+        requested_name: &str,
+        visiting: &mut HashSet<FunctionId>,
+    ) -> Option<runmat_types::ExecutionStackRequirement> {
+        if let Some(requirement) =
+            self.registered_named_method_execution_stack(requested_name, visiting)
+        {
+            return Some(requirement);
+        }
+        let mut property_is_registered = false;
+        let mut targets = HashSet::new();
+        for function in self.functions.values() {
+            for candidate in &function.instructions {
+                let Instr::RegisterClass {
+                    properties,
+                    methods,
+                    ..
+                } = candidate
+                else {
+                    continue;
+                };
+                if !properties
+                    .iter()
+                    .any(|(name, ..)| name.eq_ignore_ascii_case(requested_name))
+                {
+                    continue;
+                }
+                property_is_registered = true;
+                let getter = format!("get.{requested_name}");
+                for (method_name, target, _, _, _, _) in methods {
+                    if method_name.eq_ignore_ascii_case("subsref")
+                        || method_name.eq_ignore_ascii_case(&getter)
+                    {
+                        targets.insert(target.as_str());
+                    }
+                }
+            }
+        }
+        property_is_registered.then(|| {
+            self.registered_targets_execution_stack(targets, visiting)
+                .unwrap_or(runmat_types::ExecutionStackRequirement::Any)
+        })
+    }
+
+    fn registered_targets_execution_stack(
+        &self,
+        targets: HashSet<&str>,
+        visiting: &mut HashSet<FunctionId>,
+    ) -> Option<runmat_types::ExecutionStackRequirement> {
+        targets
+            .into_iter()
+            .map(|target| {
+                self.resolve_name(target)
+                    .map(|function| self.execution_stack_inner(function, visiting))
+                    .unwrap_or_else(|| {
+                        if runmat_builtins::builtin_name_is_known(target) {
+                            builtin_execution_stack(target)
+                        } else {
+                            runmat_types::ExecutionStackRequirement::Process
+                        }
+                    })
+            })
+            .max()
+    }
+}
+
+fn instruction_has_dynamic_dispatch(instruction: &Instr) -> bool {
+    !dynamic_dispatch_method_names(instruction).is_empty()
+        || matches!(
+            instruction,
+            Instr::Index(_)
+                | Instr::IndexSlice(..)
+                | Instr::IndexSliceExpr { .. }
+                | Instr::IndexCell { .. }
+                | Instr::IndexCellExpand { .. }
+                | Instr::IndexCellList { .. }
+                | Instr::StoreIndex(_)
+                | Instr::StoreIndexCell { .. }
+                | Instr::StoreIndexDelete(_)
+                | Instr::StoreIndexCellDelete { .. }
+                | Instr::StoreSlice(..)
+                | Instr::StoreSliceDelete(..)
+                | Instr::StoreSliceExpr { .. }
+                | Instr::StoreSliceExprDelete { .. }
+                | Instr::LoadMember(_)
+                | Instr::LoadMemberOrInit(_)
+                | Instr::LoadMemberDynamic
+                | Instr::LoadMemberDynamicOrInit
+                | Instr::StoreMember(_)
+                | Instr::StoreMemberOrInit(_)
+                | Instr::StoreMemberDynamic
+                | Instr::StoreMemberDynamicOrInit
+        )
+}
+
+fn instruction_may_dispatch_method(instruction: &Instr, method_name: &str) -> bool {
+    if dynamic_dispatch_method_names(instruction)
+        .iter()
+        .any(|candidate| method_name.eq_ignore_ascii_case(candidate))
+    {
+        return true;
+    }
+    match instruction {
+        Instr::Index(_)
+        | Instr::IndexSlice(..)
+        | Instr::IndexSliceExpr { .. }
+        | Instr::IndexCell { .. }
+        | Instr::IndexCellExpand { .. }
+        | Instr::IndexCellList { .. } => method_name.eq_ignore_ascii_case("subsref"),
+        Instr::StoreIndex(_)
+        | Instr::StoreIndexCell { .. }
+        | Instr::StoreIndexDelete(_)
+        | Instr::StoreIndexCellDelete { .. }
+        | Instr::StoreSlice(..)
+        | Instr::StoreSliceDelete(..)
+        | Instr::StoreSliceExpr { .. }
+        | Instr::StoreSliceExprDelete { .. } => method_name.eq_ignore_ascii_case("subsasgn"),
+        Instr::LoadMember(name) | Instr::LoadMemberOrInit(name) => {
+            method_name.eq_ignore_ascii_case("subsref")
+                || method_name.eq_ignore_ascii_case(&format!("get.{name}"))
+        }
+        Instr::LoadMemberDynamic | Instr::LoadMemberDynamicOrInit => {
+            method_name.eq_ignore_ascii_case("subsref")
+                || method_name
+                    .get(..4)
+                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case("get."))
+        }
+        Instr::StoreMember(name) | Instr::StoreMemberOrInit(name) => {
+            method_name.eq_ignore_ascii_case("subsasgn")
+                || method_name.eq_ignore_ascii_case(&format!("set.{name}"))
+        }
+        Instr::StoreMemberDynamic | Instr::StoreMemberDynamicOrInit => {
+            method_name.eq_ignore_ascii_case("subsasgn")
+                || method_name
+                    .get(..4)
+                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case("set."))
+        }
+        _ => false,
+    }
+}
+
+fn dynamic_dispatch_method_names(instruction: &Instr) -> &'static [&'static str] {
+    match instruction {
+        Instr::Add => &["plus"],
+        Instr::Sub => &["minus"],
+        Instr::Mul => &["mtimes"],
+        Instr::RightDiv => &["mrdivide", "rdivide"],
+        Instr::LeftDiv => &["mldivide", "ldivide"],
+        Instr::Pow => &["mpower", "power"],
+        Instr::Neg => &["uminus", "times"],
+        Instr::UPlus => &["uplus"],
+        Instr::Transpose => &["transpose"],
+        Instr::ConjugateTranspose => &["ctranspose"],
+        Instr::ElemMul => &["times"],
+        Instr::ElemDiv => &["rdivide"],
+        Instr::ElemPow => &["power"],
+        Instr::ElemLeftDiv => &["ldivide"],
+        Instr::LessEqual => &["le", "gt", "ge", "lt"],
+        Instr::Less => &["lt", "gt"],
+        Instr::Greater => &["gt", "lt"],
+        Instr::GreaterEqual => &["ge", "lt", "le", "gt"],
+        Instr::Equal => &["eq"],
+        Instr::NotEqual => &["ne"],
+        Instr::LogicalNot => &["not"],
+        Instr::LogicalAnd => &["and"],
+        Instr::LogicalOr => &["or"],
+        _ => &[],
+    }
+}
+fn builtin_execution_stack(name: &str) -> runmat_types::ExecutionStackRequirement {
+    runmat_builtins::builtin_execution_stack_requirement(name)
 }
 
 impl runmat_runtime::call::descriptor::FunctionNameResolver for FunctionRegistry {
@@ -593,6 +937,196 @@ mod function_registry_tests {
             registry.resolve_name_in_private_scope("C", "pkg.helper"),
             None,
             "qualified names should not be rewritten as private-folder aliases"
+        );
+    }
+
+    #[test]
+    fn execution_stack_requirement_propagates_through_static_calls_and_cycles() {
+        let mut entry = test_function(1, "entry", "");
+        entry.instructions = vec![Instr::CallSemanticFunctionMulti(FunctionId(2), 0, 1)];
+        let mut helper = test_function(2, "helper", "");
+        helper.instructions = vec![
+            Instr::CallSemanticFunctionMulti(FunctionId(1), 0, 1),
+            Instr::CallBuiltinMulti("javaObject".into(), 1, 1),
+        ];
+        let registry = FunctionRegistry::new(HashMap::from([
+            (FunctionId(1), entry),
+            (FunctionId(2), helper),
+        ]));
+
+        assert_eq!(
+            registry.execution_stack(FunctionId(1)),
+            runmat_types::ExecutionStackRequirement::Process
+        );
+        assert_eq!(
+            registry.execution_stack(FunctionId(2)),
+            runmat_types::ExecutionStackRequirement::Process
+        );
+    }
+
+    #[test]
+    fn execution_stack_requirement_keeps_pure_functions_segmentable() {
+        let registry = FunctionRegistry::new(HashMap::from([(
+            FunctionId(1),
+            test_function(1, "pure_helper", ""),
+        )]));
+
+        assert_eq!(
+            registry.execution_stack(FunctionId(1)),
+            runmat_types::ExecutionStackRequirement::Any
+        );
+    }
+
+    #[test]
+    fn execution_stack_requirement_is_conservative_at_dynamic_boundaries() {
+        let mut callback = test_function(1, "callback", "");
+        callback.instructions = vec![Instr::CallFevalMulti(1, 1)];
+        let registry = FunctionRegistry::new(HashMap::from([(FunctionId(1), callback)]));
+
+        assert_eq!(
+            registry.execution_stack(FunctionId(1)),
+            runmat_types::ExecutionStackRequirement::Process
+        );
+    }
+
+    #[test]
+    fn execution_stack_requirement_follows_registered_operator_overloads() {
+        let mut caller = test_function(1, "caller", "");
+        caller.instructions = vec![
+            Instr::RegisterClass {
+                name: "Example".into(),
+                super_class: None,
+                is_sealed: false,
+                is_abstract: false,
+                properties: Vec::new(),
+                methods: vec![(
+                    "plus".into(),
+                    "Example.plus".into(),
+                    false,
+                    false,
+                    false,
+                    "public".into(),
+                )],
+                enumerations: Vec::new(),
+            },
+            Instr::Add,
+        ];
+        let mut operator = test_function(2, "Example.plus", "");
+        operator.instructions = vec![Instr::CallBuiltinMulti("javaObject".into(), 1, 1)];
+        let registry = FunctionRegistry::new(HashMap::from([
+            (FunctionId(1), caller),
+            (FunctionId(2), operator),
+        ]));
+
+        assert_eq!(
+            registry.execution_stack(FunctionId(1)),
+            runmat_types::ExecutionStackRequirement::Process
+        );
+    }
+
+    fn property_dispatch_registry(property_body: Vec<Instr>) -> (FunctionRegistry, FunctionId) {
+        let mut caller = test_function(1, "caller", "");
+        caller.instructions = vec![
+            Instr::RegisterClass {
+                name: "Example".into(),
+                super_class: None,
+                is_sealed: false,
+                is_abstract: false,
+                properties: vec![(
+                    "data".into(),
+                    false,
+                    false,
+                    None,
+                    "public".into(),
+                    "public".into(),
+                )],
+                methods: vec![(
+                    "get.data".into(),
+                    "Example.get.data".into(),
+                    false,
+                    false,
+                    false,
+                    "public".into(),
+                )],
+                enumerations: Vec::new(),
+            },
+            Instr::CallMethodOrMemberIndexMulti {
+                identity: runmat_types::CallableIdentity::DynamicName(runmat_types::SymbolName(
+                    "data".into(),
+                )),
+                fallback_policy: runmat_types::CallableFallbackPolicy::ObjectDispatch,
+                arg_count: 1,
+                out_count: 1,
+            },
+        ];
+        let mut getter = test_function(2, "Example.get.data", "");
+        getter.instructions = property_body;
+        (
+            FunctionRegistry::new(HashMap::from([
+                (FunctionId(1), caller),
+                (FunctionId(2), getter),
+            ])),
+            FunctionId(1),
+        )
+    }
+
+    #[test]
+    fn execution_stack_requirement_resolves_registered_property_dispatch() {
+        let (registry, caller) = property_dispatch_registry(vec![Instr::Return]);
+
+        assert_eq!(
+            registry.execution_stack(caller),
+            runmat_types::ExecutionStackRequirement::Any
+        );
+    }
+
+    #[test]
+    fn execution_stack_requirement_follows_registered_property_accessors() {
+        let (registry, caller) =
+            property_dispatch_registry(vec![Instr::CallBuiltinMulti("javaObject".into(), 1, 1)]);
+
+        assert_eq!(
+            registry.execution_stack(caller),
+            runmat_types::ExecutionStackRequirement::Process
+        );
+    }
+
+    #[test]
+    fn execution_stack_requirement_keeps_unresolved_member_dispatch_conservative() {
+        let mut caller = test_function(1, "caller", "");
+        caller.instructions = vec![Instr::CallMethodOrMemberIndexMulti {
+            identity: runmat_types::CallableIdentity::DynamicName(runmat_types::SymbolName(
+                "unknown_member".into(),
+            )),
+            fallback_policy: runmat_types::CallableFallbackPolicy::ObjectDispatch,
+            arg_count: 1,
+            out_count: 1,
+        }];
+        let registry = FunctionRegistry::new(HashMap::from([(FunctionId(1), caller)]));
+
+        assert_eq!(
+            registry.execution_stack(FunctionId(1)),
+            runmat_types::ExecutionStackRequirement::Process
+        );
+    }
+
+    #[test]
+    fn execution_stack_cache_is_invalidated_when_functions_change() {
+        let mut registry = FunctionRegistry::new(HashMap::from([(
+            FunctionId(1),
+            test_function(1, "replaceable", ""),
+        )]));
+        assert_eq!(
+            registry.execution_stack(FunctionId(1)),
+            runmat_types::ExecutionStackRequirement::Any
+        );
+
+        let mut replacement = test_function(1, "replaceable", "");
+        replacement.instructions = vec![Instr::CallBuiltinMulti("javaObject".into(), 1, 1)];
+        registry.insert_replacing_name(replacement);
+        assert_eq!(
+            registry.execution_stack(FunctionId(1)),
+            runmat_types::ExecutionStackRequirement::Process
         );
     }
 

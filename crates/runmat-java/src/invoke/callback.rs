@@ -4,6 +4,7 @@ use std::ffi::c_void;
 use std::panic::AssertUnwindSafe;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 
 use jni::objects::{JObject, JObjectArray, JString, JValue, JValueOwned};
 use jni::{JNIEnv, NativeMethod};
@@ -55,6 +56,7 @@ thread_local! {
 }
 
 static NEXT_CALLBACK_ID: AtomicU64 = AtomicU64::new(1);
+static BRIDGE_CLASS_INSTALL: Mutex<()> = Mutex::new(());
 
 impl JavaSession {
     pub fn register_callback(
@@ -155,6 +157,9 @@ pub(super) fn remove_callbacks(ids: &[u64]) {
 fn bridge_class<'local>(
     environment: &mut JNIEnv<'local>,
 ) -> Result<jni::objects::JClass<'local>, JavaInvocationError> {
+    let _installation = BRIDGE_CLASS_INSTALL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let class = match environment.find_class(BRIDGE_CLASS) {
         Ok(class) => class,
         Err(_) => {

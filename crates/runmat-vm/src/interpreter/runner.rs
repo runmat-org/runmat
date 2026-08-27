@@ -312,6 +312,8 @@ async fn invoke_semantic_function_value_with_input_residency_inner(
     bytecode.bound_functions = function_registry.functions.clone();
     bytecode.function_registry = function_registry.clone();
     let result_vars = {
+        #[cfg(not(target_arch = "wasm32"))]
+        let execution_runtime = runtime.clone();
         let future = interpret_function_with_counts_in_context(
             &bytecode,
             vars,
@@ -328,18 +330,29 @@ async fn invoke_semantic_function_value_with_input_residency_inner(
         #[cfg(not(target_arch = "wasm32"))]
         {
             // A semantic call recursively drives another async interpreter.
-            // Polling it on the caller's small executor/test-thread stack makes
-            // ordinary class method chains consume the full native stack long
-            // before reaching a meaningful language recursion depth. Grow the
-            // stack only while polling the nested interpreter; values remain on
-            // the same thread and therefore retain their thread-confined GC
-            // semantics.
+            // Pure RunMat call chains use a large segmented stack so ordinary
+            // nesting does not consume a small executor or test-thread stack.
+            // Functions that may reach an in-process foreign runtime stay on
+            // the native OS stack, which those runtimes may register or inspect.
             const SEMANTIC_CALL_STACK_BYTES: usize = 16 * 1024 * 1024;
-            let mut future = Box::pin(future);
-            futures::future::poll_fn(move |context| {
-                stacker::grow(SEMANTIC_CALL_STACK_BYTES, || future.as_mut().poll(context))
-            })
-            .await?
+            let execution_stack = function_registry.execution_stack(function_id);
+            if execution_stack == runmat_types::ExecutionStackRequirement::Process {
+                // The async interpreter state is substantially larger than a
+                // call frame. Heap-allocate it so nested dispatch does not
+                // consume the native stack needed by the foreign runtime.
+                Box::pin(future).await?
+            } else {
+                let mut future = Box::pin(future);
+                futures::future::poll_fn(move |context| {
+                    stacker::grow(SEMANTIC_CALL_STACK_BYTES, || {
+                        let _stack = execution_runtime.enter_execution_stack(
+                            runmat_runtime::context::RuntimeExecutionStack::Segmented,
+                        );
+                        future.as_mut().poll(context)
+                    })
+                })
+                .await?
+            }
         }
     };
     let fixed_outputs = func

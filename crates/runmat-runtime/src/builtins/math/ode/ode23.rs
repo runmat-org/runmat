@@ -213,6 +213,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "ode23",
+    execution_stack = "process",
     category = "math/ode",
     summary = "Solve nonstiff ODE systems using adaptive Bogacki-Shampine 3(2) integration.",
     keywords = "ode23,ode,nonstiff,bogacki-shampine,adaptive step",

@@ -319,6 +319,7 @@ fn pulstran_error_with_source(
 
 #[runtime_builtin(
     name = "pulstran",
+    execution_stack = "process",
     category = "math/signal",
     summary = "Generate pulse trains from pulse functions or sampled prototypes.",
     keywords = "pulstran,pulse train,rectpuls,tripuls,gauspuls,signal processing",

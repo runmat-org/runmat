@@ -84,6 +84,7 @@ impl<F> Unpin for ContextFuture<F> {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::context::RuntimeExecutionStack;
     use crate::execution::RuntimeExecutionService;
     use runmat_types::SourceId;
     use std::rc::Rc;
@@ -121,6 +122,22 @@ mod tests {
             );
         }
         assert!(active_runtime_context().is_none());
+    }
+
+    #[test]
+    fn execution_stack_guard_restores_nested_stack_state() {
+        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        assert_eq!(runtime.execution_stack(), RuntimeExecutionStack::Process);
+        {
+            let _segmented = runtime.enter_execution_stack(RuntimeExecutionStack::Segmented);
+            assert_eq!(runtime.execution_stack(), RuntimeExecutionStack::Segmented);
+            {
+                let _process = runtime.enter_execution_stack(RuntimeExecutionStack::Process);
+                assert_eq!(runtime.execution_stack(), RuntimeExecutionStack::Process);
+            }
+            assert_eq!(runtime.execution_stack(), RuntimeExecutionStack::Segmented);
+        }
+        assert_eq!(runtime.execution_stack(), RuntimeExecutionStack::Process);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

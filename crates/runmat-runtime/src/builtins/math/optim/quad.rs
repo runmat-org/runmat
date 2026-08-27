@@ -325,6 +325,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "quad",
+    execution_stack = "process",
     category = "math/optim",
     summary = "Approximate finite scalar definite integrals using legacy adaptive Simpson quadrature.",
     keywords = "quad,numerical integration,adaptive simpson,quadrature,function handle",

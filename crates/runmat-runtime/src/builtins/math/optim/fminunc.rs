@@ -468,6 +468,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "fminunc",
+    execution_stack = "process",
     category = "math/optim",
     summary = "Find an unconstrained local minimum of a smooth scalar objective.",
     keywords = "fminunc,unconstrained minimization,bfgs,quasi-newton,strong wolfe,optimization",

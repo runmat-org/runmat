@@ -238,6 +238,19 @@ impl JavaAdapter {
         if call.symbol == "classpath" {
             return self.classpath_value(call.arguments);
         }
+        if call.symbol == "has_classpath" {
+            let snapshot = self
+                .session
+                .borrow()
+                .as_ref()
+                .map(|session| session.classpath())
+                .unwrap_or_else(|| self.initial_classpath.borrow().snapshot());
+            return Ok(Value::Bool(
+                !snapshot.bootstrap.is_empty()
+                    || !snapshot.project.is_empty()
+                    || !snapshot.dynamic.is_empty(),
+            ));
+        }
         if call.symbol == "status" {
             return self.status_value();
         }
@@ -307,9 +320,12 @@ impl JavaAdapter {
                         invalid_conversion("qualified Java call requires a dotted class name")
                     })?;
                     if !self.with_session(|session| session.class_exists(class))? {
-                        return Err(invalid_conversion(format!(
+                        return Err(build_runtime_error(format!(
                             "Java class {class} was not found"
-                        )));
+                        ))
+                        .with_builtin("java")
+                        .with_identifier("RunMat:Java:ClassNotFound")
+                        .build());
                     }
                     self.with_session(|session| {
                         session.call_static_resolved(class, method, &values)
@@ -837,6 +853,7 @@ impl ForeignAdapter for JavaAdapter {
             artifact_identities: self.artifact_identities.borrow().clone(),
             supports_wasm: false,
             supports_host_bridge: false,
+            execution_stack: runmat_types::ExecutionStackRequirement::Process,
         }
     }
 

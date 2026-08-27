@@ -71,6 +71,7 @@ pub const NOTIFY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     keywords = "events,listener,notify,callback,classdef",
     descriptor(crate::builtins::introspection::notify::NOTIFY_DESCRIPTOR),
     integer_audit(crate::builtins::introspection::notify::NOTIFY_INTEGER_AUDIT),
+    execution_stack = "process",
     builtin_path = "crate::builtins::introspection::notify"
 )]
 pub async fn notify_builtin(

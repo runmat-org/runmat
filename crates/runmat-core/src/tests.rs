@@ -14303,6 +14303,10 @@ fn portable_product_preserves_and_validates_explicit_interop_contract() {
         .portable_envelope_for_with_interop(None, interop.clone())
         .expect("deterministic explicit interop product");
     assert_eq!(first.manifest.interop, interop);
+    assert_eq!(
+        first.manifest.identity.entrypoint_kind,
+        runmat_execution::ExecutableEntrypointKind::Script
+    );
     assert!(first
         .manifest
         .capabilities

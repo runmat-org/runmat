@@ -142,6 +142,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "bayesopt",
+    execution_stack = "process",
     category = "stats/ml",
     summary = "Run deterministic Bayesian optimization over optimizableVariable metadata.",
     keywords = "bayesopt,Bayesian optimization,optimizableVariable,expected improvement",

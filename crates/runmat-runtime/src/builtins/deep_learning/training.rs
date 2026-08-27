@@ -129,6 +129,7 @@ fn validate_dlarray_data(data: &Value) -> BuiltinResult<()> {
 
 #[runtime_builtin(
     name = "dlfeval",
+    execution_stack = "process",
     category = "deep_learning",
     summary = "Evaluate a function handle in Deep Learning compatibility context.",
     keywords = "dlfeval,deep learning,autodiff,function evaluation",
@@ -201,6 +202,7 @@ pub(super) async fn adamupdate_builtin(args: Vec<Value>) -> BuiltinResult<Value>
 
 #[runtime_builtin(
     name = "dlupdate",
+    execution_stack = "process",
     category = "deep_learning",
     summary = "Apply a function handle across matching parameter trees.",
     keywords = "dlupdate,deep learning,model update",

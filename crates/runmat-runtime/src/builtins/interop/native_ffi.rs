@@ -213,6 +213,7 @@ async fn invoke_native(
 
 #[runtime_builtin(
     name = "loadlibrary",
+    execution_stack = "process",
     category = "interop/native",
     summary = "Load a C shared library and prepare its declared interface.",
     keywords = "loadlibrary,shared library,c,ffi,native",
@@ -305,6 +306,7 @@ async fn loadlibrary_builtin(mut arguments: Vec<Value>) -> BuiltinResult<Value> 
 
 #[runtime_builtin(
     name = "calllib",
+    execution_stack = "process",
     category = "interop/native",
     summary = "Call a function in a loaded C shared library.",
     keywords = "calllib,shared library,c,ffi,native",
@@ -319,6 +321,7 @@ async fn calllib_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "unloadlibrary",
+    execution_stack = "process",
     category = "interop/native",
     summary = "Unload a named C shared library from the current session.",
     keywords = "unloadlibrary,shared library,c,ffi,native",
@@ -335,6 +338,7 @@ async fn unloadlibrary_builtin(alias: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "libisloaded",
+    execution_stack = "process",
     category = "interop/native",
     summary = "Test whether a named C shared library is loaded in this session.",
     keywords = "libisloaded,shared library,c,ffi,native",
@@ -348,6 +352,7 @@ async fn libisloaded_builtin(alias: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "libfunctions",
+    execution_stack = "process",
     category = "interop/native",
     summary = "List functions declared by a loaded C shared library interface.",
     keywords = "libfunctions,shared library,c,ffi,native",
@@ -361,6 +366,7 @@ async fn libfunctions_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "libpointer",
+    execution_stack = "process",
     category = "interop/native",
     summary = "Create session-owned typed storage for a native pointer argument.",
     keywords = "libpointer,pointer,shared library,c,ffi,native",
@@ -374,6 +380,7 @@ async fn libpointer_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "setdatatype",
+    execution_stack = "process",
     category = "interop/native",
     summary = "Declare the type and dimensions of an opaque native pointer.",
     keywords = "setdatatype,libpointer,pointer,shared library,c,ffi,native",
@@ -396,6 +403,7 @@ async fn setdatatype_builtin(mut arguments: Vec<Value>) -> BuiltinResult<Value> 
 
 #[runtime_builtin(
     name = "libstruct",
+    execution_stack = "process",
     category = "interop/native",
     summary = "Create session-owned storage for a structure declared by a loaded library.",
     keywords = "libstruct,structure,shared library,c,ffi,native",

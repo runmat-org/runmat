@@ -832,6 +832,7 @@ pub(crate) async fn dispatch_subsasgn(
 
 #[runtime_builtin(
     name = "subsref",
+    execution_stack = "process",
     category = "introspection",
     summary = "Dispatch overloaded object indexing reads.",
     keywords = "subsref,indexing,classdef,object",
@@ -851,6 +852,7 @@ pub async fn subsref_builtin(
 
 #[runtime_builtin(
     name = "subsasgn",
+    execution_stack = "process",
     category = "introspection",
     summary = "Dispatch overloaded object indexing writes.",
     keywords = "subsasgn,indexing,classdef,object",

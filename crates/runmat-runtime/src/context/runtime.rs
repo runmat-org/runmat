@@ -11,6 +11,24 @@ pub enum RuntimeLanguageMode {
     Strict,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeExecutionStack {
+    Process,
+    Segmented,
+}
+
+#[must_use]
+pub struct RuntimeExecutionStackGuard {
+    state: Rc<RuntimeContextState>,
+    previous: RuntimeExecutionStack,
+}
+
+impl Drop for RuntimeExecutionStackGuard {
+    fn drop(&mut self) {
+        self.state.execution_stack.set(self.previous);
+    }
+}
+
 pub const DEFAULT_CALLSTACK_LIMIT: usize = 200;
 pub const DEFAULT_ERROR_NAMESPACE: &str = "RunMat";
 
@@ -153,6 +171,21 @@ impl RuntimeContext {
 
     pub fn dynamic_eval_enabled(&self) -> bool {
         self.state.dynamic_eval_enabled.get()
+    }
+
+    pub fn execution_stack(&self) -> RuntimeExecutionStack {
+        self.state.execution_stack.get()
+    }
+
+    pub fn enter_execution_stack(
+        &self,
+        stack: RuntimeExecutionStack,
+    ) -> RuntimeExecutionStackGuard {
+        let previous = self.state.execution_stack.replace(stack);
+        RuntimeExecutionStackGuard {
+            state: Rc::clone(&self.state),
+            previous,
+        }
     }
 
     pub fn set_dynamic_eval_enabled(&self, enabled: bool) {

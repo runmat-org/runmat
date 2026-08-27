@@ -131,6 +131,7 @@ async fn invoke_java(operation: &str, arguments: Vec<Value>) -> BuiltinResult<Va
 
 #[runtime_builtin(
     name = "javaObject",
+    execution_stack = "process",
     category = "interop/java",
     summary = "Construct an object from a Java class.",
     keywords = "javaObject,java,jvm,constructor",
@@ -144,6 +145,7 @@ async fn java_object_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "javaObjectEDT",
+    execution_stack = "process",
     category = "interop/java",
     summary = "Construct a Java object on the Desktop event-dispatch thread.",
     keywords = "javaObjectEDT,java,jvm,desktop,edt,constructor",
@@ -157,6 +159,7 @@ async fn java_object_edt_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> 
 
 #[runtime_builtin(
     name = "javaMethod",
+    execution_stack = "process",
     category = "interop/java",
     summary = "Invoke a static or instance Java method.",
     keywords = "javaMethod,java,jvm,method",
@@ -170,6 +173,7 @@ async fn java_method_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "javaMethodEDT",
+    execution_stack = "process",
     category = "interop/java",
     summary = "Invoke a Java method on the Desktop event-dispatch thread.",
     keywords = "javaMethodEDT,java,jvm,desktop,edt,method",
@@ -216,6 +220,7 @@ async fn java_method_dispatch(
 
 #[runtime_builtin(
     name = "javaArray",
+    execution_stack = "process",
     category = "interop/java",
     summary = "Create a Java object array with the requested dimensions.",
     keywords = "javaArray,java,jvm,array",
@@ -229,6 +234,7 @@ async fn java_array_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "javaaddpath",
+    execution_stack = "process",
     category = "interop/java",
     summary = "Add an entry to the current session's dynamic Java classpath.",
     keywords = "javaaddpath,java,jvm,classpath",
@@ -265,6 +271,7 @@ async fn java_add_path_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "javarmpath",
+    execution_stack = "process",
     category = "interop/java",
     summary = "Remove an entry from the current session's dynamic Java classpath.",
     keywords = "javarmpath,java,jvm,classpath",
@@ -283,6 +290,7 @@ async fn java_remove_path_builtin(arguments: Vec<Value>) -> BuiltinResult<Value>
 
 #[runtime_builtin(
     name = "javaclasspath",
+    execution_stack = "process",
     category = "interop/java",
     summary = "Return the current session's Java classpath.",
     keywords = "javaclasspath,java,jvm,classpath",

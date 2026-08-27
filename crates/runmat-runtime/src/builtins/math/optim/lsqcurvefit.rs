@@ -470,6 +470,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "lsqcurvefit",
+    execution_stack = "process",
     category = "math/optim",
     summary = "Fit nonlinear parametric curves in the least-squares sense.",
     keywords = "lsqcurvefit,least squares,curve fitting,optimization,levenberg-marquardt,bounds",

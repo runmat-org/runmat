@@ -1,3 +1,4 @@
+use runmat_types::ExecutionStackRequirement;
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -19,5 +20,6 @@ pub enum BuiltinLinkPolicy {
 pub struct BuiltinLinkContract {
     pub reachability: BuiltinReachability,
     pub policy: BuiltinLinkPolicy,
+    pub execution_stack: ExecutionStackRequirement,
     pub artifact_dependencies: &'static [&'static str],
 }

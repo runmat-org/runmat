@@ -713,13 +713,15 @@ async fn handle_method_or_member_index_call_inner(
         runmat_runtime::class_registry::class_context_for_function(current_function_name);
     let _access_guard = current_class_context
         .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
-    let value = runmat_runtime::object::dispatch::call_method_or_member_index_with_outputs(
-        base,
-        identity,
-        args,
-        requested_outputs,
-        (!current_function_name.is_empty()).then_some(current_function_name),
-        fallback_policy,
+    let value = Box::pin(
+        runmat_runtime::object::dispatch::call_method_or_member_index_with_outputs(
+            base,
+            identity,
+            args,
+            requested_outputs,
+            (!current_function_name.is_empty()).then_some(current_function_name),
+            fallback_policy,
+        ),
     )
     .await?;
     stack.push(normalize_requested_outputs(value, requested_outputs));
@@ -747,13 +749,15 @@ pub async fn handle_method_or_member_index_expand_multi_call(
         runmat_runtime::class_registry::class_context_for_function(current_function_name);
     let _access_guard = current_class_context
         .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
-    let value = runmat_runtime::object::dispatch::call_method_or_member_index_with_outputs(
-        base,
-        identity,
-        args,
-        requested_outputs,
-        (!current_function_name.is_empty()).then_some(current_function_name),
-        fallback_policy,
+    let value = Box::pin(
+        runmat_runtime::object::dispatch::call_method_or_member_index_with_outputs(
+            base,
+            identity,
+            args,
+            requested_outputs,
+            (!current_function_name.is_empty()).then_some(current_function_name),
+            fallback_policy,
+        ),
     )
     .await?;
     stack.push(normalize_requested_outputs(value, requested_outputs));

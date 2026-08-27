@@ -117,6 +117,7 @@ pub(crate) async fn dispatch_call_method(
 
 #[runtime_builtin(
     name = "call_method",
+    execution_stack = "process",
     category = "introspection",
     summary = "Dispatch object member calls with MATLAB method semantics.",
     keywords = "classdef,method,dispatch,object",

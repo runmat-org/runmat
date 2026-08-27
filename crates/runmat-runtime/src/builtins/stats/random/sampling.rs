@@ -2453,6 +2453,7 @@ pub mod bootstrp {
 
     #[runtime_builtin(
         name = "bootstrp",
+        execution_stack = "process",
         category = "stats/random",
         summary = "Bootstrap samples and evaluate a statistic.",
         keywords = "bootstrp,bootstrap,resampling,statistics,weights",

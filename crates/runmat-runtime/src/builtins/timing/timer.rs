@@ -436,6 +436,7 @@ pub async fn timerfindall_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "__runmat_timer_start",
+    execution_stack = "process",
     category = "timing",
     summary = "Start a timer object.",
     keywords = "timer,start",
@@ -451,6 +452,7 @@ pub async fn timer_start_builtin(value: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "__runmat_timer_startat",
+    execution_stack = "process",
     category = "timing",
     summary = "Start a timer object at a requested time.",
     keywords = "timer,startat",
@@ -481,6 +483,7 @@ pub async fn timer_startat_builtin(value: Value, rest: Vec<Value>) -> BuiltinRes
 
 #[runtime_builtin(
     name = "__runmat_timer_stop",
+    execution_stack = "process",
     category = "timing",
     summary = "Stop a timer object.",
     keywords = "timer,stop",
@@ -496,6 +499,7 @@ pub async fn timer_stop_builtin(value: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "__runmat_timer_wait",
+    execution_stack = "process",
     category = "timing",
     summary = "Wait until timer objects finish.",
     keywords = "timer,wait",
@@ -511,6 +515,7 @@ pub async fn timer_wait_builtin(value: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "__runmat_timer_delete",
+    execution_stack = "process",
     category = "timing",
     summary = "Delete a timer object.",
     keywords = "timer,delete",
