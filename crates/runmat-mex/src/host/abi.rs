@@ -2,10 +2,11 @@ use std::collections::BTreeSet;
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::rc::Rc;
 
+use super::{DirectMexBoundaryHostServices, MexBoundaryHostServices};
 use crate::mxarray::{MxArrayData, MxSparse, MxSparseValues};
 use crate::{
-    value_from_mx, value_to_mx_for_interface, MexHostServices, MxApi, MxApiMode, MxArray,
-    MxBoundaryInterface, MxClassId,
+    value_to_mx_for_interface_in_context, MexHostServices, MxApi, MxApiMode, MxArray,
+    MxBoundaryInterface, MxClassId, MxValueContext,
 };
 
 pub const MEX_HOST_ABI_VERSION: u32 = 6;
@@ -22,47 +23,97 @@ pub struct MexCallState {
     pub warnings: Vec<MexDiagnostic>,
     pub console: String,
     field_name_cache: Vec<CString>,
-    services: Rc<dyn MexHostServices>,
+    services: Rc<dyn MexBoundaryHostServices>,
     global_arrays: BTreeSet<usize>,
     interface: MxBoundaryInterface,
+    value_context: Rc<MxValueContext>,
 }
 
 impl MexCallState {
     pub fn new(mode: MxApiMode) -> Self {
+        let interface = MxBoundaryInterface::CMatrix;
+        let value_context = Rc::new(MxValueContext::new());
         Self {
             mx: MxApi::new(mode),
             error: None,
             warnings: Vec::new(),
             console: String::new(),
             field_name_cache: Vec::new(),
-            services: Rc::new(super::UnavailableMexHostServices),
+            services: Rc::new(DirectMexBoundaryHostServices::new(
+                Rc::new(super::UnavailableMexHostServices),
+                Rc::clone(&value_context),
+                mode,
+                interface,
+            )),
             global_arrays: BTreeSet::new(),
-            interface: MxBoundaryInterface::CMatrix,
+            interface,
+            value_context,
         }
     }
 
     pub fn with_services(mode: MxApiMode, services: Rc<dyn MexHostServices>) -> Self {
-        Self {
-            services,
-            ..Self::new(mode)
-        }
+        Self::with_services_for_interface(mode, MxBoundaryInterface::CMatrix, services)
     }
 
-    #[cfg(not(target_family = "wasm"))]
     pub(crate) fn with_services_for_interface(
         mode: MxApiMode,
         interface: MxBoundaryInterface,
         services: Rc<dyn MexHostServices>,
     ) -> Self {
-        Self {
+        let value_context = Rc::new(MxValueContext::new());
+        let services = Rc::new(DirectMexBoundaryHostServices::new(
             services,
+            Rc::clone(&value_context),
+            mode,
             interface,
-            ..Self::new(mode)
+        ));
+        Self {
+            mx: MxApi::new(mode),
+            error: None,
+            warnings: Vec::new(),
+            console: String::new(),
+            field_name_cache: Vec::new(),
+            services,
+            global_arrays: BTreeSet::new(),
+            interface,
+            value_context,
         }
     }
 
     pub fn set_services(&mut self, services: Rc<dyn MexHostServices>) {
+        self.services = Rc::new(DirectMexBoundaryHostServices::new(
+            services,
+            Rc::clone(&self.value_context),
+            self.mx.mode(),
+            self.interface,
+        ));
+    }
+
+    pub(crate) fn set_boundary_services(&mut self, services: Rc<dyn MexBoundaryHostServices>) {
         self.services = services;
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    pub(crate) fn with_boundary_services_for_interface(
+        mode: MxApiMode,
+        interface: MxBoundaryInterface,
+        services: Rc<dyn MexBoundaryHostServices>,
+    ) -> Self {
+        Self {
+            mx: MxApi::new(mode),
+            error: None,
+            warnings: Vec::new(),
+            console: String::new(),
+            field_name_cache: Vec::new(),
+            services,
+            global_arrays: BTreeSet::new(),
+            interface,
+            value_context: Rc::new(MxValueContext::new()),
+        }
+    }
+
+    pub(crate) fn value_context(&self) -> &MxValueContext {
+        &self.value_context
     }
 
     pub fn host_api(&mut self) -> MexHostApiV1 {
@@ -148,7 +199,12 @@ impl MexCallState {
         self.warnings.clear();
         self.console.clear();
         self.field_name_cache.clear();
-        self.services = Rc::new(super::UnavailableMexHostServices);
+        self.services = Rc::new(DirectMexBoundaryHostServices::new(
+            Rc::new(super::UnavailableMexHostServices),
+            Rc::clone(&self.value_context),
+            self.mx.mode(),
+            self.interface,
+        ));
     }
 
     fn fail(&mut self, message: impl Into<String>) {
@@ -1043,7 +1099,7 @@ unsafe extern "C" fn get_property(
         .get(value)
         .ok()
         .and_then(|array| match array.data() {
-            MxArrayData::Handle(handle) => Some(handle.clone()),
+            MxArrayData::Handle(_) => Some(array.clone()),
             _ => None,
         });
     if let Some(handle) = handle {
@@ -1051,17 +1107,7 @@ unsafe extern "C" fn get_property(
             state.fail("handle object index is out of range");
             return std::ptr::null_mut();
         }
-        return match state
-            .services
-            .get_object_property(runmat_value::Value::HandleObject(handle), &property_name)
-            .and_then(|value| {
-                value_to_mx_for_interface(&value, state.mx.mode(), state.interface).map_err(
-                    |error| MexDiagnostic {
-                        identifier: Some("RunMat:MEX:Conversion".into()),
-                        message: error.message,
-                    },
-                )
-            }) {
+        return match state.services.get_object_property(handle, &property_name) {
             Ok(value) => state.mx.allocate(value),
             Err(error) => {
                 state.error = Some(error);
@@ -1098,7 +1144,7 @@ unsafe extern "C" fn set_property(
         .get(value)
         .ok()
         .and_then(|array| match array.data() {
-            MxArrayData::Handle(handle) => Some(handle.clone()),
+            MxArrayData::Handle(_) => Some(array.clone()),
             _ => None,
         });
     if let Some(handle) = handle {
@@ -1106,16 +1152,10 @@ unsafe extern "C" fn set_property(
             state.fail("handle object index is out of range");
             return 1;
         }
-        let property_value = match state
-            .mx
-            .arena()
-            .get(child)
-            .map_err(|error| error.to_string())
-            .and_then(|value| value_from_mx(value).map_err(|error| error.message))
-        {
+        let property_value = match state.mx.arena().get(child).cloned() {
             Ok(value) => value,
             Err(error) => {
-                state.fail(error);
+                state.fail(error.to_string());
                 return 1;
             }
         };
@@ -1123,18 +1163,20 @@ unsafe extern "C" fn set_property(
             state.fail("could not consume handle property value");
             return 1;
         }
-        return match state.services.set_object_property(
-            runmat_value::Value::HandleObject(handle),
-            &property_name,
-            property_value,
-        ) {
-            Ok(runmat_value::Value::HandleObject(updated)) => {
-                if let Ok(array) = state.mx.arena_mut().get_mut(value) {
-                    *array.data_mut() = MxArrayData::Handle(updated);
+        return match state
+            .services
+            .set_object_property(handle, &property_name, property_value)
+        {
+            Ok(updated) => match state.mx.arena_mut().get_mut(value) {
+                Ok(array) => {
+                    *array = updated;
+                    0
                 }
-                0
-            }
-            Ok(_) => 0,
+                Err(error) => {
+                    state.fail(error.to_string());
+                    1
+                }
+            },
             Err(error) => {
                 state.error = Some(error);
                 1
@@ -1334,15 +1376,10 @@ unsafe extern "C" fn call(
                     .mx
                     .arena()
                     .get(*pointer)
+                    .cloned()
                     .map_err(|error| MexDiagnostic {
                         identifier: Some("RunMat:MEX:InvalidArray".into()),
                         message: error.to_string(),
-                    })
-                    .and_then(|value| {
-                        value_from_mx(value).map_err(|error| MexDiagnostic {
-                            identifier: Some("RunMat:MEX:Conversion".into()),
-                            message: error.message,
-                        })
                     })
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -1363,12 +1400,7 @@ unsafe extern "C" fn call(
             unsafe { std::slice::from_raw_parts_mut(plhs, nlhs) }
         };
         for (slot, output) in output_pointers.iter_mut().zip(outputs) {
-            let value = value_to_mx_for_interface(&output, state.mx.mode(), state.interface)
-                .map_err(|error| MexDiagnostic {
-                    identifier: Some("RunMat:MEX:Conversion".into()),
-                    message: error.message,
-                })?;
-            *slot = state.mx.allocate(value);
+            *slot = state.mx.allocate(output);
         }
         Ok(())
     })();
@@ -1399,19 +1431,11 @@ unsafe extern "C" fn get_variable(
     };
     match state.services.get_variable(&workspace, &name) {
         Ok(Some(value)) => {
-            match value_to_mx_for_interface(&value, state.mx.mode(), state.interface) {
-                Ok(value) => {
-                    let pointer = state.mx.allocate(value);
-                    if workspace == "global" {
-                        state.global_arrays.insert(pointer as usize);
-                    }
-                    pointer
-                }
-                Err(error) => {
-                    state.fail(error.message);
-                    std::ptr::null_mut()
-                }
+            let pointer = state.mx.allocate(value);
+            if workspace == "global" {
+                state.global_arrays.insert(pointer as usize);
             }
+            pointer
         }
         Ok(None) => std::ptr::null_mut(),
         Err(error) => {
@@ -1433,14 +1457,15 @@ unsafe extern "C" fn put_variable(
     let result = (|| {
         let workspace = c_string(workspace).ok_or_else(|| invalid_pointer("workspace name"))?;
         let name = c_string(name).ok_or_else(|| invalid_pointer("variable name"))?;
-        let value = state.mx.arena().get(value).map_err(|error| MexDiagnostic {
-            identifier: Some("RunMat:MEX:InvalidArray".into()),
-            message: error.to_string(),
-        })?;
-        let value = value_from_mx(value).map_err(|error| MexDiagnostic {
-            identifier: Some("RunMat:MEX:Conversion".into()),
-            message: error.message,
-        })?;
+        let value = state
+            .mx
+            .arena()
+            .get(value)
+            .cloned()
+            .map_err(|error| MexDiagnostic {
+                identifier: Some("RunMat:MEX:InvalidArray".into()),
+                message: error.to_string(),
+            })?;
         state.services.put_variable(&workspace, &name, value)
     })();
     match result {
@@ -1466,15 +1491,17 @@ unsafe extern "C" fn take_error(host: *mut c_void) -> *mut MxArray {
         return std::ptr::null_mut();
     };
     let mode = state.mx.mode();
-    let identifier = value_to_mx_for_interface(
+    let identifier = value_to_mx_for_interface_in_context(
         &runmat_value::Value::String(error.identifier.unwrap_or_default()),
         mode,
         state.interface,
+        Some(&state.value_context),
     );
-    let message = value_to_mx_for_interface(
+    let message = value_to_mx_for_interface_in_context(
         &runmat_value::Value::String(error.message),
         mode,
         state.interface,
+        Some(&state.value_context),
     );
     match (identifier, message) {
         (Ok(identifier), Ok(message)) => {

@@ -1,16 +1,118 @@
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::fmt;
+use std::thread::{self, ThreadId};
 
 use runmat_value::{
     record_host_copy, CellArray, CharArray, ComplexElement, ComplexStorage, ComplexTensor,
-    HostCopyReason, HostIndexBuffer, HostNumericBuffer, IntegerComplexStorage, IntegerStorage,
-    LogicalArray, NumericScalar, NumericStorage, ObjectArray, ObjectInstance, SparseTensor,
-    StructValue, Tensor, Value,
+    HandleRef, HostCopyReason, HostIndexBuffer, HostNumericBuffer, IntegerComplexStorage,
+    IntegerStorage, LogicalArray, NumericScalar, NumericStorage, ObjectArray, ObjectInstance,
+    SparseTensor, StructValue, Tensor, Value,
 };
 
 use crate::mxarray::{
-    MxApiMode, MxArray, MxArrayData, MxBoundaryInterface, MxInterleavedStorage, MxNumeric,
-    MxSparse, MxSparseValues,
+    MxApiMode, MxArray, MxArrayData, MxBoundaryInterface, MxHandleToken, MxInterleavedStorage,
+    MxNumeric, MxSparse, MxSparseValues,
 };
+
+#[derive(Debug)]
+struct MxHandleEntry {
+    generation: u64,
+    value: HandleRef,
+}
+
+/// Invocation-scoped origin-thread authority for garbage-collected handles.
+///
+/// Native lanes carry only [`MxHandleToken`] values. They cannot resolve or
+/// dereference a token; conversion back to a RunMat handle is permitted only
+/// through this context on the thread that created it.
+#[derive(Debug)]
+pub struct MxValueContext {
+    origin_thread: ThreadId,
+    next_resource: RefCell<u64>,
+    handles: RefCell<BTreeMap<u64, MxHandleEntry>>,
+}
+
+impl MxValueContext {
+    pub fn new() -> Self {
+        Self {
+            origin_thread: thread::current().id(),
+            next_resource: RefCell::new(1),
+            handles: RefCell::new(BTreeMap::new()),
+        }
+    }
+
+    pub(crate) fn register_handle(
+        &self,
+        value: &HandleRef,
+    ) -> Result<MxHandleToken, MxConversionError> {
+        self.require_origin_thread()?;
+        let mut next_resource = self.next_resource.borrow_mut();
+        let resource = *next_resource;
+        *next_resource = next_resource
+            .checked_add(1)
+            .ok_or_else(|| MxConversionError::new("MEX handle identity exhausted"))?;
+        let generation = 1;
+        self.handles.borrow_mut().insert(
+            resource,
+            MxHandleEntry {
+                generation,
+                value: value.clone(),
+            },
+        );
+        Ok(MxHandleToken {
+            resource,
+            generation,
+            class_name: value.class_name.clone(),
+        })
+    }
+
+    pub(crate) fn resolve_handle(
+        &self,
+        token: &MxHandleToken,
+    ) -> Result<HandleRef, MxConversionError> {
+        self.require_origin_thread()?;
+        self.handles
+            .borrow()
+            .get(&token.resource)
+            .filter(|entry| entry.generation == token.generation)
+            .map(|entry| entry.value.clone())
+            .ok_or_else(|| MxConversionError::new("stale MEX handle token"))
+    }
+
+    /// Convert a runtime value at its originating task boundary.
+    #[doc(hidden)]
+    pub fn encode(
+        &self,
+        value: &Value,
+        mode: MxApiMode,
+        interface: MxBoundaryInterface,
+    ) -> Result<MxArray, MxConversionError> {
+        value_to_mx_for_interface_in_context(value, mode, interface, Some(self))
+    }
+
+    /// Restore a runtime value at its originating task boundary.
+    #[doc(hidden)]
+    pub fn decode(&self, value: &MxArray) -> Result<Value, MxConversionError> {
+        value_from_mx_in_context(value, Some(self))
+    }
+
+    fn require_origin_thread(&self) -> Result<(), MxConversionError> {
+        if thread::current().id() == self.origin_thread {
+            Ok(())
+        } else {
+            Err(MxConversionError::new(
+                "MEX handle tokens can only be resolved on their originating runtime thread",
+            ))
+        }
+    }
+}
+
+impl Default for MxValueContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MxConversionError {
@@ -34,13 +136,14 @@ impl fmt::Display for MxConversionError {
 impl std::error::Error for MxConversionError {}
 
 pub fn value_to_mx(value: &Value, mode: MxApiMode) -> Result<MxArray, MxConversionError> {
-    value_to_mx_for_interface(value, mode, MxBoundaryInterface::CMatrix)
+    value_to_mx_for_interface_in_context(value, mode, MxBoundaryInterface::CMatrix, None)
 }
 
-pub(crate) fn value_to_mx_for_interface(
+pub(crate) fn value_to_mx_for_interface_in_context(
     value: &Value,
     mode: MxApiMode,
     interface: MxBoundaryInterface,
+    context: Option<&MxValueContext>,
 ) -> Result<MxArray, MxConversionError> {
     match value {
         Value::Num(value) => numeric_to_mx(NumericStorage::F64(vec![*value]), vec![1, 1]),
@@ -80,11 +183,16 @@ pub(crate) fn value_to_mx_for_interface(
         }
         Value::ComplexTensor(value) => complex_tensor_to_mx(value, mode),
         Value::SparseTensor(value) => sparse_to_mx(value),
-        Value::Cell(value) => cell_to_mx(value, mode, interface),
-        Value::Struct(value) => struct_to_mx(value, mode, interface),
-        Value::Object(value) => {
-            object_to_mx(&value.class_name, &[value], vec![1, 1], mode, interface)
-        }
+        Value::Cell(value) => cell_to_mx(value, mode, interface, context),
+        Value::Struct(value) => struct_to_mx(value, mode, interface, context),
+        Value::Object(value) => object_to_mx(
+            &value.class_name,
+            &[value],
+            vec![1, 1],
+            mode,
+            interface,
+            context,
+        ),
         Value::ObjectArray(value) => {
             let objects = value
                 .data()
@@ -103,9 +211,17 @@ pub(crate) fn value_to_mx_for_interface(
                 value.shape().to_vec(),
                 mode,
                 interface,
+                context,
             )
         }
-        Value::HandleObject(value) => Ok(MxArray::handle(value.clone())),
+        Value::HandleObject(value) => context
+            .ok_or_else(|| {
+                MxConversionError::new(
+                    "handle-object conversion requires an invocation value context",
+                )
+            })?
+            .register_handle(value)
+            .map(MxArray::handle),
         other => Err(MxConversionError::new(format!(
             "{} values do not have a C Matrix API representation",
             value_kind(other)
@@ -114,6 +230,13 @@ pub(crate) fn value_to_mx_for_interface(
 }
 
 pub fn value_from_mx(value: &MxArray) -> Result<Value, MxConversionError> {
+    value_from_mx_in_context(value, None)
+}
+
+pub(crate) fn value_from_mx_in_context(
+    value: &MxArray,
+    context: Option<&MxValueContext>,
+) -> Result<Value, MxConversionError> {
     match value.data() {
         MxArrayData::Numeric(numeric) => numeric_from_mx(numeric, value.shape()),
         MxArrayData::Interleaved(interleaved) => match &interleaved.values {
@@ -160,14 +283,23 @@ pub fn value_from_mx(value: &MxArray) -> Result<Value, MxConversionError> {
                     .map_err(MxConversionError::new)
             }
         }
-        MxArrayData::Cell(values) => cell_from_mx(values, value.shape()),
-        MxArrayData::Struct { fields, values } => struct_from_mx(fields, values, value.shape()),
+        MxArrayData::Cell(values) => cell_from_mx(values, value.shape(), context),
+        MxArrayData::Struct { fields, values } => {
+            struct_from_mx(fields, values, value.shape(), context)
+        }
         MxArrayData::Object {
             class_name,
             properties,
             values,
-        } => object_from_mx(class_name, properties, values, value.shape()),
-        MxArrayData::Handle(value) => Ok(Value::HandleObject(value.clone())),
+        } => object_from_mx(class_name, properties, values, value.shape(), context),
+        MxArrayData::Handle(value) => context
+            .ok_or_else(|| {
+                MxConversionError::new(
+                    "handle-object conversion requires an invocation value context",
+                )
+            })?
+            .resolve_handle(value)
+            .map(Value::HandleObject),
         MxArrayData::Sparse(value) => sparse_from_mx(value),
     }
 }
@@ -286,6 +418,7 @@ fn cell_to_mx(
     value: &CellArray,
     mode: MxApiMode,
     interface: MxBoundaryInterface,
+    context: Option<&MxValueContext>,
 ) -> Result<MxArray, MxConversionError> {
     let column_major = value.to_column_major();
     if let Some(fields) = uniform_struct_fields(&column_major) {
@@ -300,7 +433,8 @@ fn cell_to_mx(
                         .fields
                         .get(field)
                         .map(|value| {
-                            value_to_mx_for_interface(value, mode, interface).map(Box::new)
+                            value_to_mx_for_interface_in_context(value, mode, interface, context)
+                                .map(Box::new)
                         })
                         .transpose()?,
                 );
@@ -312,7 +446,7 @@ fn cell_to_mx(
     let values = column_major
         .iter()
         .map(|value| {
-            value_to_mx_for_interface(value, mode, interface)
+            value_to_mx_for_interface_in_context(value, mode, interface, context)
                 .map(Box::new)
                 .map(Some)
         })
@@ -324,18 +458,20 @@ fn struct_to_mx(
     value: &StructValue,
     mode: MxApiMode,
     interface: MxBoundaryInterface,
+    context: Option<&MxValueContext>,
 ) -> Result<MxArray, MxConversionError> {
     let fields = value.field_names().cloned().collect::<Vec<_>>();
     let values = fields
         .iter()
         .map(|field| {
-            value_to_mx_for_interface(
+            value_to_mx_for_interface_in_context(
                 value
                     .fields
                     .get(field)
                     .expect("field name came from the same struct"),
                 mode,
                 interface,
+                context,
             )
             .map(Box::new)
             .map(Some)
@@ -350,6 +486,7 @@ fn object_to_mx(
     shape: Vec<usize>,
     mode: MxApiMode,
     interface: MxBoundaryInterface,
+    context: Option<&MxValueContext>,
 ) -> Result<MxArray, MxConversionError> {
     if objects.iter().any(|object| object.class_name != class_name) {
         return Err(MxConversionError::new(
@@ -369,7 +506,10 @@ fn object_to_mx(
                 object
                     .properties
                     .get(property)
-                    .map(|value| value_to_mx_for_interface(value, mode, interface).map(Box::new))
+                    .map(|value| {
+                        value_to_mx_for_interface_in_context(value, mode, interface, context)
+                            .map(Box::new)
+                    })
                     .transpose()?,
             );
         }
@@ -502,13 +642,14 @@ fn char_from_mx(values: &[u16], shape: &[usize]) -> Result<Value, MxConversionEr
 fn cell_from_mx(
     values: &[Option<Box<MxArray>>],
     shape: &[usize],
+    context: Option<&MxValueContext>,
 ) -> Result<Value, MxConversionError> {
     let values = values
         .iter()
         .map(|value| {
             value
                 .as_deref()
-                .map(value_from_mx)
+                .map(|value| value_from_mx_in_context(value, context))
                 .transpose()
                 .map(|value| value.unwrap_or_else(|| Value::Tensor(Tensor::zeros(vec![0, 0]))))
         })
@@ -522,6 +663,7 @@ fn struct_from_mx(
     fields: &[String],
     values: &[Option<Box<MxArray>>],
     shape: &[usize],
+    context: Option<&MxValueContext>,
 ) -> Result<Value, MxConversionError> {
     let numel = shape.iter().product::<usize>();
     let mut structures = Vec::with_capacity(numel);
@@ -530,7 +672,7 @@ fn struct_from_mx(
         for (field_index, field) in fields.iter().enumerate() {
             let value = values[field_index * numel + element]
                 .as_deref()
-                .map(value_from_mx)
+                .map(|value| value_from_mx_in_context(value, context))
                 .transpose()?
                 .unwrap_or_else(|| Value::Tensor(Tensor::zeros(vec![0, 0])));
             structure.insert(field.clone(), value);
@@ -550,6 +692,7 @@ fn object_from_mx(
     properties: &[String],
     values: &[Option<Box<MxArray>>],
     shape: &[usize],
+    context: Option<&MxValueContext>,
 ) -> Result<Value, MxConversionError> {
     let numel = shape.iter().product::<usize>();
     let mut objects = Vec::with_capacity(numel);
@@ -559,7 +702,7 @@ fn object_from_mx(
             if let Some(value) = values[property_index * numel + element].as_deref() {
                 object
                     .properties
-                    .insert(property.clone(), value_from_mx(value)?);
+                    .insert(property.clone(), value_from_mx_in_context(value, context)?);
             }
         }
         objects.push(object);

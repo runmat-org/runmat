@@ -23,16 +23,16 @@ pub use build::{
     MEX_EXTENSIONS,
 };
 pub use compatibility::{MexApiAvailability, MexApiSymbol, C_MATRIX_API, C_MEX_API};
-pub(crate) use conversion::value_to_mx_for_interface;
-pub use conversion::{value_from_mx, value_to_mx, MxConversionError};
+pub use conversion::{value_from_mx, value_to_mx, MxConversionError, MxValueContext};
+pub(crate) use conversion::{value_from_mx_in_context, value_to_mx_for_interface_in_context};
 pub use host::{
-    MexCallState, MexDiagnostic, MexHostApiV1, MexHostServices, UnavailableMexHostServices,
-    MEX_HOST_ABI_VERSION,
+    DirectMexBoundaryHostServices, MexBoundaryHostServices, MexCallState, MexDiagnostic,
+    MexHostApiV1, MexHostServices, UnavailableMexHostServices, MEX_HOST_ABI_VERSION,
 };
 pub use libmx::MxApi;
 #[cfg(not(target_family = "wasm"))]
-pub use loader::{MexInvocation, MexLoadError, MexModule};
-pub(crate) use mxarray::MxBoundaryInterface;
+pub use loader::{MexInvocation, MexLoadError, MexModule, MexNativeInvocation};
 pub use mxarray::{
-    MxApiMode, MxArray, MxClassId, MxComplexity, MxInterleaved, MxNumeric, MxSparse, MxSparseValues,
+    MxApiMode, MxArray, MxBoundaryInterface, MxClassId, MxComplexity, MxHandleToken, MxInterleaved,
+    MxNumeric, MxSparse, MxSparseValues,
 };
