@@ -34,6 +34,7 @@ impl MexApi {
 pub enum MexSourceLanguage {
     C,
     Cxx,
+    Fortran,
 }
 
 impl MexSourceLanguage {
@@ -45,6 +46,7 @@ impl MexSourceLanguage {
             .as_deref()
         {
             Some("cc" | "cpp" | "cxx" | "c++") => Self::Cxx,
+            Some("f" | "for" | "f77" | "f90" | "f95" | "f03" | "f08") => Self::Fortran,
             _ => Self::C,
         }
     }
@@ -54,6 +56,9 @@ impl MexSourceLanguage {
 pub struct MexBuild {
     pub(super) compiler: PathBuf,
     pub(super) compiler_explicit: bool,
+    pub(super) c_compiler: PathBuf,
+    pub(super) cxx_compiler: PathBuf,
+    pub(super) fortran_compiler: PathBuf,
     pub(super) sources: Vec<PathBuf>,
     pub(super) output_directory: PathBuf,
     pub(super) output_name: String,
@@ -63,6 +68,9 @@ pub struct MexBuild {
     pub(super) include_directories: Vec<PathBuf>,
     pub(super) definitions: Vec<String>,
     pub(super) compiler_arguments: Vec<String>,
+    pub(super) c_compiler_arguments: Vec<String>,
+    pub(super) cxx_compiler_arguments: Vec<String>,
+    pub(super) fortran_compiler_arguments: Vec<String>,
     pub(super) linker_arguments: Vec<String>,
     pub(super) target: MexTarget,
 }
@@ -91,12 +99,19 @@ impl MexBuild {
             suffix: String::new(),
         });
         let language = MexSourceLanguage::detect(&source);
+        let c_compiler = super::default_c_compiler();
+        let cxx_compiler = super::default_cxx_compiler();
+        let fortran_compiler = super::default_fortran_compiler();
         Self {
             compiler: match language {
-                MexSourceLanguage::C => super::default_c_compiler(),
-                MexSourceLanguage::Cxx => super::default_cxx_compiler(),
+                MexSourceLanguage::C => c_compiler.clone(),
+                MexSourceLanguage::Cxx => cxx_compiler.clone(),
+                MexSourceLanguage::Fortran => fortran_compiler.clone(),
             },
             compiler_explicit: false,
+            c_compiler,
+            cxx_compiler,
+            fortran_compiler,
             sources: vec![source],
             output_directory: output_directory.into(),
             output_name,
@@ -104,11 +119,15 @@ impl MexBuild {
             api: match language {
                 MexSourceLanguage::C => MexApi::default(),
                 MexSourceLanguage::Cxx => MexApi::R2018a,
+                MexSourceLanguage::Fortran => MexApi::default(),
             },
             api_explicit: false,
             include_directories: Vec::new(),
             definitions: Vec::new(),
             compiler_arguments: Vec::new(),
+            c_compiler_arguments: Vec::new(),
+            cxx_compiler_arguments: Vec::new(),
+            fortran_compiler_arguments: Vec::new(),
             linker_arguments: Vec::new(),
             target,
         }
@@ -120,17 +139,54 @@ impl MexBuild {
         self
     }
 
+    pub fn c_compiler(mut self, compiler: impl Into<PathBuf>) -> Self {
+        self.c_compiler = compiler.into();
+        if self.language == MexSourceLanguage::C && !self.compiler_explicit {
+            self.compiler = self.c_compiler.clone();
+        }
+        self
+    }
+
+    pub fn cxx_compiler(mut self, compiler: impl Into<PathBuf>) -> Self {
+        self.cxx_compiler = compiler.into();
+        if self.language == MexSourceLanguage::Cxx && !self.compiler_explicit {
+            self.compiler = self.cxx_compiler.clone();
+        }
+        self
+    }
+
+    pub fn fortran_compiler(mut self, compiler: impl Into<PathBuf>) -> Self {
+        self.fortran_compiler = compiler.into();
+        if self.language == MexSourceLanguage::Fortran && !self.compiler_explicit {
+            self.compiler = self.fortran_compiler.clone();
+        }
+        self
+    }
+
     pub fn source(mut self, source: impl Into<PathBuf>) -> Self {
         let source = source.into();
-        if MexSourceLanguage::detect(&source) == MexSourceLanguage::Cxx
-            && self.language == MexSourceLanguage::C
-        {
-            self.language = MexSourceLanguage::Cxx;
+        let source_language = MexSourceLanguage::detect(&source);
+        let selected_language = match (self.language, source_language) {
+            (MexSourceLanguage::Fortran, _) | (_, MexSourceLanguage::Fortran) => {
+                MexSourceLanguage::Fortran
+            }
+            (MexSourceLanguage::Cxx, _) | (_, MexSourceLanguage::Cxx) => MexSourceLanguage::Cxx,
+            _ => MexSourceLanguage::C,
+        };
+        if selected_language != self.language {
+            self.language = selected_language;
             if !self.compiler_explicit {
-                self.compiler = super::default_cxx_compiler();
+                self.compiler = match selected_language {
+                    MexSourceLanguage::C => self.c_compiler.clone(),
+                    MexSourceLanguage::Cxx => self.cxx_compiler.clone(),
+                    MexSourceLanguage::Fortran => self.fortran_compiler.clone(),
+                };
             }
             if !self.api_explicit {
-                self.api = MexApi::R2018a;
+                self.api = match selected_language {
+                    MexSourceLanguage::Cxx => MexApi::R2018a,
+                    MexSourceLanguage::C | MexSourceLanguage::Fortran => MexApi::R2017b,
+                };
             }
         }
         self.sources.push(source);
@@ -163,6 +219,21 @@ impl MexBuild {
         self
     }
 
+    pub fn c_compiler_argument(mut self, argument: impl Into<String>) -> Self {
+        self.c_compiler_arguments.push(argument.into());
+        self
+    }
+
+    pub fn cxx_compiler_argument(mut self, argument: impl Into<String>) -> Self {
+        self.cxx_compiler_arguments.push(argument.into());
+        self
+    }
+
+    pub fn fortran_compiler_argument(mut self, argument: impl Into<String>) -> Self {
+        self.fortran_compiler_arguments.push(argument.into());
+        self
+    }
+
     pub fn linker_argument(mut self, argument: impl Into<String>) -> Self {
         self.linker_arguments.push(argument.into());
         self
@@ -191,7 +262,7 @@ impl MexBuild {
             }
         })?;
         let object_directory = if compiler_family(&self.compiler) == super::CCompilerFamily::Msvc
-            || self.language == MexSourceLanguage::Cxx
+            || self.language != MexSourceLanguage::C
         {
             Some(
                 tempfile::Builder::new()

@@ -4,16 +4,18 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum MexBuildError {
-    #[error("C MEX compilation is unavailable for this target")]
+    #[error("native MEX compilation is unavailable for this target")]
     UnsupportedTarget,
-    #[error("C MEX target `{triple}` is not a supported native RunMat target")]
+    #[error("MEX target `{triple}` is not a supported native RunMat target")]
     UnsupportedTargetIdentity { triple: String },
     #[error("C compiler family `{compiler_family}` is unsupported for MEX target `{triple}`")]
     UnsupportedCompilerForTarget {
         compiler_family: &'static str,
         triple: String,
     },
-    #[error("C MEX cross-compilation for target `{triple}` is not available; run this build on the target host")]
+    #[error("Fortran MEX compiler `{compiler}` does not use a supported GNU-compatible ABI")]
+    UnsupportedFortranCompiler { compiler: PathBuf },
+    #[error("MEX cross-compilation for target `{triple}` is not available; run this build on the target host")]
     CrossCompilationUnavailable { triple: String },
     #[error("a MEX build requires at least one source file")]
     MissingSources,
@@ -35,13 +37,13 @@ pub enum MexBuildError {
         #[source]
         source: std::io::Error,
     },
-    #[error("failed to invoke C compiler {compiler}: {source}")]
+    #[error("failed to invoke MEX compiler {compiler}: {source}")]
     CompilerLaunch {
         compiler: PathBuf,
         #[source]
         source: std::io::Error,
     },
-    #[error("C MEX compilation failed\ncommand: {command}\n{diagnostics}")]
+    #[error("MEX compilation failed\ncommand: {command}\n{diagnostics}")]
     CompilerFailure {
         command: String,
         diagnostics: String,

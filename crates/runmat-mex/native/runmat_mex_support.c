@@ -3,6 +3,7 @@
 #include "mex.h"
 
 #include <limits.h>
+#include <stdint.h>
 #include <math.h>
 #include <setjmp.h>
 #include <stdio.h>
@@ -86,7 +87,41 @@ RUNMAT_MEX_HOST_EXPORT int runmatMexInvoke(int nlhs, mxArray *plhs[], int nrhs,
         (void)runmat_cleanup_sparse_index_proxies(0);
         return 1;
     }
+#if defined(RUNMAT_MEX_FORTRAN)
+#define RUNMAT_FORTRAN_SYMBOL_INNER(name) name##_
+#define RUNMAT_FORTRAN_SYMBOL(name) RUNMAT_FORTRAN_SYMBOL_INNER(name)
+    extern void RUNMAT_FORTRAN_SYMBOL(RUNMAT_MEX_FORTRAN_GATEWAY)(
+        int *, intptr_t *, int *, const intptr_t *);
+    intptr_t *fortran_lhs = NULL;
+    intptr_t *fortran_rhs = NULL;
+    if (nlhs > 0) {
+        fortran_lhs = (intptr_t *)calloc((size_t)nlhs, sizeof(intptr_t));
+        if (fortran_lhs == NULL) {
+            runmat_raise("RunMat:MEX:Allocation", "could not allocate Fortran output handles");
+        }
+    }
+    if (nrhs > 0) {
+        fortran_rhs = (intptr_t *)malloc((size_t)nrhs * sizeof(intptr_t));
+        if (fortran_rhs == NULL) {
+            free(fortran_lhs);
+            runmat_raise("RunMat:MEX:Allocation", "could not allocate Fortran input handles");
+        }
+        for (int index = 0; index < nrhs; ++index) {
+            fortran_rhs[index] = (intptr_t)prhs[index];
+        }
+    }
+    RUNMAT_FORTRAN_SYMBOL(RUNMAT_MEX_FORTRAN_GATEWAY)(
+        &nlhs, fortran_lhs, &nrhs, fortran_rhs);
+#undef RUNMAT_FORTRAN_SYMBOL
+#undef RUNMAT_FORTRAN_SYMBOL_INNER
+    for (int index = 0; index < nlhs; ++index) {
+        plhs[index] = (mxArray *)fortran_lhs[index];
+    }
+    free(fortran_rhs);
+    free(fortran_lhs);
+#else
     mexFunction(nlhs, plhs, nrhs, prhs);
+#endif
     runmat_error_target = NULL;
     if (runmat_cleanup_sparse_index_proxies(1) != 0) {
         runmat_host->set_error(runmat_host->host, "RunMat:MEX:Sparse",
@@ -160,3 +195,13 @@ const char *mexFunctionName(void) { return RUNMAT_MEX_FUNCTION_NAME; }
 #include "matrix_api.inc"
 
 #include "mex_api.inc"
+
+#if defined(RUNMAT_MEX_FORTRAN)
+#if defined(__GNUC__)
+#pragma GCC visibility push(hidden)
+#endif
+#include "fortran_api.inc"
+#if defined(__GNUC__)
+#pragma GCC visibility pop
+#endif
+#endif

@@ -19,6 +19,7 @@ pub enum MxApiMode {
 pub enum MxBoundaryInterface {
     CMatrix,
     CxxData,
+    FortranMatrix,
 }
 
 /// Origin-thread value identity carried through a native MEX lane.

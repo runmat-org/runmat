@@ -11,6 +11,552 @@ use runmat_mex::{
 };
 use runmat_value::Value;
 
+fn fortran_compiler_available() -> bool {
+    std::process::Command::new("gfortran")
+        .arg("--version")
+        .output()
+        .is_ok_and(|output| output.status.success())
+}
+
+#[test]
+fn fortran_gateway_uses_native_handles_and_fortran_array_copy_routines() {
+    if !fortran_compiler_available() {
+        eprintln!("skipping Fortran MEX fixture because gfortran is unavailable");
+        return;
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("fortran_gateway.F");
+    fs::write(
+        &source,
+        r#"
+#include "fintrf.h"
+      subroutine mexFunction(nlhs, plhs, nrhs, prhs)
+      implicit none
+      integer nlhs, nrhs
+      mwPointer plhs(*), prhs(*)
+      mwPointer input_data, output_data
+      mwSize count
+      mwPointer mxGetDoubles, mxCreateDoubleMatrix
+      integer*4 mxIsDouble
+      real*8 input_values(2), output_values(2)
+
+      if (nrhs .ne. 1 .or. nlhs .ne. 1) then
+         call mexErrMsgIdAndTxt('RunMat:test:arity',
+     +        'expected one input and one output')
+      endif
+      if (mxIsDouble(prhs(1)) .eq. 0) then
+         call mexErrMsgIdAndTxt('RunMat:test:type',
+     +        'expected double input')
+      endif
+      count = 2
+      input_data = mxGetDoubles(prhs(1))
+      call mxCopyPtrToReal8(input_data, input_values, count)
+      output_values(1) = input_values(1) * 2.0d0
+      output_values(2) = input_values(2) * 2.0d0
+      plhs(1) = mxCreateDoubleMatrix(1, 2, mxREAL)
+      output_data = mxGetDoubles(plhs(1))
+      call mxCopyReal8ToPtr(output_values, output_data, count)
+      return
+      end
+"#,
+    )
+    .unwrap();
+
+    let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+    assert_eq!(
+        artifact.artifact.source_language,
+        MexSourceLanguage::Fortran
+    );
+    let module = MexModule::load(&artifact.module).unwrap();
+    assert_eq!(
+        module.boundary_interface(),
+        runmat_mex::MxBoundaryInterface::FortranMatrix
+    );
+    let error = module.invoke(&[], 1, module.api_mode()).unwrap_err();
+    assert!(
+        matches!(
+            error,
+            MexLoadError::Invocation { ref identifier, ref message }
+                if identifier == " (RunMat:test:arity)"
+                    && message == "expected one input and one output"
+        ),
+        "unexpected Fortran diagnostic: {error:?}"
+    );
+    let result = module
+        .invoke(
+            &[Value::Tensor(
+                runmat_value::Tensor::new(vec![3.5, -2.0], vec![1, 2]).unwrap(),
+            )],
+            1,
+            module.api_mode(),
+        )
+        .unwrap();
+    let Value::Tensor(output) = &result.outputs[0] else {
+        panic!("Fortran output must remain a tensor");
+    };
+    assert_eq!(output.materialize_f64(), vec![7.0, -4.0]);
+}
+
+#[test]
+fn mixed_c_and_fortran_sources_use_their_own_compilers_and_one_fortran_link() {
+    if !fortran_compiler_available() {
+        eprintln!("skipping Fortran MEX fixture because gfortran is unavailable");
+        return;
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let helper = directory.path().join("numeric_helper.c");
+    let gateway = directory.path().join("mixed_gateway.F90");
+    fs::write(
+        &helper,
+        "double scale_value_(const double *value) { return *value * 3.0; }\n",
+    )
+    .unwrap();
+    fs::write(
+        &gateway,
+        r#"
+#include "fintrf.h"
+subroutine mexFunction(nlhs, plhs, nrhs, prhs)
+  implicit none
+  integer nlhs, nrhs
+  mwPointer plhs(*), prhs(*)
+  mwPointer mxCreateDoubleScalar
+  real*8 scale_value
+  plhs(1) = mxCreateDoubleScalar(scale_value(4.0d0))
+end
+"#,
+    )
+    .unwrap();
+
+    let build = MexBuild::new(&helper, directory.path()).source(&gateway);
+    let plan = build.plan().unwrap();
+    assert!(plan.steps[0].arguments.contains(&"-std=c11".to_string()));
+    assert!(plan.steps[1].arguments.contains(&"-std=legacy".to_string()));
+    assert!(plan
+        .steps
+        .last()
+        .unwrap()
+        .compiler
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .starts_with("gfortran"));
+    let artifact = build.compile().unwrap();
+    assert_eq!(
+        artifact.artifact.source_language,
+        MexSourceLanguage::Fortran
+    );
+    let module = MexModule::load(&artifact.module).unwrap();
+    let result = module.invoke(&[], 1, module.api_mode()).unwrap();
+    assert_eq!(result.outputs, vec![Value::Num(12.0)]);
+}
+
+#[test]
+fn fortran_gateway_preserves_interleaved_complex_aliases() {
+    if !fortran_compiler_available() {
+        eprintln!("skipping Fortran MEX fixture because gfortran is unavailable");
+        return;
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("fortran_complex_callback.F");
+    fs::write(
+        &source,
+        r#"
+#include "fintrf.h"
+      subroutine mexFunction(nlhs, plhs, nrhs, prhs)
+      implicit none
+      integer nlhs, nrhs, status
+      integer*4 mxCopyPtrToComplex16
+      mwPointer plhs(*), prhs(*)
+      mwSize count
+      mwPointer complex_data
+      mwPointer mxGetComplexDoubles
+      complex*16 values(2)
+
+      if (nrhs .ne. 1 .or. nlhs .ne. 1) then
+         call mexErrMsgIdAndTxt('RunMat:test:arity',
+     +        'expected one input and one output')
+      endif
+      count = 2
+      complex_data = mxGetComplexDoubles(prhs(1))
+      status = mxCopyPtrToComplex16(complex_data, values, count)
+      if (status .ne. 1) then
+         call mexErrMsgTxt('complex copy failed')
+      endif
+      plhs(1) = prhs(1)
+      return
+      end
+"#,
+    )
+    .unwrap();
+
+    let input =
+        runmat_value::ComplexTensor::new(vec![(2.0, -3.0), (-0.0, 4.5)], vec![1, 2]).unwrap();
+    let runmat_value::ComplexStorage::F64(input_buffer) = input.complex_storage() else {
+        unreachable!("fixture creates complex double storage");
+    };
+    let input_address = unsafe { input_buffer.foreign_data_pointer() } as usize;
+    let artifact = MexBuild::new(&source, directory.path())
+        .api(MexApi::R2018a)
+        .compile()
+        .unwrap();
+    let module = MexModule::load(&artifact.module).unwrap();
+    let result = module
+        .invoke_with_services(
+            &[Value::ComplexTensor(input)],
+            1,
+            module.api_mode(),
+            Rc::new(FixtureHost::default()),
+        )
+        .unwrap();
+    let Value::ComplexTensor(output) = &result.outputs[0] else {
+        panic!("aliased Fortran output must remain complex");
+    };
+    let runmat_value::ComplexStorage::F64(output_buffer) = output.complex_storage() else {
+        panic!("Fortran output must retain complex double storage");
+    };
+    let output_address = unsafe { output_buffer.foreign_data_pointer() } as usize;
+    assert_eq!(output_address, input_address);
+    assert_eq!(output.materialize_f64(), vec![(2.0, -3.0), (-0.0, 4.5)]);
+}
+
+#[test]
+fn fortran_separate_complex_copy_family_preserves_both_components() {
+    if !fortran_compiler_available() {
+        eprintln!("skipping Fortran MEX fixture because gfortran is unavailable");
+        return;
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("fortran_separate_complex.F");
+    fs::write(
+        &source,
+        r#"
+#include "fintrf.h"
+      subroutine mexFunction(nlhs, plhs, nrhs, prhs)
+      implicit none
+      integer nlhs, nrhs
+      mwPointer plhs(*), prhs(*)
+      mwPointer real_input, imaginary_input
+      mwPointer real_output, imaginary_output
+      mwSize count
+      mwPointer mxGetPr, mxGetPi, mxCreateDoubleMatrix
+      complex*16 values(2)
+
+      count = 2
+      real_input = mxGetPr(prhs(1))
+      imaginary_input = mxGetPi(prhs(1))
+      call mxCopyPtrToComplex16(real_input, imaginary_input, values,
+     +                          count)
+      values(1) = values(1) * (2.0d0, 0.0d0)
+      values(2) = values(2) * (2.0d0, 0.0d0)
+      plhs(1) = mxCreateDoubleMatrix(1, 2, mxCOMPLEX)
+      real_output = mxGetPr(plhs(1))
+      imaginary_output = mxGetPi(plhs(1))
+      call mxCopyComplex16ToPtr(values, real_output,
+     +                          imaginary_output, count)
+      return
+      end
+"#,
+    )
+    .unwrap();
+
+    let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+    assert_eq!(artifact.artifact.api, MexApi::R2017b);
+    let module = MexModule::load(&artifact.module).unwrap();
+    let input =
+        runmat_value::ComplexTensor::new(vec![(1.5, -2.0), (-4.0, 3.0)], vec![1, 2]).unwrap();
+    let result = module
+        .invoke(&[Value::ComplexTensor(input)], 1, module.api_mode())
+        .unwrap();
+    let Value::ComplexTensor(output) = &result.outputs[0] else {
+        panic!("separate-complex Fortran output must remain complex");
+    };
+    assert_eq!(output.materialize_f64(), vec![(3.0, -4.0), (-8.0, 6.0)]);
+}
+
+#[test]
+fn fortran_gateway_uses_character_arguments_for_callbacks_and_diagnostics() {
+    if !fortran_compiler_available() {
+        eprintln!("skipping Fortran MEX fixture because gfortran is unavailable");
+        return;
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("fortran_callback.F");
+    fs::write(
+        &source,
+        r#"
+#include "fintrf.h"
+      subroutine mexFunction(nlhs, plhs, nrhs, prhs)
+      implicit none
+      integer nlhs, nrhs
+      integer*4 status, mexCallMATLAB
+      mwPointer plhs(*), prhs(*)
+      mwPointer callback_inputs(1), callback_outputs(1)
+
+      if (nrhs .ne. 1 .or. nlhs .ne. 1) then
+         call mexErrMsgIdAndTxt('RunMat:test:arity',
+     +        'expected one input and one output')
+      endif
+      callback_inputs(1) = prhs(1)
+      status = mexCallMATLAB(1, callback_outputs, 1,
+     +                       callback_inputs, 'plus_one')
+      if (status .ne. 0) then
+         call mexErrMsgTxt('callback failed')
+      endif
+      plhs(1) = callback_outputs(1)
+      return
+      end
+"#,
+    )
+    .unwrap();
+
+    let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+    let module = MexModule::load(&artifact.module).unwrap();
+    let result = module
+        .invoke_with_services(
+            &[Value::Num(12.0)],
+            1,
+            module.api_mode(),
+            Rc::new(FixtureHost::default()),
+        )
+        .unwrap();
+    assert_eq!(result.outputs, vec![Value::Num(13.0)]);
+}
+
+#[test]
+fn fortran_container_api_uses_fortran_index_and_field_number_conventions() {
+    if !fortran_compiler_available() {
+        eprintln!("skipping Fortran MEX fixture because gfortran is unavailable");
+        return;
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("fortran_containers.F");
+    fs::write(
+        &source,
+        r#"
+#include "fintrf.h"
+      subroutine mexFunction(nlhs, plhs, nrhs, prhs)
+      implicit none
+      integer nlhs, nrhs
+      integer*4 logical_value, mxIsLogicalScalarTrue
+      integer*4 mxGetFieldNumber
+      mwPointer plhs(*), prhs(*)
+      mwPointer mxCreateCellMatrix, mxCreateStructMatrix
+      mwPointer mxCreateDoubleScalar, mxCreateLogicalScalar
+      mwPointer mxGetCell, mxGetFieldByNumber
+      mwPointer number, flag
+      character*8 field_names(1)
+
+      field_names(1) = 'value'
+      number = mxCreateDoubleScalar(7.0d0)
+      logical_value = 1
+      flag = mxCreateLogicalScalar(logical_value)
+      plhs(1) = mxCreateCellMatrix(1, 1)
+      call mxSetCell(plhs(1), 1, number)
+      plhs(2) = mxCreateStructMatrix(1, 1, 1, field_names)
+      call mxSetField(plhs(2), 1, 'value', flag)
+      if (mxGetCell(plhs(1), 1) .ne. number) then
+         call mexErrMsgTxt('one-based cell lookup failed')
+      endif
+      if (mxGetFieldNumber(plhs(2), 'value') .ne. 1) then
+         call mexErrMsgTxt('one-based field number failed')
+      endif
+      if (mxIsLogicalScalarTrue(mxGetFieldByNumber(plhs(2), 1, 1))
+     +    .eq. 0) then
+         call mexErrMsgTxt('one-based field lookup failed')
+      endif
+      return
+      end
+"#,
+    )
+    .unwrap();
+
+    let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+    let module = MexModule::load(&artifact.module).unwrap();
+    let result = module.invoke(&[], 2, module.api_mode()).unwrap();
+    let Value::Cell(cell) = &result.outputs[0] else {
+        panic!("first Fortran output must be a cell array");
+    };
+    assert_eq!(cell.data, vec![Value::Num(7.0)]);
+    let Value::Struct(structure) = &result.outputs[1] else {
+        panic!("second Fortran output must be a structure");
+    };
+    assert_eq!(structure.fields.get("value"), Some(&Value::Bool(true)));
+}
+
+#[test]
+fn fortran_compatible_array_dims_keeps_pointer_and_dimension_widths_distinct() {
+    if !fortran_compiler_available() {
+        eprintln!("skipping Fortran MEX fixture because gfortran is unavailable");
+        return;
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("fortran_compatible_dims.F");
+    fs::write(
+        &source,
+        r#"
+#include "fintrf.h"
+      subroutine mexFunction(nlhs, plhs, nrhs, prhs)
+      implicit none
+      integer nlhs, nrhs
+      mwPointer plhs(*), prhs(*)
+      mwPointer mxCreateDoubleMatrix
+      plhs(1) = mxCreateDoubleMatrix(2, 3, mxREAL)
+      return
+      end
+"#,
+    )
+    .unwrap();
+    let artifact = MexBuild::new(&source, directory.path())
+        .api(MexApi::CompatibleArrayDims)
+        .compile()
+        .unwrap();
+    let module = MexModule::load(&artifact.module).unwrap();
+    let result = module.invoke(&[], 1, module.api_mode()).unwrap();
+    let Value::Tensor(output) = &result.outputs[0] else {
+        panic!("compatible-dimension Fortran output must be numeric");
+    };
+    assert_eq!(output.shape, vec![2, 3]);
+    assert_eq!(output.materialize_f64(), vec![0.0; 6]);
+}
+
+#[test]
+fn fortran_sparse_api_preserves_canonical_buffers_and_zero_based_csc_indices() {
+    if !fortran_compiler_available() {
+        eprintln!("skipping Fortran MEX fixture because gfortran is unavailable");
+        return;
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("fortran_sparse.F");
+    fs::write(
+        &source,
+        r#"
+#include "fintrf.h"
+      subroutine mexFunction(nlhs, plhs, nrhs, prhs)
+      implicit none
+      integer nlhs, nrhs
+      integer*4 mxIsSparse
+      mwPointer plhs(*), prhs(*)
+      mwPointer mxGetIr, mxGetJc, mxGetDoubles
+      mwPointer rows_pointer, columns_pointer, values_pointer
+      integer*8 rows(2), columns(3)
+      real*8 values(2)
+
+      if (nlhs .ne. 1 .or. nrhs .ne. 1) then
+         call mexErrMsgTxt('expected one sparse input and output')
+      endif
+      if (mxIsSparse(prhs(1)) .eq. 0) then
+         call mexErrMsgTxt('expected sparse input')
+      endif
+      rows_pointer = mxGetIr(prhs(1))
+      columns_pointer = mxGetJc(prhs(1))
+      values_pointer = mxGetDoubles(prhs(1))
+      call mxCopyPtrToInteger8(rows_pointer, rows, 2)
+      call mxCopyPtrToInteger8(columns_pointer, columns, 3)
+      call mxCopyPtrToReal8(values_pointer, values, 2)
+      if (rows(1) .ne. 1 .or. rows(2) .ne. 0) then
+         call mexErrMsgTxt('sparse rows must remain zero based')
+      endif
+      if (columns(1) .ne. 0 .or. columns(2) .ne. 1 .or.
+     +    columns(3) .ne. 2) then
+         call mexErrMsgTxt('sparse column pointers changed')
+      endif
+      if (values(1) .ne. 3.0d0 .or. values(2) .ne. 4.0d0) then
+         call mexErrMsgTxt('sparse values changed')
+      endif
+      plhs(1) = prhs(1)
+      return
+      end
+"#,
+    )
+    .unwrap();
+
+    let input =
+        runmat_value::SparseTensor::new(2, 2, vec![0, 1, 2], vec![1, 0], vec![3.0, 4.0]).unwrap();
+    let input_values =
+        unsafe { input.numeric_host_buffer().unwrap().foreign_data_pointer() } as usize;
+    let input_rows = unsafe { input.row_indices.foreign_data_pointer() } as usize;
+    let input_columns = unsafe { input.col_ptrs.foreign_data_pointer() } as usize;
+    let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+    let module = MexModule::load(&artifact.module).unwrap();
+    let result = module
+        .invoke(&[Value::SparseTensor(input)], 1, module.api_mode())
+        .unwrap();
+    let Value::SparseTensor(output) = &result.outputs[0] else {
+        panic!("Fortran output must remain sparse");
+    };
+    assert_eq!(output.materialize_f64(), vec![3.0, 4.0]);
+    assert_eq!(
+        unsafe { output.numeric_host_buffer().unwrap().foreign_data_pointer() } as usize,
+        input_values
+    );
+    assert_eq!(
+        unsafe { output.row_indices.foreign_data_pointer() } as usize,
+        input_rows
+    );
+    assert_eq!(
+        unsafe { output.col_ptrs.foreign_data_pointer() } as usize,
+        input_columns
+    );
+}
+
+#[test]
+fn fortran_lifecycle_callbacks_reuse_the_module_host_context() {
+    if !fortran_compiler_available() {
+        eprintln!("skipping Fortran MEX fixture because gfortran is unavailable");
+        return;
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("fortran_lifecycle.F");
+    fs::write(
+        &source,
+        r#"
+#include "fintrf.h"
+      subroutine mexFunction(nlhs, plhs, nrhs, prhs)
+      implicit none
+      integer nlhs, nrhs
+      integer*4 status, mexAtExit
+      mwPointer plhs(*), prhs(*)
+      external record_exit
+
+      status = mexAtExit(record_exit)
+      if (status .ne. 0) then
+         call mexErrMsgTxt('could not register Fortran at-exit')
+      endif
+      call mexLock
+      return
+      end
+
+      subroutine record_exit()
+      implicit none
+      integer*4 status, mexPutVariable
+      mwPointer value, mxCreateDoubleScalar
+
+      value = mxCreateDoubleScalar(73.0d0)
+      status = mexPutVariable('base', 'fortran_exit', value)
+      if (status .ne. 0) then
+         call mexErrMsgTxt('Fortran at-exit workspace callback failed')
+      endif
+      call mxDestroyArray(value)
+      return
+      end
+"#,
+    )
+    .unwrap();
+
+    let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+    let host = Rc::new(FixtureHost::default());
+    let module = MexModule::load(&artifact.module).unwrap();
+    module
+        .invoke_with_services(&[], 0, module.api_mode(), host.clone())
+        .unwrap();
+    assert!(module.is_locked());
+    module.shutdown_with_services(host.clone()).unwrap();
+    assert_eq!(
+        host.workspace.lock().unwrap().get("fortran_exit"),
+        Some(&Value::Num(73.0))
+    );
+}
+
 #[test]
 fn modern_cpp_data_api_shares_inputs_detaches_mutation_and_adopts_buffers() {
     let directory = tempfile::tempdir().unwrap();

@@ -39,6 +39,20 @@ pub(super) fn default_cxx_compiler() -> PathBuf {
         })
 }
 
+pub(super) fn default_fortran_compiler() -> PathBuf {
+    std::env::var_os("FC")
+        .or_else(|| std::env::var_os("F77"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("gfortran"))
+}
+
+pub(super) fn is_supported_fortran_compiler(compiler: &Path) -> bool {
+    compiler
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.to_ascii_lowercase().starts_with("gfortran"))
+}
+
 pub(super) fn compiler_family(compiler: &Path) -> CCompilerFamily {
     let executable = compiler
         .file_name()

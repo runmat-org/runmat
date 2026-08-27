@@ -7,9 +7,10 @@ use sha2::{Digest as _, Sha256};
 
 use super::MexBuildError;
 
-const FILES: [(&str, &[u8]); 24] = [
+const FILES: [(&str, &[u8]); 26] = [
     ("include/matrix.h", include_bytes!("../../include/matrix.h")),
     ("include/mex.h", include_bytes!("../../include/mex.h")),
+    ("include/fintrf.h", include_bytes!("../../include/fintrf.h")),
     ("include/mex.hpp", include_bytes!("../../include/mex.hpp")),
     (
         "include/mexAdapter.hpp",
@@ -94,6 +95,10 @@ const FILES: [(&str, &[u8]); 24] = [
     (
         "native/mex_api.inc",
         include_bytes!("../../native/mex_api.inc"),
+    ),
+    (
+        "native/fortran_api.inc",
+        include_bytes!("../../native/fortran_api.inc"),
     ),
 ];
 
