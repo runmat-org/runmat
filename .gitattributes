@@ -7,3 +7,7 @@
 # Canonical package fixtures are compared byte-for-byte with serializer output.
 # Keep their wire-format line endings stable on Windows checkouts as well.
 crates/runmat-package/tests/fixtures/*.lock text eol=lf
+
+# Native IR snapshots are the canonical, target-independent printer output.
+# Preserve the printer's LF format so byte-for-byte review tests are portable.
+*.native-ir text eol=lf
