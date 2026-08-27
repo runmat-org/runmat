@@ -90,7 +90,10 @@ mod tests {
     fn cataloged_symbols_are_unique_and_present_in_the_bundled_interface() {
         let matrix = include_str!("../include/matrix.h");
         let mex = include_str!("../include/mex.h");
-        let shim = include_str!("../shim/runmat_mex_shim.c");
+        let shim = concat!(
+            include_str!("../native/runmat_mex_shim.c"),
+            include_str!("../native/data_engine.inc")
+        );
         let mut names = BTreeSet::new();
         for symbol in C_MATRIX_API.iter().chain(C_MEX_API) {
             assert!(
