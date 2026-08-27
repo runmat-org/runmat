@@ -1,10 +1,13 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::{mpsc, Arc, Mutex};
 
-use runmat_mex::{MexDiagnostic, MexHostServices, MexModule, MxApiMode};
+use futures::channel::mpsc as async_mpsc;
+use futures::{FutureExt, StreamExt};
+use runmat_mex::{DirectMexBoundaryHostServices, MexDiagnostic, MexHostServices, MxValueContext};
 use runmat_process_host::ipc::{
     authenticate_host_blocking, read_payload_blocking, write_payload_blocking, FrameLimits,
     HostHandshake, SessionSecret,
@@ -14,13 +17,15 @@ use runmat_value::Value;
 
 use super::{
     decode_value_transfer, encode_value_transfer, DriverMessage, HostMessage, MexBinaryTier,
-    MexCallbackOperation, MexCallbackOutput, MexCallbackRequest, MexInvocationOutput,
-    MexInvocationRequest, MexInvocationResult, MexLifecycleOutcome, MexLifecycleResult,
-    MexWireDiagnostic, MexWireError, MEX_HOST_MAX_CALLBACK_DEPTH, MEX_HOST_MAX_MESSAGE_BYTES,
-    MEX_HOST_PROTOCOL, MEX_HOST_SCHEMA_VERSION, MEX_HOST_SECRET_ENV, MEX_HOST_SNAPSHOT_ROOT_ENV,
+    MexCallbackOperation, MexCallbackOutput, MexCallbackRequest, MexCallbackResult,
+    MexInvocationOutput, MexInvocationRequest, MexInvocationResult, MexLifecycleOutcome,
+    MexLifecycleResult, MexWireDiagnostic, MexWireError, MEX_HOST_MAX_CALLBACK_DEPTH,
+    MEX_HOST_MAX_MESSAGE_BYTES, MEX_HOST_PROTOCOL, MEX_HOST_SCHEMA_VERSION, MEX_HOST_SECRET_ENV,
+    MEX_HOST_SNAPSHOT_ROOT_ENV,
 };
+use crate::foreign::mex::native_lane::{NativeMexLane, NativeModuleLoadError};
 
-pub fn run_mex_extension_host() -> Result<(), String> {
+pub async fn run_mex_extension_host() -> Result<(), String> {
     let encoded_secret = std::env::var(MEX_HOST_SECRET_ENV)
         .map_err(|_| "extension host bootstrap secret is unavailable".to_string())?;
     std::env::remove_var(MEX_HOST_SECRET_ENV);
@@ -47,112 +52,166 @@ pub fn run_mex_extension_host() -> Result<(), String> {
         &secret,
     )
     .map_err(|error| error.to_string())?;
-    let channel = Rc::new(RefCell::new(HostChannel {
-        reader,
+    let writer = Rc::new(RefCell::new(HostWriter {
         writer,
         limits: session.limits,
     }));
-    let mut modules = HashMap::<PathBuf, Rc<MexModule>>::new();
-
-    loop {
-        let message = channel.borrow_mut().read_driver()?;
-        match message {
-            DriverMessage::Invoke(request) => {
-                let request_id = request.request_id;
-                let outcome = invoke(
-                    &mut modules,
-                    request,
-                    Rc::clone(&channel),
-                    Rc::clone(&snapshots),
-                );
-                channel
-                    .borrow_mut()
-                    .write_host(&HostMessage::Invocation(MexInvocationResult {
-                        request_id,
-                        outcome,
-                    }))?;
-            }
-            DriverMessage::Clear {
-                request_id,
-                module_path,
-            } => {
-                let outcome = clear(
-                    &mut modules,
+    let callback_waiters = Arc::new(Mutex::new(HashMap::new()));
+    let (driver_tx, mut driver_rx) = async_mpsc::unbounded();
+    spawn_driver_reader(
+        reader,
+        session.limits,
+        driver_tx,
+        Arc::clone(&callback_waiters),
+    )?;
+    let lane = Rc::new(NativeMexLane::spawn()?);
+    {
+        let mut values = HashMap::<PathBuf, Rc<MxValueContext>>::new();
+        let mut background_services_available = true;
+        loop {
+            let message = if background_services_available {
+                let driver = driver_rx.next().fuse();
+                let background = lane.service_background_once().fuse();
+                futures::pin_mut!(driver, background);
+                futures::select! {
+                    message = driver => message,
+                    serviced = background => {
+                        background_services_available = serviced;
+                        continue;
+                    }
+                }
+            } else {
+                driver_rx.next().await
+            };
+            let Some(message) = message else {
+                return Err("extension host driver transport closed".to_string());
+            };
+            match message {
+                DriverMessage::Invoke(request) => {
+                    let request_id = request.request_id;
+                    let outcome = invoke(
+                        &lane,
+                        &mut values,
+                        request,
+                        Rc::clone(&writer),
+                        Arc::clone(&callback_waiters),
+                        Rc::clone(&snapshots),
+                    )
+                    .await;
+                    writer.borrow_mut().write_host(&HostMessage::Invocation(
+                        MexInvocationResult {
+                            request_id,
+                            outcome,
+                        },
+                    ))?;
+                }
+                DriverMessage::Clear {
                     request_id,
-                    &module_path,
-                    Rc::clone(&channel),
-                    Rc::clone(&snapshots),
-                );
-                channel
-                    .borrow_mut()
-                    .write_host(&HostMessage::Lifecycle(MexLifecycleResult {
+                    module_path,
+                } => {
+                    let outcome = clear(
+                        &lane,
+                        &mut values,
                         request_id,
-                        outcome,
-                    }))?;
-            }
-            DriverMessage::Shutdown { request_id } => {
-                let outcome = shutdown(
-                    &mut modules,
-                    request_id,
-                    Rc::clone(&channel),
-                    Rc::clone(&snapshots),
-                );
-                channel
-                    .borrow_mut()
-                    .write_host(&HostMessage::Lifecycle(MexLifecycleResult {
+                        &module_path,
+                        Rc::clone(&writer),
+                        Arc::clone(&callback_waiters),
+                        Rc::clone(&snapshots),
+                    )
+                    .await;
+                    writer.borrow_mut().write_host(&HostMessage::Lifecycle(
+                        MexLifecycleResult {
+                            request_id,
+                            outcome,
+                        },
+                    ))?;
+                }
+                DriverMessage::Shutdown { request_id } => {
+                    let outcome = shutdown(
+                        &lane,
+                        &mut values,
                         request_id,
-                        outcome: outcome.map(|()| MexLifecycleOutcome::Shutdown),
-                    }))?;
-                return Ok(());
-            }
-            DriverMessage::CallbackResult(_) => {
-                return Err("callback result arrived outside an active callback".into());
+                        Rc::clone(&writer),
+                        Arc::clone(&callback_waiters),
+                        Rc::clone(&snapshots),
+                    )
+                    .await;
+                    writer.borrow_mut().write_host(&HostMessage::Lifecycle(
+                        MexLifecycleResult {
+                            request_id,
+                            outcome: outcome.map(|()| MexLifecycleOutcome::Shutdown),
+                        },
+                    ))?;
+                    return Ok(());
+                }
+                DriverMessage::CallbackResult(_) => {
+                    return Err("callback result arrived outside an active callback".into());
+                }
             }
         }
     }
 }
 
-fn invoke<R: Read + 'static, W: Write + 'static>(
-    modules: &mut HashMap<PathBuf, Rc<MexModule>>,
+async fn invoke<W: Write + 'static>(
+    lane: &NativeMexLane,
+    values: &mut HashMap<PathBuf, Rc<MxValueContext>>,
     request: MexInvocationRequest,
-    channel: Rc<RefCell<HostChannel<R, W>>>,
+    writer: Rc<RefCell<HostWriter<W>>>,
+    callback_waiters: CallbackWaiters,
     snapshots: Rc<SharedSnapshotStore>,
 ) -> Result<MexInvocationOutput, MexWireError> {
     request.validate().map_err(protocol_error)?;
     let path = canonical_module_path(&request.module_path)?;
-    let module = load_module(modules, &path, request.tier)?;
-    let mode = request.api.map_or_else(
-        || module.api_mode(),
-        |api| {
-            if api.uses_interleaved_complex() {
-                MxApiMode::InterleavedComplex
-            } else {
-                MxApiMode::SeparateComplex
-            }
-        },
-    );
+    let compatible_isolated = request.tier == MexBinaryTier::RunMatCompatibleIsolated;
+    let metadata = lane
+        .load_with_policy(&path, compatible_isolated)
+        .await
+        .map_err(native_load_error)?;
+    let mode = request.api.map_or(metadata.mode, |api| {
+        if api.uses_interleaved_complex() {
+            runmat_mex::MxApiMode::InterleavedComplex
+        } else {
+            runmat_mex::MxApiMode::SeparateComplex
+        }
+    });
+    let value_context = values
+        .entry(path.clone())
+        .or_insert_with(|| Rc::new(MxValueContext::new()))
+        .clone();
     let arguments = request
         .arguments
         .iter()
         .map(|value| decode_value_transfer(value, &snapshots))
         .collect::<Result<Vec<_>, _>>()?;
-    let services = Rc::new(IsolatedMexHostServices::new(
-        request.request_id,
-        channel,
-        Rc::clone(&snapshots),
+    let inputs = arguments
+        .iter()
+        .map(|value| value_context.encode(value, mode, metadata.interface))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| wire_error("RunMat:MEX:Conversion", error.to_string(), None))?;
+    let services = Rc::new(DirectMexBoundaryHostServices::new(
+        Rc::new(IsolatedMexHostServices::new(
+            request.request_id,
+            writer,
+            callback_waiters,
+            Rc::clone(&snapshots),
+        )),
+        value_context.clone(),
+        mode,
+        metadata.interface,
     ));
-    let invocation = module
-        .invoke_with_services(
-            &arguments,
-            request.requested_outputs as usize,
-            mode,
-            services,
-        )
+    let invocation = lane
+        .invoke(&path, inputs, request.requested_outputs as usize, services)
+        .await
         .map_err(|error| wire_error("RunMat:MEX:Invocation", error.to_string(), None))?;
     let outputs = invocation
         .outputs
         .iter()
-        .map(|value| encode_value_transfer(value, &snapshots))
+        .map(|value| {
+            value_context
+                .decode(value)
+                .map_err(|error| wire_error("RunMat:MEX:Conversion", error.to_string(), None))
+                .and_then(|value| encode_value_transfer(&value, &snapshots))
+        })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(MexInvocationOutput {
         outputs,
@@ -168,21 +227,37 @@ fn invoke<R: Read + 'static, W: Write + 'static>(
     })
 }
 
-fn clear<R: Read + 'static, W: Write + 'static>(
-    modules: &mut HashMap<PathBuf, Rc<MexModule>>,
+async fn clear<W: Write + 'static>(
+    lane: &NativeMexLane,
+    values: &mut HashMap<PathBuf, Rc<MxValueContext>>,
     request_id: u64,
     path: &str,
-    channel: Rc<RefCell<HostChannel<R, W>>>,
+    writer: Rc<RefCell<HostWriter<W>>>,
+    callback_waiters: CallbackWaiters,
     snapshots: Rc<SharedSnapshotStore>,
 ) -> Result<MexLifecycleOutcome, MexWireError> {
     let path = canonical_module_path(path)?;
-    let Some(module) = modules.get(&path).cloned() else {
+    let Some(value_context) = values.get(&path).cloned() else {
         return Ok(MexLifecycleOutcome::Cleared);
     };
-    let services = Rc::new(IsolatedMexHostServices::new(request_id, channel, snapshots));
-    match module.clear_with_services(services) {
+    let metadata = lane
+        .load_with_policy(&path, false)
+        .await
+        .map_err(native_load_error)?;
+    let services = Rc::new(DirectMexBoundaryHostServices::new(
+        Rc::new(IsolatedMexHostServices::new(
+            request_id,
+            writer,
+            callback_waiters,
+            snapshots,
+        )),
+        value_context,
+        metadata.mode,
+        metadata.interface,
+    ));
+    match lane.clear(&path, services).await {
         Ok(true) => {
-            modules.remove(&path);
+            values.remove(&path);
             Ok(MexLifecycleOutcome::Cleared)
         }
         Ok(false) => Ok(MexLifecycleOutcome::Retained),
@@ -190,49 +265,41 @@ fn clear<R: Read + 'static, W: Write + 'static>(
     }
 }
 
-fn shutdown<R: Read + 'static, W: Write + 'static>(
-    modules: &mut HashMap<PathBuf, Rc<MexModule>>,
+async fn shutdown<W: Write + 'static>(
+    lane: &NativeMexLane,
+    values: &mut HashMap<PathBuf, Rc<MxValueContext>>,
     request_id: u64,
-    channel: Rc<RefCell<HostChannel<R, W>>>,
+    writer: Rc<RefCell<HostWriter<W>>>,
+    callback_waiters: CallbackWaiters,
     snapshots: Rc<SharedSnapshotStore>,
 ) -> Result<(), MexWireError> {
-    let loaded = modules.drain().collect::<Vec<_>>();
+    let loaded = values.drain().collect::<Vec<_>>();
     let mut first_error = None;
-    for (_, module) in loaded {
-        let services = Rc::new(IsolatedMexHostServices::new(
-            request_id,
-            Rc::clone(&channel),
-            Rc::clone(&snapshots),
+    for (path, value_context) in loaded {
+        let metadata = match lane.load_with_policy(&path, false).await {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                first_error.get_or_insert_with(|| native_load_error(error));
+                continue;
+            }
+        };
+        let services = Rc::new(DirectMexBoundaryHostServices::new(
+            Rc::new(IsolatedMexHostServices::new(
+                request_id,
+                Rc::clone(&writer),
+                Arc::clone(&callback_waiters),
+                Rc::clone(&snapshots),
+            )),
+            value_context,
+            metadata.mode,
+            metadata.interface,
         ));
-        if let Err(error) = module.shutdown_with_services(services) {
+        if let Err(error) = lane.shutdown_module(&path, services).await {
             first_error
                 .get_or_insert_with(|| wire_error("RunMat:MEX:Shutdown", error.to_string(), None));
         }
     }
     first_error.map_or(Ok(()), Err)
-}
-
-fn load_module(
-    modules: &mut HashMap<PathBuf, Rc<MexModule>>,
-    path: &Path,
-    tier: MexBinaryTier,
-) -> Result<Rc<MexModule>, MexWireError> {
-    if let Some(module) = modules.get(path) {
-        return Ok(Rc::clone(module));
-    }
-    let loaded = match tier {
-        MexBinaryTier::RunMatExact => MexModule::load(path),
-        MexBinaryTier::RunMatCompatibleIsolated => MexModule::load_compatible_isolated(path),
-    };
-    let module = Rc::new(loaded.map_err(|error| {
-        wire_error(
-            "RunMat:MEX:Load",
-            error.to_string(),
-            dependency_from_load_error(&error),
-        )
-    })?);
-    modules.insert(path.to_path_buf(), Rc::clone(&module));
-    Ok(module)
 }
 
 fn canonical_module_path(path: &str) -> Result<PathBuf, MexWireError> {
@@ -253,8 +320,12 @@ fn canonical_module_path(path: &str) -> Result<PathBuf, MexWireError> {
     })
 }
 
-fn dependency_from_load_error(error: &runmat_mex::MexLoadError) -> Option<String> {
-    error.missing_dependency()
+fn native_load_error(error: NativeModuleLoadError) -> MexWireError {
+    let dependency = match &error {
+        NativeModuleLoadError::Failed { dependency, .. } => dependency.clone(),
+        NativeModuleLoadError::IsolatedHostRequired => None,
+    };
+    wire_error("RunMat:MEX:Load", error.to_string(), dependency)
 }
 
 fn protocol_error(error: impl std::fmt::Display) -> MexWireError {
@@ -273,24 +344,16 @@ fn wire_error(
     }
 }
 
-struct HostChannel<R, W> {
-    reader: R,
+type CallbackKey = (u64, u64);
+type CallbackResponse = Result<MexCallbackResult, String>;
+type CallbackWaiters = Arc<Mutex<HashMap<CallbackKey, mpsc::SyncSender<CallbackResponse>>>>;
+
+struct HostWriter<W> {
     writer: W,
     limits: FrameLimits,
 }
 
-impl<R: Read, W: Write> HostChannel<R, W> {
-    fn read_driver(&mut self) -> Result<DriverMessage, String> {
-        let payload = read_payload_blocking(&mut self.reader, self.limits)
-            .map_err(|error| error.to_string())?;
-        let message: DriverMessage = serde_json::from_slice(&payload)
-            .map_err(|error| format!("invalid driver record: {error}"))?;
-        message
-            .validate()
-            .map_err(|error| format!("invalid driver record: {error}"))?;
-        Ok(message)
-    }
-
+impl<W: Write> HostWriter<W> {
     fn write_host(&mut self, message: &HostMessage) -> Result<(), String> {
         message
             .validate()
@@ -302,31 +365,107 @@ impl<R: Read, W: Write> HostChannel<R, W> {
     }
 }
 
-struct IsolatedMexHostServices<R, W> {
+fn spawn_driver_reader<R: Read + Send + 'static>(
+    mut reader: R,
+    limits: FrameLimits,
+    commands: async_mpsc::UnboundedSender<DriverMessage>,
+    callback_waiters: CallbackWaiters,
+) -> Result<(), String> {
+    std::thread::Builder::new()
+        .name("runmat-extension-host-reader".into())
+        .spawn(move || loop {
+            let result = read_driver(&mut reader, limits);
+            match result {
+                Ok(DriverMessage::CallbackResult(response)) => {
+                    let waiter = callback_waiters
+                        .lock()
+                        .expect("callback waiter registry is not poisoned")
+                        .remove(&(response.request_id, response.callback_id));
+                    if let Some(waiter) = waiter {
+                        let _ = waiter.send(Ok(response));
+                    } else {
+                        fail_callback_waiters(
+                            &callback_waiters,
+                            "driver returned an unknown callback identity".into(),
+                        );
+                        break;
+                    }
+                }
+                Ok(message) => {
+                    if commands.unbounded_send(message).is_err() {
+                        break;
+                    }
+                }
+                Err(error) => {
+                    fail_callback_waiters(&callback_waiters, error);
+                    break;
+                }
+            }
+        })
+        .map(|_| ())
+        .map_err(|error| format!("could not start the extension-host reader: {error}"))
+}
+
+fn fail_callback_waiters(callback_waiters: &CallbackWaiters, error: String) {
+    let waiters = std::mem::take(
+        &mut *callback_waiters
+            .lock()
+            .expect("callback waiter registry is not poisoned"),
+    );
+    for (_, waiter) in waiters {
+        let _ = waiter.send(Err(error.clone()));
+    }
+}
+
+fn read_driver(reader: &mut impl Read, limits: FrameLimits) -> Result<DriverMessage, String> {
+    let payload = read_payload_blocking(reader, limits).map_err(|error| error.to_string())?;
+    let message: DriverMessage = serde_json::from_slice(&payload)
+        .map_err(|error| format!("invalid driver record: {error}"))?;
+    message
+        .validate()
+        .map_err(|error| format!("invalid driver record: {error}"))?;
+    Ok(message)
+}
+
+struct IsolatedMexHostServices<W: Write> {
     request_id: u64,
     next_callback_id: Cell<u64>,
     depth: Cell<u16>,
-    channel: Rc<RefCell<HostChannel<R, W>>>,
+    writer: Rc<RefCell<HostWriter<W>>>,
+    callback_waiters: CallbackWaiters,
     snapshots: Rc<SharedSnapshotStore>,
 }
 
-impl<R, W> IsolatedMexHostServices<R, W> {
+impl<W: Write> IsolatedMexHostServices<W> {
     fn new(
         request_id: u64,
-        channel: Rc<RefCell<HostChannel<R, W>>>,
+        writer: Rc<RefCell<HostWriter<W>>>,
+        callback_waiters: CallbackWaiters,
         snapshots: Rc<SharedSnapshotStore>,
     ) -> Self {
         Self {
             request_id,
             next_callback_id: Cell::new(1),
             depth: Cell::new(0),
-            channel,
+            writer,
+            callback_waiters,
             snapshots,
         }
     }
 }
 
-impl<R: Read, W: Write> IsolatedMexHostServices<R, W> {
+impl<W: Write> Drop for IsolatedMexHostServices<W> {
+    fn drop(&mut self) {
+        let _ = self
+            .writer
+            .borrow_mut()
+            .write_host(&HostMessage::OriginReleased {
+                request_id: self.request_id,
+            });
+    }
+}
+
+impl<W: Write> IsolatedMexHostServices<W> {
     fn callback(
         &self,
         operation: MexCallbackOperation,
@@ -340,43 +479,61 @@ impl<R: Read, W: Write> IsolatedMexHostServices<R, W> {
         }
         self.depth.set(depth);
         let callback_id = self.next_callback_id.get();
-        self.next_callback_id.set(callback_id.saturating_add(1));
-        let result = (|| {
-            let mut channel = self.channel.borrow_mut();
-            channel
-                .write_host(&HostMessage::Callback(MexCallbackRequest {
-                    request_id: self.request_id,
-                    callback_id,
-                    depth,
-                    operation,
-                }))
-                .map_err(|error| diagnostic("RunMat:MEX:CallbackTransport", error))?;
-            let response = channel
-                .read_driver()
-                .map_err(|error| diagnostic("RunMat:MEX:CallbackTransport", error))?;
-            let DriverMessage::CallbackResult(response) = response else {
-                return Err(diagnostic(
-                    "RunMat:MEX:CallbackProtocol",
-                    "host expected a callback result",
-                ));
-            };
-            if response.request_id != self.request_id || response.callback_id != callback_id {
-                return Err(diagnostic(
-                    "RunMat:MEX:CallbackProtocol",
-                    "callback result identity does not match the active callback",
-                ));
-            }
-            response.outcome.map_err(|error| MexDiagnostic {
-                identifier: Some(error.identifier),
-                message: error.message,
-            })
-        })();
+        let Some(next_callback_id) = callback_id.checked_add(1) else {
+            self.depth.set(depth - 1);
+            return Err(diagnostic(
+                "RunMat:MEX:CallbackProtocol",
+                "isolated MEX callback identity space is exhausted",
+            ));
+        };
+        self.next_callback_id.set(next_callback_id);
+        let result =
+            (|| {
+                let (response_tx, response_rx) = mpsc::sync_channel(1);
+                self.callback_waiters
+                    .lock()
+                    .expect("callback waiter registry is not poisoned")
+                    .insert((self.request_id, callback_id), response_tx);
+                if let Err(error) = self.writer.borrow_mut().write_host(&HostMessage::Callback(
+                    MexCallbackRequest {
+                        request_id: self.request_id,
+                        callback_id,
+                        depth,
+                        operation,
+                    },
+                )) {
+                    self.callback_waiters
+                        .lock()
+                        .expect("callback waiter registry is not poisoned")
+                        .remove(&(self.request_id, callback_id));
+                    return Err(diagnostic("RunMat:MEX:CallbackTransport", error));
+                }
+                let response = response_rx
+                    .recv()
+                    .map_err(|_| {
+                        diagnostic(
+                            "RunMat:MEX:CallbackTransport",
+                            "driver response channel closed",
+                        )
+                    })?
+                    .map_err(|error| diagnostic("RunMat:MEX:CallbackTransport", error))?;
+                if response.request_id != self.request_id || response.callback_id != callback_id {
+                    return Err(diagnostic(
+                        "RunMat:MEX:CallbackProtocol",
+                        "callback result identity does not match the active callback",
+                    ));
+                }
+                response.outcome.map_err(|error| MexDiagnostic {
+                    identifier: Some(error.identifier),
+                    message: error.message,
+                })
+            })();
         self.depth.set(depth - 1);
         result
     }
 }
 
-impl<R: Read, W: Write> MexHostServices for IsolatedMexHostServices<R, W> {
+impl<W: Write> MexHostServices for IsolatedMexHostServices<W> {
     fn eval(&self, command: &str) -> Result<(), MexDiagnostic> {
         match self.callback(MexCallbackOperation::Eval {
             command: command.into(),

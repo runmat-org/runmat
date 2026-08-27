@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 pub const MEX_HOST_PROTOCOL: &str = "runmat.mex-host";
 pub const MEX_HOST_SECRET_ENV: &str = "RUNMAT_EXTENSION_HOST_SECRET";
 pub const MEX_HOST_SNAPSHOT_ROOT_ENV: &str = "RUNMAT_EXTENSION_SNAPSHOT_ROOT";
-pub const MEX_HOST_SCHEMA_VERSION: u16 = 2;
+pub const MEX_HOST_SCHEMA_VERSION: u16 = 3;
 pub const MEX_HOST_MAX_MESSAGE_BYTES: u32 = 16 * 1024 * 1024;
 pub const MEX_HOST_INLINE_VALUE_BYTES: usize = 128 * 1024;
 pub const MEX_HOST_MAX_SNAPSHOT_BYTES: u64 = 512 * 1024 * 1024;
@@ -125,6 +125,7 @@ pub enum HostMessage {
     Invocation(MexInvocationResult),
     Lifecycle(MexLifecycleResult),
     Callback(MexCallbackRequest),
+    OriginReleased { request_id: u64 },
 }
 
 impl HostMessage {
@@ -133,6 +134,7 @@ impl HostMessage {
             Self::Invocation(result) => result.validate(),
             Self::Lifecycle(result) => result.validate(),
             Self::Callback(request) => request.validate(),
+            Self::OriginReleased { request_id } => validate_identity(*request_id, "request"),
         }
     }
 }

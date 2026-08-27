@@ -2,8 +2,9 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::atomic::Ordering;
+use std::sync::{atomic::Ordering, Arc};
 
+use futures::FutureExt;
 use runmat_mex::{
     DirectMexBoundaryHostServices, MexApi, MexInvocation, MexNativeInvocation, MxValueContext,
 };
@@ -30,6 +31,7 @@ pub struct MexRuntimeSession {
     native_values: RefCell<HashMap<PathBuf, Rc<MxValueContext>>>,
     isolated: RefCell<HashMap<PathBuf, IsolatedMexClient>>,
     active_isolated: RefCell<HashSet<PathBuf>>,
+    isolated_ready: Arc<tokio::sync::Notify>,
     isolation_policy: RefCell<MexIsolationPolicy>,
     shutdown_in_progress: Cell<bool>,
 }
@@ -47,9 +49,56 @@ impl MexRuntimeSession {
     /// returned. Session hosts poll this alongside their command/input loop.
     pub async fn service_background_once(&self) -> bool {
         let lane = self.native_lane.borrow().as_ref().cloned();
-        match lane {
-            Some(lane) => lane.service_background_once().await,
-            None => futures::future::pending().await,
+        let native = async move {
+            match lane {
+                Some(lane) => lane.service_background_once().await,
+                None => futures::future::pending().await,
+            }
+        }
+        .fuse();
+        let isolated = self.service_isolated_background_once().fuse();
+        futures::pin_mut!(native, isolated);
+        futures::select! {
+            serviced = native => serviced,
+            serviced = isolated => serviced,
+        }
+    }
+
+    async fn service_isolated_background_once(&self) -> bool {
+        loop {
+            let paths = self.isolated.borrow().keys().cloned().collect::<Vec<_>>();
+            if paths.is_empty() {
+                return futures::future::pending().await;
+            }
+            for path in paths {
+                let Some(mut client) = self.isolated.borrow_mut().remove(&path) else {
+                    continue;
+                };
+                if !self.active_isolated.borrow_mut().insert(path.clone()) {
+                    self.isolated.borrow_mut().insert(path, client);
+                    continue;
+                }
+                let result = client.service_ready_background().await;
+                self.active_isolated.borrow_mut().remove(&path);
+                match result {
+                    Ok(serviced) => {
+                        self.isolated.borrow_mut().insert(path, client);
+                        if serviced {
+                            return true;
+                        }
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            module = %path.display(),
+                            identifier = %error.identifier,
+                            message = %error.message,
+                            "isolated MEX background service stopped"
+                        );
+                        return true;
+                    }
+                }
+            }
+            self.isolated_ready.notified().await;
         }
     }
 
@@ -304,7 +353,7 @@ impl MexRuntimeSession {
         if let Some(client) = self.isolated.borrow_mut().remove(path) {
             return Ok(client);
         }
-        match IsolatedMexClient::spawn(path.to_path_buf()).await {
+        match IsolatedMexClient::spawn(path.to_path_buf(), Arc::clone(&self.isolated_ready)).await {
             Ok(client) => Ok(client),
             Err(error) => {
                 self.active_isolated.borrow_mut().remove(path);
