@@ -393,7 +393,7 @@ fn source_bytes(source: Value) -> BuiltinResult<Vec<u8>> {
             .into_numeric_storage()
             .map(storage_bytes)
             .map_err(|cause| error(&INTERNAL, cause)),
-        Value::LogicalArray(array) => Ok(array.data),
+        Value::LogicalArray(array) => Ok(array.data.into_vec()),
         Value::ComplexTensor(tensor) => Ok(complex_storage_bytes(tensor.into_complex_storage())),
         _ => Err(error(&INVALID_INPUT, "input must be numeric or logical")),
     }

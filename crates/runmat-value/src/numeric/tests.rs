@@ -587,6 +587,23 @@ mod integer_storage_tests {
     }
 
     #[test]
+    fn tensor_clone_shares_until_safe_mutation_detaches() {
+        let original = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
+        let mut changed = original.clone();
+        assert!(original
+            .host_buffer()
+            .shares_allocation_with(changed.host_buffer()));
+
+        changed.set2(0, 0, 9.0).unwrap();
+
+        assert!(!original
+            .host_buffer()
+            .shares_allocation_with(changed.host_buffer()));
+        assert_eq!(original.get2(0, 0), Ok(1.0));
+        assert_eq!(changed.get2(0, 0), Ok(9.0));
+    }
+
+    #[test]
     fn integer_tensor_rejects_shape_length_mismatches() {
         let err = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![3, 1])
             .expect_err("shape mismatch");

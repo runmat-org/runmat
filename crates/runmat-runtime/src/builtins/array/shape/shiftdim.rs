@@ -521,7 +521,7 @@ fn reshape_value(value: Value, shape: &[usize]) -> crate::BuiltinResult<Value> {
                 .map(Value::ComplexTensor)
                 .map_err(|error| shiftdim_error(&ERROR_UNSUPPORTED_INPUT, error))
         }
-        Value::LogicalArray(array) => LogicalArray::new(array.data, shape.to_vec())
+        Value::LogicalArray(array) => LogicalArray::from_host_buffer(array.data, shape.to_vec())
             .map(Value::LogicalArray)
             .map_err(|error| shiftdim_error(&ERROR_UNSUPPORTED_INPUT, error)),
         Value::StringArray(array) => StringArray::new(array.data, shape.to_vec())

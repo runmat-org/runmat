@@ -1148,7 +1148,7 @@ mod tests {
             (
                 "MaxIter",
                 Value::LogicalArray(LogicalArray {
-                    data: vec![1],
+                    data: vec![1].into(),
                     shape: vec![1, 1],
                 }),
             ),

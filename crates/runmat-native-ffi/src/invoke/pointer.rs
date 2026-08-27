@@ -33,14 +33,13 @@ impl NativePointerResource {
         initial_value: &Value,
         metadata: &NativeLibraryMetadata,
     ) -> Result<Self, InvocationError> {
-        let storage = pointee_from_value("libpointer", &pointee, initial_value, metadata).map_err(
-            |message| InvocationError::Argument {
+        let storage = pointee_from_value("libpointer", &pointee, initial_value, metadata, true)
+            .map_err(|message| InvocationError::Argument {
                 symbol: "libpointer".into(),
                 argument: 2,
                 name: "initial_value".into(),
                 message,
-            },
-        )?;
+            })?;
         Ok(Self {
             pointee,
             ownership: PointerOwnership::CallerOwned,
@@ -93,7 +92,7 @@ impl NativePointerResource {
         value: &Value,
         metadata: &NativeLibraryMetadata,
     ) -> Result<(), InvocationError> {
-        let replacement = pointee_from_value("libpointer", &self.pointee, value, metadata)
+        let replacement = pointee_from_value("libpointer", &self.pointee, value, metadata, true)
             .map_err(|message| InvocationError::Argument {
                 symbol: "libpointer".into(),
                 argument: 2,
@@ -214,7 +213,7 @@ fn copy_scalar_pointer(
                 bytes
                     .into_iter()
                     .map(|value| u8::from(value != 0))
-                    .collect(),
+                    .collect::<Vec<_>>(),
                 shape.to_vec(),
             )
             .map_err(pointer_output_error)?;
@@ -308,10 +307,11 @@ fn replace_storage(current: &mut PointeeSlot, replacement: PointeeSlot) -> Resul
             Ok(())
         }
         (
-            PointeeSlot::Array { storage, shape },
+            PointeeSlot::Array { storage, shape, .. },
             PointeeSlot::Array {
                 storage: replacement,
                 shape: replacement_shape,
+                ..
             },
         ) if *shape == replacement_shape => replace_numeric_storage(storage, replacement),
         (PointeeSlot::Bytes(bytes), PointeeSlot::Bytes(replacement))
@@ -331,51 +331,10 @@ fn replace_storage(current: &mut PointeeSlot, replacement: PointeeSlot) -> Resul
 }
 
 fn replace_numeric_storage(
-    current: &mut runmat_value::NumericStorage,
-    replacement: runmat_value::NumericStorage,
+    current: &mut runmat_value::HostNumericBuffer,
+    replacement: runmat_value::HostNumericBuffer,
 ) -> Result<(), String> {
-    macro_rules! copy_variant {
-        ($current:expr, $replacement:expr) => {{
-            if $current.len() != $replacement.len() {
-                return Err("replacement array changes the pointer allocation size".into());
-            }
-            $current.copy_from_slice(&$replacement);
-            Ok(())
-        }};
-    }
-    match (current, replacement) {
-        (runmat_value::NumericStorage::F64(a), runmat_value::NumericStorage::F64(b)) => {
-            copy_variant!(a, b)
-        }
-        (runmat_value::NumericStorage::F32(a), runmat_value::NumericStorage::F32(b)) => {
-            copy_variant!(a, b)
-        }
-        (runmat_value::NumericStorage::I8(a), runmat_value::NumericStorage::I8(b)) => {
-            copy_variant!(a, b)
-        }
-        (runmat_value::NumericStorage::I16(a), runmat_value::NumericStorage::I16(b)) => {
-            copy_variant!(a, b)
-        }
-        (runmat_value::NumericStorage::I32(a), runmat_value::NumericStorage::I32(b)) => {
-            copy_variant!(a, b)
-        }
-        (runmat_value::NumericStorage::I64(a), runmat_value::NumericStorage::I64(b)) => {
-            copy_variant!(a, b)
-        }
-        (runmat_value::NumericStorage::U8(a), runmat_value::NumericStorage::U8(b)) => {
-            copy_variant!(a, b)
-        }
-        (runmat_value::NumericStorage::U16(a), runmat_value::NumericStorage::U16(b)) => {
-            copy_variant!(a, b)
-        }
-        (runmat_value::NumericStorage::U32(a), runmat_value::NumericStorage::U32(b)) => {
-            copy_variant!(a, b)
-        }
-        (runmat_value::NumericStorage::U64(a), runmat_value::NumericStorage::U64(b)) => {
-            copy_variant!(a, b)
-        }
-        _ => Err("replacement array class does not match the pointer allocation".into()),
-    }
+    current.copy_from_same_type(&replacement)
 }
 
 #[derive(Debug)]

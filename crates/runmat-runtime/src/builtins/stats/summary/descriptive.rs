@@ -1506,7 +1506,7 @@ fn string_tabulate(name: &str, labels: impl IntoIterator<Item = String>) -> Buil
 fn tabulate_value(name: &str, value: Value) -> BuiltinResult<Value> {
     match value {
         Value::Tensor(tensor) => numeric_tabulate(name, tensor),
-        Value::LogicalArray(logical) => logical_tabulate(name, logical.data),
+        Value::LogicalArray(logical) => logical_tabulate(name, logical.data.into_vec()),
         Value::Int(value) => exact_integer_tabulate(name, vec![value]),
         Value::Num(_) | Value::Bool(_) => tensor::value_into_tensor_for(name, value)
             .map_err(|err| descriptive_error(name, format!("{name}: {err}")))

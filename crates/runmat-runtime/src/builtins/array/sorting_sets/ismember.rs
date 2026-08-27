@@ -1096,7 +1096,7 @@ impl IsMemberEvaluation {
         let IsMemberEvaluation { mask, loc } = self;
         Ok(IsMemberResult {
             mask: HostLogicalOwned {
-                data: mask.data,
+                data: mask.data.into_vec(),
                 shape: mask.shape,
             },
             loc: tensor::tensor_into_host_f64_owned(loc),

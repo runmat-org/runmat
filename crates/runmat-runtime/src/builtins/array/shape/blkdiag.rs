@@ -755,7 +755,7 @@ impl Block {
             Value::LogicalArray(array) => {
                 validate_matrix_shape(&array.shape)?;
                 if array.shape.is_empty() {
-                    return LogicalArray::new(array.data, vec![1, 1])
+                    return LogicalArray::from_host_buffer(array.data, vec![1, 1])
                         .map(Self::Logical)
                         .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail));
                 }

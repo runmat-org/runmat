@@ -1,4 +1,4 @@
-use runmat_value::{NumericDType, NumericScalar, NumericStorage};
+use runmat_value::{HostNumericBuffer, NumericDType, NumericScalar, NumericStorage};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(C)]
@@ -131,6 +131,26 @@ impl MxInterleavedStorage {
                 index,
                 real.value_at(index).unwrap(),
                 imag.value_at(index).unwrap(),
+            )?;
+        }
+        Ok(output)
+    }
+
+    pub fn from_host_components(
+        real: &HostNumericBuffer,
+        imag: &HostNumericBuffer,
+    ) -> Result<Self, String> {
+        if real.numeric_dtype() != imag.numeric_dtype() || real.len() != imag.len() {
+            return Err(
+                "interleaved complex components must have matching class and length".into(),
+            );
+        }
+        let mut output = Self::zeros(real.numeric_dtype(), real.len());
+        for index in 0..real.len() {
+            output.set(
+                index,
+                real.value_at(index).expect("validated real component"),
+                imag.value_at(index).expect("validated imaginary component"),
             )?;
         }
         Ok(output)

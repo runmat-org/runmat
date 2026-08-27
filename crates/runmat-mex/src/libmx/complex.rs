@@ -1,4 +1,4 @@
-use runmat_value::NumericStorage;
+use runmat_value::{HostNumericBuffer, NumericStorage};
 
 use crate::mxarray::MxArrayData;
 use crate::{MxApiMode, MxArray, MxInterleaved, MxNumeric};
@@ -17,15 +17,17 @@ impl MxApi {
                 if mode == MxApiMode::InterleavedComplex {
                     let real = numeric.real.clone();
                     *value.data_mut() = MxArrayData::Interleaved(MxInterleaved {
-                        values: crate::mxarray::MxInterleavedStorage::from_components(
+                        values: crate::mxarray::MxInterleavedStorage::from_host_components(
                             &real,
-                            &NumericStorage::zeros(real.numeric_dtype(), real.len()),
+                            &HostNumericBuffer::from_numeric_storage(NumericStorage::zeros(
+                                real.numeric_dtype(),
+                                real.len(),
+                            )),
                         )?,
                     });
                 } else {
-                    numeric.imag = Some(NumericStorage::zeros(
-                        numeric.real.numeric_dtype(),
-                        numeric.real.len(),
+                    numeric.imag = Some(HostNumericBuffer::from_numeric_storage(
+                        NumericStorage::zeros(numeric.real.numeric_dtype(), numeric.real.len()),
                     ));
                 }
                 Ok(())
@@ -47,7 +49,10 @@ impl MxApi {
             }
             MxArrayData::Interleaved(interleaved) => {
                 let (real, _) = interleaved.values.components();
-                *value.data_mut() = MxArrayData::Numeric(MxNumeric { real, imag: None });
+                *value.data_mut() = MxArrayData::Numeric(MxNumeric {
+                    real: HostNumericBuffer::from_numeric_storage(real),
+                    imag: None,
+                });
                 Ok(())
             }
             _ => Err("only numeric mxArrays can be made real".into()),

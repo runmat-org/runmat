@@ -272,8 +272,9 @@ async fn im2uint8_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value
         Value::LogicalArray(array) => {
             if indexed {
                 let shape = array.shape.clone();
-                let tensor = Tensor::from_numeric_storage(NumericStorage::U8(array.data), shape)
-                    .map_err(|err| im2uint8_error_with_detail(&IM2UINT8_ERROR_INTERNAL, err))?;
+                let tensor =
+                    Tensor::from_numeric_storage(NumericStorage::U8(array.data.into_vec()), shape)
+                        .map_err(|err| im2uint8_error_with_detail(&IM2UINT8_ERROR_INTERNAL, err))?;
                 Ok(common::image_value_from_tensor(tensor))
             } else {
                 let tensor = tensor::logical_to_tensor(&array)

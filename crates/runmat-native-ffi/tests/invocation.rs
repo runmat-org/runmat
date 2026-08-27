@@ -138,6 +138,23 @@ fn c_abi_corpus_covers_scalars_arrays_structures_and_outputs() {
         Some(InvocationValue::Value(Value::Int(IntValue::I32(9))))
     );
 
+    let values =
+        Tensor::new_integer(IntegerStorage::I32(vec![3, -2, 8]), vec![1, 3]).expect("typed values");
+    // SAFETY: only the pointer identity is observed, and `values` remains alive
+    // through the synchronous invocation.
+    let expected_address = unsafe { values.host_buffer().foreign_data_pointer() } as usize;
+    let address = invoke_symbol(
+        &library,
+        prototype("fixture_address"),
+        &[Value::Tensor(values)],
+        &metadata,
+    )
+    .expect("borrowed array address invocation");
+    let Some(InvocationValue::Value(Value::Int(address))) = address.return_value else {
+        panic!("expected pointer-sized integer address");
+    };
+    assert_eq!(address.try_to_u64(), Some(expected_address as u64));
+
     let mut record = StructValue::new();
     record.insert("value", Value::Num(2.5));
     record.insert("tag", Value::Int(IntValue::U32(7)));

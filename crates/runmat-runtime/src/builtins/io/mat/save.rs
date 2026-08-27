@@ -818,7 +818,9 @@ fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray
             Value::LogicalArray(la) => Ok(MatArray {
                 class: MatClass::Logical,
                 dims: canonical_dims(&la.shape),
-                data: MatData::Logical { data: la.data },
+                data: MatData::Logical {
+                    data: la.data.into_vec(),
+                },
             }),
             Value::SparseTensor(sparse) => {
                 let logical = sparse.is_logical();

@@ -2025,7 +2025,7 @@ fn logical_columns(
             name: base_name.to_string(),
             rows: len,
             value: Value::LogicalArray(
-                LogicalArray::new(array.data, vec![len, 1]).map_err(grouping_error)?,
+                LogicalArray::from_host_buffer(array.data, vec![len, 1]).map_err(grouping_error)?,
             ),
         }]);
     }
@@ -2599,7 +2599,7 @@ fn accumarray_data_column(data: Value, rows: usize) -> BuiltinResult<Value> {
             let values = if array.data.len() == 1 {
                 vec![array.data[0]; rows]
             } else {
-                array.data
+                array.data.into_vec()
             };
             LogicalArray::new(values, vec![rows, 1])
                 .map(Value::LogicalArray)

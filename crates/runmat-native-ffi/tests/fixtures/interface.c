@@ -17,6 +17,10 @@ int32_t fixture_sum(const int32_t *values, uint32_t length) {
     return total;
 }
 
+uintptr_t fixture_address(const int32_t *values) {
+    return (uintptr_t)values;
+}
+
 void fixture_increment(int32_t *value) {
     *value += 1;
 }

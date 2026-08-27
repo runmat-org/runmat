@@ -21,7 +21,7 @@ fn encode(value: &Value, path: &str) -> Result<ValuePayload, ValueCodecError> {
         Value::LogicalArray(value) => InlineValue::Dense(DenseValue {
             element_type: ElementType::Logical,
             shape: shape(&value.shape, path)?,
-            little_endian_data: value.data.clone(),
+            little_endian_data: value.data.to_vec(),
         }),
         Value::String(value) => InlineValue::String(value.clone()),
         Value::StringArray(value) => InlineValue::StringArray {

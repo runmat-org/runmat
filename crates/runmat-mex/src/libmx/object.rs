@@ -17,7 +17,7 @@ impl MxApi {
             .get_mut(value)
             .map_err(|error| error.to_string())?;
         let replacement =
-            match std::mem::replace(value.data_mut(), MxArrayData::Logical(Vec::new())) {
+            match std::mem::replace(value.data_mut(), MxArrayData::Logical(Vec::new().into())) {
                 MxArrayData::Struct { fields, values } => MxArrayData::Object {
                     class_name,
                     properties: fields,

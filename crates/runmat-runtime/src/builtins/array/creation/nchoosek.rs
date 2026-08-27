@@ -386,7 +386,7 @@ fn combinations_value(value: Value, k: usize) -> BuiltinResult<Value> {
         Value::Bool(flag) => combinations_logical(vec![if flag { 1 } else { 0 }], vec![1, 1], k),
         Value::Tensor(tensor) => combinations_tensor(tensor, k),
         Value::ComplexTensor(tensor) => combinations_complex_tensor(tensor, k),
-        Value::LogicalArray(array) => combinations_logical(array.data, array.shape, k),
+        Value::LogicalArray(array) => combinations_logical(array.data.into_vec(), array.shape, k),
         Value::CharArray(chars) => combinations_chars(chars, k),
         Value::Num(_) | Value::Int(_) => Err(nchoosek_error_with(
             &ERROR_INVALID_INPUT,

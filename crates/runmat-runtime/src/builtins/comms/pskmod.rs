@@ -526,7 +526,7 @@ impl SymbolInput {
             }
             Value::Bool(b) => {
                 let logical = LogicalArray {
-                    data: vec![u8::from(b)],
+                    data: vec![u8::from(b)].into(),
                     shape: vec![1, 1],
                 };
                 Self::from_logical(logical, order, input_type)
@@ -584,7 +584,7 @@ impl SymbolInput {
     ) -> BuiltinResult<Self> {
         match input_type {
             InputType::Integer => Err(pskmod_error("pskmod: logical X requires InputType='bit'")),
-            InputType::Bit => bits_to_symbols(logical.data, logical.shape, order),
+            InputType::Bit => bits_to_symbols(logical.data.into_vec(), logical.shape, order),
         }
     }
 }
@@ -1222,7 +1222,7 @@ mod tests {
     fn pskmod_rejects_default_logical_input() {
         let err = block_on(super::pskmod_builtin(
             Value::LogicalArray(LogicalArray {
-                data: vec![0, 1],
+                data: vec![0, 1].into(),
                 shape: vec![1, 2],
             }),
             Value::Num(2.0),
@@ -1236,7 +1236,7 @@ mod tests {
     fn pskmod_accepts_logical_bit_input() {
         let out = pskmod(
             Value::LogicalArray(LogicalArray {
-                data: vec![0, 0, 1, 1],
+                data: vec![0, 0, 1, 1].into(),
                 shape: vec![2, 2],
             }),
             4,

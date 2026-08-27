@@ -16,6 +16,7 @@ typedef enum fixture_mode {
 double fixture_scale(fixture_record *record, double factor);
 uint32_t fixture_tag(const fixture_record *record);
 int32_t fixture_sum(const int32_t *values, uint32_t length);
+uintptr_t fixture_address(const int32_t *values);
 void fixture_increment(int32_t *value);
 fixture_record fixture_make(double value, uint32_t tag);
 int32_t fixture_apply(int32_t value, int32_t (*callback)(int32_t));

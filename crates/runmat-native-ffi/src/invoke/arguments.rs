@@ -1,7 +1,7 @@
 use std::ffi::c_void;
 
 use libffi::middle::{arg, Arg};
-use runmat_value::{IntValue, NumericScalar, NumericStorage, StructValue, Value};
+use runmat_value::{HostNumericBuffer, IntValue, NumericDType, NumericScalar, StructValue, Value};
 
 use crate::{NativeLibraryMetadata, NativeScalar, NativeType, Parameter, ParameterDirection};
 
@@ -64,8 +64,9 @@ impl ScalarSlot {
 pub(super) enum PointeeSlot {
     Scalar(ScalarSlot),
     Array {
-        storage: NumericStorage,
+        storage: HostNumericBuffer,
         shape: Vec<usize>,
+        writable: bool,
     },
     Bytes(Vec<u8>),
     Structure(AlignedStorage),
@@ -75,7 +76,20 @@ impl PointeeSlot {
     pub(super) fn address(&mut self) -> *mut c_void {
         match self {
             Self::Scalar(value) => value.address(),
-            Self::Array { storage, .. } => numeric_storage_address(storage),
+            Self::Array {
+                storage, writable, ..
+            } => {
+                // SAFETY: the pointee slot owns the invocation lease. Writable
+                // parameters detach through COW before exposing their address;
+                // input pointers remain logically read-only.
+                unsafe {
+                    if *writable {
+                        storage.foreign_data_pointer_mut()
+                    } else {
+                        storage.foreign_data_pointer()
+                    }
+                }
+            }
             Self::Bytes(bytes) => bytes.as_mut_ptr().cast(),
             Self::Structure(storage) => storage.as_mut_ptr(),
         }
@@ -191,12 +205,18 @@ fn prepare_argument(
         NativeType::Enumeration { storage, .. } => {
             scalar_from_value(*storage, value).map(ArgumentSlot::Scalar)
         }
-        NativeType::Pointer { pointee, .. } => pointee_from_value(symbol, pointee, value, metadata)
-            .map(|pointee| {
-                let mut pointee = Box::new(pointee);
-                let address = pointee.address();
-                ArgumentSlot::Pointer(PointerSlot { address, pointee })
-            }),
+        NativeType::Pointer { pointee, .. } => pointee_from_value(
+            symbol,
+            pointee,
+            value,
+            metadata,
+            !matches!(parameter.direction, ParameterDirection::Input),
+        )
+        .map(|pointee| {
+            let mut pointee = Box::new(pointee);
+            let address = pointee.address();
+            ArgumentSlot::Pointer(PointerSlot { address, pointee })
+        }),
         NativeType::Structure { .. } | NativeType::Array { .. } => {
             pack_value(symbol, &parameter.ty, value, metadata).map(ArgumentSlot::Structure)
         }
@@ -223,6 +243,7 @@ pub(super) fn pointee_from_value(
     pointee: &NativeType,
     value: &Value,
     metadata: &NativeLibraryMetadata,
+    writable: bool,
 ) -> Result<PointeeSlot, String> {
     match pointee {
         NativeType::Scalar { scalar }
@@ -230,14 +251,12 @@ pub(super) fn pointee_from_value(
             storage: scalar, ..
         } => {
             if let Value::Tensor(tensor) = value {
-                let storage = tensor
-                    .clone()
-                    .into_numeric_storage()
-                    .map_err(|message| format!("could not access numeric array: {message}"))?;
-                ensure_storage_matches(*scalar, &storage)?;
+                let storage = tensor.host_buffer().clone();
+                ensure_storage_matches(*scalar, storage.numeric_dtype())?;
                 Ok(PointeeSlot::Array {
                     storage,
                     shape: tensor.shape.clone(),
+                    writable,
                 })
             } else if matches!(
                 scalar,
@@ -384,42 +403,36 @@ fn exact_float_u128(value: f64) -> Result<u128, String> {
     }
 }
 
-fn ensure_storage_matches(scalar: NativeScalar, storage: &NumericStorage) -> Result<(), String> {
+fn ensure_storage_matches(scalar: NativeScalar, dtype: NumericDType) -> Result<(), String> {
     let matches = matches!(
-        (scalar, storage),
-        (NativeScalar::F64, NumericStorage::F64(_))
-            | (NativeScalar::F32, NumericStorage::F32(_))
+        (scalar, dtype),
+        (NativeScalar::F64, NumericDType::F64)
+            | (NativeScalar::F32, NumericDType::F32)
             | (
                 NativeScalar::I8 | NativeScalar::SignedChar | NativeScalar::Char,
-                NumericStorage::I8(_)
+                NumericDType::I8
             )
             | (
                 NativeScalar::U8 | NativeScalar::UnsignedChar | NativeScalar::Bool,
-                NumericStorage::U8(_)
+                NumericDType::U8
             )
-            | (
-                NativeScalar::I16 | NativeScalar::Short,
-                NumericStorage::I16(_)
-            )
+            | (NativeScalar::I16 | NativeScalar::Short, NumericDType::I16)
             | (
                 NativeScalar::U16 | NativeScalar::UnsignedShort,
-                NumericStorage::U16(_)
+                NumericDType::U16
             )
-            | (
-                NativeScalar::I32 | NativeScalar::Int,
-                NumericStorage::I32(_)
-            )
+            | (NativeScalar::I32 | NativeScalar::Int, NumericDType::I32)
             | (
                 NativeScalar::U32 | NativeScalar::UnsignedInt,
-                NumericStorage::U32(_)
+                NumericDType::U32
             )
             | (
                 NativeScalar::I64 | NativeScalar::LongLong,
-                NumericStorage::I64(_)
+                NumericDType::I64
             )
             | (
                 NativeScalar::U64 | NativeScalar::UnsignedLongLong,
-                NumericStorage::U64(_)
+                NumericDType::U64
             )
     );
     if matches {
@@ -427,23 +440,8 @@ fn ensure_storage_matches(scalar: NativeScalar, storage: &NumericStorage) -> Res
     } else {
         Err(format!(
             "array class {} does not match pointer element type {scalar:?}",
-            storage.class_name()
+            dtype.class_name()
         ))
-    }
-}
-
-fn numeric_storage_address(storage: &mut NumericStorage) -> *mut c_void {
-    match storage {
-        NumericStorage::F64(values) => values.as_mut_ptr().cast(),
-        NumericStorage::F32(values) => values.as_mut_ptr().cast(),
-        NumericStorage::I8(values) => values.as_mut_ptr().cast(),
-        NumericStorage::I16(values) => values.as_mut_ptr().cast(),
-        NumericStorage::I32(values) => values.as_mut_ptr().cast(),
-        NumericStorage::I64(values) => values.as_mut_ptr().cast(),
-        NumericStorage::U8(values) => values.as_mut_ptr().cast(),
-        NumericStorage::U16(values) => values.as_mut_ptr().cast(),
-        NumericStorage::U32(values) => values.as_mut_ptr().cast(),
-        NumericStorage::U64(values) => values.as_mut_ptr().cast(),
     }
 }
 
@@ -578,8 +576,8 @@ pub(super) fn is_output(parameter: &Parameter) -> bool {
 pub(super) fn pointee_value(slot: &PointeeSlot, scalar: NativeScalar) -> Result<Value, String> {
     match slot {
         PointeeSlot::Scalar(value) => Ok(scalar_slot_value(scalar, value)),
-        PointeeSlot::Array { storage, shape } => {
-            runmat_value::Tensor::from_numeric_storage(storage.clone(), shape.clone())
+        PointeeSlot::Array { storage, shape, .. } => {
+            runmat_value::Tensor::from_host_buffer(storage.clone(), shape.clone())
                 .map(Value::Tensor)
         }
         PointeeSlot::Bytes(bytes) => {

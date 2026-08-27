@@ -863,7 +863,7 @@ fn circshift_logical_array(
     let LogicalArray { data, shape } = array;
     let plan = build_shift_plan(&shape, dims, shifts)?;
     if data.is_empty() || plan.is_noop() {
-        return LogicalArray::new(data, shape)
+        return LogicalArray::from_host_buffer(data, shape)
             .map_err(|e| circshift_internal(format!("circshift: {e}")));
     }
     let ShiftPlan {
