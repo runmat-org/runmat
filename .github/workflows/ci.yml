@@ -922,6 +922,12 @@ jobs:
         shell: bash
         run: rustup target add "${{ matrix.platform.target }}"
 
+      - name: Restore native artifact build cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: native-artifact-v1-${{ matrix.platform.target }}
+          cache-workspace-crates: true
+
       - name: Build branch CLI with embedded AOT runtime (Unix)
         if: runner.os != 'Windows'
         shell: bash
@@ -958,27 +964,12 @@ jobs:
       - name: Verify branch CLI contains the native compile runtime (Unix)
         if: runner.os != 'Windows'
         shell: bash
-        run: |
-          set -euo pipefail
-          smoke_dir="$(mktemp -d)"
-          trap 'rm -rf "$smoke_dir"' EXIT
-          printf 'x = 2 + 3;\ndisp(x);\n' > "$smoke_dir/smoke.m"
-          target/${{ matrix.platform.target }}/release/runmat compile "$smoke_dir/smoke.m" -o "$smoke_dir/smoke"
-          "$smoke_dir/smoke" | grep -Fx '5'
+        run: bash scripts/verify-runmat-with-aot-runtime.sh "target/${{ matrix.platform.target }}/release/runmat"
 
       - name: Verify branch CLI contains the native compile runtime (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $smokeDir = Join-Path $env:RUNNER_TEMP 'runmat-aot-smoke'
-          New-Item -ItemType Directory -Path $smokeDir -Force | Out-Null
-          Set-Content -LiteralPath (Join-Path $smokeDir 'smoke.m') -Value "x = 2 + 3;`ndisp(x);"
-          & "target/${{ matrix.platform.target }}/release/runmat.exe" compile (Join-Path $smokeDir 'smoke.m') -o (Join-Path $smokeDir 'smoke.exe')
-          if ($LASTEXITCODE -ne 0) { throw "embedded compile runtime verification failed with exit code $LASTEXITCODE" }
-          $output = & (Join-Path $smokeDir 'smoke.exe')
-          if ($LASTEXITCODE -ne 0) { throw "compiled smoke program failed with exit code $LASTEXITCODE" }
-          if (($output | Out-String).Trim() -ne '5') { throw "compiled smoke program returned unexpected output: $output" }
+        run: ./scripts/verify-runmat-with-aot-runtime.ps1 -RunMatBinary "target/${{ matrix.platform.target }}/release/runmat.exe"
 
       - name: Package branch artifact (Windows)
         if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') && runner.os == 'Windows'

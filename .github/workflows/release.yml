@@ -314,6 +314,12 @@ jobs:
         shell: bash
         run: rustup target add "${{ matrix.platform.target }}"
 
+      - name: Restore native artifact build cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: native-artifact-v1-${{ matrix.platform.target }}
+          cache-workspace-crates: true
+
       - name: Restore Windows native dependency cache
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
         uses: actions/cache@v5
@@ -362,87 +368,24 @@ jobs:
       - name: Verify packaged CLI contains the native compile runtime (Unix)
         if: runner.os != 'Windows'
         shell: bash
-        run: |
-          set -euo pipefail
-          smoke_dir="$(mktemp -d)"
-          trap 'rm -rf "$smoke_dir"' EXIT
-          printf 'x = 2 + 3;\ndisp(x);\n' > "$smoke_dir/smoke.m"
-          target/${{ matrix.platform.target }}/release/runmat compile "$smoke_dir/smoke.m" -o "$smoke_dir/smoke"
-          "$smoke_dir/smoke" | grep -Fx '5'
+        run: bash scripts/verify-runmat-with-aot-runtime.sh "target/${{ matrix.platform.target }}/release/runmat"
 
       - name: Verify packaged CLI contains the native compile runtime (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $smokeDir = Join-Path $env:RUNNER_TEMP 'runmat-aot-smoke'
-          New-Item -ItemType Directory -Path $smokeDir -Force | Out-Null
-          Set-Content -LiteralPath (Join-Path $smokeDir 'smoke.m') -Value "x = 2 + 3;`ndisp(x);"
-          & "target/${{ matrix.platform.target }}/release/runmat.exe" compile (Join-Path $smokeDir 'smoke.m') -o (Join-Path $smokeDir 'smoke.exe')
-          if ($LASTEXITCODE -ne 0) { throw "embedded compile runtime verification failed with exit code $LASTEXITCODE" }
-          $output = & (Join-Path $smokeDir 'smoke.exe')
-          if ($LASTEXITCODE -ne 0) { throw "compiled smoke program failed with exit code $LASTEXITCODE" }
-          if (($output | Out-String).Trim() -ne '5') { throw "compiled smoke program returned unexpected output: $output" }
+        run: ./scripts/verify-runmat-with-aot-runtime.ps1 -RunMatBinary "target/${{ matrix.platform.target }}/release/runmat.exe"
 
-      - name: Import signing cert and codesign (macOS)
+      - name: Sign and notarize release artifact (macOS)
         if: runner.os == 'macOS'
         shell: bash
         env:
           MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
           MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
           MACOS_CERT_IDENTITY: ${{ secrets.MACOS_CERT_IDENTITY }}
-        run: |
-          set -euxo pipefail
-          # Prepare keychain with Developer ID Application certificate
-          KEYCHAIN=build.keychain
-          KEYCHAIN_PWD=$(uuidgen)
-          echo "$MACOS_CERT_P12" | base64 --decode > cert.p12
-          security create-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN"
-          security unlock-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN"
-          security import cert.p12 -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
-          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
-          security default-keychain -s "$KEYCHAIN"
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PWD" "$KEYCHAIN"
-
-          BIN="target/${{ matrix.platform.target }}/release/runmat"
-          # Minimal entitlements to support JIT and dynamic loading under Hardened Runtime
-          cat > entitlements.plist <<'EOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>com.apple.security.cs.allow-jit</key><true/>
-            <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
-            <key>com.apple.security.cs.disable-library-validation</key><true/>
-          </dict>
-          </plist>
-          EOF
-
-          codesign --force --timestamp --options runtime --entitlements entitlements.plist \
-            --sign "$MACOS_CERT_IDENTITY" "$BIN"
-          codesign -dv --verbose=4 "$BIN" || true
-
-      - name: Notarize (macOS)
-        if: runner.os == 'macOS'
-        shell: bash
-        env:
           APPLE_NOTARIZE_KEY_ID: ${{ secrets.APPLE_NOTARIZE_KEY_ID }}
           APPLE_NOTARIZE_ISSUER_ID: ${{ secrets.APPLE_NOTARIZE_ISSUER_ID }}
           APPLE_NOTARIZE_PRIVATE_KEY: ${{ secrets.APPLE_NOTARIZE_PRIVATE_KEY }}
-        run: |
-          set -euxo pipefail
-          BIN="target/${{ matrix.platform.target }}/release/runmat"
-          # Create a temporary zip only for notarization submission (do not ship this)
-          ZIP_NAME="notarize-submit.zip"
-          /usr/bin/zip -j "$ZIP_NAME" "$BIN"
-          echo "$APPLE_NOTARIZE_PRIVATE_KEY" | base64 --decode > notary_key.p8
-          # Submit and wait for notarization result
-          xcrun notarytool submit "$ZIP_NAME" --key notary_key.p8 \
-            --key-id "$APPLE_NOTARIZE_KEY_ID" --issuer "$APPLE_NOTARIZE_ISSUER_ID" --wait
-          # Staple ticket to binary if possible (no-op for some formats)
-          xcrun stapler staple "$BIN" || true
-          rm -f "$ZIP_NAME" notary_key.p8
+        run: bash scripts/sign-and-notarize-macos-binary.sh "target/${{ matrix.platform.target }}/release/runmat"
 
       - name: Package as archive (Windows)
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
