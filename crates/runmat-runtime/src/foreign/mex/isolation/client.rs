@@ -461,6 +461,56 @@ async fn execute_callback(
                 .map(|()| MexCallbackOutput::Unit)
                 .map_err(diagnostic_error)
         }
+        MexCallbackOperation::GetObjectProperty {
+            object,
+            index,
+            name,
+        } => {
+            let object = decode_value_transfer(&object, snapshots)?;
+            let index = usize::try_from(index).map_err(|_| {
+                wire_error(
+                    "RunMat:MEX:ObjectIndex",
+                    "object index exceeds the current platform width",
+                    None,
+                )
+            })?;
+            let value = services
+                .get_object_property_at(object, index, &name)
+                .map_err(diagnostic_error)?;
+            let host_value = crate::gather_if_needed_async(&value)
+                .await
+                .map_err(|error| wire_error("RunMat:MEX:ValueGather", error.to_string(), None))?;
+            Ok(MexCallbackOutput::Values(vec![encode_value_transfer(
+                &host_value,
+                snapshots,
+            )?]))
+        }
+        MexCallbackOperation::SetObjectProperty {
+            object,
+            index,
+            name,
+            value,
+        } => {
+            let object = decode_value_transfer(&object, snapshots)?;
+            let value = decode_value_transfer(&value, snapshots)?;
+            let index = usize::try_from(index).map_err(|_| {
+                wire_error(
+                    "RunMat:MEX:ObjectIndex",
+                    "object index exceeds the current platform width",
+                    None,
+                )
+            })?;
+            let object = services
+                .set_object_property_at(object, index, &name, value)
+                .map_err(diagnostic_error)?;
+            let host_value = crate::gather_if_needed_async(&object)
+                .await
+                .map_err(|error| wire_error("RunMat:MEX:ValueGather", error.to_string(), None))?;
+            Ok(MexCallbackOutput::Values(vec![encode_value_transfer(
+                &host_value,
+                snapshots,
+            )?]))
+        }
     }
 }
 

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 pub const MEX_HOST_PROTOCOL: &str = "runmat.mex-host";
 pub const MEX_HOST_SECRET_ENV: &str = "RUNMAT_EXTENSION_HOST_SECRET";
 pub const MEX_HOST_SNAPSHOT_ROOT_ENV: &str = "RUNMAT_EXTENSION_SNAPSHOT_ROOT";
-pub const MEX_HOST_SCHEMA_VERSION: u16 = 1;
+pub const MEX_HOST_SCHEMA_VERSION: u16 = 2;
 pub const MEX_HOST_MAX_MESSAGE_BYTES: u32 = 16 * 1024 * 1024;
 pub const MEX_HOST_INLINE_VALUE_BYTES: usize = 128 * 1024;
 pub const MEX_HOST_MAX_SNAPSHOT_BYTES: u64 = 512 * 1024 * 1024;
@@ -251,6 +251,17 @@ pub enum MexCallbackOperation {
         name: String,
         value: MexValueTransfer,
     },
+    GetObjectProperty {
+        object: MexValueTransfer,
+        index: u64,
+        name: String,
+    },
+    SetObjectProperty {
+        object: MexValueTransfer,
+        index: u64,
+        name: String,
+        value: MexValueTransfer,
+    },
 }
 
 impl MexCallbackOperation {
@@ -289,6 +300,24 @@ impl MexCallbackOperation {
             } => {
                 validate_name(workspace, "workspace")?;
                 validate_name(name, "variable")?;
+                value.validate()
+            }
+            Self::GetObjectProperty {
+                object,
+                index: _,
+                name,
+            } => {
+                object.validate()?;
+                validate_name(name, "property")
+            }
+            Self::SetObjectProperty {
+                object,
+                index: _,
+                name,
+                value,
+            } => {
+                object.validate()?;
+                validate_name(name, "property")?;
                 value.validate()
             }
         }
@@ -459,6 +488,33 @@ mod tests {
             panic!("expected invocation");
         };
         request.validate().unwrap();
+
+        let value =
+            MexValueTransfer::Inline(ValuePayload::Inline(Box::new(InlineValue::U64(u64::MAX))));
+        for operation in [
+            MexCallbackOperation::GetObjectProperty {
+                object: value.clone(),
+                index: u64::MAX,
+                name: "Value".into(),
+            },
+            MexCallbackOperation::SetObjectProperty {
+                object: value.clone(),
+                index: 3,
+                name: "Value".into(),
+                value,
+            },
+        ] {
+            let callback = MexCallbackRequest {
+                request_id: 7,
+                callback_id: 2,
+                depth: 1,
+                operation,
+            };
+            let bytes = serde_json::to_vec(&HostMessage::Callback(callback.clone())).unwrap();
+            let decoded: HostMessage = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(decoded, HostMessage::Callback(callback));
+            decoded.validate().unwrap();
+        }
     }
 
     #[test]
