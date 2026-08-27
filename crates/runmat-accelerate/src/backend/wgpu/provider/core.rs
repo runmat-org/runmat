@@ -69,7 +69,12 @@ impl WgpuProvider {
         }
     }
     pub(super) const BUFFER_RESIDENCY_MAX_PER_KEY: usize = 8;
-    pub(super) const BUFFER_RESIDENCY_MAX_TOTAL: usize = 64;
+    // Keep enough reusable storage for common tensor shapes while reserving
+    // native resource capacity for pipelines, uniforms, and transient command
+    // buffers. This is deliberately conservative across software and integrated
+    // D3D12 adapters, whose resource ceilings can be substantially lower than
+    // those of discrete GPUs.
+    pub(super) const BUFFER_RESIDENCY_MAX_TOTAL: usize = 16;
     pub(super) const IMAGE_NORMALIZE_AUTOTUNE_VERSION: u8 = 1;
     pub(super) const IMAGE_NORMALIZE_STREAM_COLD_CAP: u32 = 8;
     pub(super) const IMAGE_NORMALIZE_TARGET_SAMPLES_PER_LANE: f64 = 256.0;
