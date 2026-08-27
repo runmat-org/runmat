@@ -605,8 +605,8 @@ fn inf_sparse(shape: &[usize], dtype: NumericDType) -> crate::BuiltinResult<Valu
     let len = rows
         .checked_mul(cols)
         .ok_or_else(|| builtin_error("inf: sparse output size overflow"))?;
-    let col_ptrs = (0..=cols).map(|column| column * rows).collect();
-    let row_indices = (0..cols).flat_map(|_| 0..rows).collect();
+    let col_ptrs: Vec<_> = (0..=cols).map(|column| column * rows).collect();
+    let row_indices: Vec<_> = (0..cols).flat_map(|_| 0..rows).collect();
     let sparse = match dtype {
         NumericDType::F32 => {
             SparseTensor::new_f32(rows, cols, col_ptrs, row_indices, vec![f32::INFINITY; len])

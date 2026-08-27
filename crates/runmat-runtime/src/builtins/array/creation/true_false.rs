@@ -632,7 +632,7 @@ fn logical_sparse_output(
         .map(|col| col.checked_mul(rows))
         .collect::<Option<Vec<_>>>()
         .ok_or_else(|| builtin_error(name, format!("{name}: output size overflows usize")))?;
-    let row_indices = (0..cols).flat_map(|_| 0..rows).collect();
+    let row_indices: Vec<_> = (0..cols).flat_map(|_| 0..rows).collect();
     runmat_value::SparseTensor::new_logical(rows, cols, col_ptrs, row_indices)
         .map_err(|error| builtin_error(name, format!("{name}: {error}")))
         .and_then(|value| {

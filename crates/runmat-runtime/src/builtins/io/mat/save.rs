@@ -844,8 +844,8 @@ fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray
                     data: MatData::Sparse {
                         rows: sparse.rows,
                         cols: sparse.cols,
-                        col_ptrs: sparse.col_ptrs,
-                        row_indices: sparse.row_indices,
+                        col_ptrs: sparse.col_ptrs.into_vec(),
+                        row_indices: sparse.row_indices.into_vec(),
                         values,
                         logical,
                     },

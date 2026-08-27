@@ -5,17 +5,15 @@ pub struct SparseTensor {
     pub rows: usize,
     pub cols: usize,
     /// Column pointers into `row_indices` and the numeric value storage; length is `cols + 1`.
-    pub col_ptrs: Vec<usize>,
+    pub col_ptrs: HostIndexBuffer,
     /// Zero-based row indices, sorted within each column.
-    pub row_indices: Vec<usize>,
+    pub row_indices: HostIndexBuffer,
     storage: SparseValueStorage,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 enum SparseValueStorage {
-    F64(Vec<f64>),
-    F32(Vec<f32>),
-    Integer(IntegerStorage),
+    Numeric(HostNumericBuffer),
     Logical,
 }
 
@@ -36,12 +34,9 @@ impl fmt::Display for SparseTensor {
             for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
                 let row = self.row_indices[idx];
                 let value = match &self.storage {
-                    SparseValueStorage::F64(values) => format_number(values[idx]),
-                    SparseValueStorage::F32(values) => format_number(f64::from(values[idx])),
-                    SparseValueStorage::Integer(storage) => storage
-                        .value_at(idx)
-                        .expect("validated sparse storage")
-                        .decimal_string(),
+                    SparseValueStorage::Numeric(storage) => format_sparse_scalar(
+                        storage.value_at(idx).expect("validated sparse storage"),
+                    ),
                     SparseValueStorage::Logical => "1".to_string(),
                 };
                 writeln!(f, "  ({},{})  {}", row + 1, col + 1, value)?;
@@ -53,21 +48,47 @@ impl fmt::Display for SparseTensor {
 
 type SparseCscParts<T> = (Vec<usize>, Vec<usize>, Vec<T>);
 
+fn format_sparse_scalar(value: NumericScalar) -> String {
+    match value {
+        NumericScalar::F64(value) => format_number(value),
+        NumericScalar::F32(value) => format_number(f64::from(value)),
+        value => value
+            .into_int_value()
+            .expect("non-floating numeric scalar is integer")
+            .decimal_string(),
+    }
+}
+
+fn sparse_scalar_f64(value: NumericScalar) -> f64 {
+    match value {
+        NumericScalar::F64(value) => value,
+        NumericScalar::F32(value) => f64::from(value),
+        value => value
+            .into_int_value()
+            .expect("non-floating numeric scalar is integer")
+            .to_f64(),
+    }
+}
+
 impl SparseTensor {
     pub fn new(
         rows: usize,
         cols: usize,
-        col_ptrs: Vec<usize>,
-        row_indices: Vec<usize>,
+        col_ptrs: impl Into<HostIndexBuffer>,
+        row_indices: impl Into<HostIndexBuffer>,
         values: Vec<f64>,
     ) -> Result<Self, String> {
+        let col_ptrs = col_ptrs.into();
+        let row_indices = row_indices.into();
         Self::validate_structure(rows, cols, &col_ptrs, &row_indices, values.len())?;
         Ok(Self {
             rows,
             cols,
             col_ptrs,
             row_indices,
-            storage: SparseValueStorage::F64(values),
+            storage: SparseValueStorage::Numeric(HostNumericBuffer::from_numeric_storage(
+                NumericStorage::F64(values),
+            )),
         })
     }
 
@@ -75,17 +96,21 @@ impl SparseTensor {
     pub fn new_f32(
         rows: usize,
         cols: usize,
-        col_ptrs: Vec<usize>,
-        row_indices: Vec<usize>,
+        col_ptrs: impl Into<HostIndexBuffer>,
+        row_indices: impl Into<HostIndexBuffer>,
         values: Vec<f32>,
     ) -> Result<Self, String> {
+        let col_ptrs = col_ptrs.into();
+        let row_indices = row_indices.into();
         Self::validate_structure(rows, cols, &col_ptrs, &row_indices, values.len())?;
         Ok(Self {
             rows,
             cols,
             col_ptrs,
             row_indices,
-            storage: SparseValueStorage::F32(values),
+            storage: SparseValueStorage::Numeric(HostNumericBuffer::from_numeric_storage(
+                NumericStorage::F32(values),
+            )),
         })
     }
 
@@ -93,17 +118,21 @@ impl SparseTensor {
     pub fn new_integer(
         rows: usize,
         cols: usize,
-        col_ptrs: Vec<usize>,
-        row_indices: Vec<usize>,
+        col_ptrs: impl Into<HostIndexBuffer>,
+        row_indices: impl Into<HostIndexBuffer>,
         integer_data: IntegerStorage,
     ) -> Result<Self, String> {
+        let col_ptrs = col_ptrs.into();
+        let row_indices = row_indices.into();
         Self::validate_structure(rows, cols, &col_ptrs, &row_indices, integer_data.len())?;
         Ok(Self {
             rows,
             cols,
             col_ptrs,
             row_indices,
-            storage: SparseValueStorage::Integer(integer_data),
+            storage: SparseValueStorage::Numeric(HostNumericBuffer::from_numeric_storage(
+                NumericStorage::from_integer_storage(integer_data),
+            )),
         })
     }
 
@@ -112,8 +141,43 @@ impl SparseTensor {
     pub fn new_logical(
         rows: usize,
         cols: usize,
-        col_ptrs: Vec<usize>,
-        row_indices: Vec<usize>,
+        col_ptrs: impl Into<HostIndexBuffer>,
+        row_indices: impl Into<HostIndexBuffer>,
+    ) -> Result<Self, String> {
+        let col_ptrs = col_ptrs.into();
+        let row_indices = row_indices.into();
+        Self::validate_structure(rows, cols, &col_ptrs, &row_indices, row_indices.len())?;
+        Ok(Self {
+            rows,
+            cols,
+            col_ptrs,
+            row_indices,
+            storage: SparseValueStorage::Logical,
+        })
+    }
+
+    pub fn from_host_numeric_buffers(
+        rows: usize,
+        cols: usize,
+        col_ptrs: HostIndexBuffer,
+        row_indices: HostIndexBuffer,
+        values: HostNumericBuffer,
+    ) -> Result<Self, String> {
+        Self::validate_structure(rows, cols, &col_ptrs, &row_indices, values.len())?;
+        Ok(Self {
+            rows,
+            cols,
+            col_ptrs,
+            row_indices,
+            storage: SparseValueStorage::Numeric(values),
+        })
+    }
+
+    pub fn from_host_logical_pattern(
+        rows: usize,
+        cols: usize,
+        col_ptrs: HostIndexBuffer,
+        row_indices: HostIndexBuffer,
     ) -> Result<Self, String> {
         Self::validate_structure(rows, cols, &col_ptrs, &row_indices, row_indices.len())?;
         Ok(Self {
@@ -123,6 +187,34 @@ impl SparseTensor {
             row_indices,
             storage: SparseValueStorage::Logical,
         })
+    }
+
+    pub fn numeric_host_buffer(&self) -> Option<&HostNumericBuffer> {
+        match &self.storage {
+            SparseValueStorage::Numeric(values) => Some(values),
+            SparseValueStorage::Logical => None,
+        }
+    }
+
+    fn from_numeric_scalars(
+        rows: usize,
+        cols: usize,
+        col_ptrs: Vec<usize>,
+        row_indices: Vec<usize>,
+        dtype: NumericDType,
+        values: Vec<NumericScalar>,
+    ) -> Result<Self, String> {
+        let mut storage = NumericStorage::zeros(dtype, values.len());
+        for (index, value) in values.into_iter().enumerate() {
+            storage.set_value(index, value)?;
+        }
+        Self::from_host_numeric_buffers(
+            rows,
+            cols,
+            col_ptrs.into(),
+            row_indices.into(),
+            HostNumericBuffer::from_numeric_storage(storage),
+        )
     }
 
     fn validate_structure(
@@ -178,9 +270,11 @@ impl SparseTensor {
         Self {
             rows,
             cols,
-            col_ptrs: vec![0; cols.saturating_add(1)],
-            row_indices: Vec::new(),
-            storage: SparseValueStorage::F64(Vec::new()),
+            col_ptrs: vec![0; cols.saturating_add(1)].into(),
+            row_indices: Vec::new().into(),
+            storage: SparseValueStorage::Numeric(HostNumericBuffer::from_numeric_storage(
+                NumericStorage::F64(Vec::new()),
+            )),
         }
     }
 
@@ -189,9 +283,11 @@ impl SparseTensor {
         Self {
             rows,
             cols,
-            col_ptrs: vec![0; cols.saturating_add(1)],
-            row_indices: Vec::new(),
-            storage: SparseValueStorage::F32(Vec::new()),
+            col_ptrs: vec![0; cols.saturating_add(1)].into(),
+            row_indices: Vec::new().into(),
+            storage: SparseValueStorage::Numeric(HostNumericBuffer::from_numeric_storage(
+                NumericStorage::F32(Vec::new()),
+            )),
         }
     }
 
@@ -200,8 +296,8 @@ impl SparseTensor {
         Self {
             rows,
             cols,
-            col_ptrs: vec![0; cols.saturating_add(1)],
-            row_indices: Vec::new(),
+            col_ptrs: vec![0; cols.saturating_add(1)].into(),
+            row_indices: Vec::new().into(),
             storage: SparseValueStorage::Logical,
         }
     }
@@ -211,9 +307,11 @@ impl SparseTensor {
         Self {
             rows,
             cols,
-            col_ptrs: vec![0; cols.saturating_add(1)],
-            row_indices: Vec::new(),
-            storage: SparseValueStorage::Integer(storage.zeros_like(0)),
+            col_ptrs: vec![0; cols.saturating_add(1)].into(),
+            row_indices: Vec::new().into(),
+            storage: SparseValueStorage::Numeric(HostNumericBuffer::from_numeric_storage(
+                NumericStorage::from_integer_storage(storage.zeros_like(0)),
+            )),
         }
     }
 
@@ -221,8 +319,8 @@ impl SparseTensor {
     pub fn new_integer_like(
         rows: usize,
         cols: usize,
-        col_ptrs: Vec<usize>,
-        row_indices: Vec<usize>,
+        col_ptrs: impl Into<HostIndexBuffer>,
+        row_indices: impl Into<HostIndexBuffer>,
         values: Vec<IntValue>,
         prototype: &IntegerStorage,
     ) -> Result<Self, String> {
@@ -237,9 +335,7 @@ impl SparseTensor {
 
     pub fn nnz(&self) -> usize {
         match &self.storage {
-            SparseValueStorage::F64(values) => values.len(),
-            SparseValueStorage::F32(values) => values.len(),
-            SparseValueStorage::Integer(storage) => storage.len(),
+            SparseValueStorage::Numeric(values) => values.len(),
             SparseValueStorage::Logical => self.row_indices.len(),
         }
     }
@@ -254,42 +350,18 @@ impl SparseTensor {
             .checked_mul(self.cols)
             .ok_or_else(|| "SparseTensor dense dimensions overflow usize".to_string())?;
         match &self.storage {
-            SparseValueStorage::F64(values) => {
-                let mut data = Vec::new();
-                data.try_reserve_exact(len)
-                    .map_err(|err| format!("SparseTensor dense allocation failed: {err}"))?;
-                data.resize(len, 0.0);
-                for col in 0..self.cols {
-                    for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
-                        data[self.row_indices[idx] + col * self.rows] = values[idx];
-                    }
-                }
-                Tensor::new(data, self.shape())
-            }
-            SparseValueStorage::F32(values) => {
-                let mut data = Vec::new();
-                data.try_reserve_exact(len)
-                    .map_err(|err| format!("SparseTensor dense allocation failed: {err}"))?;
-                data.resize(len, 0.0);
-                for col in 0..self.cols {
-                    for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
-                        data[self.row_indices[idx] + col * self.rows] = values[idx];
-                    }
-                }
-                Tensor::from_f32(data, self.shape())
-            }
-            SparseValueStorage::Integer(integer_data) => {
-                let mut data = integer_data.zeros_like(len);
+            SparseValueStorage::Numeric(values) => {
+                let mut data = NumericStorage::zeros(values.numeric_dtype(), len);
                 for col in 0..self.cols {
                     for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
                         let row = self.row_indices[idx];
-                        let value = integer_data.value_at(idx).ok_or_else(|| {
-                            "SparseTensor integer storage is inconsistent".to_string()
+                        let value = values.value_at(idx).ok_or_else(|| {
+                            "SparseTensor numeric storage is inconsistent".to_string()
                         })?;
                         data.set_value(row + col * self.rows, value)?;
                     }
                 }
-                Tensor::new_integer(data, self.shape())
+                Tensor::from_numeric_storage(data, self.shape())
             }
             SparseValueStorage::Logical => {
                 Err("SparseTensor logical storage requires to_dense_logical".to_string())
@@ -329,12 +401,11 @@ impl SparseTensor {
             .map(|offset| {
                 let index = start + offset;
                 match &self.storage {
-                    SparseValueStorage::F64(values) => values[index],
-                    SparseValueStorage::F32(values) => f64::from(values[index]),
-                    SparseValueStorage::Integer(storage) => storage
-                        .value_at(index)
-                        .expect("validated sparse storage index")
-                        .to_f64(),
+                    SparseValueStorage::Numeric(storage) => sparse_scalar_f64(
+                        storage
+                            .value_at(index)
+                            .expect("validated sparse storage index"),
+                    ),
                     SparseValueStorage::Logical => 1.0,
                 }
             })
@@ -365,30 +436,24 @@ impl SparseTensor {
 
     pub fn integer_storage(&self) -> Option<&IntegerStorage> {
         match &self.storage {
-            SparseValueStorage::Integer(storage) => Some(storage),
-            SparseValueStorage::F64(_)
-            | SparseValueStorage::F32(_)
-            | SparseValueStorage::Logical => None,
+            SparseValueStorage::Numeric(storage) => storage.integer_storage(),
+            SparseValueStorage::Logical => None,
         }
     }
 
     /// Borrows stored nonzero values when this sparse matrix is double.
     pub fn as_f64_slice(&self) -> Option<&[f64]> {
         match &self.storage {
-            SparseValueStorage::F64(values) => Some(values),
-            SparseValueStorage::F32(_)
-            | SparseValueStorage::Integer(_)
-            | SparseValueStorage::Logical => None,
+            SparseValueStorage::Numeric(values) => values.as_f64_slice(),
+            SparseValueStorage::Logical => None,
         }
     }
 
     /// Borrows stored nonzero values when this sparse matrix is single.
     pub fn as_f32_slice(&self) -> Option<&[f32]> {
         match &self.storage {
-            SparseValueStorage::F32(values) => Some(values),
-            SparseValueStorage::F64(_)
-            | SparseValueStorage::Integer(_)
-            | SparseValueStorage::Logical => None,
+            SparseValueStorage::Numeric(values) => values.as_f32_slice(),
+            SparseValueStorage::Logical => None,
         }
     }
 
@@ -411,9 +476,7 @@ impl SparseTensor {
     /// Integer values outside the exact binary64 range may lose precision.
     pub fn materialize_f64(&self) -> Vec<f64> {
         match &self.storage {
-            SparseValueStorage::F64(values) => values.clone(),
-            SparseValueStorage::F32(values) => values.iter().copied().map(f64::from).collect(),
-            SparseValueStorage::Integer(storage) => storage.to_f64_vec(),
+            SparseValueStorage::Numeric(values) => values.materialize_f64(),
             SparseValueStorage::Logical => vec![1.0; self.nnz()],
         }
     }
@@ -421,20 +484,14 @@ impl SparseTensor {
     /// Reads one stored nonzero value without routing integers through floating point.
     pub fn numeric_value_at(&self, index: usize) -> Option<NumericScalar> {
         match &self.storage {
-            SparseValueStorage::F64(values) => values.get(index).copied().map(NumericScalar::F64),
-            SparseValueStorage::F32(values) => values.get(index).copied().map(NumericScalar::F32),
-            SparseValueStorage::Integer(storage) => {
-                storage.value_at(index).map(NumericScalar::from)
-            }
+            SparseValueStorage::Numeric(values) => values.value_at(index),
             SparseValueStorage::Logical => (index < self.nnz()).then_some(NumericScalar::F64(1.0)),
         }
     }
 
     pub fn numeric_dtype(&self) -> Option<NumericDType> {
         match &self.storage {
-            SparseValueStorage::F64(_) => Some(NumericDType::F64),
-            SparseValueStorage::F32(_) => Some(NumericDType::F32),
-            SparseValueStorage::Integer(storage) => Some(storage.numeric_dtype()),
+            SparseValueStorage::Numeric(storage) => Some(storage.numeric_dtype()),
             SparseValueStorage::Logical => None,
         }
     }
@@ -625,29 +682,15 @@ impl SparseTensor {
             self.nnz(),
         );
         match &self.storage {
-            SparseValueStorage::F64(values) => Self::new(
+            SparseValueStorage::Numeric(values) => Self::from_host_numeric_buffers(
                 rows,
                 cols,
                 col_ptrs,
                 self.row_indices.clone(),
                 values.clone(),
-            ),
-            SparseValueStorage::F32(values) => Self::new_f32(
-                rows,
-                cols,
-                col_ptrs,
-                self.row_indices.clone(),
-                values.clone(),
-            ),
-            SparseValueStorage::Integer(storage) => Self::new_integer(
-                rows,
-                cols,
-                col_ptrs,
-                self.row_indices.clone(),
-                storage.clone(),
             ),
             SparseValueStorage::Logical => {
-                Self::new_logical(rows, cols, col_ptrs, self.row_indices.clone())
+                Self::from_host_logical_pattern(rows, cols, col_ptrs, self.row_indices.clone())
             }
         }
     }
@@ -737,38 +780,20 @@ impl SparseTensor {
             Err(removed_before) => Some(row - removed_before),
         };
         match &self.storage {
-            SparseValueStorage::F64(storage) => {
-                let (col_ptrs, row_indices, values) =
-                    self.rebuilt_csc(&source_columns, map_row, |index| {
-                        storage.get(index).copied().ok_or_else(|| {
-                            "SparseTensor double storage is inconsistent".to_string()
-                        })
-                    })?;
-                Self::new(output_rows, self.cols, col_ptrs, row_indices, values)
-            }
-            SparseValueStorage::F32(storage) => {
-                let (col_ptrs, row_indices, values) =
-                    self.rebuilt_csc(&source_columns, map_row, |index| {
-                        storage.get(index).copied().ok_or_else(|| {
-                            "SparseTensor single storage is inconsistent".to_string()
-                        })
-                    })?;
-                Self::new_f32(output_rows, self.cols, col_ptrs, row_indices, values)
-            }
-            SparseValueStorage::Integer(storage) => {
+            SparseValueStorage::Numeric(storage) => {
                 let (col_ptrs, row_indices, values) =
                     self.rebuilt_csc(&source_columns, map_row, |index| {
                         storage.value_at(index).ok_or_else(|| {
-                            "SparseTensor integer storage is inconsistent".to_string()
+                            "SparseTensor numeric storage is inconsistent".to_string()
                         })
                     })?;
-                Self::new_integer_like(
+                Self::from_numeric_scalars(
                     output_rows,
                     self.cols,
                     col_ptrs,
                     row_indices,
+                    storage.numeric_dtype(),
                     values,
-                    storage,
                 )
             }
             SparseValueStorage::Logical => {
@@ -786,50 +811,20 @@ impl SparseTensor {
             .filter(|column| columns.binary_search(column).is_err())
             .collect::<Vec<_>>();
         match &self.storage {
-            SparseValueStorage::F64(storage) => {
-                let (col_ptrs, row_indices, values) =
-                    self.rebuilt_csc(&source_columns, Some, |index| {
-                        storage.get(index).copied().ok_or_else(|| {
-                            "SparseTensor double storage is inconsistent".to_string()
-                        })
-                    })?;
-                Self::new(
-                    self.rows,
-                    source_columns.len(),
-                    col_ptrs,
-                    row_indices,
-                    values,
-                )
-            }
-            SparseValueStorage::F32(storage) => {
-                let (col_ptrs, row_indices, values) =
-                    self.rebuilt_csc(&source_columns, Some, |index| {
-                        storage.get(index).copied().ok_or_else(|| {
-                            "SparseTensor single storage is inconsistent".to_string()
-                        })
-                    })?;
-                Self::new_f32(
-                    self.rows,
-                    source_columns.len(),
-                    col_ptrs,
-                    row_indices,
-                    values,
-                )
-            }
-            SparseValueStorage::Integer(storage) => {
+            SparseValueStorage::Numeric(storage) => {
                 let (col_ptrs, row_indices, values) =
                     self.rebuilt_csc(&source_columns, Some, |index| {
                         storage.value_at(index).ok_or_else(|| {
-                            "SparseTensor integer storage is inconsistent".to_string()
+                            "SparseTensor numeric storage is inconsistent".to_string()
                         })
                     })?;
-                Self::new_integer_like(
+                Self::from_numeric_scalars(
                     self.rows,
                     source_columns.len(),
                     col_ptrs,
                     row_indices,
+                    storage.numeric_dtype(),
                     values,
-                    storage,
                 )
             }
             SparseValueStorage::Logical => {
@@ -850,6 +845,30 @@ impl SparseTensor {
 #[cfg(test)]
 mod sparse_tensor_tests {
     use super::*;
+
+    #[test]
+    fn sparse_clone_and_shape_expansion_retain_unchanged_host_allocations() {
+        let sparse = SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![3.0, 4.0]).unwrap();
+        let clone = sparse.clone();
+        assert!(sparse.col_ptrs.shares_allocation_with(&clone.col_ptrs));
+        assert!(sparse
+            .row_indices
+            .shares_allocation_with(&clone.row_indices));
+        assert!(sparse
+            .numeric_host_buffer()
+            .unwrap()
+            .shares_allocation_with(clone.numeric_host_buffer().unwrap()));
+
+        let expanded = sparse.with_expanded_shape(2, 3).unwrap();
+        assert!(!sparse.col_ptrs.shares_allocation_with(&expanded.col_ptrs));
+        assert!(sparse
+            .row_indices
+            .shares_allocation_with(&expanded.row_indices));
+        assert!(sparse
+            .numeric_host_buffer()
+            .unwrap()
+            .shares_allocation_with(expanded.numeric_host_buffer().unwrap()));
+    }
 
     #[test]
     fn typed_sparse_scalar_updates_preserve_exact_values_and_zero_elision() {
@@ -1090,9 +1109,11 @@ mod sparse_tensor_tests {
         let sparse = SparseTensor {
             rows: usize::MAX,
             cols: 2,
-            col_ptrs: vec![0, 0, 0],
-            row_indices: Vec::new(),
-            storage: SparseValueStorage::F64(Vec::new()),
+            col_ptrs: vec![0, 0, 0].into(),
+            row_indices: Vec::new().into(),
+            storage: SparseValueStorage::Numeric(HostNumericBuffer::from_numeric_storage(
+                NumericStorage::F64(Vec::new()),
+            )),
         };
 
         let err = sparse.to_dense().unwrap_err();

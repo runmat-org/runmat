@@ -726,8 +726,8 @@ fn ones_sparse_like(prototype: &SparseTensor, shape: &[usize]) -> crate::Builtin
     let len = rows
         .checked_mul(cols)
         .ok_or_else(|| builtin_error("ones: sparse output size overflow"))?;
-    let col_ptrs = (0..=cols).map(|column| column * rows).collect();
-    let row_indices = (0..cols).flat_map(|_| 0..rows).collect();
+    let col_ptrs: Vec<_> = (0..=cols).map(|column| column * rows).collect();
+    let row_indices: Vec<_> = (0..cols).flat_map(|_| 0..rows).collect();
     let sparse = if prototype.is_logical() {
         SparseTensor::new_logical(rows, cols, col_ptrs, row_indices)
     } else if let Some(storage) = prototype.integer_storage() {

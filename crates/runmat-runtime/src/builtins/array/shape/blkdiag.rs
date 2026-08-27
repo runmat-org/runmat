@@ -378,8 +378,8 @@ fn assemble_typed_integer_sparse_blocks(args: &[Value]) -> Option<BuiltinResult<
                 (
                     sparse.rows,
                     sparse.cols,
-                    sparse.col_ptrs.clone(),
-                    sparse.row_indices.clone(),
+                    sparse.col_ptrs.to_vec(),
+                    sparse.row_indices.to_vec(),
                     storage.exact_values(),
                     storage.clone(),
                 )
@@ -1643,7 +1643,7 @@ mod tests {
                     .iter()
                     .enumerate()
                     .filter_map(|(row, value)| (!value.is_zero()).then_some(row))
-                    .collect(),
+                    .collect::<Vec<_>>(),
                 storage
                     .from_exact_values_like(nonzero.clone())
                     .expect("typed sparse storage"),
