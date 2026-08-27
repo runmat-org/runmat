@@ -24,7 +24,8 @@ struct InstalledRun {
 /// remains transport-agnostic, while CLI and Desktop reuse this exact Core
 /// execution adapter instead of implementing independent child loops.
 pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
-    let (mut input, mut output) = runmat_process_host::ipc::stdio::endpoint();
+    let (mut input, mut output) = runmat_process_host::ipc::stdio::endpoint()
+        .map_err(|error| NativeRunnerError::Protocol(error.to_string()))?;
     let local = ProtocolHandshake::current(
         "runmat-native-worker",
         vec![

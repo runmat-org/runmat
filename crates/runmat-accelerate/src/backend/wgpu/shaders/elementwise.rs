@@ -235,14 +235,48 @@ let p = a * {ty}(0.5);
 var normal: {ty};
 if p < {ty}(0.02425) {{
     let q = sqrt(-{ty}(2.0) * log(p));
-    normal = ((((({ty}(-0.007784894002430293) * q + {ty}(-0.3223964580411365)) * q + {ty}(-2.400758277161838)) * q + {ty}(-2.549732539343734)) * q + {ty}(4.374664141464968)) * q + {ty}(2.938163982698783)) / (((({ty}(0.007784695709041462) * q + {ty}(0.3224671290700398)) * q + {ty}(2.445134137142996)) * q + {ty}(3.754408661907416)) * q + {ty}(1.0));
+    var numerator = {ty}(-0.007784894002430293);
+    numerator = numerator * q + {ty}(-0.3223964580411365);
+    numerator = numerator * q + {ty}(-2.400758277161838);
+    numerator = numerator * q + {ty}(-2.549732539343734);
+    numerator = numerator * q + {ty}(4.374664141464968);
+    numerator = numerator * q + {ty}(2.938163982698783);
+    var denominator = {ty}(0.007784695709041462);
+    denominator = denominator * q + {ty}(0.3224671290700398);
+    denominator = denominator * q + {ty}(2.445134137142996);
+    denominator = denominator * q + {ty}(3.754408661907416);
+    denominator = denominator * q + {ty}(1.0);
+    normal = numerator / denominator;
 }} else if p > {ty}(0.97575) {{
     let q = sqrt(-{ty}(2.0) * log({ty}(1.0) - p));
-    normal = -((((({ty}(-0.007784894002430293) * q + {ty}(-0.3223964580411365)) * q + {ty}(-2.400758277161838)) * q + {ty}(-2.549732539343734)) * q + {ty}(4.374664141464968)) * q + {ty}(2.938163982698783)) / (((({ty}(0.007784695709041462) * q + {ty}(0.3224671290700398)) * q + {ty}(2.445134137142996)) * q + {ty}(3.754408661907416)) * q + {ty}(1.0));
+    var numerator = {ty}(-0.007784894002430293);
+    numerator = numerator * q + {ty}(-0.3223964580411365);
+    numerator = numerator * q + {ty}(-2.400758277161838);
+    numerator = numerator * q + {ty}(-2.549732539343734);
+    numerator = numerator * q + {ty}(4.374664141464968);
+    numerator = numerator * q + {ty}(2.938163982698783);
+    var denominator = {ty}(0.007784695709041462);
+    denominator = denominator * q + {ty}(0.3224671290700398);
+    denominator = denominator * q + {ty}(2.445134137142996);
+    denominator = denominator * q + {ty}(3.754408661907416);
+    denominator = denominator * q + {ty}(1.0);
+    normal = -(numerator / denominator);
 }} else {{
     let q = p - {ty}(0.5);
     let r = q * q;
-    normal = ((((({ty}(-39.69683028665376) * r + {ty}(220.9460984245205)) * r + {ty}(-275.9285104469687)) * r + {ty}(138.3577518672690)) * r + {ty}(-30.66479806614716)) * r + {ty}(2.506628277459239)) * q / ((((({ty}(-54.47609879822406) * r + {ty}(161.5858368580409)) * r + {ty}(-155.6989798598866)) * r + {ty}(66.80131188771972)) * r + {ty}(-13.28068155288572)) * r + {ty}(1.0));
+    var numerator = {ty}(-39.69683028665376);
+    numerator = numerator * r + {ty}(220.9460984245205);
+    numerator = numerator * r + {ty}(-275.9285104469687);
+    numerator = numerator * r + {ty}(138.3577518672690);
+    numerator = numerator * r + {ty}(-30.66479806614716);
+    numerator = numerator * r + {ty}(2.506628277459239);
+    var denominator = {ty}(-54.47609879822406);
+    denominator = denominator * r + {ty}(161.5858368580409);
+    denominator = denominator * r + {ty}(-155.6989798598866);
+    denominator = denominator * r + {ty}(66.80131188771972);
+    denominator = denominator * r + {ty}(-13.28068155288572);
+    denominator = denominator * r + {ty}(1.0);
+    normal = (numerator * q) / denominator;
 }}
 return {encode}(-normal * {ty}(0.7071067811865476));
 "#

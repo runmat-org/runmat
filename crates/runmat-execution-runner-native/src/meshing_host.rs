@@ -113,7 +113,7 @@ pub async fn run_meshing_worker_stdio(
     let frame_limits = FrameLimits {
         max_message_bytes: limits.max_message_bytes,
     };
-    let (mut reader, mut writer) = runmat_process_host::ipc::stdio::endpoint();
+    let (mut reader, mut writer) = runmat_process_host::ipc::stdio::endpoint()?;
     let payload = read_payload(&mut reader, frame_limits).await?;
     let request: ProgramExecutionRequest = serde_json::from_slice(&payload)
         .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;

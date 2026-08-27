@@ -143,9 +143,13 @@ pub(super) use backend_types::*;
 fn install_device_error_handlers(device: &wgpu::Device) {
     device.on_uncaptured_error(Box::new(|error| {
         error!("WGPU uncaptured error: {:?}", error);
+        #[cfg(test)]
+        eprintln!("WGPU uncaptured error: {error:?}");
     }));
     device.set_device_lost_callback(|reason, message| {
         error!("WGPU device lost: reason={:?}, message={}", reason, message);
+        #[cfg(test)]
+        eprintln!("WGPU device lost: reason={reason:?}, message={message}");
     });
 }
 

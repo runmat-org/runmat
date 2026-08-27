@@ -4,7 +4,7 @@ use crate::protocol::{WorkerRequest, WorkerResponse};
 use crate::{NativeExecutionError, NativeExecutionResult};
 
 pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
-    let (mut reader, mut writer) = runmat_process_host::ipc::stdio::endpoint();
+    let (mut reader, mut writer) = runmat_process_host::ipc::stdio::endpoint()?;
     let limits = FrameLimits {
         max_message_bytes: 64 * 1024 * 1024,
     };
