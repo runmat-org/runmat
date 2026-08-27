@@ -1746,10 +1746,11 @@ fn coerce_complex_tensor_dtype(
     let shape = tensor.shape.clone();
     match (tensor.into_complex_storage(), dtype) {
         (ComplexStorage::F64(values), NumericDType::F64) => {
-            ComplexTensor::new(values, shape).map_err(mean_internal_error)
+            ComplexTensor::new(values.into_iter().collect(), shape).map_err(mean_internal_error)
         }
         (ComplexStorage::F32(values), NumericDType::F32) => {
-            ComplexTensor::from_f32(values, shape).map_err(mean_internal_error)
+            ComplexTensor::from_f32(values.into_iter().collect(), shape)
+                .map_err(mean_internal_error)
         }
         (ComplexStorage::F32(values), NumericDType::F64) => ComplexTensor::new(
             values

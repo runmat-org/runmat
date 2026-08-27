@@ -2185,7 +2185,7 @@ fn elementwise_complex_min(
                 values.push(if origin == 1.0 { a } else { b });
                 indices[offset] = origin;
             }
-            ComplexStorage::$variant(values)
+            ComplexStorage::$variant(values.into())
         }};
     }
 
@@ -2206,7 +2206,7 @@ fn elementwise_complex_min(
                 values.push(value);
                 indices[offset] = origin;
             }
-            ComplexStorage::F64(values)
+            ComplexStorage::F64(values.into())
         }
     };
 
@@ -2638,7 +2638,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             values.into_complex_storage(),
-            ComplexStorage::F32(vec![(1.0, 2.0)])
+            ComplexStorage::F32(vec![(1.0, 2.0)].into())
         );
     }
 
@@ -2745,7 +2745,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             values.into_complex_storage(),
-            ComplexStorage::F32(vec![(4.0, 0.0), (1.0, 0.0)])
+            ComplexStorage::F32(vec![(4.0, 0.0), (1.0, 0.0)].into())
         );
     }
 

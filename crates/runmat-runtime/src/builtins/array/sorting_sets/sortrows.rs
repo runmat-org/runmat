@@ -22,7 +22,11 @@ use runmat_value::{
     NumericStorage, Tensor, Value,
 };
 
-use super::{float_order::SetFloat, integer_order, type_resolvers::tensor_output_type};
+use super::{
+    float_order::{ComplexSequence, SetFloat},
+    integer_order,
+    type_resolvers::tensor_output_type,
+};
 use crate::build_runtime_error;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
@@ -872,8 +876,8 @@ fn floating_column_to_i64(value: f64) -> crate::BuiltinResult<i64> {
     })
 }
 
-fn compare_complex_rows<T: SetFloat>(
-    values: &[(T, T)],
+fn compare_complex_rows<T: SetFloat, S: ComplexSequence<T> + ?Sized>(
+    values: &S,
     rows: usize,
     cols: usize,
     args: &SortRowsArgs,
@@ -886,8 +890,8 @@ fn compare_complex_rows<T: SetFloat>(
         }
         let idx_a = a + spec.index * rows;
         let idx_b = b + spec.index * rows;
-        let va = values[idx_a];
-        let vb = values[idx_b];
+        let va = values.pair_at(idx_a);
+        let vb = values.pair_at(idx_b);
         let missing = args.missing_for_direction(spec.direction);
         let ord = compare_complex_scalars(va, vb, spec.direction, args.comparison, missing);
         if ord != Ordering::Equal {
@@ -2040,17 +2044,19 @@ pub(crate) mod tests {
             panic!("expected complex tensor");
         };
         assert_eq!(
-            sorted.as_f32_slice(),
-            Some(
-                &[
-                    (1.0, 0.0),
-                    (0.0, 2.0),
-                    (3.0, 4.0),
-                    (10.0, 1.0),
-                    (20.0, 1.0),
-                    (30.0, 1.0),
-                ][..]
-            )
+            sorted.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![
+                (1.0, 0.0),
+                (0.0, 2.0),
+                (3.0, 4.0),
+                (10.0, 1.0),
+                (20.0, 1.0),
+                (30.0, 1.0),
+            ])
         );
         let Value::Tensor(indices) = indices else {
             panic!("expected index tensor");
@@ -2067,7 +2073,14 @@ pub(crate) mod tests {
         let Value::ComplexTensor(sorted) = sorted else {
             panic!("expected complex single tensor");
         };
-        assert_eq!(sorted.as_f32_slice(), Some(&[(1.25, -2.5)][..]));
+        assert_eq!(
+            sorted.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(1.25, -2.5)])
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

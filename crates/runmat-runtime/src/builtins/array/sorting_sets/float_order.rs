@@ -1,6 +1,50 @@
 use std::cmp::Ordering;
 
-use runmat_value::{ComplexStorage, NumericStorage};
+use runmat_value::{ComplexElement, ComplexStorage, HostComplexBuffer, NumericStorage};
+
+/// Read-only access to complex values independent of their owning representation.
+///
+/// Sorting and set operations always create a reordered result, but they do not
+/// need to materialize a second input buffer first. This view keeps canonical
+/// interleaved host storage borrowed while also supporting promoted tuple data.
+pub(super) trait ComplexSequence<T: Copy> {
+    fn len(&self) -> usize;
+    fn pair_at(&self, index: usize) -> (T, T);
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl<T: Copy> ComplexSequence<T> for HostComplexBuffer<T> {
+    fn len(&self) -> usize {
+        HostComplexBuffer::len(self)
+    }
+
+    fn pair_at(&self, index: usize) -> (T, T) {
+        self[index].into()
+    }
+}
+
+impl<T: Copy> ComplexSequence<T> for Vec<(T, T)> {
+    fn len(&self) -> usize {
+        Vec::len(self)
+    }
+
+    fn pair_at(&self, index: usize) -> (T, T) {
+        self[index]
+    }
+}
+
+impl<T: Copy> ComplexSequence<T> for [ComplexElement<T>] {
+    fn len(&self) -> usize {
+        <[ComplexElement<T>]>::len(self)
+    }
+
+    fn pair_at(&self, index: usize) -> (T, T) {
+        self[index].into()
+    }
+}
 
 pub(super) trait SetFloat: Copy + Default + PartialOrd + std::fmt::Debug {
     fn canonical_key(self) -> u64;
@@ -49,7 +93,7 @@ impl SetFloat for f64 {
     }
 
     fn complex_storage(values: Vec<(Self, Self)>) -> ComplexStorage {
-        ComplexStorage::F64(values)
+        ComplexStorage::F64(values.into())
     }
 }
 
@@ -89,7 +133,7 @@ impl SetFloat for f32 {
     }
 
     fn complex_storage(values: Vec<(Self, Self)>) -> ComplexStorage {
-        ComplexStorage::F32(values)
+        ComplexStorage::F32(values.into())
     }
 }
 

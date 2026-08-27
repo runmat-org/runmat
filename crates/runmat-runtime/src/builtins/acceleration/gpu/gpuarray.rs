@@ -1027,7 +1027,7 @@ fn upload_complex_host_value(
     let storage = match dtype {
         DataClass::Double => match storage {
             storage @ ComplexStorage::F64(_) => storage,
-            storage => ComplexStorage::F64(storage.materialize_f64()),
+            storage => ComplexStorage::F64(storage.materialize_f64().into()),
         },
         DataClass::Single => match storage {
             storage @ ComplexStorage::F32(_) => storage,

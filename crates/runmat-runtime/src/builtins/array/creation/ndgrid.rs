@@ -462,7 +462,7 @@ async fn axis_from_value(
         Value::Bool(value) => Ok(logical_scalar_axis(value)),
         Value::Complex(re, im) => Ok(AxisData {
             len: 1,
-            storage: AxisStorage::Complex(ComplexStorage::F64(vec![(re, im)])),
+            storage: AxisStorage::Complex(ComplexStorage::F64(vec![(re, im)].into())),
         }),
         Value::ComplexTensor(tensor) => axis_from_complex_tensor(tensor, index),
         Value::GpuTensor(handle) => {
@@ -538,7 +538,7 @@ async fn axis_from_value(
                 Value::Bool(value) => Ok(logical_scalar_axis(value)),
                 Value::Complex(re, im) => Ok(AxisData {
                     len: 1,
-                    storage: AxisStorage::Complex(ComplexStorage::F64(vec![(re, im)])),
+                    storage: AxisStorage::Complex(ComplexStorage::F64(vec![(re, im)].into())),
                 }),
                 other => Err(ndgrid_error_with_detail(
                     &NDGRID_ERROR_INVALID_AXIS,
@@ -673,7 +673,7 @@ async fn axis_to_host_async(axis: &AxisData) -> BuiltinResult<AxisData> {
         Value::Bool(value) => Ok(logical_scalar_axis(value)),
         Value::Complex(re, im) => Ok(AxisData {
             len: 1,
-            storage: AxisStorage::Complex(ComplexStorage::F64(vec![(re, im)])),
+            storage: AxisStorage::Complex(ComplexStorage::F64(vec![(re, im)].into())),
         }),
         other => Err(ndgrid_error_with_detail(
             &NDGRID_ERROR_INTERNAL,
@@ -1130,8 +1130,12 @@ mod tests {
         assert_eq!(output.numeric_dtype(), NumericDType::F32);
         assert_eq!(output.shape, vec![2, 2]);
         assert_eq!(
-            output.as_f32_slice(),
-            Some(&[(1.25, -2.5), (3.75, 4.5), (1.25, -2.5), (3.75, 4.5),][..])
+            output.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(1.25, -2.5), (3.75, 4.5), (1.25, -2.5), (3.75, 4.5),])
         );
     }
 

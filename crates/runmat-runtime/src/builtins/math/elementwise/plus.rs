@@ -872,7 +872,7 @@ fn plus_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResu
                     lhs[lhs_index].1 + rhs[rhs_index].1,
                 );
             }
-            ComplexStorage::F64(output)
+            ComplexStorage::F64(output.into())
         }
         (ComplexStorage::F32(lhs), ComplexStorage::F32(rhs)) => {
             let mut output = vec![(0.0f32, 0.0f32); plan.len()];
@@ -882,7 +882,7 @@ fn plus_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResu
                     lhs[lhs_index].1 + rhs[rhs_index].1,
                 );
             }
-            ComplexStorage::F32(output)
+            ComplexStorage::F32(output.into())
         }
         (ComplexStorage::F32(lhs), ComplexStorage::F64(rhs)) => {
             let mut output = vec![(0.0f32, 0.0f32); plan.len()];
@@ -892,7 +892,7 @@ fn plus_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResu
                     (f64::from(lhs[lhs_index].1) + rhs[rhs_index].1) as f32,
                 );
             }
-            ComplexStorage::F32(output)
+            ComplexStorage::F32(output.into())
         }
         (ComplexStorage::F64(lhs), ComplexStorage::F32(rhs)) => {
             let mut output = vec![(0.0f32, 0.0f32); plan.len()];
@@ -902,7 +902,7 @@ fn plus_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResu
                     (lhs[lhs_index].1 + f64::from(rhs[rhs_index].1)) as f32,
                 );
             }
-            ComplexStorage::F32(output)
+            ComplexStorage::F32(output.into())
         }
         _ => {
             return Err(builtin_error(
@@ -962,7 +962,7 @@ fn add_complex_real_storage(
                 let value = complex[complex_index];
                 output[output_index] = (value.0 + real[real_index], value.1);
             }
-            ComplexStorage::F64(output)
+            ComplexStorage::F64(output.into())
         }
         (ComplexStorage::F32(complex), NumericStorage::F32(real)) => {
             let mut output = vec![(0.0f32, 0.0f32); plan.len()];
@@ -971,7 +971,7 @@ fn add_complex_real_storage(
                 let value = complex[complex_index];
                 output[output_index] = (value.0 + real[real_index], value.1);
             }
-            ComplexStorage::F32(output)
+            ComplexStorage::F32(output.into())
         }
         (ComplexStorage::F32(complex), NumericStorage::F64(real)) => {
             let mut output = vec![(0.0f32, 0.0f32); plan.len()];
@@ -980,7 +980,7 @@ fn add_complex_real_storage(
                 let value = complex[complex_index];
                 output[output_index] = ((f64::from(value.0) + real[real_index]) as f32, value.1);
             }
-            ComplexStorage::F32(output)
+            ComplexStorage::F32(output.into())
         }
         (ComplexStorage::F64(complex), NumericStorage::F32(real)) => {
             let mut output = vec![(0.0f32, 0.0f32); plan.len()];
@@ -992,7 +992,7 @@ fn add_complex_real_storage(
                     value.1 as f32,
                 );
             }
-            ComplexStorage::F32(output)
+            ComplexStorage::F32(output.into())
         }
         _ => {
             return Err(builtin_error(
@@ -1283,8 +1283,12 @@ pub(crate) mod tests {
         };
         assert_eq!(result.numeric_dtype(), NumericDType::F32);
         assert_eq!(
-            result.as_f32_slice(),
-            Some(&[(1.75_f32, -2.0_f32), (4.0_f32, 4.0_f32)][..])
+            result.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(1.75_f32, -2.0_f32), (4.0_f32, 4.0_f32)])
         );
     }
 
@@ -1305,7 +1309,14 @@ pub(crate) mod tests {
             let Value::ComplexTensor(result) = result else {
                 panic!("expected one-element complex single tensor");
             };
-            assert_eq!(result.as_f32_slice(), Some(&[(4.0, 1.0)][..]));
+            assert_eq!(
+                result.as_f32_slice().map(|values| values
+                    .iter()
+                    .copied()
+                    .map(<(f32, f32)>::from)
+                    .collect::<Vec<_>>()),
+                Some(vec![(4.0, 1.0)])
+            );
         }
     }
 
@@ -1322,8 +1333,14 @@ pub(crate) mod tests {
         let Value::ComplexTensor(result) = result else {
             panic!("expected complex single tensor");
         };
-        assert_eq!(result.as_f32_slice(), Some(&[(1.75, -2.0), (4.0, 4.0)][..]));
-
+        assert_eq!(
+            result.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(1.75, -2.0), (4.0, 4.0)])
+        );
         let lhs = ComplexTensor::from_f32(Vec::new(), vec![0, 2]).unwrap();
         let rhs = ComplexTensor::new(Vec::new(), vec![0, 2]).unwrap();
         let result = plus_builtin(
@@ -1347,7 +1364,14 @@ pub(crate) mod tests {
         let Value::ComplexTensor(result) = result else {
             panic!("expected complex single tensor");
         };
-        assert_eq!(result.as_f32_slice(), Some(&[(2.0, 0.0), (3.0, 0.0)][..]));
+        assert_eq!(
+            result.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(2.0, 0.0), (3.0, 0.0)])
+        );
     }
 
     #[test]

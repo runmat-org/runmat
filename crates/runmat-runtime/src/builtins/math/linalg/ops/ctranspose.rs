@@ -312,7 +312,7 @@ fn ctranspose_complex_tensor_value(ct: ComplexTensor) -> BuiltinResult<Value> {
                     (re, imag)
                 })
                 .collect::<Vec<_>>();
-            ComplexTensor::from_complex_storage(ComplexStorage::F64(conj_data), shape)
+            ComplexTensor::from_complex_storage(ComplexStorage::F64(conj_data.into()), shape)
                 .map(Value::ComplexTensor)
                 .map_err(|e| internal_error(format!("{NAME}: {e}")))
         }
@@ -324,7 +324,7 @@ fn ctranspose_complex_tensor_value(ct: ComplexTensor) -> BuiltinResult<Value> {
                     (re, imag)
                 })
                 .collect::<Vec<_>>();
-            ComplexTensor::from_complex_storage(ComplexStorage::F32(conj_data), shape)
+            ComplexTensor::from_complex_storage(ComplexStorage::F32(conj_data.into()), shape)
                 .map(Value::ComplexTensor)
                 .map_err(|e| internal_error(format!("{NAME}: {e}")))
         }

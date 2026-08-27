@@ -527,18 +527,18 @@ fn compose_floating_complex(real: &Tensor, imag: &Tensor) -> BuiltinResult<Value
         .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INTERNAL, e))?;
     let storage = match (real_storage, imag_storage) {
         (NumericStorage::F64(real), NumericStorage::F64(imag)) => {
-            ComplexStorage::F64(pair_complex_components(&real, &imag))
+            ComplexStorage::F64(pair_complex_components(&real, &imag).into())
         }
         (NumericStorage::F32(real), NumericStorage::F32(imag)) => {
-            ComplexStorage::F32(pair_complex_components(&real, &imag))
+            ComplexStorage::F32(pair_complex_components(&real, &imag).into())
         }
         (NumericStorage::F64(real), NumericStorage::F32(imag)) => {
             let real: Vec<f32> = real.into_iter().map(|value| value as f32).collect();
-            ComplexStorage::F32(pair_complex_components(&real, &imag))
+            ComplexStorage::F32(pair_complex_components(&real, &imag).into())
         }
         (NumericStorage::F32(real), NumericStorage::F64(imag)) => {
             let imag: Vec<f32> = imag.into_iter().map(|value| value as f32).collect();
-            ComplexStorage::F32(pair_complex_components(&real, &imag))
+            ComplexStorage::F32(pair_complex_components(&real, &imag).into())
         }
         _ => {
             return Err(complex_error_with_detail(
@@ -814,8 +814,12 @@ pub(crate) mod tests {
         };
         assert_eq!(result.numeric_dtype(), NumericDType::F32);
         assert_eq!(
-            result.as_f32_slice(),
-            Some(&[(0.1_f32, 0.2_f32), (2.0_f32, -3.0_f32)][..])
+            result.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(0.1_f32, 0.2_f32), (2.0_f32, -3.0_f32)])
         );
         assert_eq!(
             result.materialize_f64(),
@@ -832,7 +836,14 @@ pub(crate) mod tests {
             panic!("single complex scalar must retain its class");
         };
         assert_eq!(result.numeric_dtype(), NumericDType::F32);
-        assert_eq!(result.as_f32_slice(), Some(&[(0.1_f32, 0.2_f32)][..]));
+        assert_eq!(
+            result.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(0.1_f32, 0.2_f32)])
+        );
     }
 
     #[test]
@@ -844,10 +855,13 @@ pub(crate) mod tests {
         };
         assert_eq!(output.shape, vec![2, 1]);
         assert_eq!(
-            output.as_f32_slice(),
-            Some(&[(0.1_f32, 0.0), (-2.0, 0.0)][..])
+            output.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(0.1_f32, 0.0), (-2.0, 0.0)])
         );
-
         let empty = Tensor::from_f32(Vec::new(), vec![0, 3]).unwrap();
         let result = complex_call(Value::Tensor(empty), Vec::new()).expect("complex");
         let Value::ComplexTensor(output) = result else {
@@ -866,8 +880,14 @@ pub(crate) mod tests {
             panic!("expected broadcast complex single tensor");
         };
         assert_eq!(output.shape, vec![1, 2]);
-        assert_eq!(output.as_f32_slice(), Some(&[(1.0, 2.0), (1.0, 3.0)][..]));
-
+        assert_eq!(
+            output.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(1.0, 2.0), (1.0, 3.0)])
+        );
         let real = Tensor::from_f32(vec![0.1, 2.0], vec![1, 2]).unwrap();
         let imag = Tensor::new(vec![4.0, 5.0], vec![1, 2]).unwrap();
         let result = complex_call(Value::Tensor(real), vec![Value::Tensor(imag)]).expect("complex");
@@ -875,10 +895,13 @@ pub(crate) mod tests {
             panic!("expected complex single tensor");
         };
         assert_eq!(
-            output.as_f32_slice(),
-            Some(&[(0.1_f32, 4.0_f32), (2.0_f32, 5.0_f32)][..])
+            output.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(0.1_f32, 4.0_f32), (2.0_f32, 5.0_f32)])
         );
-
         let real = Tensor::from_f32(Vec::new(), vec![0, 2]).unwrap();
         let imag = Tensor::from_f32(Vec::new(), vec![0, 2]).unwrap();
         let result = complex_call(Value::Tensor(real), vec![Value::Tensor(imag)]).expect("complex");

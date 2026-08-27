@@ -1421,7 +1421,7 @@ mod tests {
         };
         assert_eq!(
             values.into_complex_storage(),
-            runmat_value::ComplexStorage::F32(vec![(3.0, -1.0), (2.0, 0.0)])
+            runmat_value::ComplexStorage::F32(vec![(3.0, -1.0), (2.0, 0.0)].into())
         );
 
         let logical = Value::LogicalArray(

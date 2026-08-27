@@ -617,16 +617,10 @@ fn interleaved_complex_data(tensor: &ComplexTensor) -> Result<HostNumericDataOwn
     }
     match tensor.complex_storage() {
         ComplexStorage::F64(values) => Ok(HostNumericDataOwned::F64(
-            values
-                .iter()
-                .flat_map(|&(real, imag)| [real, imag])
-                .collect(),
+            values.iter().flat_map(|value| [value.0, value.1]).collect(),
         )),
         ComplexStorage::F32(values) => Ok(HostNumericDataOwned::F32(
-            values
-                .iter()
-                .flat_map(|&(real, imag)| [real, imag])
-                .collect(),
+            values.iter().flat_map(|value| [value.0, value.1]).collect(),
         )),
         ComplexStorage::Integer(storage) => match (&storage.real, &storage.imag) {
             (IntegerStorage::I8(real), IntegerStorage::I8(imag)) => {
@@ -1082,8 +1076,8 @@ mod preserving_download_tests {
                 };
             }
             let complex_cases = vec![
-                ComplexStorage::F64(vec![(-1.25, 3.5), (2.5, -4.75)]),
-                ComplexStorage::F32(vec![(-1.25, 3.5), (2.5, -4.75)]),
+                ComplexStorage::F64(vec![(-1.25, 3.5), (2.5, -4.75)].into()),
+                ComplexStorage::F32(vec![(-1.25, 3.5), (2.5, -4.75)].into()),
                 integer_complex_case!(I8, vec![i8::MIN, i8::MAX], vec![1, -1]),
                 integer_complex_case!(I16, vec![i16::MIN, i16::MAX], vec![1, -1]),
                 integer_complex_case!(I32, vec![i32::MIN, i32::MAX], vec![1, -1]),

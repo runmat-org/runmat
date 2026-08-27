@@ -974,11 +974,11 @@ fn nonzeros_value(value: &Value) -> BuiltinResult<Value> {
             let indices = (0..tensor.len())
                 .filter(|&index| match tensor.complex_storage() {
                     ComplexStorage::F64(values) => {
-                        let (real, imag) = values[index];
+                        let (real, imag) = values[index].into();
                         is_stored_value(real) || is_stored_value(imag)
                     }
                     ComplexStorage::F32(values) => {
-                        let (real, imag) = values[index];
+                        let (real, imag) = values[index].into();
                         real.is_nan() || imag.is_nan() || real != 0.0 || imag != 0.0
                     }
                     ComplexStorage::Integer(storage) => storage
@@ -3725,14 +3725,14 @@ pub(crate) mod tests {
         );
 
         let single = ComplexTensor::from_complex_storage(
-            ComplexStorage::F32(vec![(0.0, 0.0), (1.5, 0.0), (0.0, -2.5)]),
+            ComplexStorage::F32(vec![(0.0, 0.0), (1.5, 0.0), (0.0, -2.5)].into()),
             vec![3, 1],
         )
         .expect("single complex tensor");
         let output =
             nonzeros_builtin(Value::ComplexTensor(single)).expect("single complex nonzeros");
         assert!(
-            matches!(output, Value::ComplexTensor(tensor) if tensor.complex_storage() == &ComplexStorage::F32(vec![(1.5, 0.0), (0.0, -2.5)]))
+            matches!(output, Value::ComplexTensor(tensor) if tensor.complex_storage() == &ComplexStorage::F32(vec![(1.5, 0.0), (0.0, -2.5)].into()))
         );
 
         let integer = runmat_value::IntegerComplexStorage::new(

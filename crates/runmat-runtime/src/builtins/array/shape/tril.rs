@@ -443,11 +443,11 @@ fn tril_complex_tensor(
     let shape = tensor.shape.clone();
     let storage = match tensor.into_complex_storage() {
         ComplexStorage::F64(mut values) => {
-            apply_tril_inplace(&mut values, &shape, offset, (0.0, 0.0))?;
+            apply_tril_inplace(&mut values, &shape, offset, (0.0, 0.0).into())?;
             ComplexStorage::F64(values)
         }
         ComplexStorage::F32(mut values) => {
-            apply_tril_inplace(&mut values, &shape, offset, (0.0, 0.0))?;
+            apply_tril_inplace(&mut values, &shape, offset, (0.0, 0.0).into())?;
             ComplexStorage::F32(values)
         }
         ComplexStorage::Integer(storage) => {

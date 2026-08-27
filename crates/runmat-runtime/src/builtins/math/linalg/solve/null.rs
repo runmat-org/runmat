@@ -519,7 +519,7 @@ fn complex_basis_tensor(
                 .map(|(real, imag)| (real as f32, imag as f32))
                 .collect(),
         ),
-        _ => ComplexStorage::F64(data),
+        _ => ComplexStorage::F64(data.into()),
     };
     ComplexTensor::from_complex_storage(storage, shape)
         .map_err(|error| internal_error(format!("{NAME}: {error}")))

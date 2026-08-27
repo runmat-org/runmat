@@ -738,7 +738,7 @@ fn convert_output(
                     .collect(),
             )
         } else {
-            ComplexStorage::F64(complex_data)
+            ComplexStorage::F64(complex_data.into())
         };
         let tensor = ComplexTensor::from_complex_storage(storage, shape)
             .map_err(|e| deconv_error_with_detail(&DECONV_ERROR_BUILD_COMPLEX_OUTPUT, &e))?;

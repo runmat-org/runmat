@@ -12,9 +12,10 @@ mod value;
 
 pub use aggregate::{CellArray, StructValue};
 pub use array::{
-    host_copy_metrics, record_host_copy, CharArray, ComplexStorage, ComplexTensor, HostCopyMetrics,
-    HostCopyReason, HostIndexBuffer, HostLogicalBuffer, HostNumericBuffer, IntegerComplexStorage,
-    LogicalArray, SparseTensor, StringArray, SymbolicArray, Tensor,
+    host_copy_metrics, record_host_copy, CharArray, ComplexElement, ComplexStorage, ComplexTensor,
+    HostComplexBuffer, HostCopyMetrics, HostCopyReason, HostIndexBuffer, HostLogicalBuffer,
+    HostNumericBuffer, IntegerComplexStorage, LogicalArray, SparseTensor, StringArray,
+    SymbolicArray, Tensor,
 };
 pub use callable::Closure;
 pub use display::{format_number, get_display_format, set_display_format, FormatMode};

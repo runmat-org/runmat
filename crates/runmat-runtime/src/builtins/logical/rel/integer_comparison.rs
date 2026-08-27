@@ -1297,7 +1297,7 @@ mod tests {
     fn complex_single_and_double_ordering_broadcasts_without_using_imaginary_components() {
         let lhs = Value::ComplexTensor(
             ComplexTensor::from_complex_storage(
-                ComplexStorage::F32(vec![(1.0, f32::NAN), (3.0, f32::INFINITY)]),
+                ComplexStorage::F32(vec![(1.0, f32::NAN), (3.0, f32::INFINITY)].into()),
                 vec![2, 1],
             )
             .expect("complex single"),

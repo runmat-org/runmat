@@ -1,7 +1,6 @@
 //! MATLAB-compatible `decomposition` objects for reusable linear solves.
 use runmat_types::MemberAccess;
 
-use std::borrow::Cow;
 use std::collections::HashMap;
 
 use num_complex::Complex64;
@@ -15,8 +14,8 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
-    ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, NumericDType,
-    ObjectInstance, Tensor, Value,
+    ComplexElement, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
+    NumericDType, ObjectInstance, Tensor, Value,
 };
 
 use crate::builtins::common::tensor;
@@ -1407,10 +1406,10 @@ fn is_diagonal_matrix(matrix: &Value) -> bool {
             true
         }
         Value::ComplexTensor(tensor) => {
-            let values = complex_tensor_values_pair_cow(tensor);
+            let values = complex_tensor_values_pair_view(tensor);
             for col in 0..tensor.cols {
                 for row in 0..tensor.rows {
-                    if row != col && values[row + col * tensor.rows] != (0.0, 0.0) {
+                    if row != col && values.get(row + col * tensor.rows) != (0.0, 0.0) {
                         return false;
                     }
                 }
@@ -1445,10 +1444,10 @@ fn is_upper_triangular(matrix: &Value) -> bool {
             true
         }
         Value::ComplexTensor(tensor) => {
-            let values = complex_tensor_values_pair_cow(tensor);
+            let values = complex_tensor_values_pair_view(tensor);
             for col in 0..tensor.cols {
                 for row in (col + 1)..tensor.rows {
-                    if values[row + col * tensor.rows] != (0.0, 0.0) {
+                    if values.get(row + col * tensor.rows) != (0.0, 0.0) {
                         return false;
                     }
                 }
@@ -1478,10 +1477,10 @@ fn is_lower_triangular(matrix: &Value) -> bool {
             true
         }
         Value::ComplexTensor(tensor) => {
-            let values = complex_tensor_values_pair_cow(tensor);
+            let values = complex_tensor_values_pair_view(tensor);
             for col in 0..tensor.cols {
                 for row in 0..col.min(tensor.rows) {
-                    if values[row + col * tensor.rows] != (0.0, 0.0) {
+                    if values.get(row + col * tensor.rows) != (0.0, 0.0) {
                         return false;
                     }
                 }
@@ -1515,11 +1514,11 @@ fn is_hermitian_matrix(matrix: &Value) -> bool {
             true
         }
         Value::ComplexTensor(tensor) => {
-            let values = complex_tensor_values_pair_cow(tensor);
+            let values = complex_tensor_values_pair_view(tensor);
             for col in 0..cols {
                 for row in 0..rows {
-                    let lhs = values[row + col * rows];
-                    let rhs = values[col + row * rows];
+                    let lhs = values.get(row + col * rows);
+                    let rhs = values.get(col + row * rows);
                     if lhs != (rhs.0, -rhs.1) {
                         return false;
                     }
@@ -1984,18 +1983,40 @@ fn matrix_datatype(matrix: &Value) -> &'static str {
 
 fn matrix_is_real(matrix: &Value) -> bool {
     match matrix {
-        Value::ComplexTensor(tensor) => complex_tensor_values_pair_cow(tensor)
-            .iter()
-            .all(|(_, im)| *im == 0.0),
+        Value::ComplexTensor(tensor) => {
+            let values = complex_tensor_values_pair_view(tensor);
+            (0..values.len()).all(|index| values.get(index).1 == 0.0)
+        }
         _ => true,
     }
 }
 
-fn complex_tensor_values_pair_cow(tensor: &ComplexTensor) -> Cow<'_, [(f64, f64)]> {
+enum ComplexPairView<'a> {
+    Borrowed(&'a [ComplexElement<f64>]),
+    Materialized(Vec<(f64, f64)>),
+}
+
+impl ComplexPairView<'_> {
+    fn len(&self) -> usize {
+        match self {
+            Self::Borrowed(values) => values.len(),
+            Self::Materialized(values) => values.len(),
+        }
+    }
+
+    fn get(&self, index: usize) -> (f64, f64) {
+        match self {
+            Self::Borrowed(values) => values[index].into(),
+            Self::Materialized(values) => values[index],
+        }
+    }
+}
+
+fn complex_tensor_values_pair_view(tensor: &ComplexTensor) -> ComplexPairView<'_> {
     if let Some(values) = tensor.as_f64_slice() {
-        Cow::Borrowed(values)
+        ComplexPairView::Borrowed(values)
     } else {
-        Cow::Owned(
+        ComplexPairView::Materialized(
             tensor::complex_tensor_values_complex64(tensor)
                 .into_iter()
                 .map(|value| (value.re, value.im))

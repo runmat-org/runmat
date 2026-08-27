@@ -1,5 +1,26 @@
 use super::*;
 
+/// One complex numeric element in the canonical host interleaved layout.
+///
+/// The explicit C representation makes this layout suitable for in-process
+/// foreign buffer leases. Callers must still use the owning buffer APIs for
+/// lifetime and mutation; this type establishes element layout only.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[repr(C)]
+pub struct ComplexElement<T>(pub T, pub T);
+
+impl<T> From<(T, T)> for ComplexElement<T> {
+    fn from((real, imaginary): (T, T)) -> Self {
+        Self(real, imaginary)
+    }
+}
+
+impl<T> From<ComplexElement<T>> for (T, T) {
+    fn from(value: ComplexElement<T>) -> Self {
+        (value.0, value.1)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComplexTensor {
     storage: ComplexStorage,
@@ -10,8 +31,8 @@ pub struct ComplexTensor {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ComplexStorage {
-    F64(Vec<(f64, f64)>),
-    F32(Vec<(f32, f32)>),
+    F64(HostComplexBuffer<f64>),
+    F32(HostComplexBuffer<f32>),
     Integer(IntegerComplexStorage),
 }
 
@@ -66,11 +87,11 @@ impl IntegerComplexStorage {
 
 impl ComplexTensor {
     pub fn new(data: Vec<(f64, f64)>, shape: Vec<usize>) -> Result<Self, String> {
-        Self::from_complex_storage(ComplexStorage::F64(data), shape)
+        Self::from_complex_storage(ComplexStorage::F64(data.into()), shape)
     }
 
     pub fn from_f32(data: Vec<(f32, f32)>, shape: Vec<usize>) -> Result<Self, String> {
-        Self::from_complex_storage(ComplexStorage::F32(data), shape)
+        Self::from_complex_storage(ComplexStorage::F32(data.into()), shape)
     }
 
     /// Reconstructs floating complex values in the requested floating class.
@@ -124,8 +145,11 @@ impl ComplexTensor {
             .iter()
             .try_fold(1usize, |count, &dimension| count.checked_mul(dimension))
             .expect("complex zero shape must fit usize");
-        Self::from_complex_storage(ComplexStorage::F64(vec![(0.0, 0.0); size]), shape)
-            .expect("complex zero storage length matches shape")
+        Self::from_complex_storage(
+            ComplexStorage::F64(vec![ComplexElement(0.0, 0.0); size].into()),
+            shape,
+        )
+        .expect("complex zero storage length matches shape")
     }
 
     pub fn complex_storage(&self) -> &ComplexStorage {
@@ -148,14 +172,14 @@ impl ComplexTensor {
         self.storage.numeric_dtype()
     }
 
-    pub fn as_f64_slice(&self) -> Option<&[(f64, f64)]> {
+    pub fn as_f64_slice(&self) -> Option<&[ComplexElement<f64>]> {
         match &self.storage {
             ComplexStorage::F64(values) => Some(values),
             ComplexStorage::F32(_) | ComplexStorage::Integer(_) => None,
         }
     }
 
-    pub fn as_f32_slice(&self) -> Option<&[(f32, f32)]> {
+    pub fn as_f32_slice(&self) -> Option<&[ComplexElement<f32>]> {
         match &self.storage {
             ComplexStorage::F32(values) => Some(values),
             ComplexStorage::F64(_) | ComplexStorage::Integer(_) => None,
@@ -185,14 +209,22 @@ impl ComplexTensor {
             ));
         }
         match &self.storage {
-            ComplexStorage::F64(values) => values
-                .get(index)
-                .copied()
-                .map(|(real, imag)| (NumericScalar::F64(real), NumericScalar::F64(imag))),
-            ComplexStorage::F32(values) => values
-                .get(index)
-                .copied()
-                .map(|(real, imag)| (NumericScalar::F32(real), NumericScalar::F32(imag))),
+            ComplexStorage::F64(values) => {
+                values
+                    .get(index)
+                    .copied()
+                    .map(|ComplexElement(real, imag)| {
+                        (NumericScalar::F64(real), NumericScalar::F64(imag))
+                    })
+            }
+            ComplexStorage::F32(values) => {
+                values
+                    .get(index)
+                    .copied()
+                    .map(|ComplexElement(real, imag)| {
+                        (NumericScalar::F32(real), NumericScalar::F32(imag))
+                    })
+            }
             ComplexStorage::Integer(_) => unreachable!("integer storage returned above"),
         }
     }
@@ -209,13 +241,13 @@ impl ComplexTensor {
                 let destination = values
                     .get_mut(index)
                     .ok_or_else(|| format!("ComplexTensor index {index} out of bounds"))?;
-                *destination = (real, imag);
+                *destination = ComplexElement(real, imag);
             }
             ComplexStorage::F32(values) => {
                 let destination = values
                     .get_mut(index)
                     .ok_or_else(|| format!("ComplexTensor index {index} out of bounds"))?;
-                *destination = (real as f32, imag as f32);
+                *destination = ComplexElement(real as f32, imag as f32);
             }
             ComplexStorage::Integer(storage) => {
                 storage.real.set_f64_assignment(index, real)?;
@@ -241,11 +273,11 @@ impl ComplexTensor {
                 format_integer_complex_value(&real, &imag)
             }
             ComplexStorage::F64(values) => {
-                let (real, imag) = values[index];
+                let ComplexElement(real, imag) = values[index];
                 Value::Complex(real, imag).to_string()
             }
             ComplexStorage::F32(values) => {
-                let (real, imag) = values[index];
+                let ComplexElement(real, imag) = values[index];
                 Value::Complex(f64::from(real), f64::from(imag)).to_string()
             }
         }
@@ -294,10 +326,10 @@ impl ComplexStorage {
 
     pub fn materialize_f64(&self) -> Vec<(f64, f64)> {
         match self {
-            Self::F64(values) => values.clone(),
+            Self::F64(values) => values.iter().copied().map(Into::into).collect(),
             Self::F32(values) => values
                 .iter()
-                .map(|&(real, imag)| (f64::from(real), f64::from(imag)))
+                .map(|&ComplexElement(real, imag)| (f64::from(real), f64::from(imag)))
                 .collect(),
             Self::Integer(storage) => storage
                 .real
@@ -318,7 +350,7 @@ impl ComplexStorage {
                         .copied()
                         .ok_or_else(|| format!("complex storage index {index} out of bounds"))
                 })
-                .collect::<Result<Vec<_>, _>>()
+                .collect::<Result<HostComplexBuffer<_>, _>>()
                 .map(Self::F64),
             Self::F32(values) => indices
                 .iter()
@@ -328,7 +360,7 @@ impl ComplexStorage {
                         .copied()
                         .ok_or_else(|| format!("complex storage index {index} out of bounds"))
                 })
-                .collect::<Result<Vec<_>, _>>()
+                .collect::<Result<HostComplexBuffer<_>, _>>()
                 .map(Self::F32),
             Self::Integer(storage) => {
                 let real = indices

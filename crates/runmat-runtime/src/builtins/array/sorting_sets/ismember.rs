@@ -18,7 +18,10 @@ use runmat_value::{
     StringArray, Tensor, Value,
 };
 
-use super::{float_order::SetFloat, type_resolvers::logical_output_type};
+use super::{
+    float_order::{ComplexSequence, SetFloat},
+    type_resolvers::logical_output_type,
+};
 use crate::build_runtime_error;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
@@ -727,10 +730,10 @@ fn ismember_promoted_complex_f64(
     )
 }
 
-fn ismember_floating_complex<T: SetFloat>(
-    a: Vec<(T, T)>,
+fn ismember_floating_complex<T: SetFloat, A: ComplexSequence<T>, B: ComplexSequence<T>>(
+    a: A,
     a_shape: Vec<usize>,
-    b: Vec<(T, T)>,
+    b: B,
     b_shape: Vec<usize>,
     rows: bool,
 ) -> crate::BuiltinResult<IsMemberEvaluation> {
@@ -749,20 +752,22 @@ fn ismember_complex_elements(
     ismember_complex(a, b, false)
 }
 
-fn ismember_floating_complex_elements<T: SetFloat>(
-    a: Vec<(T, T)>,
+fn ismember_floating_complex_elements<T: SetFloat, A: ComplexSequence<T>, B: ComplexSequence<T>>(
+    a: A,
     a_shape: Vec<usize>,
-    b: Vec<(T, T)>,
+    b: B,
 ) -> crate::BuiltinResult<IsMemberEvaluation> {
     let mut map: HashMap<ComplexKey, usize> = HashMap::new();
-    for (idx, &value) in b.iter().enumerate() {
+    for idx in 0..b.len() {
+        let value = b.pair_at(idx);
         map.entry(ComplexKey::new(value)).or_insert(idx + 1);
     }
 
     let mut mask_data = Vec::<u8>::with_capacity(a.len());
     let mut loc_data = Vec::<f64>::with_capacity(a.len());
 
-    for &value in &a {
+    for index in 0..a.len() {
+        let value = a.pair_at(index);
         let key = ComplexKey::new(value);
         if let Some(&pos) = map.get(&key) {
             mask_data.push(1);
@@ -788,10 +793,10 @@ fn ismember_complex_rows(
     ismember_complex(a, b, true)
 }
 
-fn ismember_floating_complex_rows<T: SetFloat>(
-    a: Vec<(T, T)>,
+fn ismember_floating_complex_rows<T: SetFloat, A: ComplexSequence<T>, B: ComplexSequence<T>>(
+    a: A,
     a_shape: Vec<usize>,
-    b: Vec<(T, T)>,
+    b: B,
     b_shape: Vec<usize>,
 ) -> crate::BuiltinResult<IsMemberEvaluation> {
     let (rows_a, cols_a) = shape_rows_cols(&a_shape, "ismember")?;
@@ -805,7 +810,7 @@ fn ismember_floating_complex_rows<T: SetFloat>(
         let mut row_keys = Vec::with_capacity(cols_b);
         for c in 0..cols_b {
             let idx = r + c * rows_b;
-            row_keys.push(ComplexKey::new(b[idx]));
+            row_keys.push(ComplexKey::new(b.pair_at(idx)));
         }
         map.entry(row_keys).or_insert(r + 1);
     }
@@ -817,7 +822,7 @@ fn ismember_floating_complex_rows<T: SetFloat>(
         let mut row_keys = Vec::with_capacity(cols_a);
         for c in 0..cols_a {
             let idx = r + c * rows_a;
-            row_keys.push(ComplexKey::new(a[idx]));
+            row_keys.push(ComplexKey::new(a.pair_at(idx)));
         }
         if let Some(&pos) = map.get(&row_keys) {
             mask_data[r] = 1;

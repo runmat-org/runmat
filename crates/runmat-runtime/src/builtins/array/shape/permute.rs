@@ -467,11 +467,11 @@ pub(crate) fn permute_complex_tensor(
     let (storage, new_shape) = match storage {
         ComplexStorage::F64(values) => {
             let (values, shape) = permute_generic(builtin, &values, &shape, order)?;
-            (ComplexStorage::F64(values), shape)
+            (ComplexStorage::F64(values.into()), shape)
         }
         ComplexStorage::F32(values) => {
             let (values, shape) = permute_generic(builtin, &values, &shape, order)?;
-            (ComplexStorage::F32(values), shape)
+            (ComplexStorage::F32(values.into()), shape)
         }
         ComplexStorage::Integer(storage) => {
             let (real, new_shape) = permute_integer_storage(builtin, storage.real, &shape, order)?;

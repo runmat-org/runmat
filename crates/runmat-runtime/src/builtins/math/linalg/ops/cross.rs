@@ -650,7 +650,7 @@ fn cross_complex_tensor(
                 .collect(),
         )
     } else {
-        ComplexStorage::F64(output)
+        ComplexStorage::F64(output.into())
     };
     ComplexTensor::from_complex_storage(storage, shape)
         .map_err(|e| cross_internal_error(format!("{CROSS_NAME}: {e}")))
@@ -1167,12 +1167,12 @@ pub(crate) mod tests {
     #[test]
     fn cross_complex_single_retains_class_and_explicit_complexity() {
         let lhs = ComplexTensor::from_complex_storage(
-            ComplexStorage::F32(vec![(1.0, 0.0), (0.0, 0.0), (0.0, 0.0)]),
+            ComplexStorage::F32(vec![(1.0, 0.0), (0.0, 0.0), (0.0, 0.0)].into()),
             vec![1, 3],
         )
         .unwrap();
         let rhs = ComplexTensor::from_complex_storage(
-            ComplexStorage::F32(vec![(0.0, 0.0), (1.0, 0.0), (0.0, 0.0)]),
+            ComplexStorage::F32(vec![(0.0, 0.0), (1.0, 0.0), (0.0, 0.0)].into()),
             vec![1, 3],
         )
         .unwrap();

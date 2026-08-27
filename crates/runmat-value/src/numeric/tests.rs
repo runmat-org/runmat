@@ -91,9 +91,9 @@ mod int_value_tests {
 #[cfg(test)]
 mod integer_storage_tests {
     use crate::{
-        ComplexStorage, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
-        NumericDType, NumericScalar, NumericStorage, NumericStorageView, NumericStorageViewMut,
-        Tensor,
+        ComplexElement, ComplexStorage, ComplexTensor, IntValue, IntegerComplexStorage,
+        IntegerStorage, NumericDType, NumericScalar, NumericStorage, NumericStorageView,
+        NumericStorageViewMut, Tensor,
     };
 
     #[test]
@@ -681,7 +681,16 @@ mod integer_storage_tests {
             ComplexTensor::from_f32(values.clone(), vec![1, 2]).expect("single complex tensor");
 
         assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
-        assert_eq!(tensor.as_f32_slice(), Some(values.as_slice()));
+        assert_eq!(
+            tensor.as_f32_slice(),
+            Some(
+                [
+                    ComplexElement::from(values[0]),
+                    ComplexElement::from(values[1]),
+                ]
+                .as_slice()
+            )
+        );
         assert!(tensor.as_f64_slice().is_none());
         assert!(tensor.integer_storage().is_none());
 
@@ -690,16 +699,16 @@ mod integer_storage_tests {
             .expect("single complex assignment");
         assert_eq!(
             tensor.complex_storage(),
-            &ComplexStorage::F32(vec![(3.75_f32, -4.5_f32), values[1]])
+            &ComplexStorage::F32(vec![(3.75_f32, -4.5_f32), values[1]].into())
         );
     }
 
     #[test]
     fn complex_storage_gather_preserves_native_component_class() {
-        let single = ComplexStorage::F32(vec![(1.0, -1.0), (2.0, -2.0), (3.0, -3.0)]);
+        let single = ComplexStorage::F32(vec![(1.0, -1.0), (2.0, -2.0), (3.0, -3.0)].into());
         assert_eq!(
             single.gather(&[2, 0]),
-            Ok(ComplexStorage::F32(vec![(3.0, -3.0), (1.0, -1.0)]))
+            Ok(ComplexStorage::F32(vec![(3.0, -3.0), (1.0, -1.0)].into()))
         );
 
         let integer = ComplexStorage::Integer(
@@ -741,7 +750,16 @@ mod integer_storage_tests {
         assert_eq!(single.numeric_dtype(), NumericDType::F32);
         assert_eq!(single.materialize_f64(), values);
         assert_eq!(double.numeric_dtype(), NumericDType::F64);
-        assert_eq!(double.as_f64_slice(), Some(values.as_slice()));
+        assert_eq!(
+            double.as_f64_slice(),
+            Some(
+                [
+                    ComplexElement::from(values[0]),
+                    ComplexElement::from(values[1]),
+                ]
+                .as_slice()
+            )
+        );
     }
 
     #[test]

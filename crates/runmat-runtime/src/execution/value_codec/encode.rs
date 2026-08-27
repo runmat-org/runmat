@@ -230,7 +230,8 @@ fn encode_complex_storage(storage: &ComplexStorage) -> (ElementType, Vec<u8>) {
             ElementType::ComplexF64,
             values
                 .iter()
-                .flat_map(|(real, imag)| {
+                .flat_map(|value| {
+                    let (real, imag) = (*value).into();
                     real.to_bits()
                         .to_le_bytes()
                         .into_iter()
@@ -242,7 +243,8 @@ fn encode_complex_storage(storage: &ComplexStorage) -> (ElementType, Vec<u8>) {
             ElementType::ComplexF32,
             values
                 .iter()
-                .flat_map(|(real, imag)| {
+                .flat_map(|value| {
+                    let (real, imag) = (*value).into();
                     real.to_bits()
                         .to_le_bytes()
                         .into_iter()

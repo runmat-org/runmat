@@ -527,10 +527,13 @@ pub(crate) mod tests {
         };
         assert_eq!(output.shape, vec![1, 2]);
         assert_eq!(
-            output.as_f32_slice(),
-            Some(&[(1.25, -2.5), (-3.0, 4.0)][..])
+            output.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(1.25, -2.5), (-3.0, 4.0)])
         );
-
         let empty = ComplexTensor::from_f32(Vec::new(), vec![0, 2]).unwrap();
         let Value::ComplexTensor(output) = conj_builtin(Value::ComplexTensor(empty)).expect("conj")
         else {

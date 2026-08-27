@@ -7,7 +7,8 @@ use crate::builtins::common::matrix::matrix_power;
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::math::elementwise::integer_arithmetic::{try_integer_binary, IntegerBinaryOp};
 use runmat_value::{
-    ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericStorage, Tensor, Value,
+    ComplexElement, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericStorage,
+    Tensor, Value,
 };
 
 fn complex_pow_scalar(base_re: f64, base_im: f64, exp_re: f64, exp_im: f64) -> (f64, f64) {
@@ -72,7 +73,7 @@ fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
 }
 
 enum PromotedComplexTensorValues<'a> {
-    Raw(&'a [(f64, f64)]),
+    Raw(&'a [ComplexElement<f64>]),
     Exact(Vec<num_complex::Complex64>),
 }
 
@@ -86,7 +87,7 @@ impl PromotedComplexTensorValues<'_> {
 
     fn value_at(&self, index: usize) -> (f64, f64) {
         match self {
-            Self::Raw(values) => values[index],
+            Self::Raw(values) => values[index].into(),
             Self::Exact(values) => {
                 let value = values[index];
                 (value.re, value.im)
@@ -376,19 +377,23 @@ fn multiply_complex_tensors(lhs: &ComplexTensor, rhs: &ComplexTensor) -> Result<
         (ComplexStorage::F64(lhs), ComplexStorage::F64(rhs)) => ComplexStorage::F64(
             lhs.iter()
                 .zip(rhs)
-                .map(|(&(ar, ai), &(br, bi))| (ar * br - ai * bi, ar * bi + ai * br))
+                .map(|(&ComplexElement(ar, ai), &ComplexElement(br, bi))| {
+                    (ar * br - ai * bi, ar * bi + ai * br)
+                })
                 .collect(),
         ),
         (ComplexStorage::F32(lhs), ComplexStorage::F32(rhs)) => ComplexStorage::F32(
             lhs.iter()
                 .zip(rhs)
-                .map(|(&(ar, ai), &(br, bi))| (ar * br - ai * bi, ar * bi + ai * br))
+                .map(|(&ComplexElement(ar, ai), &ComplexElement(br, bi))| {
+                    (ar * br - ai * bi, ar * bi + ai * br)
+                })
                 .collect(),
         ),
         (ComplexStorage::F32(lhs), ComplexStorage::F64(rhs)) => ComplexStorage::F32(
             lhs.iter()
                 .zip(rhs)
-                .map(|(&(ar, ai), &(br, bi))| {
+                .map(|(&ComplexElement(ar, ai), &ComplexElement(br, bi))| {
                     let ar = f64::from(ar);
                     let ai = f64::from(ai);
                     ((ar * br - ai * bi) as f32, (ar * bi + ai * br) as f32)
@@ -398,7 +403,7 @@ fn multiply_complex_tensors(lhs: &ComplexTensor, rhs: &ComplexTensor) -> Result<
         (ComplexStorage::F64(lhs), ComplexStorage::F32(rhs)) => ComplexStorage::F32(
             lhs.iter()
                 .zip(rhs)
-                .map(|(&(ar, ai), &(br, bi))| {
+                .map(|(&ComplexElement(ar, ai), &ComplexElement(br, bi))| {
                     let br = f64::from(br);
                     let bi = f64::from(bi);
                     ((ar * br - ai * bi) as f32, (ar * bi + ai * br) as f32)
@@ -431,7 +436,7 @@ fn multiply_complex_tensor_scalar(tensor: &ComplexTensor, scalar: f64) -> Result
         ComplexStorage::F64(values) => ComplexStorage::F64(
             values
                 .iter()
-                .map(|&(real, imag)| (real * scalar, imag * scalar))
+                .map(|&ComplexElement(real, imag)| (real * scalar, imag * scalar))
                 .collect(),
         ),
         ComplexStorage::F32(values) => {
@@ -439,7 +444,7 @@ fn multiply_complex_tensor_scalar(tensor: &ComplexTensor, scalar: f64) -> Result
             ComplexStorage::F32(
                 values
                     .iter()
-                    .map(|&(real, imag)| (real * scalar, imag * scalar))
+                    .map(|&ComplexElement(real, imag)| (real * scalar, imag * scalar))
                     .collect(),
             )
         }
@@ -682,21 +687,21 @@ fn divide_complex_tensors(lhs: &ComplexTensor, rhs: &ComplexTensor) -> Result<Va
         (ComplexStorage::F64(lhs), ComplexStorage::F64(rhs)) => ComplexStorage::F64(
             lhs.iter()
                 .zip(rhs)
-                .map(|(&left, &right)| divide_complex_value_f64(left, right))
+                .map(|(&left, &right)| divide_complex_value_f64(left.into(), right.into()))
                 .collect(),
         ),
         (ComplexStorage::F32(lhs), ComplexStorage::F32(rhs)) => ComplexStorage::F32(
             lhs.iter()
                 .zip(rhs)
-                .map(|(&left, &right)| divide_complex_value_f32(left, right))
+                .map(|(&left, &right)| divide_complex_value_f32(left.into(), right.into()))
                 .collect(),
         ),
         (ComplexStorage::F32(lhs), ComplexStorage::F64(rhs)) => ComplexStorage::F32(
             lhs.iter()
                 .zip(rhs)
-                .map(|(&(ar, ai), &right)| {
+                .map(|(&ComplexElement(ar, ai), &right)| {
                     let (real, imag) =
-                        divide_complex_value_f64((f64::from(ar), f64::from(ai)), right);
+                        divide_complex_value_f64((f64::from(ar), f64::from(ai)), right.into());
                     (real as f32, imag as f32)
                 })
                 .collect(),
@@ -704,9 +709,9 @@ fn divide_complex_tensors(lhs: &ComplexTensor, rhs: &ComplexTensor) -> Result<Va
         (ComplexStorage::F64(lhs), ComplexStorage::F32(rhs)) => ComplexStorage::F32(
             lhs.iter()
                 .zip(rhs)
-                .map(|(&left, &(br, bi))| {
+                .map(|(&left, &ComplexElement(br, bi))| {
                     let (real, imag) =
-                        divide_complex_value_f64(left, (f64::from(br), f64::from(bi)));
+                        divide_complex_value_f64(left.into(), (f64::from(br), f64::from(bi)));
                     (real as f32, imag as f32)
                 })
                 .collect(),
@@ -736,7 +741,7 @@ fn divide_complex_tensor_scalar(tensor: &ComplexTensor, scalar: f64) -> Result<V
         ComplexStorage::F64(values) => ComplexStorage::F64(
             values
                 .iter()
-                .map(|&(real, imag)| (real / scalar, imag / scalar))
+                .map(|&ComplexElement(real, imag)| (real / scalar, imag / scalar))
                 .collect(),
         ),
         ComplexStorage::F32(values) => {
@@ -744,7 +749,7 @@ fn divide_complex_tensor_scalar(tensor: &ComplexTensor, scalar: f64) -> Result<V
             ComplexStorage::F32(
                 values
                     .iter()
-                    .map(|&(real, imag)| (real / scalar, imag / scalar))
+                    .map(|&ComplexElement(real, imag)| (real / scalar, imag / scalar))
                     .collect(),
             )
         }
@@ -773,7 +778,7 @@ fn divide_scalar_complex_tensor(scalar: f64, tensor: &ComplexTensor) -> Result<V
         ComplexStorage::F64(values) => ComplexStorage::F64(
             values
                 .iter()
-                .map(|&denominator| divide_complex_value_f64((scalar, 0.0), denominator))
+                .map(|&denominator| divide_complex_value_f64((scalar, 0.0), denominator.into()))
                 .collect(),
         ),
         ComplexStorage::F32(values) => {
@@ -781,7 +786,7 @@ fn divide_scalar_complex_tensor(scalar: f64, tensor: &ComplexTensor) -> Result<V
             ComplexStorage::F32(
                 values
                     .iter()
-                    .map(|&denominator| divide_complex_value_f32((scalar, 0.0), denominator))
+                    .map(|&denominator| divide_complex_value_f32((scalar, 0.0), denominator.into()))
                     .collect(),
             )
         }
@@ -1058,19 +1063,23 @@ fn power_complex_tensors(base: &ComplexTensor, exponent: &ComplexTensor) -> Resu
         (ComplexStorage::F64(base), ComplexStorage::F64(exponent)) => ComplexStorage::F64(
             base.iter()
                 .zip(exponent)
-                .map(|(&(br, bi), &(er, ei))| complex_pow_scalar(br, bi, er, ei))
+                .map(|(&ComplexElement(br, bi), &ComplexElement(er, ei))| {
+                    complex_pow_scalar(br, bi, er, ei)
+                })
                 .collect(),
         ),
         (ComplexStorage::F32(base), ComplexStorage::F32(exponent)) => ComplexStorage::F32(
             base.iter()
                 .zip(exponent)
-                .map(|(&(br, bi), &(er, ei))| complex_pow_scalar_f32(br, bi, er, ei))
+                .map(|(&ComplexElement(br, bi), &ComplexElement(er, ei))| {
+                    complex_pow_scalar_f32(br, bi, er, ei)
+                })
                 .collect(),
         ),
         (ComplexStorage::F32(base), ComplexStorage::F64(exponent)) => ComplexStorage::F32(
             base.iter()
                 .zip(exponent)
-                .map(|(&(br, bi), &(er, ei))| {
+                .map(|(&ComplexElement(br, bi), &ComplexElement(er, ei))| {
                     let (real, imag) = complex_pow_scalar(f64::from(br), f64::from(bi), er, ei);
                     (real as f32, imag as f32)
                 })
@@ -1079,7 +1088,7 @@ fn power_complex_tensors(base: &ComplexTensor, exponent: &ComplexTensor) -> Resu
         (ComplexStorage::F64(base), ComplexStorage::F32(exponent)) => ComplexStorage::F32(
             base.iter()
                 .zip(exponent)
-                .map(|(&(br, bi), &(er, ei))| {
+                .map(|(&ComplexElement(br, bi), &ComplexElement(er, ei))| {
                     let (real, imag) = complex_pow_scalar(br, bi, f64::from(er), f64::from(ei));
                     (real as f32, imag as f32)
                 })
@@ -1115,7 +1124,7 @@ fn power_complex_tensor_scalar(
         ComplexStorage::F64(values) => ComplexStorage::F64(
             values
                 .iter()
-                .map(|&(br, bi)| complex_pow_scalar(br, bi, exponent.0, exponent.1))
+                .map(|&ComplexElement(br, bi)| complex_pow_scalar(br, bi, exponent.0, exponent.1))
                 .collect(),
         ),
         ComplexStorage::F32(values) => {
@@ -1123,7 +1132,9 @@ fn power_complex_tensor_scalar(
             ComplexStorage::F32(
                 values
                     .iter()
-                    .map(|&(br, bi)| complex_pow_scalar_f32(br, bi, exponent.0, exponent.1))
+                    .map(|&ComplexElement(br, bi)| {
+                        complex_pow_scalar_f32(br, bi, exponent.0, exponent.1)
+                    })
                     .collect(),
             )
         }
@@ -1155,7 +1166,7 @@ fn power_scalar_complex_tensor(
         ComplexStorage::F64(values) => ComplexStorage::F64(
             values
                 .iter()
-                .map(|&(er, ei)| complex_pow_scalar(base.0, base.1, er, ei))
+                .map(|&ComplexElement(er, ei)| complex_pow_scalar(base.0, base.1, er, ei))
                 .collect(),
         ),
         ComplexStorage::F32(values) => {
@@ -1163,7 +1174,7 @@ fn power_scalar_complex_tensor(
             ComplexStorage::F32(
                 values
                     .iter()
-                    .map(|&(er, ei)| complex_pow_scalar_f32(base.0, base.1, er, ei))
+                    .map(|&ComplexElement(er, ei)| complex_pow_scalar_f32(base.0, base.1, er, ei))
                     .collect(),
             )
         }
@@ -1270,7 +1281,14 @@ mod tests {
             panic!("expected complex tensor");
         };
         assert_eq!(result.shape, shape);
-        assert_eq!(result.as_f32_slice(), Some(&[(5.0, 5.0), (-10.0, 0.0)][..]));
+        assert_eq!(
+            result.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(5.0, 5.0), (-10.0, 0.0)])
+        );
     }
 
     #[test]
@@ -1288,7 +1306,14 @@ mod tests {
             .expect("mul") else {
                 panic!("expected complex tensor");
             };
-            assert_eq!(result.as_f32_slice(), Some(&[(5.0, 5.0)][..]));
+            assert_eq!(
+                result.as_f32_slice().map(|values| values
+                    .iter()
+                    .copied()
+                    .map(<(f32, f32)>::from)
+                    .collect::<Vec<_>>()),
+                Some(vec![(5.0, 5.0)])
+            );
         }
     }
 
@@ -1302,7 +1327,14 @@ mod tests {
         .expect("mul") else {
             panic!("expected complex tensor");
         };
-        assert_eq!(result.as_f32_slice(), Some(&[(0.5, 1.0), (-1.0, 0.5)][..]));
+        assert_eq!(
+            result.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(0.5, 1.0), (-1.0, 0.5)])
+        );
     }
 
     #[test]
@@ -1333,7 +1365,14 @@ mod tests {
             panic!("expected complex tensor");
         };
         assert_eq!(result.shape, shape);
-        assert_eq!(result.as_f32_slice(), Some(&[(1.0, 2.0), (-2.0, 1.0)][..]));
+        assert_eq!(
+            result.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(1.0, 2.0), (-2.0, 1.0)])
+        );
     }
 
     #[test]
@@ -1347,7 +1386,14 @@ mod tests {
         .expect("div") else {
             panic!("expected complex tensor");
         };
-        assert_eq!(result.as_f32_slice(), Some(&[(1.0, 2.0)][..]));
+        assert_eq!(
+            result.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(1.0, 2.0)])
+        );
     }
 
     #[test]
@@ -1360,8 +1406,14 @@ mod tests {
         .expect("div") else {
             panic!("expected complex tensor");
         };
-        assert_eq!(by_scalar.as_f32_slice(), Some(&[(1.0, 2.0)][..]));
-
+        assert_eq!(
+            by_scalar.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(1.0, 2.0)])
+        );
         let Value::ComplexTensor(scalar_by) = block_on(elementwise_div(
             &Value::Num(10.0),
             &Value::ComplexTensor(tensor),
@@ -1369,7 +1421,14 @@ mod tests {
         .expect("div") else {
             panic!("expected complex tensor");
         };
-        assert_eq!(scalar_by.as_f32_slice(), Some(&[(1.0, -2.0)][..]));
+        assert_eq!(
+            scalar_by.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(1.0, -2.0)])
+        );
     }
 
     #[test]

@@ -1020,7 +1020,7 @@ pub(crate) mod tests {
         for complex in [
             ComplexTensor::new(vec![(1.0, 2.0), (3.0, -4.0)], vec![1, 2]).unwrap(),
             ComplexTensor::from_complex_storage(
-                runmat_value::ComplexStorage::F32(vec![(1.0, 2.0), (3.0, -4.0)]),
+                runmat_value::ComplexStorage::F32(vec![(1.0, 2.0), (3.0, -4.0)].into()),
                 vec![1, 2],
             )
             .unwrap(),

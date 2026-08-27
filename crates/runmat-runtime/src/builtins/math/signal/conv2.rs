@@ -1087,7 +1087,7 @@ pub(crate) mod tests {
     #[test]
     fn conv2_complex_single_retains_class_and_explicit_complexity() {
         let input = ComplexTensor::from_complex_storage(
-            ComplexStorage::F32(vec![(1.0, 0.0), (2.0, 0.0)]),
+            ComplexStorage::F32(vec![(1.0, 0.0), (2.0, 0.0)].into()),
             vec![2, 1],
         )
         .unwrap();

@@ -95,7 +95,10 @@ mod tests {
         let decoded_values = decoded_single.as_f32_slice().unwrap();
         assert_eq!(decoded_values[0].0.to_bits(), 0x8000_0000);
         assert_eq!(decoded_values[0].1.to_bits(), 0x7fc0_0042);
-        assert_eq!(decoded_values[1], (f32::MAX, f32::MIN_POSITIVE));
+        assert_eq!(
+            decoded_values[1],
+            runmat_value::ComplexElement(f32::MAX, f32::MIN_POSITIVE)
+        );
         assert_eq!(decoded_single.shape, vec![1, 2]);
 
         let integer_components = [

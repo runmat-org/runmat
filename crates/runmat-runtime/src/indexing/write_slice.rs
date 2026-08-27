@@ -1583,14 +1583,16 @@ mod tests {
         };
         assert_eq!(updated.numeric_dtype(), NumericDType::F32);
         assert_eq!(
-            updated.as_f32_slice(),
-            Some(
-                &[
-                    (1.234_567_890_123_f64 as f32, -9.876_543_210_987_f64 as f32,),
-                    (2.0, -2.0),
-                    (1.234_567_890_123_f64 as f32, -9.876_543_210_987_f64 as f32,),
-                ][..]
-            )
+            updated.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![
+                (1.234_567_890_123_f64 as f32, -9.876_543_210_987_f64 as f32,),
+                (2.0, -2.0),
+                (1.234_567_890_123_f64 as f32, -9.876_543_210_987_f64 as f32,),
+            ])
         );
 
         let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).expect("empty"));
@@ -1603,13 +1605,15 @@ mod tests {
         assert_eq!(deleted.numeric_dtype(), NumericDType::F32);
         assert_eq!(deleted.shape, vec![1, 2]);
         assert_eq!(
-            deleted.as_f32_slice(),
-            Some(
-                &[
-                    (1.234_567_890_123_f64 as f32, -9.876_543_210_987_f64 as f32,),
-                    (1.234_567_890_123_f64 as f32, -9.876_543_210_987_f64 as f32,),
-                ][..]
-            )
+            deleted.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![
+                (1.234_567_890_123_f64 as f32, -9.876_543_210_987_f64 as f32,),
+                (1.234_567_890_123_f64 as f32, -9.876_543_210_987_f64 as f32,),
+            ])
         );
     }
 

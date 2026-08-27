@@ -773,13 +773,15 @@ pub(crate) mod tests {
         };
         assert_eq!(output.shape, vec![1, 2]);
         assert_eq!(
-            output.as_f32_slice(),
-            Some(
-                &[
-                    exp_complex_parts_f32(0.0, 0.0),
-                    exp_complex_parts_f32(1.0, 0.5),
-                ][..]
-            )
+            output.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![
+                exp_complex_parts_f32(0.0, 0.0),
+                exp_complex_parts_f32(1.0, 0.5),
+            ])
         );
 
         let empty = ComplexTensor::from_f32(Vec::new(), vec![0, 3]).unwrap();

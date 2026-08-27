@@ -395,18 +395,12 @@ fn ifftshift_complex_tensor(tensor: ComplexTensor, dims: &[usize]) -> BuiltinRes
         });
     }
     let rotated = match storage {
-        ComplexStorage::F64(values) => ComplexStorage::F64(apply_shift(
-            BUILTIN_NAME,
-            &values,
-            &plan.ext_shape,
-            &plan.positive,
-        )?),
-        ComplexStorage::F32(values) => ComplexStorage::F32(apply_shift(
-            BUILTIN_NAME,
-            &values,
-            &plan.ext_shape,
-            &plan.positive,
-        )?),
+        ComplexStorage::F64(values) => ComplexStorage::F64(
+            apply_shift(BUILTIN_NAME, &values, &plan.ext_shape, &plan.positive)?.into(),
+        ),
+        ComplexStorage::F32(values) => ComplexStorage::F32(
+            apply_shift(BUILTIN_NAME, &values, &plan.ext_shape, &plan.positive)?.into(),
+        ),
         ComplexStorage::Integer(storage) => ComplexStorage::Integer(
             storage
                 .reorder(|values| {

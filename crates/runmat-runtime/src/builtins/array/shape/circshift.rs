@@ -838,10 +838,10 @@ fn circshift_complex_tensor(
     } = plan;
     let rotated = match storage {
         ComplexStorage::F64(values) => {
-            ComplexStorage::F64(circshift_generic(&values, &ext_shape, &positive)?)
+            ComplexStorage::F64(circshift_generic(&values, &ext_shape, &positive)?.into())
         }
         ComplexStorage::F32(values) => {
-            ComplexStorage::F32(circshift_generic(&values, &ext_shape, &positive)?)
+            ComplexStorage::F32(circshift_generic(&values, &ext_shape, &positive)?.into())
         }
         ComplexStorage::Integer(storage) => ComplexStorage::Integer(
             storage

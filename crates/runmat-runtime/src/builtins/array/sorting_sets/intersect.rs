@@ -22,7 +22,11 @@ use runmat_value::{
     NumericStorage, StringArray, Tensor, Value,
 };
 
-use super::{float_order::SetFloat, integer_order, type_resolvers::set_values_output_type};
+use super::{
+    float_order::{ComplexSequence, SetFloat},
+    integer_order,
+    type_resolvers::set_values_output_type,
+};
 use crate::build_runtime_error;
 use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::gpu_helpers;
@@ -868,10 +872,10 @@ fn intersect_promoted_complex_f64(
     )
 }
 
-fn intersect_floating_complex<T: SetFloat>(
-    a: Vec<(T, T)>,
+fn intersect_floating_complex<T: SetFloat, A: ComplexSequence<T>, B: ComplexSequence<T>>(
+    a: A,
     a_shape: Vec<usize>,
-    b: Vec<(T, T)>,
+    b: B,
     b_shape: Vec<usize>,
     opts: &IntersectOptions,
 ) -> crate::BuiltinResult<IntersectEvaluation> {
@@ -882,13 +886,14 @@ fn intersect_floating_complex<T: SetFloat>(
     }
 }
 
-fn intersect_complex_elements<T: SetFloat>(
-    a: Vec<(T, T)>,
-    b: Vec<(T, T)>,
+fn intersect_complex_elements<T: SetFloat, A: ComplexSequence<T>, B: ComplexSequence<T>>(
+    a: A,
+    b: B,
     opts: &IntersectOptions,
 ) -> crate::BuiltinResult<IntersectEvaluation> {
     let mut b_map: HashMap<ComplexKey, usize> = HashMap::new();
-    for (idx, &value) in b.iter().enumerate() {
+    for idx in 0..b.len() {
+        let value = b.pair_at(idx);
         let key = ComplexKey::new(value);
         b_map.entry(key).or_insert(idx);
     }
@@ -897,7 +902,8 @@ fn intersect_complex_elements<T: SetFloat>(
     let mut entries = Vec::<ComplexIntersectEntry<T>>::new();
     let mut order_counter = 0usize;
 
-    for (idx, &value) in a.iter().enumerate() {
+    for idx in 0..a.len() {
+        let value = a.pair_at(idx);
         let key = ComplexKey::new(value);
         if seen.contains(&key) {
             continue;
@@ -917,10 +923,10 @@ fn intersect_complex_elements<T: SetFloat>(
     assemble_complex_intersect(entries, opts)
 }
 
-fn intersect_complex_rows<T: SetFloat>(
-    a: Vec<(T, T)>,
+fn intersect_complex_rows<T: SetFloat, A: ComplexSequence<T>, B: ComplexSequence<T>>(
+    a: A,
     a_shape: Vec<usize>,
-    b: Vec<(T, T)>,
+    b: B,
     b_shape: Vec<usize>,
     opts: &IntersectOptions,
 ) -> crate::BuiltinResult<IntersectEvaluation> {
@@ -941,7 +947,7 @@ fn intersect_complex_rows<T: SetFloat>(
         let mut row_keys = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_b;
-            row_keys.push(ComplexKey::new(b[idx]));
+            row_keys.push(ComplexKey::new(b.pair_at(idx)));
         }
         b_map.entry(row_keys).or_insert(r);
     }
@@ -955,7 +961,7 @@ fn intersect_complex_rows<T: SetFloat>(
         let mut row_keys = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_a;
-            let value = a[idx];
+            let value = a.pair_at(idx);
             row_values.push(value);
             row_keys.push(ComplexKey::new(value));
         }
@@ -1997,8 +2003,14 @@ pub(crate) mod tests {
         let Value::ComplexTensor(values) = values else {
             panic!("expected native complex single value");
         };
-        assert_eq!(values.as_f32_slice(), Some(&[(0.0, 2.0)][..]));
-
+        assert_eq!(
+            values.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(0.0, 2.0)])
+        );
         let a = ComplexTensor::from_f32(
             vec![
                 (1.0, 0.0),
@@ -2027,7 +2039,14 @@ pub(crate) mod tests {
             panic!("expected native complex single rows");
         };
         assert_eq!(values.shape, vec![1, 2]);
-        assert_eq!(values.as_f32_slice(), Some(&[(1.0, 0.0), (2.0, 1.0)][..]));
+        assert_eq!(
+            values.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(1.0, 0.0), (2.0, 1.0)])
+        );
     }
 
     #[test]

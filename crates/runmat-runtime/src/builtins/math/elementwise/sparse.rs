@@ -1176,7 +1176,14 @@ mod tests {
             .expect("sparse complex sum"),
         );
         assert_eq!(output.numeric_dtype(), NumericDType::F32);
-        assert_eq!(output.as_f32_slice(), Some(&[(3.0, 0.5), (2.0, -1.0)][..]));
+        assert_eq!(
+            output.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(3.0, 0.5), (2.0, -1.0)])
+        );
     }
 
     fn double_values(tensor: &Tensor) -> &[f64] {

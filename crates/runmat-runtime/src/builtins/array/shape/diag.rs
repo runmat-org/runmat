@@ -1307,13 +1307,13 @@ fn evaluate_complex(tensor: ComplexTensor, args: &ParsedDiagArgs) -> BuiltinResu
     let (storage, shape) = match tensor.into_complex_storage() {
         ComplexStorage::F64(values) => {
             let (values, shape) =
-                evaluate_column_major_diag(&values, &input_shape, args, (0.0f64, 0.0f64))?;
-            (ComplexStorage::F64(values), shape)
+                evaluate_column_major_diag(&values, &input_shape, args, (0.0f64, 0.0f64).into())?;
+            (ComplexStorage::F64(values.into()), shape)
         }
         ComplexStorage::F32(values) => {
             let (values, shape) =
-                evaluate_column_major_diag(&values, &input_shape, args, (0.0f32, 0.0f32))?;
-            (ComplexStorage::F32(values), shape)
+                evaluate_column_major_diag(&values, &input_shape, args, (0.0f32, 0.0f32).into())?;
+            (ComplexStorage::F32(values.into()), shape)
         }
         ComplexStorage::Integer(storage) => {
             let zero = storage
