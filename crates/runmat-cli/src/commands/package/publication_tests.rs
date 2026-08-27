@@ -1,7 +1,10 @@
-use super::publication_artifact::{collect_entries, normalized_link_target};
+#[cfg(unix)]
+use super::publication_artifact::collect_entries;
+use super::publication_artifact::normalized_link_target;
 use super::publication_manifest::PreparedPublication;
 use super::publication_retry::{load_or_create_encrypted, private_state_path};
 use crate::cli::PackageInspectArgs;
+#[cfg(unix)]
 use runmat_package_cache::PublicationPolicy;
 use runmat_package_cache_native::registry::RecipientKeyPair;
 use std::path::Path;
