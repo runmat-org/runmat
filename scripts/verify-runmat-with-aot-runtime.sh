@@ -21,15 +21,28 @@ if [[ "$(uname -s)" == "Linux" ]]; then
     echo "pkg-config is required to locate the HDF5 development libraries" >&2
     exit 1
   }
-  if ! hdf5_library_directory="$(pkg-config --variable=libdir hdf5)"; then
+  if ! hdf5_link_search_output="$(pkg-config --libs-only-L hdf5)"; then
     echo "pkg-config could not locate the HDF5 development package" >&2
     exit 1
   fi
-  if [[ -z "$hdf5_library_directory" || ! -d "$hdf5_library_directory" ]]; then
-    echo "pkg-config returned an invalid HDF5 library directory: $hdf5_library_directory" >&2
+
+  read -r -a hdf5_link_search_flags <<< "$hdf5_link_search_output"
+  hdf5_library_path=""
+  for flag in "${hdf5_link_search_flags[@]}"; do
+    [[ "$flag" == -L* ]] || continue
+    hdf5_library_directory="${flag#-L}"
+    if [[ -z "$hdf5_library_directory" || ! -d "$hdf5_library_directory" ]]; then
+      echo "pkg-config returned an invalid HDF5 library directory: $hdf5_library_directory" >&2
+      exit 1
+    fi
+    hdf5_library_path="${hdf5_library_path:+$hdf5_library_path:}$hdf5_library_directory"
+  done
+
+  if [[ -z "$hdf5_library_path" ]]; then
+    echo "pkg-config returned no HDF5 linker search directories" >&2
     exit 1
   fi
-  export LIBRARY_PATH="$hdf5_library_directory${LIBRARY_PATH:+:$LIBRARY_PATH}"
+  export LIBRARY_PATH="$hdf5_library_path${LIBRARY_PATH:+:$LIBRARY_PATH}"
 fi
 
 smoke_directory="$(mktemp -d "${TMPDIR:-/tmp}/runmat-aot-smoke.XXXXXX")"
