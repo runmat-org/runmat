@@ -105,6 +105,56 @@ public:
 }
 
 #[test]
+fn modern_cpp_array_control_can_retain_an_input_across_gateway_calls() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("retained_data_api_input.cpp");
+    fs::write(
+        &source,
+        r#"
+#include "mex.hpp"
+#include "mexAdapter.hpp"
+
+class MexFunction : public matlab::mex::Function {
+public:
+    void operator()(matlab::mex::ArgumentList outputs,
+                    matlab::mex::ArgumentList inputs) override {
+        if (!inputs.empty()) {
+            retained_ = inputs[0];
+            return;
+        }
+        if (outputs.size() != 1 || !retained_) {
+            throw matlab::Exception("expected one retained input");
+        }
+        outputs[0] = retained_;
+    }
+
+private:
+    matlab::data::Array retained_;
+};
+"#,
+    )
+    .unwrap();
+
+    let input = runmat_value::Tensor::new(vec![11.0, 12.0], vec![1, 2]).unwrap();
+    let input_address = unsafe { input.host_buffer().foreign_data_pointer() } as usize;
+    let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+    let module = MexModule::load(&artifact.module).unwrap();
+    module
+        .invoke(&[Value::Tensor(input)], 0, module.api_mode())
+        .unwrap();
+    let result = module.invoke(&[], 1, module.api_mode()).unwrap();
+    let Value::Tensor(retained) = &result.outputs[0] else {
+        panic!("retained C++ input must remain a tensor");
+    };
+    assert_eq!(retained.materialize_f64(), vec![11.0, 12.0]);
+    assert_eq!(
+        unsafe { retained.host_buffer().foreign_data_pointer() } as usize,
+        input_address
+    );
+    drop(module);
+}
+
+#[test]
 fn modern_cpp_data_api_preserves_aggregate_complex_and_layout_semantics() {
     let directory = tempfile::tempdir().unwrap();
     let source = directory.path().join("modern_aggregate_api.cpp");
@@ -1465,6 +1515,36 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
 }
 
 #[test]
+fn local_cpp_engine_futures_complete_through_the_explicit_host_port() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("local_async_fixture.cpp");
+    fs::write(
+        &source,
+        r#"
+#include "mex.hpp"
+#include "mexAdapter.hpp"
+
+class MexFunction : public matlab::mex::Function {
+public:
+    void operator()(matlab::mex::ArgumentList outputs,
+                    matlab::mex::ArgumentList inputs) override {
+        (void)inputs;
+        outputs[0] = matlab::data::ArrayFactory().createScalar<double>(
+            getEngine()->fevalAsync<double>(u"plus_one", 8.0).get());
+    }
+};
+"#,
+    )
+    .unwrap();
+    let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+    let module = MexModule::load(&artifact.module).unwrap();
+    let result = module
+        .invoke_with_services(&[], 1, module.api_mode(), Rc::new(FixtureHost::default()))
+        .unwrap();
+    assert_eq!(result.outputs, vec![Value::Num(9.0)]);
+}
+
+#[test]
 fn completed_gateway_does_not_retain_its_invocation_host() {
     let directory = tempfile::tempdir().unwrap();
     let source = directory.path().join("host_lifetime.c");
@@ -1629,6 +1709,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
     )
     .unwrap();
     let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+
     let module = Rc::new(MexModule::load(&artifact.module).unwrap());
     let host = Rc::new(ReentrantHost::default());
     *host.module.borrow_mut() = Some(Rc::downgrade(&module));
@@ -1642,4 +1723,33 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             if identifier.contains("RunMat:MEX:ReentrantInvocation")
                 && message.contains("recursive invocation of the same C MEX module")
     ));
+}
+
+#[test]
+fn one_in_process_owner_is_admitted_per_module_image() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("ownership_fixture.c");
+    fs::write(
+        &source,
+        r#"
+#include "mex.h"
+void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
+    (void)nlhs; (void)plhs; (void)nrhs; (void)prhs;
+}
+"#,
+    )
+    .unwrap();
+    let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+
+    let owner = MexModule::load(&artifact.module).unwrap();
+    let contender = match MexModule::load(&artifact.module) {
+        Ok(_) => panic!("a second in-process owner must use an isolated host"),
+        Err(error) => error,
+    };
+    assert!(contender.requires_isolated_host());
+
+    drop(owner);
+    let successor = MexModule::load(&artifact.module)
+        .expect("ownership must be released when the loaded module is dropped");
+    successor.invoke(&[], 0, successor.api_mode()).unwrap();
 }

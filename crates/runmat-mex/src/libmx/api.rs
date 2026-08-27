@@ -51,6 +51,22 @@ impl MxApi {
         self.memory.finish_call();
     }
 
+    pub fn begin_call(&mut self) {
+        self.arena.begin_call();
+    }
+
+    pub fn retain_data_api(&mut self, value: *const MxArray) -> Result<(), MxArenaError> {
+        self.arena.retain_data_api(value)
+    }
+
+    pub fn release_data_api(
+        &mut self,
+        value: *mut MxArray,
+        owned: bool,
+    ) -> Result<(), MxArenaError> {
+        self.arena.release_data_api(value, owned)
+    }
+
     pub fn allocate_memory(&mut self, byte_length: usize, zeroed: bool) -> *mut c_void {
         self.memory.allocate(byte_length, zeroed)
     }

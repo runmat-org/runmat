@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use futures::{FutureExt, StreamExt};
 use log::info;
 use runmat_config::runtime::{GcPreset, JitOptLevel, RunMatRuntimeConfig};
 use runmat_core::{
@@ -76,32 +77,77 @@ pub async fn execute_repl(config: &RunMatRuntimeConfig, cli: &Cli) -> Result<()>
     }
 
     print_repl_banner(config);
+    let prompt = presentation::stdout().brand("runmat> ");
+    let (input_sender, mut input) = futures::channel::mpsc::unbounded();
+    let (continue_sender, continue_receiver) = mpsc::channel();
+    let input_thread = std::thread::Builder::new()
+        .name("runmat-repl-input".into())
+        .spawn(move || loop {
+            let event = match rl.readline(&prompt) {
+                Ok(line) => {
+                    let _ = rl.add_history_entry(line.as_str());
+                    ReplInputEvent::Line(line)
+                }
+                Err(ReadlineError::Interrupted) => ReplInputEvent::Interrupted,
+                Err(ReadlineError::Eof) => ReplInputEvent::Eof,
+                Err(error) => ReplInputEvent::Error(format!("{error:?}")),
+            };
+            let expects_acknowledgement = matches!(event, ReplInputEvent::Line(_));
+            if input_sender.unbounded_send(event).is_err() || !expects_acknowledgement {
+                break;
+            }
+            if !continue_receiver.recv().unwrap_or(false) {
+                break;
+            }
+        })
+        .context("Failed to start REPL input thread")?;
 
+    let mut background_services_available = true;
     loop {
-        let prompt = presentation::stdout().brand("runmat> ");
-        let readline = rl.readline(&prompt);
-        match readline {
-            Ok(line) => {
-                let _ = rl.add_history_entry(line.as_str());
-
-                if !process_repl_input(&line, &mut engine, config).await? {
+        let wake = if background_services_available {
+            let input_ready = input.next().fuse();
+            let background_ready = engine.service_background_once().fuse();
+            futures::pin_mut!(input_ready, background_ready);
+            futures::select! {
+                event = input_ready => ReplWake::Input(event),
+                serviced = background_ready => ReplWake::Background(serviced),
+            }
+        } else {
+            ReplWake::Input(input.next().await)
+        };
+        let ReplWake::Input(event) = wake else {
+            if let ReplWake::Background(serviced) = wake {
+                background_services_available = serviced;
+            }
+            continue;
+        };
+        match event {
+            Some(ReplInputEvent::Line(line)) => {
+                let keep_running = process_repl_input(&line, &mut engine, config).await?;
+                let _ = continue_sender.send(keep_running);
+                if !keep_running {
                     break;
                 }
             }
-            Err(ReadlineError::Interrupted) => {
+            Some(ReplInputEvent::Interrupted) => {
                 println!("{}", presentation::stdout().muted("CTRL-C"));
                 break;
             }
-            Err(ReadlineError::Eof) => {
+            Some(ReplInputEvent::Eof) => {
                 println!("{}", presentation::stdout().muted("CTRL-D"));
                 break;
             }
-            Err(err) => {
-                println!("{}: {:?}", presentation::stdout().error("Error"), err);
+            Some(ReplInputEvent::Error(error)) => {
+                println!("{}: {error}", presentation::stdout().error("Error"));
                 break;
             }
+            None => break,
         }
     }
+    let _ = continue_sender.send(false);
+    input_thread
+        .join()
+        .map_err(|_| anyhow::anyhow!("REPL input thread panicked"))?;
 
     engine
         .shutdown_foreign_runtime()
@@ -109,6 +155,18 @@ pub async fn execute_repl(config: &RunMatRuntimeConfig, cli: &Cli) -> Result<()>
         .context("Failed to finish foreign runtime lifecycle")?;
     finalize_repl_session(&engine, session_start, repl_run);
     Ok(())
+}
+
+enum ReplInputEvent {
+    Line(String),
+    Interrupted,
+    Eof,
+    Error(String),
+}
+
+enum ReplWake {
+    Input(Option<ReplInputEvent>),
+    Background(bool),
 }
 
 fn print_repl_banner(config: &RunMatRuntimeConfig) {

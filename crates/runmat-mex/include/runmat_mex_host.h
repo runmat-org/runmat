@@ -2,6 +2,7 @@
 #define RUNMAT_MEX_HOST_H
 
 #include "matrix.h"
+#include <stdint.h>
 
 #if defined(_WIN32)
 #define RUNMAT_MEX_HOST_EXPORT __declspec(dllexport)
@@ -13,7 +14,7 @@
 extern "C" {
 #endif
 
-#define RUNMAT_MEX_HOST_ABI_VERSION 6u
+#define RUNMAT_MEX_HOST_ABI_VERSION 8u
 #define RUNMAT_HOST_COPY_MEMORY_LAYOUT 8u
 #define RUNMAT_HOST_COPY_SPARSE_LAYOUT 4u
 
@@ -109,6 +110,45 @@ typedef struct RunMatMexHostApiV1 {
                        unsigned short *output, size_t output_length);
     int (*set_string)(void *host, mxArray *array, size_t index,
                       const unsigned short *input, size_t input_length);
+    /* ABI v7 append-only C++ Data API control lifetime authority. */
+    int (*retain_data_array)(void *host, const mxArray *array);
+    int (*release_data_array)(void *host, mxArray *array, int owned);
+    /* ABI v8 append-only asynchronous RunMat engine request authority. */
+    uint64_t (*engine_context_create)(void *host);
+    void (*engine_context_release)(void *host, uint64_t engine_context);
+    uint64_t (*async_submit_eval)(void *host, uint64_t engine_context,
+                                  const char *command, int capture_stdout,
+                                  int capture_stderr);
+    uint64_t (*async_submit_call)(void *host, uint64_t engine_context,
+                                  const char *function_name,
+                                  size_t output_count, size_t input_count,
+                                  const mxArray *const *inputs,
+                                  int capture_stdout, int capture_stderr);
+    uint64_t (*async_submit_get_variable)(void *host, uint64_t engine_context,
+                                          const char *workspace,
+                                          const char *name);
+    uint64_t (*async_submit_put_variable)(void *host, uint64_t engine_context,
+                                          const char *workspace,
+                                          const char *name,
+                                          const mxArray *value);
+    uint64_t (*async_submit_get_property)(void *host, uint64_t engine_context,
+                                          const mxArray *object,
+                                          size_t index,
+                                          const char *name);
+    uint64_t (*async_submit_set_property)(void *host, uint64_t engine_context,
+                                          mxArray *object,
+                                          size_t index,
+                                          const char *name,
+                                          const mxArray *value);
+    int (*async_is_ready)(void *host, uint64_t request);
+    int (*async_wait)(void *host, uint64_t request, int64_t timeout_millis);
+    int (*async_cancel)(void *host, uint64_t request, int allow_interrupt);
+    int (*async_copy_result)(void *host, uint64_t request,
+                             size_t output_capacity, mxArray **outputs);
+    size_t (*async_copy_text)(void *host, uint64_t request,
+                              unsigned int field, char *output,
+                              size_t output_capacity);
+    void (*async_release)(void *host, uint64_t request);
 } RunMatMexHostApiV1;
 
 RUNMAT_MEX_HOST_EXPORT int runmatMexBindHost(const RunMatMexHostApiV1 *api);
@@ -137,6 +177,43 @@ RUNMAT_MEX_LOCAL int runmatDataArrayCopyString(const mxArray *array,
 RUNMAT_MEX_LOCAL int runmatDataArraySetString(mxArray *array, size_t index,
                                               const unsigned short *input,
                                               size_t input_length);
+RUNMAT_MEX_LOCAL int runmatDataArrayRetain(const mxArray *array);
+RUNMAT_MEX_LOCAL int runmatDataArrayRelease(mxArray *array, int owned);
+RUNMAT_MEX_LOCAL uint64_t runmatEngineContextCreate(void);
+RUNMAT_MEX_LOCAL void runmatEngineContextRelease(uint64_t engine_context);
+RUNMAT_MEX_LOCAL uint64_t runmatAsyncSubmitEval(uint64_t engine_context,
+                                                const char *command,
+                                                int capture_stdout,
+                                                int capture_stderr);
+RUNMAT_MEX_LOCAL uint64_t
+runmatAsyncSubmitCall(uint64_t engine_context, const char *function_name,
+                      size_t output_count, size_t input_count,
+                      const mxArray *const *inputs, int capture_stdout,
+                      int capture_stderr);
+RUNMAT_MEX_LOCAL uint64_t
+runmatAsyncSubmitGetVariable(uint64_t engine_context, const char *workspace,
+                             const char *name);
+RUNMAT_MEX_LOCAL uint64_t
+runmatAsyncSubmitPutVariable(uint64_t engine_context, const char *workspace,
+                             const char *name,
+                             const mxArray *value);
+RUNMAT_MEX_LOCAL uint64_t
+runmatAsyncSubmitGetProperty(uint64_t engine_context, const mxArray *object,
+                             size_t index, const char *name);
+RUNMAT_MEX_LOCAL uint64_t
+runmatAsyncSubmitSetProperty(uint64_t engine_context, mxArray *object,
+                             size_t index, const char *name,
+                             const mxArray *value);
+RUNMAT_MEX_LOCAL int runmatAsyncIsReady(uint64_t request);
+RUNMAT_MEX_LOCAL int runmatAsyncWait(uint64_t request, int64_t timeout_millis);
+RUNMAT_MEX_LOCAL int runmatAsyncCancel(uint64_t request, int allow_interrupt);
+RUNMAT_MEX_LOCAL int runmatAsyncCopyResult(uint64_t request,
+                                           size_t output_capacity,
+                                           mxArray **outputs);
+RUNMAT_MEX_LOCAL size_t runmatAsyncCopyText(uint64_t request,
+                                            unsigned int field, char *output,
+                                            size_t output_capacity);
+RUNMAT_MEX_LOCAL void runmatAsyncRelease(uint64_t request);
 
 #ifdef __cplusplus
 }
