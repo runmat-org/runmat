@@ -902,6 +902,46 @@ impl WgpuProvider {
                 "runmat-matmul-chunked-out",
                 out_usage,
             )?;
+            // Chunk dispatches execute serially and bind the same tensors throughout the
+            // operation. Keep their parameter buffer and bind group stable so updating the
+            // chunk offsets/accumulation flag cannot alias a stale cached bind group.
+            let params_buffer = self.kernel_resources.uniform_buffer(
+                self.device_ref(),
+                UniformBufferKey::MatmulParams,
+                std::mem::size_of::<crate::backend::wgpu::params::MatmulParams>() as u64,
+                "runmat-matmul-chunked-params",
+            );
+            let bind_entries = [
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: entry_a.buffer.as_ref().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: entry_b.buffer.as_ref().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: out_buffer.as_ref().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: params_buffer.as_entire_binding(),
+                },
+            ];
+            let layout = &self.pipelines.matmul.layout;
+            let bg = self
+                .bind_group_cache
+                .get_or_create(layout, &bind_entries, || {
+                    Arc::new(
+                        self.device_ref()
+                            .create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("runmat-matmul-chunked-bind"),
+                                layout,
+                                entries: &bind_entries,
+                            }),
+                    )
+                });
             let mut k_off: usize = 0;
             let mut first_chunk = true;
             while k_off < k {
@@ -929,44 +969,8 @@ impl WgpuProvider {
                         crate::backend::wgpu::params::MATMUL_FLAG_ACCUMULATE
                     },
                 };
-                let params_buffer = self.kernel_resources.uniform_buffer(
-                    self.device_ref(),
-                    UniformBufferKey::MatmulParams,
-                    std::mem::size_of::<crate::backend::wgpu::params::MatmulParams>() as u64,
-                    "runmat-matmul-params",
-                );
                 self.queue
                     .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
-                let bind_entries = [
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry_a.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: entry_b.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: out_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ];
-                let layout = &self.pipelines.matmul.layout;
-                let bg =
-                    self.bind_group_cache
-                        .get_or_create(layout, &bind_entries, || {
-                            Arc::new(self.device_ref().create_bind_group(
-                                &wgpu::BindGroupDescriptor {
-                                    label: Some("runmat-matmul-bind"),
-                                    layout,
-                                    entries: &bind_entries,
-                                },
-                            ))
-                        });
                 let tile = crate::backend::wgpu::config::effective_matmul_tile();
                 let groups_x =
                     crate::backend::wgpu::dispatch::common::dispatch_size_dim(n_u32, tile);
