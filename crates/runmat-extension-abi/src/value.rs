@@ -46,6 +46,18 @@ pub struct RunMatBufferView {
     pub flags: u32,
 }
 
+/// A buffer view and the explicit lifetime token that keeps it valid.
+///
+/// The view, including its shape pointer, remains valid until the matching
+/// host `release_buffer` call succeeds. Releasing the source value handle does
+/// not implicitly release this lease.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct RunMatBufferLease {
+    pub view: RunMatBufferView,
+    pub handle: crate::RunMatBufferLeaseHandle,
+}
+
 pub const RUNMAT_BUFFER_READ_ONLY: u32 = 1 << 0;
 pub const RUNMAT_BUFFER_COLUMN_MAJOR: u32 = 1 << 1;
 pub const RUNMAT_BUFFER_INTERLEAVED_COMPLEX: u32 = 1 << 2;

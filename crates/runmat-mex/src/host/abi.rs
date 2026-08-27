@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use crate::{value_from_mx, value_to_mx, MexHostServices, MxApi, MxApiMode, MxArray, MxClassId};
 
-pub const MEX_HOST_ABI_VERSION: u32 = 2;
+pub const MEX_HOST_ABI_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MexDiagnostic {
@@ -102,6 +102,10 @@ impl MexCallState {
             emit_warning,
             write_console,
             has_error,
+            allocate_memory,
+            reallocate_memory,
+            free_memory,
+            make_memory_persistent,
         }
     }
 
@@ -209,6 +213,11 @@ pub struct MexHostApiV1 {
     pub emit_warning: unsafe extern "C" fn(*mut c_void, *const c_char, *const c_char),
     pub write_console: unsafe extern "C" fn(*mut c_void, *const c_char),
     pub has_error: unsafe extern "C" fn(*mut c_void) -> i32,
+    // ABI v3 fields are appended after the complete v2 prefix.
+    pub allocate_memory: unsafe extern "C" fn(*mut c_void, usize, i32) -> *mut c_void,
+    pub reallocate_memory: unsafe extern "C" fn(*mut c_void, *mut c_void, usize) -> *mut c_void,
+    pub free_memory: unsafe extern "C" fn(*mut c_void, *mut c_void) -> i32,
+    pub make_memory_persistent: unsafe extern "C" fn(*mut c_void, *mut c_void) -> i32,
 }
 
 unsafe fn state<'a>(host: *mut c_void) -> Option<&'a mut MexCallState> {
@@ -908,6 +917,42 @@ fn replace_sparse_indices(
     }
 }
 
+unsafe extern "C" fn allocate_memory(
+    host: *mut c_void,
+    byte_length: usize,
+    zeroed: i32,
+) -> *mut c_void {
+    let Some(state) = (unsafe { state(host) }) else {
+        return std::ptr::null_mut();
+    };
+    state.mx.allocate_memory(byte_length, zeroed != 0)
+}
+
+unsafe extern "C" fn reallocate_memory(
+    host: *mut c_void,
+    pointer: *mut c_void,
+    byte_length: usize,
+) -> *mut c_void {
+    let Some(state) = (unsafe { state(host) }) else {
+        return std::ptr::null_mut();
+    };
+    state.mx.reallocate_memory(pointer, byte_length)
+}
+
+unsafe extern "C" fn free_memory(host: *mut c_void, pointer: *mut c_void) -> i32 {
+    let Some(state) = (unsafe { state(host) }) else {
+        return 1;
+    };
+    i32::from(!state.mx.free_memory(pointer))
+}
+
+unsafe extern "C" fn make_memory_persistent(host: *mut c_void, pointer: *mut c_void) -> i32 {
+    let Some(state) = (unsafe { state(host) }) else {
+        return 1;
+    };
+    i32::from(!state.mx.make_memory_persistent(pointer))
+}
+
 unsafe extern "C" fn make_array_persistent(host: *mut c_void, value: *mut MxArray) -> i32 {
     let Some(state) = (unsafe { state(host) }) else {
         return 1;
@@ -1199,6 +1244,19 @@ unsafe extern "C" fn has_error(host: *mut c_void) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn allocator_callbacks_extend_the_complete_previous_vtable_prefix() {
+        let pointer_size = std::mem::size_of::<usize>();
+        assert_eq!(
+            std::mem::offset_of!(MexHostApiV1, allocate_memory),
+            std::mem::size_of::<MexHostApiV1>() - 4 * pointer_size
+        );
+        assert_eq!(
+            std::mem::offset_of!(MexHostApiV1, make_memory_persistent),
+            std::mem::size_of::<MexHostApiV1>() - pointer_size
+        );
+    }
 
     #[test]
     fn vtable_uses_opaque_host_and_reports_bad_class_without_unwinding() {

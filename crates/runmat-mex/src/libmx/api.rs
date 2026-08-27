@@ -1,7 +1,8 @@
 use std::ffi::c_void;
 
-use runmat_value::{HostNumericBuffer, NumericStorage};
+use runmat_value::{record_host_copy, HostCopyReason, HostNumericBuffer, NumericStorage};
 
+use super::memory::MexMemoryRegistry;
 use crate::mxarray::MxArrayData;
 use crate::{MxApiMode, MxArena, MxArenaError, MxArray, MxClassId, MxSparse, MxSparseValues};
 
@@ -9,6 +10,7 @@ use crate::{MxApiMode, MxArena, MxArenaError, MxArray, MxClassId, MxSparse, MxSp
 pub struct MxApi {
     pub(super) mode: MxApiMode,
     pub(super) arena: MxArena,
+    pub(super) memory: MexMemoryRegistry,
 }
 
 impl MxApi {
@@ -16,6 +18,7 @@ impl MxApi {
         Self {
             mode,
             arena: MxArena::default(),
+            memory: MexMemoryRegistry::default(),
         }
     }
 
@@ -45,6 +48,23 @@ impl MxApi {
 
     pub fn finish_call(&mut self) {
         self.arena.retain_persistent();
+        self.memory.finish_call();
+    }
+
+    pub fn allocate_memory(&mut self, byte_length: usize, zeroed: bool) -> *mut c_void {
+        self.memory.allocate(byte_length, zeroed)
+    }
+
+    pub fn reallocate_memory(&mut self, pointer: *mut c_void, byte_length: usize) -> *mut c_void {
+        self.memory.reallocate(pointer, byte_length)
+    }
+
+    pub fn free_memory(&mut self, pointer: *mut c_void) -> bool {
+        self.memory.free(pointer)
+    }
+
+    pub fn make_memory_persistent(&mut self, pointer: *mut c_void) -> bool {
+        self.memory.make_persistent(pointer)
     }
 
     pub fn create_numeric(
@@ -201,7 +221,7 @@ impl MxApi {
         Ok(value.imaginary_pointer())
     }
 
-    /// Copy an adopted C data buffer into the array's owned storage.
+    /// Adopt a proven compatible C data buffer, or perform one checked copy.
     ///
     /// # Safety
     ///
@@ -227,21 +247,70 @@ impl MxApi {
         if byte_len > 0 && source.is_null() {
             return Err("replacement data pointer is null".into());
         }
-        let destination = if imaginary {
-            value.imaginary_pointer_for_write()
+        let current = if imaginary {
+            value.imaginary_pointer()
         } else {
-            value.data_pointer_for_write()
+            value.data_pointer()
         };
-        if byte_len > 0 && destination.is_null() {
-            return Err("mxArray data storage is unavailable".into());
+        if current.cast_const() == source {
+            return Ok(());
         }
-        // SAFETY: the caller transfers a buffer with the exact byte size of
-        // this already-allocated mxArray. Source and destination do not overlap.
-        unsafe { std::ptr::copy_nonoverlapping(source.cast::<u8>(), destination.cast(), byte_len) };
-        Ok(())
+
+        if let Some(allocation) = self.memory.take_for_adoption(source.cast_mut()) {
+            match value.try_replace_with_adopted_data(allocation, imaginary) {
+                Ok(()) => return Ok(()),
+                Err((allocation, _reason)) => {
+                    if allocation.provenance().byte_length < byte_len {
+                        return Err(format!(
+                            "replacement allocation contains {} bytes but {byte_len} are required",
+                            allocation.provenance().byte_length
+                        ));
+                    }
+                    record_host_copy(HostCopyReason::ForeignStorageConversion, byte_len);
+                    let destination = if imaginary {
+                        value.imaginary_pointer_for_write()
+                    } else {
+                        value.data_pointer_for_write()
+                    };
+                    if byte_len > 0 && destination.is_null() {
+                        return Err("mxArray data storage is unavailable".into());
+                    }
+                    if value.class_id() == MxClassId::Logical {
+                        // SAFETY: the registry proves both byte ranges. Logical
+                        // host storage requires canonical zero/one bytes.
+                        let source = unsafe {
+                            std::slice::from_raw_parts(allocation.pointer().as_ptr(), byte_len)
+                        };
+                        let destination = unsafe {
+                            std::slice::from_raw_parts_mut(destination.cast::<u8>(), byte_len)
+                        };
+                        destination
+                            .iter_mut()
+                            .zip(source)
+                            .for_each(|(output, input)| *output = u8::from(*input != 0));
+                    } else {
+                        // SAFETY: the registry proves the source allocation
+                        // length, and the array reports the destination length.
+                        unsafe {
+                            std::ptr::copy_nonoverlapping(
+                                allocation.pointer().as_ptr(),
+                                destination.cast(),
+                                byte_len,
+                            )
+                        };
+                    }
+                    return Ok(());
+                }
+            }
+        }
+
+        Err(
+            "replacement data must come from mxMalloc, mxCalloc, or mxRealloc so ownership and allocation length can be verified"
+                .into(),
+        )
     }
 
-    /// Copy an adopted C sparse-index buffer into owned CSC storage.
+    /// Adopt a native-width sparse-index allocation, or perform one checked copy.
     ///
     /// # Safety
     ///
@@ -254,27 +323,84 @@ impl MxApi {
         source: *const usize,
         columns: bool,
     ) -> Result<(), String> {
-        let value = self
-            .arena
-            .get_mut(value)
-            .map_err(|error| error.to_string())?;
-        let MxArrayData::Sparse(value) = value.data_mut() else {
-            return Err("mxArray is not sparse".into());
+        let (len, current) = {
+            let value = self
+                .arena
+                .get_mut(value)
+                .map_err(|error| error.to_string())?;
+            let MxArrayData::Sparse(value) = value.data_mut() else {
+                return Err("mxArray is not sparse".into());
+            };
+            let destination = if columns {
+                &mut value.col_ptrs
+            } else {
+                &mut value.row_indices
+            };
+            (destination.len(), destination.as_ptr())
         };
-        let destination = if columns {
-            &mut value.col_ptrs
-        } else {
-            &mut value.row_indices
-        };
-        if !destination.is_empty() && source.is_null() {
+        if len > 0 && source.is_null() {
             return Err("replacement sparse-index pointer is null".into());
         }
-        // SAFETY: the caller transfers at least the fixed index capacity
-        // reported by this sparse array; the vectors retain Rust ownership.
-        unsafe {
-            std::ptr::copy_nonoverlapping(source, destination.as_mut_ptr(), destination.len())
-        };
-        Ok(())
+        if current == source {
+            return Ok(());
+        }
+        if let Some(allocation) = self.memory.take_for_adoption(source.cast_mut().cast()) {
+            match runmat_value::HostIndexBuffer::try_adopt(allocation, len) {
+                Ok(replacement) => {
+                    let value = self
+                        .arena
+                        .get_mut(value)
+                        .map_err(|error| error.to_string())?;
+                    let MxArrayData::Sparse(value) = value.data_mut() else {
+                        unreachable!("sparse array was validated before adoption")
+                    };
+                    if columns {
+                        value.col_ptrs = replacement;
+                    } else {
+                        value.row_indices = replacement;
+                    }
+                    return Ok(());
+                }
+                Err((allocation, _reason)) => {
+                    let required_bytes = len
+                        .checked_mul(std::mem::size_of::<usize>())
+                        .ok_or_else(|| "sparse-index byte length overflowed".to_string())?;
+                    if allocation.provenance().byte_length < required_bytes {
+                        return Err(format!(
+                            "sparse-index allocation contains {} bytes but {required_bytes} are required",
+                            allocation.provenance().byte_length
+                        ));
+                    }
+                    record_host_copy(HostCopyReason::ForeignStorageConversion, required_bytes);
+                    let value = self
+                        .arena
+                        .get_mut(value)
+                        .map_err(|error| error.to_string())?;
+                    let MxArrayData::Sparse(value) = value.data_mut() else {
+                        unreachable!("sparse array was validated before replacement")
+                    };
+                    let destination = if columns {
+                        &mut value.col_ptrs
+                    } else {
+                        &mut value.row_indices
+                    };
+                    // SAFETY: the allocation registry proves the source byte
+                    // length, and `destination` has the validated typed length.
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(
+                            allocation.pointer().as_ptr().cast::<usize>(),
+                            destination.as_mut_ptr(),
+                            len,
+                        )
+                    };
+                    return Ok(());
+                }
+            }
+        }
+        Err(
+            "replacement sparse indices must come from mxMalloc, mxCalloc, or mxRealloc so ownership and allocation length can be verified"
+                .into(),
+        )
     }
 
     pub fn get_cell(&self, value: *const MxArray, index: usize) -> Result<*mut MxArray, String> {

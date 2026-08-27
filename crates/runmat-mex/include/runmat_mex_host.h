@@ -13,7 +13,7 @@
 extern "C" {
 #endif
 
-#define RUNMAT_MEX_HOST_ABI_VERSION 2u
+#define RUNMAT_MEX_HOST_ABI_VERSION 3u
 
 typedef struct RunMatMexHostApiV1 {
     uint32_t abi_version;
@@ -88,6 +88,11 @@ typedef struct RunMatMexHostApiV1 {
                          const char *message);
     void (*write_console)(void *host, const char *text);
     int (*has_error)(void *host);
+    /* ABI v3 append-only allocator authority. */
+    void *(*allocate_memory)(void *host, size_t byte_length, int zeroed);
+    void *(*reallocate_memory)(void *host, void *pointer, size_t byte_length);
+    int (*free_memory)(void *host, void *pointer);
+    int (*make_memory_persistent)(void *host, void *pointer);
 } RunMatMexHostApiV1;
 
 RUNMAT_MEX_HOST_EXPORT int runmatMexBindHost(const RunMatMexHostApiV1 *api);

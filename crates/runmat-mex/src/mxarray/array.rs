@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 use std::ffi::c_void;
 
 use runmat_value::{
-    HostIndexBuffer, HostLogicalBuffer, HostNumericBuffer, NumericDType, NumericStorage,
+    AdoptedHostAllocation, HostComplexBuffer, HostIndexBuffer, HostLogicalBuffer,
+    HostNumericBuffer, NumericDType, NumericStorage,
 };
 
 use super::{MxClassId, MxInterleavedStorage};
@@ -481,6 +482,82 @@ impl MxArray {
                 imag: Some(values), ..
             }) => values.checked_byte_len(),
             _ => None,
+        }
+    }
+
+    pub fn try_replace_with_adopted_data(
+        &mut self,
+        allocation: AdoptedHostAllocation,
+        imaginary: bool,
+    ) -> Result<(), (AdoptedHostAllocation, String)> {
+        if imaginary {
+            let MxArrayData::Numeric(MxNumeric {
+                real,
+                imag: Some(values),
+            }) = &mut self.data
+            else {
+                return Err((
+                    allocation,
+                    "mxArray does not expose separate imaginary storage".into(),
+                ));
+            };
+            let replacement =
+                HostNumericBuffer::try_adopt(allocation, real.numeric_dtype(), real.len())?;
+            *values = replacement;
+            return Ok(());
+        }
+
+        match &mut self.data {
+            MxArrayData::Numeric(value) => {
+                let replacement = HostNumericBuffer::try_adopt(
+                    allocation,
+                    value.real.numeric_dtype(),
+                    value.real.len(),
+                )?;
+                value.real = replacement;
+                Ok(())
+            }
+            MxArrayData::Interleaved(value) => match &mut value.values {
+                MxInterleavedStorage::F64(values) => {
+                    *values = HostComplexBuffer::try_adopt(allocation, values.len())?;
+                    Ok(())
+                }
+                MxInterleavedStorage::F32(values) => {
+                    *values = HostComplexBuffer::try_adopt(allocation, values.len())?;
+                    Ok(())
+                }
+                _ => Err((
+                    allocation,
+                    "integer-complex storage is not yet an adoptable canonical buffer".into(),
+                )),
+            },
+            MxArrayData::Logical(values) => {
+                let byte_length = values.len();
+                *values = HostLogicalBuffer::try_adopt(allocation, byte_length)?;
+                Ok(())
+            }
+            MxArrayData::Sparse(value) => match &mut value.values {
+                MxSparseValues::Numeric(values) => {
+                    *values = HostNumericBuffer::try_adopt(
+                        allocation,
+                        values.numeric_dtype(),
+                        values.len(),
+                    )?;
+                    Ok(())
+                }
+                MxSparseValues::Logical(values) => {
+                    let len = values.len();
+                    *values = HostLogicalBuffer::try_adopt(allocation, len)?;
+                    Ok(())
+                }
+            },
+            MxArrayData::Char(_)
+            | MxArrayData::Cell(_)
+            | MxArrayData::Struct { .. }
+            | MxArrayData::Object { .. } => Err((
+                allocation,
+                "mxArray data layout requires explicit conversion".into(),
+            )),
         }
     }
 

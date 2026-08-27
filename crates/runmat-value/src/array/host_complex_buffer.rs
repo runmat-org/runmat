@@ -2,8 +2,9 @@ use std::ffi::c_void;
 use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
 
+use super::host_allocation::HostData;
 use super::host_buffer::HostBuffer;
-use super::{record_host_copy, ComplexElement, HostCopyReason};
+use super::{record_host_copy, AdoptedHostAllocation, ComplexElement, HostCopyReason};
 
 /// Pointer-stable copy-on-write storage for interleaved complex elements.
 ///
@@ -12,22 +13,31 @@ use super::{record_host_copy, ComplexElement, HostCopyReason};
 /// invocation-scoped pointer, never ownership of a Rust collection.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HostComplexBuffer<T: Clone + Copy> {
-    storage: HostBuffer<Vec<ComplexElement<T>>>,
+    storage: HostBuffer<HostData<ComplexElement<T>>>,
 }
 
 impl<T: Clone + Copy> HostComplexBuffer<T> {
     pub fn from_elements(values: Vec<ComplexElement<T>>) -> Self {
         Self {
-            storage: HostBuffer::new(values),
+            storage: HostBuffer::new(HostData::from_vec(values)),
         }
     }
 
+    pub fn try_adopt(
+        allocation: AdoptedHostAllocation,
+        len: usize,
+    ) -> Result<Self, (AdoptedHostAllocation, String)> {
+        HostData::try_adopt(allocation, len).map(|storage| Self {
+            storage: HostBuffer::new(storage),
+        })
+    }
+
     pub fn len(&self) -> usize {
-        self.storage.get().len()
+        self.storage.get().as_slice().len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.storage.get().is_empty()
+        self.storage.get().as_slice().is_empty()
     }
 
     pub fn shares_allocation_with(&self, other: &Self) -> bool {
@@ -42,10 +52,10 @@ impl<T: Clone + Copy> HostComplexBuffer<T> {
     }
 
     pub fn into_elements(self) -> Vec<ComplexElement<T>> {
-        if self.storage.is_shared() {
+        if self.storage.is_shared() || self.storage.get().is_adopted() {
             record_host_copy(HostCopyReason::OwnedMaterialization, self.byte_len());
         }
-        self.storage.into_inner()
+        self.storage.into_inner().into_vec()
     }
 
     fn byte_len(&self) -> usize {
@@ -61,7 +71,7 @@ impl<T: Clone + Copy> HostComplexBuffer<T> {
     /// The pointer must not outlive this owner or its invocation lease. No Rust
     /// reference into the allocation may be used while foreign code executes.
     pub unsafe fn foreign_data_pointer(&self) -> *mut c_void {
-        self.storage.get().as_ptr().cast_mut().cast()
+        self.storage.get().as_slice().as_ptr().cast_mut().cast()
     }
 
     /// Returns a writable pointer after applying copy-on-write semantics.
@@ -74,7 +84,7 @@ impl<T: Clone + Copy> HostComplexBuffer<T> {
         if self.storage.is_shared() {
             record_host_copy(HostCopyReason::CopyOnWriteMutation, self.byte_len());
         }
-        self.storage.make_mut().as_mut_ptr().cast()
+        self.storage.make_mut().as_mut_slice().as_mut_ptr().cast()
     }
 }
 
@@ -106,7 +116,7 @@ impl<T: Clone + Copy> Deref for HostComplexBuffer<T> {
     type Target = [ComplexElement<T>];
 
     fn deref(&self) -> &Self::Target {
-        self.storage.get()
+        self.storage.get().as_slice()
     }
 }
 
@@ -115,7 +125,7 @@ impl<T: Clone + Copy> DerefMut for HostComplexBuffer<T> {
         if self.storage.is_shared() {
             record_host_copy(HostCopyReason::CopyOnWriteMutation, self.byte_len());
         }
-        self.storage.make_mut()
+        self.storage.make_mut().as_mut_slice()
     }
 }
 

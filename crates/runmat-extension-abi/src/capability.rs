@@ -11,6 +11,9 @@ impl RunMatExtensionCapabilities {
     pub const TRANSFER: Self = Self(1 << 4);
     pub const SERIALIZE: Self = Self(1 << 5);
     pub const ZERO_COPY: Self = Self(1 << 6);
+    /// The host provides generation-fenced `borrow_buffer_lease` and
+    /// `release_buffer` callbacks introduced in ABI 1.1.
+    pub const BUFFER_LEASES: Self = Self(1 << 7);
 
     pub const fn contains(self, required: Self) -> bool {
         self.0 & required.0 == required.0

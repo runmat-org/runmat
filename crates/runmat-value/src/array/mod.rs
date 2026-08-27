@@ -10,6 +10,7 @@ mod conversion;
 mod copy_accounting;
 mod dense;
 mod format;
+mod host_allocation;
 mod host_buffer;
 mod host_complex_buffer;
 mod host_index_buffer;
@@ -25,6 +26,7 @@ pub use complex::{ComplexElement, ComplexStorage, ComplexTensor, IntegerComplexS
 pub use copy_accounting::{host_copy_metrics, record_host_copy, HostCopyMetrics, HostCopyReason};
 pub use dense::Tensor;
 pub(crate) use format::{format_integer_complex_value, should_expand_nd_display, write_nd_pages};
+pub use host_allocation::{AdoptedHostAllocation, HostAllocationProvenance, HostAllocationRelease};
 pub use host_complex_buffer::HostComplexBuffer;
 pub use host_index_buffer::HostIndexBuffer;
 pub use host_logical_buffer::HostLogicalBuffer;

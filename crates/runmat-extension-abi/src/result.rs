@@ -11,6 +11,7 @@ pub enum RunMatStatusCode {
     Panic = 5,
     AbiMismatch = 6,
     StaleHandle = 7,
+    AffinityViolation = 8,
 }
 
 #[repr(C)]
