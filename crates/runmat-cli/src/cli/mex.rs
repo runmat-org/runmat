@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 #[derive(Args, Clone)]
 pub struct MexArgs {
-    /// C source files to compile and link into one MEX module
+    /// C, C++, or Fortran source files to compile and link into one MEX module
     #[arg(required = true)]
     pub sources: Vec<PathBuf>,
     /// Output module name without the platform MEX extension
@@ -12,7 +12,7 @@ pub struct MexArgs {
     /// Directory in which to write the compiled MEX module
     #[arg(long, default_value = ".")]
     pub out_dir: PathBuf,
-    /// C compiler driver (defaults to CC, cc, or cl.exe)
+    /// Primary language compiler driver (defaults through CC, CXX, FC/F77, or the platform driver)
     #[arg(long)]
     pub compiler: Option<PathBuf>,
     /// Use the R2017b separate-complex, large-array API (the default)
@@ -39,7 +39,7 @@ pub struct MexArgs {
         conflicts_with_all = ["r2017b", "r2018a", "large_array_dims"]
     )]
     pub compatible_array_dims: bool,
-    /// Add a C header search directory
+    /// Add a source include search directory
     #[arg(short = 'I', value_name = "DIRECTORY")]
     pub include_directories: Vec<PathBuf>,
     /// Add a preprocessor definition

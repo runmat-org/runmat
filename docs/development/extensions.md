@@ -36,6 +36,33 @@ The bundled Data API uses shared copy-on-write array controls over the same host
 
 The modern Data API and the C Matrix API are separate source interfaces. A C++ gateway should not use C Matrix functions to mutate an object managed by a Data API wrapper. The adapter itself uses the private host boundary to implement shared copies, allocator transfer, callbacks, and output publication while keeping those mechanics out of extension source.
 
+### Fortran MEX modules
+
+Passing a `.f`, `.for`, `.f77`, `.f90`, `.f95`, `.f03`, or `.f08` source selects the Fortran gateway. Uppercase suffixes are accepted as well. `FC` selects the compiler, `F77` is its fallback, and `FFLAGS` applies only to Fortran translation units. `CFLAGS` and `CXXFLAGS` remain scoped to C and C++ helper sources in a mixed build. RunMat currently qualifies GNU Fortran drivers whose executable name begins with `gfortran`; another driver is rejected before compilation rather than being given incompatible flags. Fixed- and free-form sources are both supported.
+
+Fortran gateways include `fintrf.h` and use the conventional `mexFunction` subroutine:
+
+```fortran
+#include "fintrf.h"
+      subroutine mexFunction(nlhs, plhs, nrhs, prhs)
+      implicit none
+      integer nlhs, nrhs
+      mwPointer plhs(*), prhs(*)
+      mwPointer mxCreateDoubleScalar
+
+      plhs(1) = mxCreateDoubleScalar(42.0d0)
+      return
+      end
+```
+
+The default remains the `-R2017b` separate-complex, large-array API. `-R2018a` selects interleaved complex storage, and the large- and compatible-array-dimension pins have the same meaning as they do for C. `mwPointer` follows the process pointer width under every pin. `mwSize` and `mwIndex` become 32-bit only under `-compatibleArrayDims`; RunMat range-checks those dimensions and converts sparse indices at the native-width host boundary.
+
+Fortran arrays use the same canonical copy-on-write host buffers, invocation leases, allocation registry, callbacks, diagnostics, workspace, lock, persistence, and teardown paths as C and C++. Passing an input through unchanged retains its compatible dense, interleaved floating-complex, or native-width sparse allocation. Copy routines such as `mxCopyPtrToReal8` perform the explicit copy their names request. Legacy separate-complex and 32-bit sparse-index pins remain explicit representation conversions.
+
+Cell, structure, and object element indices use the Fortran interface's one-based convention, including field numbers returned by `mxGetFieldNumber`. The raw CSC arrays returned by `mxGetIr` and `mxGetJc` remain zero-based storage: row indices start at zero, and the first column pointer is zero. This distinction lets existing Fortran gateways inspect sparse storage without changing its representation.
+
+RunMat compiles the gateway and any helper sources separately, compiles one bundled native-support translation unit, and links the result with the Fortran driver so the language runtime is retained. Extension authors do not need to compile or order RunMat's private support files. The generated manifest records Fortran as the source boundary and otherwise uses the same identity, API-pin, admission, package, and isolation contracts as C and C++ modules. Native Fortran modules are unavailable in browser/WASM sessions; the runtime reports that capability boundary before execution.
+
 Each successful build writes a canonical `.runmat.json` manifest beside the platform MEX module. The manifest binds the module name and bytes to its target triple, Matrix API selection, compiler family, embedded SDK revision, and RunMat MEX host ABI. Its content identity can be carried in executable and package interop manifests for capability admission and cache validation. Moving a module does not change its identity, while changing the module or its compatibility contract does.
 
 Loaded modules belong to the current session. A native library image may contain process-global state, so one RunMat session owns each canonical image in-process at a time. A concurrent session uses an exact manifest-admitted isolated extension host, which gives it independent module state instead of rebinding the first image's globals. Releasing the owning session makes that image eligible for another in-process owner. `clear mex`, `clear functions`, `clear all`, and named `clear` requests unload eligible modules and run registered `mexAtExit` handlers. A locked, currently executing, or asynchronously active module stays loaded. Native MEX loading is not available in a browser/WASM runtime; capability checks report that boundary before native execution.

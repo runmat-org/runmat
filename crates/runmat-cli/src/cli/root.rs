@@ -268,7 +268,7 @@ pub enum Commands {
         #[arg(short, long)]
         force: bool,
     },
-    /// Build C sources into a platform-native MEX module
+    /// Build C, C++, or Fortran sources into a platform-native MEX module
     Mex(MexArgs),
     /// Check a MATLAB script or FEA document without running it
     Check {

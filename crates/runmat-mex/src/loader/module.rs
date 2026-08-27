@@ -265,6 +265,7 @@ impl MexModule {
             match admit_artifact(path)?.source_language {
                 MexSourceLanguage::C => MxBoundaryInterface::CMatrix,
                 MexSourceLanguage::Cxx => MxBoundaryInterface::CxxData,
+                MexSourceLanguage::Fortran => MxBoundaryInterface::FortranMatrix,
             }
         } else {
             MxBoundaryInterface::CMatrix

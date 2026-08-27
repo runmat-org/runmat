@@ -22,7 +22,9 @@ pub use build::{
     MexSourceLanguage, MexTarget, MEX_ADAPTER_ID, MEX_ADAPTER_VERSION, MEX_ARTIFACT_SCHEMA_VERSION,
     MEX_EXTENSIONS,
 };
-pub use compatibility::{MexApiAvailability, MexApiSymbol, C_MATRIX_API, C_MEX_API};
+pub use compatibility::{
+    MexApiAvailability, MexApiSymbol, C_MATRIX_API, C_MEX_API, FORTRAN_MATRIX_API, FORTRAN_MEX_API,
+};
 pub use conversion::{value_from_mx, value_to_mx, MxConversionError, MxValueContext};
 pub(crate) use conversion::{value_from_mx_in_context, value_to_mx_for_interface_in_context};
 pub use host::{

@@ -18,4 +18,7 @@ pub use error::MexBuildError;
 pub use plan::{MexBuildPlan, MexBuildStep};
 pub use suffix::{mex_suffix, MEX_EXTENSIONS};
 pub use target::MexTarget;
-use toolchain::{compiler_family, default_c_compiler, default_cxx_compiler, CCompilerFamily};
+use toolchain::{
+    compiler_family, default_c_compiler, default_cxx_compiler, default_fortran_compiler,
+    is_supported_fortran_compiler, CCompilerFamily,
+};

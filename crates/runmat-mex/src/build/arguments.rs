@@ -6,13 +6,15 @@ use super::{MexApi, MexBuild, MexBuildOutput};
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum MexArgumentError {
-    #[error("mex: expected at least one C source file")]
+    #[error("mex: expected at least one C, C++, or Fortran source file")]
     MissingSource,
     #[error("mex: option {0} requires a value")]
     MissingOptionValue(String),
     #[error("mex: unsupported option {0}")]
     UnsupportedOption(String),
-    #[error("mex: -setup is not interactive; set CC/CXX or pass --compiler to select a toolchain")]
+    #[error(
+        "mex: -setup is not interactive; set CC/CXX/FC or pass --compiler to select a toolchain"
+    )]
     SetupUnsupported,
     #[error("mex: API options {first} and {second} cannot be combined")]
     ConflictingApiOptions { first: String, second: String },
@@ -29,11 +31,16 @@ impl MexBuildInvocation {
         let mut sources = Vec::new();
         let mut output_name = None;
         let mut output_directory = working_directory.to_path_buf();
-        let mut compiler = None;
+        let mut c_compiler = None;
+        let mut cxx_compiler = None;
+        let mut fortran_compiler = None;
         let mut api = None;
         let mut include_directories = Vec::new();
         let mut definitions = Vec::new();
         let mut compiler_arguments = Vec::new();
+        let mut c_compiler_arguments = Vec::new();
+        let mut cxx_compiler_arguments = Vec::new();
+        let mut fortran_compiler_arguments = Vec::new();
         let mut linker_arguments = Vec::new();
         let mut verbose = false;
         let mut index = 0;
@@ -76,16 +83,25 @@ impl MexBuildInvocation {
                     compiler_arguments.push(argument.clone());
                 }
                 _ if argument.starts_with("CC=") => {
-                    compiler = Some(PathBuf::from(&argument[3..]));
+                    c_compiler = Some(PathBuf::from(&argument[3..]));
                 }
                 _ if argument.starts_with("CXX=") => {
-                    compiler = Some(PathBuf::from(&argument[4..]));
+                    cxx_compiler = Some(PathBuf::from(&argument[4..]));
+                }
+                _ if argument.starts_with("FC=") => {
+                    fortran_compiler = Some(PathBuf::from(&argument[3..]));
+                }
+                _ if argument.starts_with("F77=") => {
+                    fortran_compiler = Some(PathBuf::from(&argument[4..]));
                 }
                 _ if argument.starts_with("CFLAGS=") => {
-                    compiler_arguments.extend(split_driver_arguments(&argument[7..]));
+                    c_compiler_arguments.extend(split_driver_arguments(&argument[7..]));
                 }
                 _ if argument.starts_with("CXXFLAGS=") => {
-                    compiler_arguments.extend(split_driver_arguments(&argument[9..]));
+                    cxx_compiler_arguments.extend(split_driver_arguments(&argument[9..]));
+                }
+                _ if argument.starts_with("FFLAGS=") => {
+                    fortran_compiler_arguments.extend(split_driver_arguments(&argument[7..]));
                 }
                 _ if argument.starts_with("LDFLAGS=") => {
                     linker_arguments.extend(split_driver_arguments(&argument[8..]));
@@ -109,8 +125,14 @@ impl MexBuildInvocation {
         if let Some(output_name) = output_name {
             build = build.output_name(output_name);
         }
-        if let Some(compiler) = compiler {
-            build = build.compiler(compiler);
+        if let Some(compiler) = c_compiler {
+            build = build.c_compiler(compiler);
+        }
+        if let Some(compiler) = cxx_compiler {
+            build = build.cxx_compiler(compiler);
+        }
+        if let Some(compiler) = fortran_compiler {
+            build = build.fortran_compiler(compiler);
         }
         for directory in include_directories {
             build = build.include_directory(directory);
@@ -120,6 +142,15 @@ impl MexBuildInvocation {
         }
         for argument in compiler_arguments {
             build = build.compiler_argument(argument);
+        }
+        for argument in c_compiler_arguments {
+            build = build.c_compiler_argument(argument);
+        }
+        for argument in cxx_compiler_arguments {
+            build = build.cxx_compiler_argument(argument);
+        }
+        for argument in fortran_compiler_arguments {
+            build = build.fortran_compiler_argument(argument);
         }
         for argument in linker_arguments {
             build = build.linker_argument(argument);
@@ -240,7 +271,61 @@ mod tests {
         assert_eq!(invocation.build.compiler, PathBuf::from("custom-cxx"));
         assert!(invocation
             .build
-            .compiler_arguments
+            .cxx_compiler_arguments
             .contains(&"-fno-exceptions".to_string()));
+    }
+
+    #[test]
+    fn fortran_sources_select_fc_flags_and_keep_the_default_api_pin() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = temporary.path().join("gateway.F90");
+        std::fs::write(&source, "subroutine mexFunction\nend").unwrap();
+        let arguments = vec![
+            "FC=custom-fortran".into(),
+            "FFLAGS=-g -fcheck=bounds".into(),
+            "gateway.F90".into(),
+        ];
+        let invocation = MexBuildInvocation::parse(&arguments, temporary.path()).unwrap();
+        assert_eq!(
+            invocation.build.language,
+            crate::build::MexSourceLanguage::Fortran
+        );
+        assert_eq!(invocation.build.api, MexApi::R2017b);
+        assert_eq!(invocation.build.compiler, PathBuf::from("custom-fortran"));
+        assert!(invocation
+            .build
+            .fortran_compiler_arguments
+            .contains(&"-fcheck=bounds".to_string()));
+    }
+
+    #[test]
+    fn mixed_source_selection_is_order_independent_and_uses_language_specific_flags() {
+        let temporary = tempfile::tempdir().unwrap();
+        for name in ["helper.c", "gateway.F90"] {
+            std::fs::write(temporary.path().join(name), "").unwrap();
+        }
+        for sources in [["helper.c", "gateway.F90"], ["gateway.F90", "helper.c"]] {
+            let arguments = vec![
+                "CC=custom-c".into(),
+                "FC=gfortran-14".into(),
+                "CFLAGS=-DC_ONLY".into(),
+                "FFLAGS=-DFORTRAN_ONLY".into(),
+                sources[0].into(),
+                sources[1].into(),
+            ];
+            let invocation = MexBuildInvocation::parse(&arguments, temporary.path()).unwrap();
+            assert_eq!(
+                invocation.build.language,
+                super::super::MexSourceLanguage::Fortran
+            );
+            assert_eq!(invocation.build.api, MexApi::R2017b);
+            assert_eq!(invocation.build.compiler, PathBuf::from("gfortran-14"));
+            assert_eq!(invocation.build.c_compiler, PathBuf::from("custom-c"));
+            assert_eq!(invocation.build.c_compiler_arguments, ["-DC_ONLY"]);
+            assert_eq!(
+                invocation.build.fortran_compiler_arguments,
+                ["-DFORTRAN_ONLY"]
+            );
+        }
     }
 }

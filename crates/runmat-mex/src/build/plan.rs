@@ -76,6 +76,19 @@ impl MexBuildPlan {
                 &sdk.support_source,
                 object_directory,
             ),
+            (CCompilerFamily::GnuLike, MexSourceLanguage::Fortran) => fortran_gnu_steps(
+                build,
+                &module,
+                &function_name,
+                &sdk.include_directory,
+                &sdk.support_source,
+                object_directory,
+            ),
+            (CCompilerFamily::Msvc, MexSourceLanguage::Fortran) => {
+                return Err(MexBuildError::UnsupportedFortranCompiler {
+                    compiler: build.compiler.clone(),
+                });
+            }
         };
         let arguments = flatten_step_arguments(&steps);
         Ok(Self {
@@ -134,6 +147,13 @@ fn validate(build: &MexBuild) -> Result<(), MexBuildError> {
     {
         return Err(MexBuildError::InvalidDefinition);
     }
+    if build.language == MexSourceLanguage::Fortran
+        && !super::is_supported_fortran_compiler(&build.compiler)
+    {
+        return Err(MexBuildError::UnsupportedFortranCompiler {
+            compiler: build.compiler.clone(),
+        });
+    }
     Ok(())
 }
 
@@ -157,6 +177,7 @@ fn gnu_arguments(
         match build.language {
             MexSourceLanguage::C => "-std=c11",
             MexSourceLanguage::Cxx => "-std=c++17",
+            MexSourceLanguage::Fortran => unreachable!("Fortran uses a multi-step build"),
         }
         .into(),
         "-O2".into(),
@@ -167,6 +188,7 @@ fn gnu_arguments(
     }
     push_definitions(build, function_name, "-D", &mut arguments);
     arguments.extend(build.compiler_arguments.iter().cloned());
+    arguments.extend(build.c_compiler_arguments.iter().cloned());
     if build.language == MexSourceLanguage::Cxx {
         for source in &build.sources {
             arguments.extend([
@@ -174,6 +196,7 @@ fn gnu_arguments(
                 match MexSourceLanguage::detect(source) {
                     MexSourceLanguage::C => "c",
                     MexSourceLanguage::Cxx => "c++",
+                    MexSourceLanguage::Fortran => "f95",
                 }
                 .into(),
                 source.display().to_string(),
@@ -208,6 +231,7 @@ fn msvc_arguments(
         match build.language {
             MexSourceLanguage::C => "/std:c11",
             MexSourceLanguage::Cxx => "/std:c++17",
+            MexSourceLanguage::Fortran => unreachable!("Fortran does not use MSVC"),
         }
         .into(),
         format!("/I{}", sdk_include.display()),
@@ -222,11 +246,13 @@ fn msvc_arguments(
     }
     push_definitions(build, function_name, "/D", &mut arguments);
     arguments.extend(build.compiler_arguments.iter().cloned());
+    arguments.extend(build.c_compiler_arguments.iter().cloned());
     if build.language == MexSourceLanguage::Cxx {
         arguments.extend(build.sources.iter().map(|path| {
             let mode = match MexSourceLanguage::detect(path) {
                 MexSourceLanguage::C => "/TC",
                 MexSourceLanguage::Cxx => "/TP",
+                MexSourceLanguage::Fortran => unreachable!("Fortran does not use MSVC"),
             };
             format!("{mode}{}", path.display())
         }));
@@ -261,11 +287,13 @@ fn cxx_gnu_steps(
             match language {
                 MexSourceLanguage::C => "c",
                 MexSourceLanguage::Cxx => "c++",
+                MexSourceLanguage::Fortran => "f95",
             }
             .into(),
             match language {
                 MexSourceLanguage::C => "-std=c11",
                 MexSourceLanguage::Cxx => "-std=c++17",
+                MexSourceLanguage::Fortran => "-std=legacy",
             }
             .into(),
             format!("-I{}", sdk_include.display()),
@@ -274,7 +302,18 @@ fn cxx_gnu_steps(
             arguments.push(format!("-I{}", include.display()));
         }
         push_definitions(build, function_name, "-D", &mut arguments);
-        arguments.extend(build.compiler_arguments.iter().cloned());
+        if language == MexSourceLanguage::Cxx {
+            arguments.extend(build.compiler_arguments.iter().cloned());
+        }
+        match language {
+            MexSourceLanguage::C => {
+                arguments.extend(build.c_compiler_arguments.iter().cloned());
+            }
+            MexSourceLanguage::Cxx => {
+                arguments.extend(build.cxx_compiler_arguments.iter().cloned());
+            }
+            MexSourceLanguage::Fortran => unreachable!("C++ builds do not compile Fortran"),
+        }
         arguments.extend([
             "-c".into(),
             source.display().to_string(),
@@ -282,7 +321,11 @@ fn cxx_gnu_steps(
             object.display().to_string(),
         ]);
         steps.push(MexBuildStep {
-            compiler: build.compiler.clone(),
+            compiler: match language {
+                MexSourceLanguage::C => build.c_compiler.clone(),
+                MexSourceLanguage::Cxx => build.compiler.clone(),
+                MexSourceLanguage::Fortran => unreachable!("C++ builds do not compile Fortran"),
+            },
             arguments,
         });
     }
@@ -297,6 +340,7 @@ fn cxx_gnu_steps(
         format!("-I{}", sdk_include.display()),
     ];
     push_definitions(build, function_name, "-D", &mut support_arguments);
+    support_arguments.extend(build.c_compiler_arguments.iter().cloned());
     support_arguments.extend([
         "-c".into(),
         support_source.display().to_string(),
@@ -304,7 +348,7 @@ fn cxx_gnu_steps(
         support_object.display().to_string(),
     ]);
     steps.push(MexBuildStep {
-        compiler: build.compiler.clone(),
+        compiler: build.c_compiler.clone(),
         arguments: support_arguments,
     });
 
@@ -348,6 +392,7 @@ fn cxx_msvc_steps(
             match language {
                 MexSourceLanguage::C => "/std:c11",
                 MexSourceLanguage::Cxx => "/std:c++17",
+                MexSourceLanguage::Fortran => unreachable!("Fortran does not use MSVC"),
             }
             .into(),
             format!("/I{}", sdk_include.display()),
@@ -356,18 +401,34 @@ fn cxx_msvc_steps(
             arguments.push(format!("/I{}", include.display()));
         }
         push_definitions(build, function_name, "/D", &mut arguments);
-        arguments.extend(build.compiler_arguments.iter().cloned());
+        if language == MexSourceLanguage::Cxx {
+            arguments.extend(build.compiler_arguments.iter().cloned());
+        }
+        match language {
+            MexSourceLanguage::C => {
+                arguments.extend(build.c_compiler_arguments.iter().cloned());
+            }
+            MexSourceLanguage::Cxx => {
+                arguments.extend(build.cxx_compiler_arguments.iter().cloned());
+            }
+            MexSourceLanguage::Fortran => unreachable!("C++ builds do not compile Fortran"),
+        }
         arguments.push(format!(
             "{}{}",
             match language {
                 MexSourceLanguage::C => "/TC",
                 MexSourceLanguage::Cxx => "/TP",
+                MexSourceLanguage::Fortran => unreachable!("Fortran does not use MSVC"),
             },
             source.display()
         ));
         arguments.push(format!("/Fo{}", object.display()));
         steps.push(MexBuildStep {
-            compiler: build.compiler.clone(),
+            compiler: match language {
+                MexSourceLanguage::C => build.c_compiler.clone(),
+                MexSourceLanguage::Cxx => build.compiler.clone(),
+                MexSourceLanguage::Fortran => unreachable!("C++ builds do not compile Fortran"),
+            },
             arguments,
         });
     }
@@ -381,12 +442,13 @@ fn cxx_msvc_steps(
         format!("/I{}", sdk_include.display()),
     ];
     push_definitions(build, function_name, "/D", &mut support_arguments);
+    support_arguments.extend(build.c_compiler_arguments.iter().cloned());
     support_arguments.extend([
         format!("/TC{}", support_source.display()),
         format!("/Fo{}", support_object.display()),
     ]);
     steps.push(MexBuildStep {
-        compiler: build.compiler.clone(),
+        compiler: build.c_compiler.clone(),
         arguments: support_arguments,
     });
 
@@ -405,6 +467,144 @@ fn cxx_msvc_steps(
         arguments: link_arguments,
     });
     steps
+}
+
+fn fortran_gnu_steps(
+    build: &MexBuild,
+    module: &Path,
+    function_name: &str,
+    sdk_include: &Path,
+    support_source: &Path,
+    object_directory: &Path,
+) -> Vec<MexBuildStep> {
+    let mut steps = Vec::new();
+    let c_compiler = build.c_compiler.clone();
+    let cxx_compiler = build.cxx_compiler.clone();
+    let mut objects = Vec::new();
+    for (index, source) in build.sources.iter().enumerate() {
+        let language = MexSourceLanguage::detect(source);
+        let object = object_path(object_directory, index, source, "o");
+        let (compiler, mut arguments) = match language {
+            MexSourceLanguage::Fortran => (
+                build.compiler.clone(),
+                vec![
+                    "-fPIC".into(),
+                    "-O2".into(),
+                    "-cpp".into(),
+                    "-std=legacy".into(),
+                    if fortran_uses_fixed_form(source) {
+                        "-ffixed-line-length-none".into()
+                    } else {
+                        "-ffree-line-length-none".into()
+                    },
+                    format!("-I{}", sdk_include.display()),
+                ],
+            ),
+            MexSourceLanguage::C => (
+                c_compiler.clone(),
+                vec![
+                    "-fPIC".into(),
+                    "-O2".into(),
+                    "-std=c11".into(),
+                    format!("-I{}", sdk_include.display()),
+                ],
+            ),
+            MexSourceLanguage::Cxx => (
+                cxx_compiler.clone(),
+                vec![
+                    "-fPIC".into(),
+                    "-O2".into(),
+                    "-std=c++17".into(),
+                    format!("-I{}", sdk_include.display()),
+                ],
+            ),
+        };
+        for include in &build.include_directories {
+            arguments.push(format!("-I{}", include.display()));
+        }
+        push_definitions(build, function_name, "-D", &mut arguments);
+        match language {
+            MexSourceLanguage::Fortran => {
+                arguments.extend(build.compiler_arguments.iter().cloned());
+                arguments.extend(build.fortran_compiler_arguments.iter().cloned());
+            }
+            MexSourceLanguage::C => {
+                arguments.extend(build.c_compiler_arguments.iter().cloned());
+            }
+            MexSourceLanguage::Cxx => {
+                arguments.extend(build.cxx_compiler_arguments.iter().cloned());
+            }
+        }
+        arguments.extend([
+            "-c".into(),
+            source.display().to_string(),
+            "-o".into(),
+            object.display().to_string(),
+        ]);
+        objects.push(object);
+        steps.push(MexBuildStep {
+            compiler,
+            arguments,
+        });
+    }
+
+    let support_object = object_path(object_directory, build.sources.len(), support_source, "o");
+    let mut support_arguments = vec![
+        "-fPIC".into(),
+        "-O2".into(),
+        "-std=c11".into(),
+        format!("-I{}", sdk_include.display()),
+        "-DRUNMAT_MEX_FORTRAN=1".into(),
+    ];
+    push_definitions(build, function_name, "-D", &mut support_arguments);
+    support_arguments.extend(build.c_compiler_arguments.iter().cloned());
+    support_arguments.extend([
+        "-c".into(),
+        support_source.display().to_string(),
+        "-o".into(),
+        support_object.display().to_string(),
+    ]);
+    objects.push(support_object);
+    steps.push(MexBuildStep {
+        compiler: c_compiler,
+        arguments: support_arguments,
+    });
+
+    let mut link_arguments = vec![if cfg!(target_os = "macos") {
+        "-dynamiclib".into()
+    } else {
+        "-shared".into()
+    }];
+    link_arguments.extend(objects.iter().map(|path| path.display().to_string()));
+    if build
+        .sources
+        .iter()
+        .any(|source| MexSourceLanguage::detect(source) == MexSourceLanguage::Cxx)
+    {
+        link_arguments.push(if cfg!(target_os = "macos") {
+            "-lc++".into()
+        } else {
+            "-lstdc++".into()
+        });
+    }
+    link_arguments.extend(build.linker_arguments.iter().cloned());
+    link_arguments.extend(["-o".into(), module.display().to_string()]);
+    steps.push(MexBuildStep {
+        compiler: build.compiler.clone(),
+        arguments: link_arguments,
+    });
+    steps
+}
+
+fn fortran_uses_fixed_form(source: &Path) -> bool {
+    matches!(
+        source
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some("f" | "for" | "f77")
+    )
 }
 
 fn object_path(directory: &Path, index: usize, source: &Path, extension: &str) -> PathBuf {
@@ -452,12 +652,25 @@ fn push_definitions(
     arguments.push(format!(
         "{prefix}RUNMAT_MEX_FUNCTION_NAME=\"{function_name}\""
     ));
+    if build.language == MexSourceLanguage::Fortran {
+        let gateway = fortran_gateway_name(function_name);
+        arguments.push(format!("{prefix}RUNMAT_MEX_FORTRAN_GATEWAY={gateway}"));
+    }
     arguments.extend(
         build
             .definitions
             .iter()
             .map(|definition| format!("{prefix}{definition}")),
     );
+}
+
+fn fortran_gateway_name(function_name: &str) -> String {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in function_name.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("rmf_{hash:016x}")
 }
 
 fn c_identifier(name: &str) -> String {
@@ -476,6 +689,53 @@ fn c_identifier(name: &str) -> String {
 mod tests {
     use super::*;
     use crate::MexTarget;
+
+    #[test]
+    fn fortran_plan_compiles_language_and_support_units_then_links_with_fortran() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = temporary.path().join("demo.F");
+        std::fs::write(
+            &source,
+            "#include \"fintrf.h\"\n      subroutine mexFunction(n,p,m,q)\n      end",
+        )
+        .unwrap();
+        let build = MexBuild::new(&source, temporary.path()).compiler("gfortran");
+        let plan = build.plan().unwrap();
+        assert_eq!(build.language, MexSourceLanguage::Fortran);
+        assert_eq!(plan.steps.len(), 3);
+        assert_eq!(plan.steps[0].compiler, PathBuf::from("gfortran"));
+        assert!(plan.steps[0]
+            .arguments
+            .contains(&"-ffixed-line-length-none".to_string()));
+        assert!(plan.steps[0]
+            .arguments
+            .iter()
+            .any(|argument| argument.contains("RUNMAT_MEX_FORTRAN_GATEWAY=rmf_")));
+        assert!(plan.steps[1]
+            .arguments
+            .contains(&"-DRUNMAT_MEX_FORTRAN=1".to_string()));
+        assert_eq!(plan.steps[2].compiler, PathBuf::from("gfortran"));
+        assert!(plan.steps[2]
+            .arguments
+            .iter()
+            .any(|argument| argument.ends_with("runmat_mex_support.o")));
+    }
+
+    #[test]
+    fn fortran_plan_rejects_an_unqualified_driver_before_launch() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = temporary.path().join("demo.F90");
+        std::fs::write(&source, "subroutine mexFunction\nend").unwrap();
+        let error = MexBuild::new(&source, temporary.path())
+            .compiler("ifort")
+            .plan()
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            MexBuildError::UnsupportedFortranCompiler { compiler }
+                if compiler == PathBuf::from("ifort")
+        ));
+    }
 
     #[test]
     fn msvc_plan_uses_native_driver_spelling() {

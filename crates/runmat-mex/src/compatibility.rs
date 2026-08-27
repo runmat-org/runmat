@@ -1,4 +1,4 @@
-//! Source-compatibility catalog for the C Matrix and C MEX APIs.
+//! Source-compatibility catalog for the C and Fortran Matrix and MEX APIs.
 //!
 //! This catalog is the adapter's public support contract. It intentionally
 //! excludes the C++ Data API, engine API, MAT-file API, and undocumented
@@ -80,6 +80,56 @@ pub const C_MEX_API: &[MexApiSymbol] = api_symbols! {
     ],
 };
 
+pub const FORTRAN_MATRIX_API: &[MexApiSymbol] = api_symbols! {
+    R2017b => [
+        "mxCreateDoubleMatrix", "mxCreateDoubleScalar", "mxCreateNumericMatrix",
+        "mxCreateNumericArray", "mxCreateLogicalMatrix", "mxCreateLogicalArray",
+        "mxCreateLogicalScalar", "mxCreateCharArray", "mxCreateString",
+        "mxCreateCellMatrix", "mxCreateCellArray", "mxCreateStructMatrix",
+        "mxCreateStructArray", "mxCreateSparse", "mxCreateSparseLogicalMatrix",
+        "mxDuplicateArray", "mxDestroyArray", "mxGetData", "mxSetData",
+        "mxGetPr", "mxSetPr", "mxGetPi", "mxSetPi", "mxGetLogicals",
+        "mxGetChars", "mxGetDimensions", "mxGetM", "mxGetN",
+        "mxGetNumberOfElements", "mxGetNumberOfDimensions", "mxGetElementSize",
+        "mxGetNzmax", "mxGetIr", "mxGetJc", "mxSetIr", "mxSetJc",
+        "mxSetM", "mxSetN", "mxSetNzmax", "mxGetScalar", "mxGetClassID",
+        "mxIsNumeric", "mxIsDouble", "mxIsSingle", "mxIsInt8", "mxIsUint8",
+        "mxIsInt16", "mxIsUint16", "mxIsInt32", "mxIsUint32", "mxIsInt64",
+        "mxIsUint64", "mxIsLogical", "mxIsLogicalScalar",
+        "mxIsLogicalScalarTrue", "mxIsChar", "mxIsCell", "mxIsStruct",
+        "mxIsSparse", "mxIsComplex", "mxIsEmpty", "mxGetCell", "mxSetCell",
+        "mxGetNumberOfFields", "mxGetFieldNumber", "mxAddField", "mxRemoveField",
+        "mxGetField", "mxSetField", "mxGetFieldByNumber", "mxSetFieldByNumber",
+        "mxIsClass", "mxSetClassName", "mxGetProperty", "mxSetProperty",
+        "mxGetString", "mxMalloc", "mxCalloc", "mxRealloc", "mxFree",
+        "mxCopyPtrToReal8", "mxCopyReal8ToPtr", "mxCopyPtrToReal4",
+        "mxCopyReal4ToPtr", "mxCopyPtrToInteger1", "mxCopyInteger1ToPtr",
+        "mxCopyPtrToInteger2", "mxCopyInteger2ToPtr", "mxCopyPtrToInteger4",
+        "mxCopyInteger4ToPtr", "mxCopyPtrToInteger8", "mxCopyInteger8ToPtr",
+        "mxCopyPtrToComplex16", "mxCopyComplex16ToPtr", "mxCopyPtrToComplex8",
+        "mxCopyComplex8ToPtr"
+    ],
+    R2018a => [
+        "mxGetDoubles", "mxSetDoubles", "mxGetSingles", "mxSetSingles",
+        "mxGetInt8s", "mxSetInt8s", "mxGetUint8s", "mxSetUint8s",
+        "mxGetInt16s", "mxSetInt16s", "mxGetUint16s", "mxSetUint16s",
+        "mxGetInt32s", "mxSetInt32s", "mxGetUint32s", "mxSetUint32s",
+        "mxGetInt64s", "mxSetInt64s", "mxGetUint64s", "mxSetUint64s",
+        "mxGetComplexDoubles", "mxSetComplexDoubles", "mxGetComplexSingles",
+        "mxSetComplexSingles"
+    ],
+};
+
+pub const FORTRAN_MEX_API: &[MexApiSymbol] = api_symbols! {
+    R2017b => [
+        "mexFunction", "mexAtExit", "mexCallMATLAB", "mexEvalString",
+        "mexGetVariable", "mexPutVariable", "mexPrintf", "mexErrMsgTxt",
+        "mexErrMsgIdAndTxt", "mexWarnMsgTxt", "mexWarnMsgIdAndTxt",
+        "mexIsLocked", "mexLock", "mexUnlock", "mexMakeArrayPersistent",
+        "mexMakeMemoryPersistent", "mexIsGlobal"
+    ],
+};
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
@@ -133,5 +183,48 @@ mod tests {
             symbol.name == "mxGetComplexUint64s"
                 && symbol.availability == MexApiAvailability::R2018a
         }));
+    }
+
+    #[test]
+    fn fortran_catalog_is_backed_by_the_bundled_header_and_abi_unit() {
+        let header = include_str!("../include/fintrf.h");
+        let implementation = include_str!("../native/fortran_api.inc").to_ascii_lowercase();
+        let mut names = BTreeSet::new();
+        for symbol in FORTRAN_MATRIX_API.iter().chain(FORTRAN_MEX_API) {
+            assert!(
+                names.insert(symbol.name),
+                "duplicate Fortran symbol {}",
+                symbol.name
+            );
+            assert!(
+                header.contains(symbol.name)
+                    || implementation.contains(&symbol.name.to_ascii_lowercase()),
+                "bundled Fortran interface does not expose {}",
+                symbol.name
+            );
+            if symbol.name != "mexFunction" {
+                let generated_copy_family = symbol
+                    .name
+                    .strip_prefix("mxCopyPtrTo")
+                    .or_else(|| {
+                        symbol
+                            .name
+                            .strip_prefix("mxCopy")
+                            .and_then(|name| name.strip_suffix("ToPtr"))
+                    })
+                    .is_some_and(|element| {
+                        implementation.contains(&format!(
+                            "runmat_fortran_copy_pair({},",
+                            element.to_ascii_lowercase()
+                        ))
+                    });
+                assert!(
+                    implementation.contains(&symbol.name.to_ascii_lowercase())
+                        || generated_copy_family,
+                    "Fortran ABI unit does not implement {}",
+                    symbol.name
+                );
+            }
+        }
     }
 }
