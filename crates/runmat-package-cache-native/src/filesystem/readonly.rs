@@ -57,6 +57,7 @@ fn set_owner_writable(path: &Path, metadata: &std::fs::Metadata) -> Result<(), N
 }
 
 #[cfg(not(unix))]
+#[allow(clippy::permissions_set_readonly_false)] // Clears the Windows read-only attribute; it does not broaden ACLs.
 fn set_owner_writable(path: &Path, metadata: &std::fs::Metadata) -> Result<(), NativeCacheError> {
     let mut permissions = metadata.permissions();
     permissions.set_readonly(false);

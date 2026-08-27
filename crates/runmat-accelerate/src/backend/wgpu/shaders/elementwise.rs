@@ -205,16 +205,16 @@ return value;
 }
 
 fn inline_erfcinv_body(precision: NumericPrecision) -> String {
-    let ty = match precision {
-        NumericPrecision::F64 => "f64",
-        NumericPrecision::F32 => "f32",
+    let (ty, positive_infinity, negative_infinity, nan) = match precision {
+        NumericPrecision::F64 => ("f64", "pos_inf_f64", "neg_inf_f64", "nan_f64"),
+        NumericPrecision::F32 => ("f32", "pos_inf_f32", "neg_inf_f32", "nan_f32"),
     };
     format!(
         r#"
 if a != a {{ return a; }}
-if a < {ty}(0.0) || a > {ty}(2.0) {{ return {ty}(0.0) / {ty}(0.0); }}
-if a == {ty}(0.0) {{ return {ty}(1.0) / {ty}(0.0); }}
-if a == {ty}(2.0) {{ return -{ty}(1.0) / {ty}(0.0); }}
+if a < {ty}(0.0) || a > {ty}(2.0) {{ return {nan}(); }}
+if a == {ty}(0.0) {{ return {positive_infinity}(); }}
+if a == {ty}(2.0) {{ return {negative_infinity}(); }}
 if a == {ty}(1.0) {{ return {ty}(0.0); }}
 let p = a * {ty}(0.5);
 var normal: {ty};
@@ -247,8 +247,16 @@ pub(crate) fn real_unary_shader(op: UnaryOpCode, precision: NumericPrecision) ->
         .map(|offset| constants_start + offset)
         .expect("unary WGSL constants must precede expm1");
     let constants = &template[constants_start..constants_end];
-    let helper_names = if matches!(op, UnaryOpCode::Gammaln | UnaryOpCode::Erfcinv) {
-        &[][..]
+    let helper_names: &[&str] = if matches!(op, UnaryOpCode::Gammaln | UnaryOpCode::Erfcinv) {
+        match (op, precision) {
+            (UnaryOpCode::Erfcinv, NumericPrecision::F64) => {
+                &["pos_inf_f64", "neg_inf_f64", "nan_f64"]
+            }
+            (UnaryOpCode::Erfcinv, NumericPrecision::F32) => {
+                &["pos_inf_f32", "neg_inf_f32", "nan_f32"]
+            }
+            _ => &[],
+        }
     } else {
         unary_helper_names(op, precision)
     };
@@ -333,6 +341,18 @@ mod real_unary_tests {
         assert!(!shader.contains("fn lanczos_"));
         assert!(!shader.contains("fn erf_real"));
         assert!(!shader.contains("fn factorial_real"));
+    }
+
+    #[test]
+    fn erfcinv_shader_uses_portable_non_finite_value_helpers() {
+        for precision in [NumericPrecision::F32, NumericPrecision::F64] {
+            let shader = real_unary_shader(UnaryOpCode::Erfcinv, precision);
+            assert!(shader.contains("return nan_"));
+            assert!(shader.contains("return pos_inf_"));
+            assert!(shader.contains("return neg_inf_"));
+            assert!(!shader.contains("(0.0) /"));
+            assert!(!shader.contains("(1.0) /"));
+        }
     }
 }
 
