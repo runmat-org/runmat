@@ -13,19 +13,20 @@ async fn detached_file_backed_child_survives_its_host_handle() {
     };
     #[cfg(windows)]
     let mut spec = {
-        let mut spec = HostCommand::new("cmd.exe");
+        let mut spec = HostCommand::new("powershell.exe");
         spec.arguments = vec![
-            "/D".into(),
-            "/S".into(),
-            "/C".into(),
-            "ping -n 2 127.0.0.1 >NUL && <NUL set /p =detached".into(),
+            "-NoLogo".into(),
+            "-NoProfile".into(),
+            "-NonInteractive".into(),
+            "-Command".into(),
+            "Start-Sleep -Milliseconds 100; [Console]::Out.Write('detached')".into(),
         ];
         spec
     };
     spec.lifetime = ChildLifetime::Detached;
     spec.stdio = StdioPolicy::Files {
         stdout: stdout.clone(),
-        stderr,
+        stderr: stderr.clone(),
     };
     let child = spec.spawn().await.unwrap();
     let process_id = child.id().unwrap();
@@ -39,5 +40,6 @@ async fn detached_file_backed_child_survives_its_host_handle() {
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
     let _ = terminate_process_tree(process_id).await;
-    panic!("detached child did not finish after its host handle was dropped");
+    let stderr = std::fs::read_to_string(stderr).unwrap_or_default();
+    panic!("detached child did not finish after its host handle was dropped; stderr: {stderr:?}");
 }
