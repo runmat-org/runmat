@@ -139,16 +139,8 @@ impl WgpuProvider {
         } else {
             4
         };
-        let mut batch_tile = if plane >= 8192 {
-            batches.min(16)
-        } else {
-            batches.min(32)
-        };
-        if batches <= 4 {
-            batch_tile = batches;
-        }
         let tuning = ImageNormalizeTuning {
-            batch_tile: batch_tile.max(1),
+            batch_tile: 1,
             values_per_thread,
             lane_count: lane,
             spatial_tile,

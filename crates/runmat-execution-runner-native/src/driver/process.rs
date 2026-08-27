@@ -77,19 +77,28 @@ async fn run_process(
         .map_err(|error| error.to_string())?;
     let mut last_progress_sequence = 0;
     let response = loop {
-        let payload = tokio::select! {
-            response = read_payload(&mut reader, limits) => {
-                response.map_err(|error| {
-                    let stderr = stderr.text();
-                    if stderr.is_empty() { error.to_string() } else { format!("{error}; worker stderr: {stderr}") }
-                })?
-            }
-            _ = tokio::time::sleep(Duration::from_millis(10)) => {
-                if completion.cancelled.load(Ordering::Acquire) {
-                    let _ = child.terminate_tree().await;
-                    return Err("execution was cancelled".into());
+        // A framed read may span several pipe reads. Keep the same future
+        // alive while polling cancellation: recreating `read_payload` after a
+        // timer tick would discard bytes already consumed by a partial read
+        // and permanently desynchronize the length-prefixed stream.
+        let payload = {
+            let read = read_payload(&mut reader, limits);
+            tokio::pin!(read);
+            loop {
+                tokio::select! {
+                    response = &mut read => {
+                        break response.map_err(|error| {
+                            let stderr = stderr.text();
+                            if stderr.is_empty() { error.to_string() } else { format!("{error}; worker stderr: {stderr}") }
+                        })?;
+                    }
+                    _ = tokio::time::sleep(Duration::from_millis(10)) => {
+                        if completion.cancelled.load(Ordering::Acquire) {
+                            let _ = child.terminate_tree().await;
+                            return Err("execution was cancelled".into());
+                        }
+                    }
                 }
-                continue;
             }
         };
         if let Ok(message) = serde_json::from_slice::<WorkerProcessMessage>(&payload) {

@@ -275,7 +275,10 @@ impl WorkgroupConfig {
                 break;
             }
         }
-        tuning.batch_tile = tuning.batch_tile.clamp(1, batches.max(1));
+        // Image normalization assigns one batch to each workgroup. Keeping this
+        // invariant in the sanitizer also upgrades persisted autotune entries
+        // created by the former cross-batch vectorized kernel.
+        tuning.batch_tile = 1;
         if tuning != original {
             debug!(
                 "sanitize_image_normalize_tuning batches={} lane {} -> {} spatial {} -> {} values/thread {} -> {} batch_tile {} -> {} (max_invocations={}, limits=({}, {}, {}))",
