@@ -1,13 +1,14 @@
 use crate::{IntegerStorage, NumericDType, NumericScalar, NumericStorage};
 use std::ffi::c_void;
 
+use super::host_allocation::HostData;
 use super::host_buffer::HostBuffer;
-use super::{record_host_copy, HostCopyReason};
+use super::{record_host_copy, AdoptedHostAllocation, HostCopyReason};
 
 #[derive(Debug, Clone, PartialEq)]
 enum HostNumericStorage {
-    F64(Vec<f64>),
-    F32(Vec<f32>),
+    F64(HostData<f64>),
+    F32(HostData<f32>),
     Integer(IntegerStorage),
 }
 
@@ -26,8 +27,8 @@ pub struct HostNumericBuffer {
 impl HostNumericBuffer {
     pub fn from_numeric_storage(storage: NumericStorage) -> Self {
         let storage = match storage {
-            NumericStorage::F64(values) => HostNumericStorage::F64(values),
-            NumericStorage::F32(values) => HostNumericStorage::F32(values),
+            NumericStorage::F64(values) => HostNumericStorage::F64(HostData::from_vec(values)),
+            NumericStorage::F32(values) => HostNumericStorage::F32(HostData::from_vec(values)),
             storage @ (NumericStorage::I8(_)
             | NumericStorage::I16(_)
             | NumericStorage::I32(_)
@@ -46,6 +47,38 @@ impl HostNumericBuffer {
         }
     }
 
+    pub fn try_adopt(
+        allocation: AdoptedHostAllocation,
+        dtype: NumericDType,
+        len: usize,
+    ) -> Result<Self, (AdoptedHostAllocation, String)> {
+        macro_rules! adopt {
+            ($variant:ident, $type:ty) => {
+                HostData::<$type>::try_adopt(allocation, len).map(HostNumericStorage::$variant)
+            };
+        }
+        let storage = match dtype {
+            NumericDType::F64 => adopt!(F64, f64),
+            NumericDType::F32 => adopt!(F32, f32),
+            NumericDType::I8
+            | NumericDType::I16
+            | NumericDType::I32
+            | NumericDType::I64
+            | NumericDType::U8
+            | NumericDType::U16
+            | NumericDType::U32
+            | NumericDType::U64 => {
+                return Err((
+                    allocation,
+                    "adopted integer storage requires the typed integer-view migration".into(),
+                ));
+            }
+        }?;
+        Ok(Self {
+            storage: HostBuffer::new(storage),
+        })
+    }
+
     pub fn numeric_dtype(&self) -> NumericDType {
         match self.storage.get() {
             HostNumericStorage::F64(_) => NumericDType::F64,
@@ -56,8 +89,8 @@ impl HostNumericBuffer {
 
     pub fn len(&self) -> usize {
         match self.storage.get() {
-            HostNumericStorage::F64(values) => values.len(),
-            HostNumericStorage::F32(values) => values.len(),
+            HostNumericStorage::F64(values) => values.as_slice().len(),
+            HostNumericStorage::F32(values) => values.as_slice().len(),
             HostNumericStorage::Integer(storage) => storage.len(),
         }
     }
@@ -73,21 +106,21 @@ impl HostNumericBuffer {
     pub fn integer_storage(&self) -> Option<&IntegerStorage> {
         match self.storage.get() {
             HostNumericStorage::Integer(storage) => Some(storage),
-            HostNumericStorage::F64(_) | HostNumericStorage::F32(_) => None,
+            _ => None,
         }
     }
 
     pub fn as_f64_slice(&self) -> Option<&[f64]> {
         match self.storage.get() {
-            HostNumericStorage::F64(values) => Some(values),
-            HostNumericStorage::F32(_) | HostNumericStorage::Integer(_) => None,
+            HostNumericStorage::F64(values) => Some(values.as_slice()),
+            _ => None,
         }
     }
 
     pub fn as_f32_slice(&self) -> Option<&[f32]> {
         match self.storage.get() {
-            HostNumericStorage::F32(values) => Some(values),
-            HostNumericStorage::F64(_) | HostNumericStorage::Integer(_) => None,
+            HostNumericStorage::F32(values) => Some(values.as_slice()),
+            _ => None,
         }
     }
 
@@ -107,7 +140,7 @@ impl HostNumericBuffer {
             self.len().saturating_mul(std::mem::size_of::<f64>()),
         );
         match self.storage.get() {
-            HostNumericStorage::F64(values) => values.clone(),
+            HostNumericStorage::F64(values) => values.to_vec(),
             HostNumericStorage::F32(values) => values.iter().copied().map(f64::from).collect(),
             HostNumericStorage::Integer(storage) => storage.to_f64_vec(),
         }
@@ -179,7 +212,7 @@ impl HostNumericBuffer {
     }
 
     pub fn resize_zeroed(&mut self, len: usize) {
-        if self.storage.is_shared() {
+        if self.storage.is_shared() || storage_is_adopted(self.storage.get()) {
             record_host_copy(
                 HostCopyReason::CopyOnWriteMutation,
                 self.checked_byte_len()
@@ -187,8 +220,8 @@ impl HostNumericBuffer {
             );
         }
         match self.storage.make_mut() {
-            HostNumericStorage::F64(values) => values.resize(len, 0.0),
-            HostNumericStorage::F32(values) => values.resize(len, 0.0),
+            HostNumericStorage::F64(values) => values.ensure_rust_vec().resize(len, 0.0),
+            HostNumericStorage::F32(values) => values.ensure_rust_vec().resize(len, 0.0),
             HostNumericStorage::Integer(storage) => resize_integer_zeroed(storage, len),
         }
     }
@@ -249,7 +282,7 @@ impl HostNumericBuffer {
     }
 
     pub fn into_numeric_storage(self) -> NumericStorage {
-        if self.storage.is_shared() {
+        if self.storage.is_shared() || storage_is_adopted(self.storage.get()) {
             record_host_copy(
                 HostCopyReason::OwnedMaterialization,
                 self.checked_byte_len()
@@ -257,10 +290,18 @@ impl HostNumericBuffer {
             );
         }
         match self.storage.into_inner() {
-            HostNumericStorage::F64(values) => NumericStorage::F64(values),
-            HostNumericStorage::F32(values) => NumericStorage::F32(values),
+            HostNumericStorage::F64(values) => NumericStorage::F64(values.into_vec()),
+            HostNumericStorage::F32(values) => NumericStorage::F32(values.into_vec()),
             HostNumericStorage::Integer(storage) => NumericStorage::from_integer_storage(storage),
         }
+    }
+}
+
+fn storage_is_adopted(storage: &HostNumericStorage) -> bool {
+    match storage {
+        HostNumericStorage::F64(values) => values.is_adopted(),
+        HostNumericStorage::F32(values) => values.is_adopted(),
+        HostNumericStorage::Integer(_) => false,
     }
 }
 

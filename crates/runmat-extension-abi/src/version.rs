@@ -5,7 +5,7 @@ pub struct RunMatAbiVersion {
     pub minor: u16,
 }
 
-pub const RUNMAT_EXTENSION_ABI_VERSION: RunMatAbiVersion = RunMatAbiVersion { major: 1, minor: 0 };
+pub const RUNMAT_EXTENSION_ABI_VERSION: RunMatAbiVersion = RunMatAbiVersion { major: 1, minor: 1 };
 
 impl RunMatAbiVersion {
     pub const fn is_compatible_with(self, required: Self) -> bool {

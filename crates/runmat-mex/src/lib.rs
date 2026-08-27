@@ -1,8 +1,9 @@
 //! MATLAB-compatible C Matrix and MEX boundary.
 //!
 //! `runmat-mex` owns compatibility objects and adapter lifecycle. It does not
-//! define a second RunMat value model: every call copies between the canonical
-//! [`runmat_value::Value`] representation and a call-owned [`MxArray`] arena.
+//! define a second RunMat value model. Compatible in-process arrays retain the
+//! canonical [`runmat_value::Value`] host allocation through invocation leases;
+//! incompatible layouts cross through explicit, accounted conversions.
 
 pub mod arena;
 pub mod build;

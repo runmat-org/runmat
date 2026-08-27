@@ -7253,6 +7253,7 @@ dependencies = [
  "runmat-async",
  "runmat-builtins",
  "runmat-execution",
+ "runmat-extension-abi",
  "runmat-filesystem",
  "runmat-gc",
  "runmat-gc-api",

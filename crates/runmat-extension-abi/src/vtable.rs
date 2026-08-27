@@ -1,9 +1,10 @@
 use core::ffi::c_void;
 
 use crate::{
-    RunMatAbiVersion, RunMatBufferView, RunMatCancellationToken, RunMatExtensionCall,
-    RunMatExtensionCapabilities, RunMatExtensionInstance, RunMatExtensionResult, RunMatStatusCode,
-    RunMatUtf8View, RunMatValueHandle, RunMatValueKind,
+    RunMatAbiVersion, RunMatBufferLease, RunMatBufferLeaseHandle, RunMatBufferView,
+    RunMatCancellationToken, RunMatExtensionCall, RunMatExtensionCapabilities,
+    RunMatExtensionInstance, RunMatExtensionResult, RunMatStatusCode, RunMatUtf8View,
+    RunMatValueHandle, RunMatValueKind,
 };
 
 pub type RunMatRetainValueFn =
@@ -20,6 +21,13 @@ pub type RunMatBorrowBufferFn = unsafe extern "C" fn(
     value: RunMatValueHandle,
     view: *mut RunMatBufferView,
 ) -> RunMatStatusCode;
+pub type RunMatBorrowBufferLeaseFn = unsafe extern "C" fn(
+    context: *mut c_void,
+    value: RunMatValueHandle,
+    lease: *mut RunMatBufferLease,
+) -> RunMatStatusCode;
+pub type RunMatReleaseBufferFn =
+    unsafe extern "C" fn(context: *mut c_void, lease: RunMatBufferLeaseHandle) -> RunMatStatusCode;
 pub type RunMatInvokeCallbackFn = unsafe extern "C" fn(
     context: *mut c_void,
     name: RunMatUtf8View,
@@ -44,6 +52,8 @@ pub struct RunMatHostVTable {
     pub borrow_buffer: Option<RunMatBorrowBufferFn>,
     pub invoke_callback: Option<RunMatInvokeCallbackFn>,
     pub is_cancelled: Option<RunMatIsCancelledFn>,
+    pub borrow_buffer_lease: Option<RunMatBorrowBufferLeaseFn>,
+    pub release_buffer: Option<RunMatReleaseBufferFn>,
 }
 
 pub type RunMatExtensionInitializeFn = unsafe extern "C" fn(

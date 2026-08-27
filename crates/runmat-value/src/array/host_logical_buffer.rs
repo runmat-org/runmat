@@ -1,13 +1,14 @@
 use std::ffi::c_void;
 use std::ops::{Deref, DerefMut};
 
+use super::host_allocation::HostData;
 use super::host_buffer::HostBuffer;
-use super::{record_host_copy, HostCopyReason};
+use super::{record_host_copy, AdoptedHostAllocation, HostCopyReason};
 
 /// Pointer-stable copy-on-write storage for dense logical arrays.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HostLogicalBuffer {
-    storage: HostBuffer<Vec<u8>>,
+    storage: HostBuffer<HostData<u8>>,
 }
 
 impl HostLogicalBuffer {
@@ -16,16 +17,39 @@ impl HostLogicalBuffer {
             .iter_mut()
             .for_each(|value| *value = u8::from(*value != 0));
         Self {
-            storage: HostBuffer::new(values),
+            storage: HostBuffer::new(HostData::from_vec(values)),
         }
     }
 
+    pub fn try_adopt(
+        allocation: AdoptedHostAllocation,
+        len: usize,
+    ) -> Result<Self, (AdoptedHostAllocation, String)> {
+        if allocation.provenance().byte_length < len {
+            return Err((
+                allocation,
+                "logical allocation is smaller than the requested payload".into(),
+            ));
+        }
+        // SAFETY: provenance proves at least `len` readable bytes.
+        let input = unsafe { std::slice::from_raw_parts(allocation.pointer().as_ptr(), len) };
+        if input.iter().any(|value| *value > 1) {
+            return Err((
+                allocation,
+                "logical allocation contains noncanonical bytes".into(),
+            ));
+        }
+        HostData::try_adopt(allocation, len).map(|storage| Self {
+            storage: HostBuffer::new(storage),
+        })
+    }
+
     pub fn len(&self) -> usize {
-        self.storage.get().len()
+        self.storage.get().as_slice().len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.storage.get().is_empty()
+        self.storage.get().as_slice().is_empty()
     }
 
     pub fn shares_allocation_with(&self, other: &Self) -> bool {
@@ -40,10 +64,13 @@ impl HostLogicalBuffer {
     }
 
     pub fn resize(&mut self, len: usize, value: u8) {
-        if self.storage.is_shared() {
+        if self.storage.is_shared() || self.storage.get().is_adopted() {
             record_host_copy(HostCopyReason::CopyOnWriteMutation, self.len());
         }
-        self.storage.make_mut().resize(len, u8::from(value != 0));
+        self.storage
+            .make_mut()
+            .ensure_rust_vec()
+            .resize(len, u8::from(value != 0));
     }
 
     pub fn as_slice(&self) -> &[u8] {
@@ -54,17 +81,17 @@ impl HostLogicalBuffer {
     where
         R: std::ops::RangeBounds<usize>,
     {
-        if self.storage.is_shared() {
+        if self.storage.is_shared() || self.storage.get().is_adopted() {
             record_host_copy(HostCopyReason::CopyOnWriteMutation, self.len());
         }
-        self.storage.make_mut().drain(range)
+        self.storage.make_mut().ensure_rust_vec().drain(range)
     }
 
     pub fn into_vec(self) -> Vec<u8> {
-        if self.storage.is_shared() {
+        if self.storage.is_shared() || self.storage.get().is_adopted() {
             record_host_copy(HostCopyReason::OwnedMaterialization, self.len());
         }
-        self.storage.into_inner()
+        self.storage.into_inner().into_vec()
     }
 
     /// # Safety
@@ -72,7 +99,7 @@ impl HostLogicalBuffer {
     /// The pointer is invocation-scoped and logically read-only. No Rust
     /// reference into the allocation may be used during foreign execution.
     pub unsafe fn foreign_data_pointer(&self) -> *mut c_void {
-        self.storage.get().as_ptr().cast_mut().cast()
+        self.storage.get().as_slice().as_ptr().cast_mut().cast()
     }
 
     /// # Safety
@@ -83,7 +110,7 @@ impl HostLogicalBuffer {
         if self.storage.is_shared() {
             record_host_copy(HostCopyReason::CopyOnWriteMutation, self.len());
         }
-        self.storage.make_mut().as_mut_ptr().cast()
+        self.storage.make_mut().as_mut_slice().as_mut_ptr().cast()
     }
 }
 
@@ -121,7 +148,7 @@ impl Deref for HostLogicalBuffer {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
-        self.storage.get()
+        self.storage.get().as_slice()
     }
 }
 
@@ -130,7 +157,7 @@ impl DerefMut for HostLogicalBuffer {
         if self.storage.is_shared() {
             record_host_copy(HostCopyReason::CopyOnWriteMutation, self.len());
         }
-        self.storage.make_mut()
+        self.storage.make_mut().as_mut_slice()
     }
 }
 

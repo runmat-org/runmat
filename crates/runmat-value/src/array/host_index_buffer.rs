@@ -1,8 +1,9 @@
 use std::ffi::c_void;
 use std::ops::{Deref, DerefMut};
 
+use super::host_allocation::HostData;
 use super::host_buffer::HostBuffer;
-use super::{record_host_copy, HostCopyReason};
+use super::{record_host_copy, AdoptedHostAllocation, HostCopyReason};
 
 /// Pointer-stable copy-on-write storage for native-width host indices.
 ///
@@ -11,22 +12,31 @@ use super::{record_host_copy, HostCopyReason};
 /// different index width must perform and account for an explicit conversion.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HostIndexBuffer {
-    storage: HostBuffer<Vec<usize>>,
+    storage: HostBuffer<HostData<usize>>,
 }
 
 impl HostIndexBuffer {
     pub fn new(values: Vec<usize>) -> Self {
         Self {
-            storage: HostBuffer::new(values),
+            storage: HostBuffer::new(HostData::from_vec(values)),
         }
     }
 
+    pub fn try_adopt(
+        allocation: AdoptedHostAllocation,
+        len: usize,
+    ) -> Result<Self, (AdoptedHostAllocation, String)> {
+        HostData::try_adopt(allocation, len).map(|storage| Self {
+            storage: HostBuffer::new(storage),
+        })
+    }
+
     pub fn len(&self) -> usize {
-        self.storage.get().len()
+        self.storage.get().as_slice().len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.storage.get().is_empty()
+        self.storage.get().as_slice().is_empty()
     }
 
     pub fn shares_allocation_with(&self, other: &Self) -> bool {
@@ -39,15 +49,17 @@ impl HostIndexBuffer {
     }
 
     pub fn resize(&mut self, len: usize, value: usize) {
-        self.detach_for_write();
-        self.storage.make_mut().resize(len, value);
+        if self.storage.is_shared() || self.storage.get().is_adopted() {
+            record_host_copy(HostCopyReason::CopyOnWriteMutation, self.byte_len());
+        }
+        self.storage.make_mut().ensure_rust_vec().resize(len, value);
     }
 
     pub fn into_vec(self) -> Vec<usize> {
-        if self.storage.is_shared() {
+        if self.storage.is_shared() || self.storage.get().is_adopted() {
             record_host_copy(HostCopyReason::OwnedMaterialization, self.byte_len());
         }
-        self.storage.into_inner()
+        self.storage.into_inner().into_vec()
     }
 
     /// # Safety
@@ -55,7 +67,7 @@ impl HostIndexBuffer {
     /// The pointer is invocation-scoped and logically read-only. No Rust
     /// reference into the allocation may be used during foreign execution.
     pub unsafe fn foreign_data_pointer(&self) -> *mut c_void {
-        self.storage.get().as_ptr().cast_mut().cast()
+        self.storage.get().as_slice().as_ptr().cast_mut().cast()
     }
 
     /// # Safety
@@ -64,7 +76,7 @@ impl HostIndexBuffer {
     /// reference may be used while foreign code writes through it.
     pub unsafe fn foreign_data_pointer_mut(&mut self) -> *mut c_void {
         self.detach_for_write();
-        self.storage.make_mut().as_mut_ptr().cast()
+        self.storage.make_mut().as_mut_slice().as_mut_ptr().cast()
     }
 
     fn byte_len(&self) -> usize {
@@ -104,7 +116,7 @@ impl PartialEq<[usize]> for HostIndexBuffer {
 
 impl AsRef<[usize]> for HostIndexBuffer {
     fn as_ref(&self) -> &[usize] {
-        self.storage.get()
+        self.storage.get().as_slice()
     }
 }
 
@@ -112,14 +124,14 @@ impl Deref for HostIndexBuffer {
     type Target = [usize];
 
     fn deref(&self) -> &Self::Target {
-        self.storage.get()
+        self.storage.get().as_slice()
     }
 }
 
 impl DerefMut for HostIndexBuffer {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.detach_for_write();
-        self.storage.make_mut()
+        self.storage.make_mut().as_mut_slice()
     }
 }
 

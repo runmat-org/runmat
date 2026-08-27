@@ -10,13 +10,22 @@ extern "C" {
 #endif
 
 #define RUNMAT_EXTENSION_ABI_MAJOR 1
-#define RUNMAT_EXTENSION_ABI_MINOR 0
+#define RUNMAT_EXTENSION_ABI_MINOR 1
 #define RUNMAT_EXTENSION_QUERY_SYMBOL runmat_extension_query_v1
 
 typedef struct { uint16_t major; uint16_t minor; } RunMatAbiVersion;
 typedef struct { uint64_t bits; } RunMatExtensionCapabilities;
+#define RUNMAT_EXTENSION_CAP_INVOKE (UINT64_C(1) << 0)
+#define RUNMAT_EXTENSION_CAP_READ_VALUE (UINT64_C(1) << 1)
+#define RUNMAT_EXTENSION_CAP_WRITE_VALUE (UINT64_C(1) << 2)
+#define RUNMAT_EXTENSION_CAP_CALLBACK (UINT64_C(1) << 3)
+#define RUNMAT_EXTENSION_CAP_TRANSFER (UINT64_C(1) << 4)
+#define RUNMAT_EXTENSION_CAP_SERIALIZE (UINT64_C(1) << 5)
+#define RUNMAT_EXTENSION_CAP_ZERO_COPY (UINT64_C(1) << 6)
+#define RUNMAT_EXTENSION_CAP_BUFFER_LEASES (UINT64_C(1) << 7)
 typedef struct { uint64_t host; uint64_t resource; uint64_t generation; } RunMatForeignHandle;
 typedef struct { uint64_t resource; uint64_t generation; } RunMatValueHandle;
+typedef struct { uint64_t resource; uint64_t generation; } RunMatBufferLeaseHandle;
 typedef struct { const uint8_t *data; size_t length; } RunMatUtf8View;
 typedef struct { RunMatUtf8View identifier; RunMatUtf8View message; } RunMatErrorView;
 
@@ -28,7 +37,8 @@ typedef enum {
   RUNMAT_STATUS_FAILED = 4,
   RUNMAT_STATUS_PANIC = 5,
   RUNMAT_STATUS_ABI_MISMATCH = 6,
-  RUNMAT_STATUS_STALE_HANDLE = 7
+  RUNMAT_STATUS_STALE_HANDLE = 7,
+  RUNMAT_STATUS_AFFINITY_VIOLATION = 8
 } RunMatStatusCode;
 
 typedef enum {
@@ -74,6 +84,11 @@ typedef struct {
 } RunMatBufferView;
 
 typedef struct {
+  RunMatBufferView view;
+  RunMatBufferLeaseHandle handle;
+} RunMatBufferLease;
+
+typedef struct {
   void *context;
   const RunMatValueHandle *arguments;
   size_t argument_count;
@@ -100,6 +115,8 @@ struct RunMatHostVTable {
   RunMatStatusCode (*borrow_buffer)(void *, RunMatValueHandle, RunMatBufferView *);
   RunMatStatusCode (*invoke_callback)(void *, RunMatUtf8View, const RunMatExtensionCall *, RunMatExtensionResult *);
   bool (*is_cancelled)(void *, const void *);
+  RunMatStatusCode (*borrow_buffer_lease)(void *, RunMatValueHandle, RunMatBufferLease *);
+  RunMatStatusCode (*release_buffer)(void *, RunMatBufferLeaseHandle);
 };
 
 typedef struct RunMatExtensionVTable RunMatExtensionVTable;

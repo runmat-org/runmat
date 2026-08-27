@@ -31,6 +31,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
     plhs[2] = mxCreateNumericMatrix(1, 1, mxUINT64_CLASS, mxREAL);
     mxGetUint64s(plhs[2])[0] = (mxUint64)(uintptr_t)mxGetData(prhs[0]);
 }
+
 "#,
     )
     .unwrap();
@@ -63,6 +64,82 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
     };
     assert_eq!(created_address.try_to_u64(), Some(output_address));
     assert_eq!(observed_input_address.try_to_u64(), Some(input_address));
+}
+
+#[test]
+fn mxsetdata_adopts_a_proven_compatible_host_allocation() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("adopted_allocation.c");
+    fs::write(
+        &source,
+        r#"
+#include "mex.h"
+#include <stdint.h>
+
+void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
+    (void)nrhs; (void)prhs;
+    if (nlhs != 2) mexErrMsgTxt("expected two outputs");
+    mxArray *output = mxCreateDoubleMatrix(1, 2, mxREAL);
+    double *owned = (double *)mxMalloc(2 * sizeof(double));
+    if (owned == NULL) mexErrMsgTxt("allocation failed");
+    owned[0] = 17.0;
+    owned[1] = -9.0;
+    plhs[1] = mxCreateNumericMatrix(1, 1, mxUINT64_CLASS, mxREAL);
+    mxGetUint64s(plhs[1])[0] = (mxUint64)(uintptr_t)owned;
+    mxSetDoubles(output, owned);
+    if (mxGetDoubles(output) != owned) mexErrMsgTxt("allocation was not adopted");
+    plhs[0] = output;
+}
+"#,
+    )
+    .unwrap();
+
+    let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+    let module = MexModule::load(&artifact.module).unwrap();
+    let result = module.invoke(&[], 2, module.api_mode()).unwrap();
+    let Value::Tensor(output) = &result.outputs[0] else {
+        panic!("adopted output must remain a tensor");
+    };
+    let Value::Int(observed_address) = &result.outputs[1] else {
+        panic!("allocation address must remain uint64");
+    };
+    // SAFETY: only pointer identity is observed while `output` owns the block.
+    let output_address = unsafe { output.host_buffer().foreign_data_pointer() } as usize as u64;
+    assert_eq!(observed_address.try_to_u64(), Some(output_address));
+    assert_eq!(output.materialize_f64(), vec![17.0, -9.0]);
+}
+
+#[test]
+fn mxsetdata_normalizes_registered_logical_storage_during_conversion() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("logical_allocation.c");
+    fs::write(
+        &source,
+        r#"
+#include "mex.h"
+
+void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
+    (void)nrhs; (void)prhs;
+    if (nlhs != 1) mexErrMsgTxt("expected one output");
+    mxArray *output = mxCreateLogicalMatrix(1, 2);
+    mxLogical *owned = (mxLogical *)mxMalloc(2 * sizeof(mxLogical));
+    if (owned == NULL) mexErrMsgTxt("allocation failed");
+    owned[0] = 0;
+    owned[1] = 7;
+    mxSetData(output, owned);
+    plhs[0] = output;
+}
+"#,
+    )
+    .unwrap();
+
+    let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+    let module = MexModule::load(&artifact.module).unwrap();
+    let result = module.invoke(&[], 1, module.api_mode()).unwrap();
+    let Value::LogicalArray(output) = &result.outputs[0] else {
+        panic!("logical output must remain an array");
+    };
+    assert_eq!(output.data, vec![0, 1]);
 }
 
 #[test]
@@ -153,9 +230,12 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         mexErrMsgTxt("expected one sparse input and seven outputs");
     }
     plhs[0] = mxCreateSparse(2, 2, 2, mxREAL);
-    double *values = mxGetDoubles(plhs[0]);
-    mwIndex *rows = mxGetIr(plhs[0]);
-    mwIndex *columns = mxGetJc(plhs[0]);
+    double *values = (double *)mxMalloc(2 * sizeof(double));
+    mwIndex *rows = (mwIndex *)mxMalloc(2 * sizeof(mwIndex));
+    mwIndex *columns = (mwIndex *)mxMalloc(3 * sizeof(mwIndex));
+    if (values == NULL || rows == NULL || columns == NULL) {
+        mexErrMsgTxt("allocation failed");
+    }
     values[0] = 5.0;
     values[1] = -2.0;
     rows[0] = 0;
@@ -163,6 +243,9 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
     columns[0] = 0;
     columns[1] = 1;
     columns[2] = 2;
+    mxSetDoubles(plhs[0], values);
+    mxSetIr(plhs[0], rows);
+    mxSetJc(plhs[0], columns);
     plhs[1] = address_of(mxGetData(prhs[0]));
     plhs[2] = address_of(mxGetIr(prhs[0]));
     plhs[3] = address_of(mxGetJc(prhs[0]));

@@ -14,13 +14,6 @@ static jmp_buf *runmat_error_target = NULL;
 static mexExitFcn runmat_exit_function = NULL;
 static unsigned int runmat_lock_count = 0;
 
-typedef struct RunMatMexAllocation {
-    void *pointer;
-    int persistent;
-    struct RunMatMexAllocation *next;
-} RunMatMexAllocation;
-
-static RunMatMexAllocation *runmat_allocations = NULL;
 static void runmat_raise(const char *identifier, const char *message);
 
 #if defined(RUNMAT_MX_COMPATIBLE_ARRAY_DIMS)
@@ -123,6 +116,7 @@ static void runmat_drop_sparse_index_proxy(mxArray *array, int columns) {
         RunMatSparseIndexProxy *proxy = *slot;
         if (proxy->array == array && proxy->columns == columns) {
             *slot = proxy->next;
+            (void)runmat_host->free_memory(runmat_host->host, proxy->indices);
             free(proxy);
         } else {
             slot = &proxy->next;
@@ -136,8 +130,8 @@ static int runmat_cleanup_sparse_index_proxies(int flush) {
         RunMatSparseIndexProxy *proxy = runmat_sparse_index_proxies;
         runmat_sparse_index_proxies = proxy->next;
         if (flush) {
-            size_t *indices =
-                (size_t *)malloc(proxy->count * sizeof(size_t));
+            size_t *indices = (size_t *)runmat_host->allocate_memory(
+                runmat_host->host, proxy->count * sizeof(size_t), 0);
             if (indices == NULL && proxy->count != 0) {
                 status = 1;
             } else {
@@ -155,9 +149,12 @@ static int runmat_cleanup_sparse_index_proxies(int flush) {
                                  : runmat_host->replace_sparse_row_indices(
                                        runmat_host->host, proxy->array, indices);
                 }
-                free(indices);
+                if (status != 0) {
+                    (void)runmat_host->free_memory(runmat_host->host, indices);
+                }
             }
         }
+        (void)runmat_host->free_memory(runmat_host->host, proxy->indices);
         free(proxy);
     }
     return status;
@@ -211,47 +208,6 @@ static char *runmat_format(const char *format, va_list arguments) {
     return message;
 }
 
-static int runmat_track_allocation(void *pointer) {
-    if (pointer == NULL) {
-        return 0;
-    }
-    RunMatMexAllocation *allocation =
-        (RunMatMexAllocation *)malloc(sizeof(RunMatMexAllocation));
-    if (allocation == NULL) {
-        free(pointer);
-        return 0;
-    }
-    allocation->pointer = pointer;
-    allocation->persistent = 0;
-    allocation->next = runmat_allocations;
-    runmat_allocations = allocation;
-    return 1;
-}
-
-static RunMatMexAllocation *runmat_find_allocation(void *pointer) {
-    for (RunMatMexAllocation *allocation = runmat_allocations;
-         allocation != NULL; allocation = allocation->next) {
-        if (allocation->pointer == pointer) {
-            return allocation;
-        }
-    }
-    return NULL;
-}
-
-static void runmat_cleanup_memory(int include_persistent) {
-    RunMatMexAllocation **slot = &runmat_allocations;
-    while (*slot != NULL) {
-        RunMatMexAllocation *allocation = *slot;
-        if (include_persistent || !allocation->persistent) {
-            *slot = allocation->next;
-            free(allocation->pointer);
-            free(allocation);
-        } else {
-            slot = &allocation->next;
-        }
-    }
-}
-
 RUNMAT_MEX_HOST_EXPORT int runmatMexBindHost(const RunMatMexHostApiV1 *api) {
     if (api == NULL) {
         runmat_host = NULL;
@@ -276,7 +232,6 @@ RUNMAT_MEX_HOST_EXPORT int runmatMexInvoke(int nlhs, mxArray *plhs[], int nrhs,
     if (setjmp(target) != 0) {
         runmat_error_target = NULL;
         (void)runmat_cleanup_sparse_index_proxies(0);
-        runmat_cleanup_memory(0);
         return 1;
     }
     mexFunction(nlhs, plhs, nrhs, prhs);
@@ -286,7 +241,6 @@ RUNMAT_MEX_HOST_EXPORT int runmatMexInvoke(int nlhs, mxArray *plhs[], int nrhs,
                                "could not synchronize 32-bit sparse indices");
     }
     int failed = runmat_host->has_error(runmat_host->host) ? 1 : 0;
-    runmat_cleanup_memory(0);
     return failed;
 }
 
@@ -315,7 +269,6 @@ RUNMAT_MEX_HOST_EXPORT void runmatMexUnload(void) {
     }
     runmat_lock_count = 0;
     (void)runmat_cleanup_sparse_index_proxies(0);
-    runmat_cleanup_memory(1);
     runmat_error_target = NULL;
     runmat_host = NULL;
 }
@@ -343,12 +296,11 @@ void mexMakeArrayPersistent(mxArray *array) {
 }
 
 void mexMakeMemoryPersistent(void *memory) {
-    RunMatMexAllocation *allocation = runmat_find_allocation(memory);
-    if (allocation == NULL) {
+    runmat_require_host();
+    if (runmat_host->make_memory_persistent(runmat_host->host, memory) != 0) {
         runmat_raise("RunMat:MEX:Persistence",
                      "memory was not allocated by mxMalloc, mxCalloc, or mxRealloc");
     }
-    allocation->persistent = 1;
 }
 
 const char *mexFunctionName(void) { return RUNMAT_MEX_FUNCTION_NAME; }
@@ -710,7 +662,6 @@ void mxSetData(mxArray *array, void *data) {
     if (runmat_host->replace_data(runmat_host->host, array, data) != 0) {
         runmat_raise("RunMat:MEX:Data", "could not replace mxArray data");
     }
-    mxFree(data);
 }
 
 double *mxGetPr(const mxArray *array) {
@@ -734,7 +685,6 @@ void mxSetPi(mxArray *array, double *data) {
         runmat_raise("RunMat:MEX:Data",
                      "could not replace imaginary mxArray data");
     }
-    mxFree(data);
 }
 
 void *mxGetImagData(const mxArray *array) { return mxGetPi(array); }
@@ -743,7 +693,6 @@ void mxSetImagData(mxArray *array, void *data) {
     if (runmat_host->replace_imaginary_data(runmat_host->host, array, data) != 0) {
         runmat_raise("RunMat:MEX:Data", "could not replace imaginary mxArray data");
     }
-    mxFree(data);
 }
 
 #define RUNMAT_TYPED_GETTER(name, type, class_id)                              \
@@ -1037,14 +986,15 @@ void mxSetIr(mxArray *array, mwIndex *ir) {
 #if defined(RUNMAT_MX_COMPATIBLE_ARRAY_DIMS)
     runmat_drop_sparse_index_proxy(array, 0);
     size_t count = runmat_host->sparse_nzmax(runmat_host->host, array);
-    size_t *indices = (size_t *)malloc(count * sizeof(size_t));
+    size_t *indices = (size_t *)runmat_host->allocate_memory(
+        runmat_host->host, count * sizeof(size_t), 0);
     if (indices == NULL && count != 0) {
         runmat_raise("RunMat:MEX:Allocation", "could not replace sparse row indices");
     }
     for (size_t index = 0; index < count; ++index) indices[index] = (size_t)ir[index];
     int status = runmat_host->replace_sparse_row_indices(runmat_host->host, array,
                                                          indices);
-    free(indices);
+    (void)runmat_host->free_memory(runmat_host->host, ir);
 #else
     int status = runmat_host->replace_sparse_row_indices(runmat_host->host, array,
                                                          ir);
@@ -1052,7 +1002,6 @@ void mxSetIr(mxArray *array, mwIndex *ir) {
     if (status != 0) {
         runmat_raise("RunMat:MEX:Sparse", "could not replace sparse row indices");
     }
-    mxFree(ir);
 }
 
 void mxSetJc(mxArray *array, mwIndex *jc) {
@@ -1062,14 +1011,15 @@ void mxSetJc(mxArray *array, mwIndex *jc) {
     const size_t *dims = runmat_host->dimensions(runmat_host->host, array);
     size_t ndim = runmat_host->number_of_dimensions(runmat_host->host, array);
     size_t count = (ndim < 2 ? 1 : dims[1]) + 1;
-    size_t *indices = (size_t *)malloc(count * sizeof(size_t));
+    size_t *indices = (size_t *)runmat_host->allocate_memory(
+        runmat_host->host, count * sizeof(size_t), 0);
     if (indices == NULL && count != 0) {
         runmat_raise("RunMat:MEX:Allocation", "could not replace sparse column pointers");
     }
     for (size_t index = 0; index < count; ++index) indices[index] = (size_t)jc[index];
     int status = runmat_host->replace_sparse_column_pointers(
         runmat_host->host, array, indices);
-    free(indices);
+    (void)runmat_host->free_memory(runmat_host->host, jc);
 #else
     int status = runmat_host->replace_sparse_column_pointers(runmat_host->host,
                                                               array, jc);
@@ -1078,7 +1028,6 @@ void mxSetJc(mxArray *array, mwIndex *jc) {
         runmat_raise("RunMat:MEX:Sparse",
                      "could not replace sparse column pointers");
     }
-    mxFree(jc);
 }
 
 double mxGetScalar(const mxArray *array) {
@@ -1346,52 +1295,32 @@ int mexSet(double handle, const char *property, mxArray *value) {
 }
 
 void *mxMalloc(mwSize size) {
-    void *pointer = malloc(size == 0 ? 1 : size);
-    if (!runmat_track_allocation(pointer)) {
-        return NULL;
-    }
-    return pointer;
+    runmat_require_host();
+    return runmat_host->allocate_memory(runmat_host->host, (size_t)size, 0);
 }
 
 void *mxCalloc(mwSize count, mwSize size) {
     if (size != 0 && count > SIZE_MAX / size) {
         return NULL;
     }
-    void *pointer = calloc(count == 0 ? 1 : count, size == 0 ? 1 : size);
-    if (!runmat_track_allocation(pointer)) {
-        return NULL;
-    }
-    return pointer;
+    runmat_require_host();
+    return runmat_host->allocate_memory(runmat_host->host,
+                                        (size_t)count * (size_t)size, 1);
 }
 
 void *mxRealloc(void *pointer, mwSize size) {
     if (pointer == NULL) {
         return mxMalloc(size);
     }
-    RunMatMexAllocation *allocation = runmat_find_allocation(pointer);
-    if (allocation == NULL) {
-        return NULL;
-    }
-    void *replacement = realloc(pointer, size == 0 ? 1 : size);
-    if (replacement != NULL) {
-        allocation->pointer = replacement;
-    }
-    return replacement;
+    runmat_require_host();
+    return runmat_host->reallocate_memory(runmat_host->host, pointer,
+                                          (size_t)size);
 }
 
 void mxFree(void *pointer) {
     if (pointer == NULL) {
         return;
     }
-    RunMatMexAllocation **slot = &runmat_allocations;
-    while (*slot != NULL) {
-        RunMatMexAllocation *allocation = *slot;
-        if (allocation->pointer == pointer) {
-            *slot = allocation->next;
-            free(allocation->pointer);
-            free(allocation);
-            return;
-        }
-        slot = &allocation->next;
-    }
+    runmat_require_host();
+    (void)runmat_host->free_memory(runmat_host->host, pointer);
 }

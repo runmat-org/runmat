@@ -1,6 +1,7 @@
 mod callback;
 mod conversion;
 mod error;
+mod extension;
 mod handle;
 #[cfg(not(target_arch = "wasm32"))]
 mod java;
@@ -16,6 +17,7 @@ mod telemetry;
 pub use callback::*;
 pub use conversion::*;
 pub use error::*;
+pub use extension::*;
 pub use handle::*;
 #[cfg(not(target_arch = "wasm32"))]
 pub use java::*;

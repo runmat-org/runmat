@@ -12,7 +12,8 @@ mod value;
 
 pub use aggregate::{CellArray, StructValue};
 pub use array::{
-    host_copy_metrics, record_host_copy, CharArray, ComplexElement, ComplexStorage, ComplexTensor,
+    host_copy_metrics, record_host_copy, AdoptedHostAllocation, CharArray, ComplexElement,
+    ComplexStorage, ComplexTensor, HostAllocationProvenance, HostAllocationRelease,
     HostComplexBuffer, HostCopyMetrics, HostCopyReason, HostIndexBuffer, HostLogicalBuffer,
     HostNumericBuffer, IntegerComplexStorage, LogicalArray, SparseTensor, StringArray,
     SymbolicArray, Tensor,

@@ -8,7 +8,7 @@ pub enum HostCopyReason {
     ComplexLayoutConversion = 2,
     CharacterEncoding = 3,
     SparseLayoutConversion = 4,
-    ForeignAllocatorMismatch = 5,
+    ForeignStorageConversion = 5,
     ProviderReadback = 6,
     ProcessSnapshot = 7,
 }
