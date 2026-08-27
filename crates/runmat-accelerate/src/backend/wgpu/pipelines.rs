@@ -1436,8 +1436,6 @@ impl WgpuPipelines {
                 storage_read_entry(0),
                 storage_read_write_entry(1),
                 uniform_entry(2),
-                storage_read_entry(3),
-                storage_read_write_entry(4),
             ],
             image_norm_source,
         );

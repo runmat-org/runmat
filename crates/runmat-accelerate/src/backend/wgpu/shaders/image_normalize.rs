@@ -12,10 +12,6 @@ struct TensorScalar {
     data: array<f64>,
 };
 
-struct TensorVec {
-    data: array<vec4<f64>>,
-};
-
 struct Params {
     batch_count: u32,
     height: u32,
@@ -36,8 +32,6 @@ struct Params {
 @group(0) @binding(0) var<storage, read> input_tensor: TensorScalar;
 @group(0) @binding(1) var<storage, read_write> output_tensor: TensorScalar;
 @group(0) @binding(2) var<uniform> params: Params;
-@group(0) @binding(3) var<storage, read> input_tensor_vec: TensorVec;
-@group(0) @binding(4) var<storage, read_write> output_tensor_vec: TensorVec;
 
 var<workgroup> partial_sum: array<vec4<f64>, PARTIAL_STRIDE>;
 var<workgroup> partial_sum_sq: array<vec4<f64>, PARTIAL_STRIDE>;
@@ -50,10 +44,6 @@ fn has_flag(mask: u32) -> bool {
 
 fn plane_offset(idx: u32) -> u32 {
     return idx * params.batch_stride;
-}
-
-fn can_use_vec_path(base: u32, count: u32) -> bool {
-    return count == BATCH_VEC_WIDTH && (base & (BATCH_VEC_WIDTH - 1u)) == 0u;
 }
 
 fn group_count(active_batches: u32) -> u32 {
@@ -85,10 +75,6 @@ fn load_batch_group(base: u32, count: u32) -> vec4<f64> {
     if count == 0u {
         return vec4<f64>(0.0);
     }
-    if can_use_vec_path(base, count) {
-        let vec_index = base >> 2u;
-        return input_tensor_vec.data[vec_index];
-    }
     var value = vec4<f64>(0.0);
     for (var i = 0u; i < count; i = i + 1u) {
         value[i] = input_tensor.data[base + i];
@@ -98,11 +84,6 @@ fn load_batch_group(base: u32, count: u32) -> vec4<f64> {
 
 fn store_batch_group(base: u32, count: u32, value: vec4<f64>) {
     if count == 0u {
-        return;
-    }
-    if can_use_vec_path(base, count) {
-        let vec_index = base >> 2u;
-        output_tensor_vec.data[vec_index] = value;
         return;
     }
     for (var i = 0u; i < count; i = i + 1u) {
@@ -291,10 +272,6 @@ struct TensorScalar {
     data: array<f32>,
 };
 
-struct TensorVec {
-    data: array<vec4<f32>>,
-};
-
 struct Params {
     batch_count: u32,
     height: u32,
@@ -315,8 +292,6 @@ struct Params {
 @group(0) @binding(0) var<storage, read> input_tensor: TensorScalar;
 @group(0) @binding(1) var<storage, read_write> output_tensor: TensorScalar;
 @group(0) @binding(2) var<uniform> params: Params;
-@group(0) @binding(3) var<storage, read> input_tensor_vec: TensorVec;
-@group(0) @binding(4) var<storage, read_write> output_tensor_vec: TensorVec;
 
 var<workgroup> partial_sum: array<vec4<f32>, PARTIAL_STRIDE>;
 var<workgroup> partial_sum_sq: array<vec4<f32>, PARTIAL_STRIDE>;
@@ -329,10 +304,6 @@ fn has_flag(mask: u32) -> bool {
 
 fn plane_offset(idx: u32) -> u32 {
     return idx * params.batch_stride;
-}
-
-fn can_use_vec_path(base: u32, count: u32) -> bool {
-    return count == BATCH_VEC_WIDTH && (base & (BATCH_VEC_WIDTH - 1u)) == 0u;
 }
 
 fn group_count(active_batches: u32) -> u32 {
@@ -364,10 +335,6 @@ fn load_batch_group(base: u32, count: u32) -> vec4<f32> {
     if count == 0u {
         return vec4<f32>(0.0);
     }
-    if can_use_vec_path(base, count) {
-        let vec_index = base >> 2u;
-        return input_tensor_vec.data[vec_index];
-    }
     var value = vec4<f32>(0.0);
     for (var i = 0u; i < count; i = i + 1u) {
         value[i] = input_tensor.data[base + i];
@@ -377,11 +344,6 @@ fn load_batch_group(base: u32, count: u32) -> vec4<f32> {
 
 fn store_batch_group(base: u32, count: u32, value: vec4<f32>) {
     if count == 0u {
-        return;
-    }
-    if can_use_vec_path(base, count) {
-        let vec_index = base >> 2u;
-        output_tensor_vec.data[vec_index] = value;
         return;
     }
     for (var i = 0u; i < count; i = i + 1u) {
