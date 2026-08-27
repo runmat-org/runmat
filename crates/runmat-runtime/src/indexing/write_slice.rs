@@ -233,6 +233,54 @@ pub fn build_complex_rhs_view(
     }
 }
 
+fn materialize_complex_rhs_view_for_plan(
+    rhs_view: &ComplexRhsView,
+    plan: &IndexPlan,
+) -> Vec<(f64, f64)> {
+    match rhs_view {
+        ComplexRhsView::Scalar(value) => vec![*value; plan.indices.len()],
+        ComplexRhsView::Tensor { data, .. } if plan.dims == 1 => {
+            if data.len() == 1 {
+                vec![data[0]; plan.indices.len()]
+            } else {
+                data.clone()
+            }
+        }
+        ComplexRhsView::Tensor {
+            data,
+            shape,
+            strides,
+        } => {
+            let selection_lengths = if plan.selection_lengths.is_empty() {
+                &plan.output_shape
+            } else {
+                &plan.selection_lengths
+            };
+            let mut coordinates = vec![0usize; plan.dims];
+            let mut values = Vec::with_capacity(plan.indices.len());
+            for _ in 0..plan.indices.len() {
+                let source = (0..plan.dims).fold(0usize, |offset, dimension| {
+                    let coordinate = if shape[dimension] == 1 {
+                        0
+                    } else {
+                        coordinates[dimension]
+                    };
+                    offset + coordinate * strides[dimension]
+                });
+                values.push(data[source]);
+                for dimension in 0..plan.dims {
+                    coordinates[dimension] += 1;
+                    if coordinates[dimension] < selection_lengths[dimension].max(1) {
+                        break;
+                    }
+                    coordinates[dimension] = 0;
+                }
+            }
+            values
+        }
+    }
+}
+
 pub fn scatter_complex_with_plan(
     t: &mut ComplexTensor,
     plan: &IndexPlan,
@@ -710,6 +758,18 @@ pub async fn assign_sparse_with_plan(
             .collect::<Vec<_>>();
         sparse
             .with_updated_integer_linear_values(&updates)
+            .map_err(|error| map_slice_shape_error("sparse slice assign", error))?
+    } else if sparse.is_complex() {
+        let rhs_view = build_complex_rhs_view(rhs, &plan.selection_lengths)?;
+        let rhs_values = materialize_complex_rhs_view_for_plan(&rhs_view, plan);
+        let updates = plan
+            .indices
+            .iter()
+            .zip(rhs_values)
+            .map(|(&index, value)| (index as usize, value))
+            .collect::<Vec<_>>();
+        sparse
+            .with_updated_complex_linear_values(&updates)
             .map_err(|error| map_slice_shape_error("sparse slice assign", error))?
     } else if sparse.numeric_dtype() == Some(NumericDType::F32) {
         let rhs_values = materialize_rhs_real_for_plan(rhs, plan).await?;
@@ -2150,6 +2210,31 @@ mod tests {
         assert!(output.is_logical());
         assert_eq!(output.col_ptrs, vec![0, 1, 2]);
         assert_eq!(output.row_indices, vec![1, 1]);
+    }
+
+    #[test]
+    fn sparse_complex_plan_assignment_preserves_values_and_last_write_wins() {
+        let sparse = SparseTensor::zeros_complex(2, 2);
+        let rhs = Value::ComplexTensor(
+            ComplexTensor::new(
+                vec![(1.0, 2.0), (0.0, 0.0), (3.0, -4.0), (5.0, 6.0)],
+                vec![1, 4],
+            )
+            .expect("rhs"),
+        );
+        let plan = IndexPlan::new(vec![0, 3, 1, 3], vec![1, 4], vec![4], 1, vec![2, 2]);
+        let Value::SparseTensor(output) =
+            block_on(assign_sparse_with_plan(sparse, &plan, &rhs)).expect("assign")
+        else {
+            panic!("expected sparse output");
+        };
+        assert!(output.is_complex());
+        assert_eq!(output.col_ptrs, vec![0, 2, 3]);
+        assert_eq!(output.row_indices, vec![0, 1, 1]);
+        assert_eq!(
+            output.materialize_complex_f64().expect("complex values"),
+            vec![(1.0, 2.0), (3.0, -4.0), (5.0, 6.0)]
+        );
     }
 
     #[test]

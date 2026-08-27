@@ -90,9 +90,12 @@ mod tests {
     fn cataloged_symbols_are_unique_and_present_in_the_bundled_interface() {
         let matrix = include_str!("../include/matrix.h");
         let mex = include_str!("../include/mex.h");
-        let shim = concat!(
-            include_str!("../native/runmat_mex_shim.c"),
-            include_str!("../native/data_engine.inc")
+        let support_source = concat!(
+            include_str!("../native/runmat_mex_support.c"),
+            include_str!("../native/sparse_index_compat.inc"),
+            include_str!("../native/matrix_api.inc"),
+            include_str!("../native/data_engine.inc"),
+            include_str!("../native/mex_api.inc")
         );
         let mut names = BTreeSet::new();
         for symbol in C_MATRIX_API.iter().chain(C_MEX_API) {
@@ -113,8 +116,8 @@ mod tests {
             );
             if !matches!(symbol.name, "mexFunction" | "mxAssert" | "mxAssertS") {
                 assert!(
-                    shim.contains(symbol.name),
-                    "compatibility shim does not implement {}",
+                    support_source.contains(symbol.name),
+                    "native compatibility support does not implement {}",
                     symbol.name
                 );
             }

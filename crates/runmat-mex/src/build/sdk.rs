@@ -7,7 +7,7 @@ use sha2::{Digest as _, Sha256};
 
 use super::MexBuildError;
 
-const FILES: [(&str, &[u8]); 21] = [
+const FILES: [(&str, &[u8]); 24] = [
     ("include/matrix.h", include_bytes!("../../include/matrix.h")),
     ("include/mex.h", include_bytes!("../../include/mex.h")),
     ("include/mex.hpp", include_bytes!("../../include/mex.hpp")),
@@ -76,12 +76,24 @@ const FILES: [(&str, &[u8]); 21] = [
         include_bytes!("../../include/runmat_mex_host.h"),
     ),
     (
-        "native/runmat_mex_shim.c",
-        include_bytes!("../../native/runmat_mex_shim.c"),
+        "native/runmat_mex_support.c",
+        include_bytes!("../../native/runmat_mex_support.c"),
     ),
     (
         "native/data_engine.inc",
         include_bytes!("../../native/data_engine.inc"),
+    ),
+    (
+        "native/sparse_index_compat.inc",
+        include_bytes!("../../native/sparse_index_compat.inc"),
+    ),
+    (
+        "native/matrix_api.inc",
+        include_bytes!("../../native/matrix_api.inc"),
+    ),
+    (
+        "native/mex_api.inc",
+        include_bytes!("../../native/mex_api.inc"),
     ),
 ];
 
@@ -89,7 +101,7 @@ static TEMPORARY_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub(super) struct MexSdk {
     pub include_directory: PathBuf,
-    pub shim: PathBuf,
+    pub support_source: PathBuf,
 }
 
 pub(super) fn prepare() -> Result<MexSdk, MexBuildError> {
@@ -101,7 +113,7 @@ pub(super) fn prepare() -> Result<MexSdk, MexBuildError> {
     }
     Ok(MexSdk {
         include_directory: root.join("include"),
-        shim: root.join("native/runmat_mex_shim.c"),
+        support_source: root.join("native/runmat_mex_support.c"),
     })
 }
 
@@ -181,6 +193,6 @@ mod tests {
             .join("MatlabDataArray/ArrayFactory.hpp")
             .is_file());
         assert!(sdk.include_directory.join("runmat_mex_host.h").is_file());
-        assert!(sdk.shim.is_file());
+        assert!(sdk.support_source.is_file());
     }
 }

@@ -210,9 +210,24 @@ fn decode_sparse(value: &SparseValue, path: &str) -> Result<Value, ValueCodecErr
             row_indices,
             decode_f32(&value.little_endian_data, path)?,
         ),
-        ElementType::Logical
-        | ElementType::ComplexF64
-        | ElementType::ComplexF32
+        ElementType::ComplexF64 => {
+            let words = decode_words::<8>(&value.little_endian_data, path)?;
+            let values = words
+                .chunks_exact(2)
+                .map(|pair| (f64::from_bits(pair[0]), f64::from_bits(pair[1])))
+                .collect();
+            SparseTensor::new_complex(rows, columns, column_offsets, row_indices, values)
+        }
+        ElementType::Logical => {
+            if value.little_endian_data.iter().any(|entry| *entry != 1) {
+                return Err(ValueCodecError::invalid(
+                    path,
+                    "logical sparse payload contains a stored false value",
+                ));
+            }
+            SparseTensor::new_logical(rows, columns, column_offsets, row_indices)
+        }
+        ElementType::ComplexF32
         | ElementType::ComplexI8
         | ElementType::ComplexI16
         | ElementType::ComplexI32

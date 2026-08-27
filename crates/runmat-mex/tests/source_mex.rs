@@ -875,6 +875,297 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
 }
 
 #[test]
+fn interleaved_complex_sparse_c_api_retains_input_and_output_allocations() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("complex_sparse_interleaved.c");
+    fs::write(
+        &source,
+        r#"
+#include "mex.h"
+#include <stdint.h>
+
+static mxArray *address_of(const void *pointer) {
+    mxArray *value = mxCreateNumericMatrix(1, 1, mxUINT64_CLASS, mxREAL);
+    mxGetUint64s(value)[0] = (mxUint64)(uintptr_t)pointer;
+    return value;
+}
+
+void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
+    if (nlhs != 3 || nrhs != 1 || !mxIsSparse(prhs[0]) ||
+        !mxIsComplex(prhs[0])) {
+        mexErrMsgTxt("expected one complex sparse input and three outputs");
+    }
+    const mxComplexDouble *input = mxGetComplexDoubles(prhs[0]);
+    if (input == NULL || input[0].real != 3.0 || input[0].imag != -4.0 ||
+        input[1].real != 5.0 || input[1].imag != 6.0) {
+        mexErrMsgTxt("complex sparse input was not interleaved correctly");
+    }
+
+    plhs[0] = mxCreateSparse(3, 2, 2, mxCOMPLEX);
+    mxComplexDouble *values = mxGetComplexDoubles(plhs[0]);
+    mwIndex *rows = mxGetIr(plhs[0]);
+    mwIndex *columns = mxGetJc(plhs[0]);
+    values[0].real = 7.0; values[0].imag = -8.0;
+    values[1].real = -9.0; values[1].imag = 10.0;
+    rows[0] = 2; rows[1] = 1;
+    columns[0] = 0; columns[1] = 1; columns[2] = 2;
+    plhs[1] = address_of(values);
+    plhs[2] = address_of(input);
+}
+"#,
+    )
+    .unwrap();
+
+    let input = runmat_value::SparseTensor::new_complex(
+        3,
+        2,
+        vec![0, 1, 2],
+        vec![0, 1],
+        vec![(3.0, -4.0), (5.0, 6.0)],
+    )
+    .unwrap();
+    let input_address =
+        unsafe { input.complex_host_buffer().unwrap().foreign_data_pointer() } as usize as u64;
+    let artifact = MexBuild::new(&source, directory.path())
+        .api(MexApi::R2018a)
+        .compile()
+        .unwrap();
+    let module = MexModule::load(&artifact.module).unwrap();
+    let result = module
+        .invoke(&[Value::SparseTensor(input)], 3, module.api_mode())
+        .unwrap();
+    let Value::SparseTensor(output) = &result.outputs[0] else {
+        panic!("complex sparse output expected");
+    };
+    assert!(output.is_complex());
+    assert_eq!(&output.col_ptrs[..], &[0, 1, 2]);
+    assert_eq!(&output.row_indices[..], &[2, 1]);
+    assert_eq!(
+        output.materialize_complex_f64().unwrap(),
+        vec![(7.0, -8.0), (-9.0, 10.0)]
+    );
+    let output_address =
+        unsafe { output.complex_host_buffer().unwrap().foreign_data_pointer() } as usize as u64;
+    let addresses = result.outputs[1..]
+        .iter()
+        .map(|value| match value {
+            Value::Int(value) => value.try_to_u64().unwrap(),
+            _ => panic!("pointer address must remain uint64"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(addresses, vec![output_address, input_address]);
+}
+
+#[test]
+fn separate_complex_sparse_c_api_preserves_components_and_mutation() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("complex_sparse_separate.c");
+    fs::write(
+        &source,
+        r#"
+#include "mex.h"
+
+void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
+    if (nlhs != 1 || nrhs != 1 || !mxIsSparse(prhs[0]) ||
+        !mxIsComplex(prhs[0])) {
+        mexErrMsgTxt("expected one complex sparse input and one output");
+    }
+    const double *inputReal = mxGetPr(prhs[0]);
+    const double *inputImaginary = mxGetPi(prhs[0]);
+    if (inputReal == NULL || inputImaginary == NULL ||
+        inputReal[0] != 3.0 || inputImaginary[0] != -4.0 ||
+        inputReal[1] != 5.0 || inputImaginary[1] != 6.0) {
+        mexErrMsgTxt("complex sparse input was not split correctly");
+    }
+
+    plhs[0] = mxCreateSparse(3, 2, 2, mxCOMPLEX);
+    double *real = mxGetPr(plhs[0]);
+    double *imaginary = mxGetPi(plhs[0]);
+    mwIndex *rows = mxGetIr(plhs[0]);
+    mwIndex *columns = mxGetJc(plhs[0]);
+    real[0] = 11.0; imaginary[0] = -12.0;
+    real[1] = -13.0; imaginary[1] = 14.0;
+    rows[0] = 1; rows[1] = 2;
+    columns[0] = 0; columns[1] = 1; columns[2] = 2;
+}
+"#,
+    )
+    .unwrap();
+
+    let input = Value::SparseTensor(
+        runmat_value::SparseTensor::new_complex(
+            3,
+            2,
+            vec![0, 1, 2],
+            vec![0, 1],
+            vec![(3.0, -4.0), (5.0, 6.0)],
+        )
+        .unwrap(),
+    );
+    let artifact = MexBuild::new(&source, directory.path())
+        .api(MexApi::R2017b)
+        .compile()
+        .unwrap();
+    let module = MexModule::load(&artifact.module).unwrap();
+    assert_eq!(module.api_mode(), MxApiMode::SeparateComplex);
+    let result = module.invoke(&[input], 1, module.api_mode()).unwrap();
+    let Value::SparseTensor(output) = &result.outputs[0] else {
+        panic!("complex sparse output expected");
+    };
+    assert_eq!(&output.col_ptrs[..], &[0, 1, 2]);
+    assert_eq!(&output.row_indices[..], &[1, 2]);
+    assert_eq!(
+        output.materialize_complex_f64().unwrap(),
+        vec![(11.0, -12.0), (-13.0, 14.0)]
+    );
+}
+
+#[test]
+fn interleaved_complex_sparse_duplicate_detaches_and_nzmax_growth_is_owned() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("complex_sparse_copy_on_write.c");
+    fs::write(
+        &source,
+        r#"
+#include "mex.h"
+
+void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
+    if (nlhs != 2 || nrhs != 1 || !mxIsSparse(prhs[0]) ||
+        !mxIsComplex(prhs[0])) {
+        mexErrMsgTxt("expected one complex sparse input and two outputs");
+    }
+    mxArray *copy = mxDuplicateArray(prhs[0]);
+    mxComplexDouble *original = mxGetComplexDoubles(prhs[0]);
+    mxComplexDouble *values = mxGetComplexDoubles(copy);
+    if (values == original) {
+        mexErrMsgTxt("writable duplicate did not detach");
+    }
+    values[0].real = 11.0;
+    values[0].imag = -12.0;
+    if (original[0].real != 3.0 || original[0].imag != -4.0) {
+        mexErrMsgTxt("duplicate mutation changed the input");
+    }
+
+    mxSetNzmax(copy, 3);
+    values = mxGetComplexDoubles(copy);
+    mwIndex *rows = mxGetIr(copy);
+    mwIndex *columns = mxGetJc(copy);
+    values[2].real = 7.0;
+    values[2].imag = 8.0;
+    rows[2] = 2;
+    columns[0] = 0;
+    columns[1] = 1;
+    columns[2] = 3;
+    plhs[0] = copy;
+    plhs[1] = mxDuplicateArray(prhs[0]);
+}
+"#,
+    )
+    .unwrap();
+
+    let input = Value::SparseTensor(
+        runmat_value::SparseTensor::new_complex(
+            3,
+            2,
+            vec![0, 1, 2],
+            vec![0, 1],
+            vec![(3.0, -4.0), (5.0, 6.0)],
+        )
+        .unwrap(),
+    );
+    let artifact = MexBuild::new(&source, directory.path())
+        .api(MexApi::R2018a)
+        .compile()
+        .unwrap();
+    let module = MexModule::load(&artifact.module).unwrap();
+    let result = module.invoke(&[input], 2, module.api_mode()).unwrap();
+    let Value::SparseTensor(updated) = &result.outputs[0] else {
+        panic!("updated complex sparse output expected");
+    };
+    assert_eq!(&updated.col_ptrs[..], &[0, 1, 3]);
+    assert_eq!(&updated.row_indices[..], &[0, 1, 2]);
+    assert_eq!(
+        updated.materialize_complex_f64().unwrap(),
+        vec![(11.0, -12.0), (5.0, 6.0), (7.0, 8.0)]
+    );
+    let Value::SparseTensor(original) = &result.outputs[1] else {
+        panic!("original complex sparse output expected");
+    };
+    assert_eq!(&original.col_ptrs[..], &[0, 1, 2]);
+    assert_eq!(&original.row_indices[..], &[0, 1]);
+    assert_eq!(
+        original.materialize_complex_f64().unwrap(),
+        vec![(3.0, -4.0), (5.0, 6.0)]
+    );
+}
+
+#[test]
+fn modern_cpp_complex_sparse_factory_adopts_ordered_storage() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("modern_complex_sparse.cpp");
+    fs::write(
+        &source,
+        r#"
+#include "mex.hpp"
+#include "mexAdapter.hpp"
+#include <complex>
+#include <cstdint>
+
+class MexFunction : public matlab::mex::Function {
+public:
+    void operator()(matlab::mex::ArgumentList outputs,
+                    matlab::mex::ArgumentList inputs) override {
+        (void)inputs;
+        matlab::data::ArrayFactory factory;
+        auto data = factory.createBuffer<std::complex<double>>(3);
+        auto rows = factory.createBuffer<std::size_t>(3);
+        auto columns = factory.createBuffer<std::size_t>(3);
+        std::complex<double> *allocation = data.get();
+        data.get()[0] = {2.0, -3.0};
+        data.get()[1] = {4.0, 5.0};
+        data.get()[2] = {-6.0, 7.0};
+        rows.get()[0] = 0; rows.get()[1] = 2; rows.get()[2] = 1;
+        columns.get()[0] = 0; columns.get()[1] = 0; columns.get()[2] = 2;
+        auto sparse = factory.createSparseArray<std::complex<double>>(
+            {3, 3}, 3, std::move(data), std::move(rows), std::move(columns));
+        auto position = sparse.begin();
+        if (sparse.getType() != matlab::data::ArrayType::SPARSE_COMPLEX_DOUBLE ||
+            sparse.getNumberOfNonZeroElements() != 3 ||
+            sparse.getIndex(position) != matlab::data::SparseIndex(0, 0) ||
+            static_cast<std::complex<double>>(*position) !=
+                std::complex<double>(2.0, -3.0)) {
+            throw matlab::Exception("complex sparse storage was not retained");
+        }
+        outputs[0] = sparse;
+        outputs[1] = factory.createScalar<std::uint64_t>(
+            reinterpret_cast<std::uintptr_t>(allocation));
+    }
+};
+"#,
+    )
+    .unwrap();
+
+    let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+    let module = MexModule::load(&artifact.module).unwrap();
+    let result = module.invoke(&[], 2, module.api_mode()).unwrap();
+    let Value::SparseTensor(output) = &result.outputs[0] else {
+        panic!("complex sparse output expected");
+    };
+    assert_eq!(&output.col_ptrs[..], &[0, 2, 2, 3]);
+    assert_eq!(&output.row_indices[..], &[0, 2, 1]);
+    assert_eq!(
+        output.materialize_complex_f64().unwrap(),
+        vec![(2.0, -3.0), (4.0, 5.0), (-6.0, 7.0)]
+    );
+    let output_address =
+        unsafe { output.complex_host_buffer().unwrap().foreign_data_pointer() } as usize as u64;
+    let Value::Int(recorded_address) = &result.outputs[1] else {
+        panic!("recorded buffer address must remain uint64");
+    };
+    assert_eq!(recorded_address.try_to_u64(), Some(output_address));
+}
+
+#[test]
 fn sparse_numeric_inputs_and_outputs_keep_compatible_host_allocations() {
     let directory = tempfile::tempdir().unwrap();
     let source = directory.path().join("sparse_allocation_identity.c");

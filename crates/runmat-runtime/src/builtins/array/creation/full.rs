@@ -127,6 +127,17 @@ fn full_from_sparse(sparse: SparseTensor) -> BuiltinResult<Value> {
                 )
             });
     }
+    if sparse.is_complex() {
+        return sparse
+            .to_dense_complex()
+            .map(Value::ComplexTensor)
+            .map_err(|err| {
+                full_error_with_detail(
+                    &FULL_ERROR_INTERNAL,
+                    format!("failed to densify sparse input: {err}"),
+                )
+            });
+    }
     let tensor = sparse.to_dense().map_err(|err| {
         full_error_with_detail(
             &FULL_ERROR_INTERNAL,
@@ -350,6 +361,35 @@ pub(crate) mod tests {
         };
         assert_eq!(dense.shape, vec![3, 2]);
         assert_eq!(dense.data, vec![1, 0, 1, 0, 1, 0]);
+    }
+
+    #[test]
+    fn full_preserves_complex_sparse_values_and_shape() {
+        let sparse = SparseTensor::new_complex(
+            3,
+            2,
+            vec![0, 2, 3],
+            vec![0, 2, 1],
+            vec![(1.0, -2.0), (-0.0, 4.0), (5.0, 6.0)],
+        )
+        .expect("complex sparse");
+        let Value::ComplexTensor(dense) =
+            run_full(Value::SparseTensor(sparse)).expect("full complex sparse")
+        else {
+            panic!("expected dense complex tensor");
+        };
+        assert_eq!(dense.shape, vec![3, 2]);
+        assert_eq!(
+            dense.materialize_f64(),
+            vec![
+                (1.0, -2.0),
+                (0.0, 0.0),
+                (-0.0, 4.0),
+                (0.0, 0.0),
+                (5.0, 6.0),
+                (0.0, 0.0)
+            ]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

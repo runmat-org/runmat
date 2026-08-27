@@ -59,9 +59,12 @@ public:
 private:
     void validate() const {
         const ArrayType type = getType();
-        const ArrayType expected = std::is_same<T, bool>::value
-                                       ? ArrayType::SPARSE_LOGICAL
-                                       : ArrayType::SPARSE_DOUBLE;
+        const ArrayType expected =
+            std::is_same<T, bool>::value
+                ? ArrayType::SPARSE_LOGICAL
+                : (std::is_same<T, std::complex<double>>::value
+                       ? ArrayType::SPARSE_COMPLEX_DOUBLE
+                       : ArrayType::SPARSE_DOUBLE);
         if (type != expected) {
             throw InvalidArrayTypeException("array has the wrong sparse element type");
         }

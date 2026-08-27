@@ -46,7 +46,7 @@ impl MexBuildPlan {
                     &module,
                     &function_name,
                     &sdk.include_directory,
-                    &sdk.shim,
+                    &sdk.support_source,
                 ),
             }],
             (CCompilerFamily::Msvc, MexSourceLanguage::C) => vec![MexBuildStep {
@@ -56,7 +56,7 @@ impl MexBuildPlan {
                     &module,
                     &function_name,
                     &sdk.include_directory,
-                    &sdk.shim,
+                    &sdk.support_source,
                     object_directory,
                 ),
             }],
@@ -65,7 +65,7 @@ impl MexBuildPlan {
                 &module,
                 &function_name,
                 &sdk.include_directory,
-                &sdk.shim,
+                &sdk.support_source,
                 object_directory,
             ),
             (CCompilerFamily::Msvc, MexSourceLanguage::Cxx) => cxx_msvc_steps(
@@ -73,7 +73,7 @@ impl MexBuildPlan {
                 &module,
                 &function_name,
                 &sdk.include_directory,
-                &sdk.shim,
+                &sdk.support_source,
                 object_directory,
             ),
         };
@@ -142,7 +142,7 @@ fn gnu_arguments(
     module: &Path,
     function_name: &str,
     sdk_include: &Path,
-    shim: &Path,
+    support_source: &Path,
 ) -> Vec<String> {
     let mut arguments = Vec::new();
     arguments.push(if cfg!(target_os = "macos") {
@@ -179,10 +179,14 @@ fn gnu_arguments(
                 source.display().to_string(),
             ]);
         }
-        arguments.extend(["-x".into(), "c++".into(), shim.display().to_string()]);
+        arguments.extend([
+            "-x".into(),
+            "c++".into(),
+            support_source.display().to_string(),
+        ]);
     } else {
         arguments.extend(build.sources.iter().map(|path| path.display().to_string()));
-        arguments.push(shim.display().to_string());
+        arguments.push(support_source.display().to_string());
     }
     arguments.extend(build.linker_arguments.iter().cloned());
     arguments.extend(["-o".into(), module.display().to_string()]);
@@ -194,7 +198,7 @@ fn msvc_arguments(
     module: &Path,
     function_name: &str,
     sdk_include: &Path,
-    shim: &Path,
+    support_source: &Path,
     object_directory: &Path,
 ) -> Vec<String> {
     let mut arguments = vec![
@@ -226,10 +230,10 @@ fn msvc_arguments(
             };
             format!("{mode}{}", path.display())
         }));
-        arguments.push(format!("/TP{}", shim.display()));
+        arguments.push(format!("/TP{}", support_source.display()));
     } else {
         arguments.extend(build.sources.iter().map(|path| path.display().to_string()));
-        arguments.push(shim.display().to_string());
+        arguments.push(support_source.display().to_string());
     }
     arguments.push("/link".into());
     arguments.extend(build.linker_arguments.iter().cloned());
@@ -242,7 +246,7 @@ fn cxx_gnu_steps(
     module: &Path,
     function_name: &str,
     sdk_include: &Path,
-    shim: &Path,
+    support_source: &Path,
     object_directory: &Path,
 ) -> Vec<MexBuildStep> {
     let mut steps = Vec::new();
@@ -283,8 +287,8 @@ fn cxx_gnu_steps(
         });
     }
 
-    let shim_object = object_path(object_directory, build.sources.len(), shim, "o");
-    let mut shim_arguments = vec![
+    let support_object = object_path(object_directory, build.sources.len(), support_source, "o");
+    let mut support_arguments = vec![
         "-fPIC".into(),
         "-O2".into(),
         "-x".into(),
@@ -292,16 +296,16 @@ fn cxx_gnu_steps(
         "-std=c11".into(),
         format!("-I{}", sdk_include.display()),
     ];
-    push_definitions(build, function_name, "-D", &mut shim_arguments);
-    shim_arguments.extend([
+    push_definitions(build, function_name, "-D", &mut support_arguments);
+    support_arguments.extend([
         "-c".into(),
-        shim.display().to_string(),
+        support_source.display().to_string(),
         "-o".into(),
-        shim_object.display().to_string(),
+        support_object.display().to_string(),
     ]);
     steps.push(MexBuildStep {
         compiler: build.compiler.clone(),
-        arguments: shim_arguments,
+        arguments: support_arguments,
     });
 
     let mut link_arguments = vec![if cfg!(target_os = "macos") {
@@ -315,7 +319,7 @@ fn cxx_gnu_steps(
             .display()
             .to_string()
     }));
-    link_arguments.push(shim_object.display().to_string());
+    link_arguments.push(support_object.display().to_string());
     link_arguments.extend(build.linker_arguments.iter().cloned());
     link_arguments.extend(["-o".into(), module.display().to_string()]);
     steps.push(MexBuildStep {
@@ -330,7 +334,7 @@ fn cxx_msvc_steps(
     module: &Path,
     function_name: &str,
     sdk_include: &Path,
-    shim: &Path,
+    support_source: &Path,
     object_directory: &Path,
 ) -> Vec<MexBuildStep> {
     let mut steps = Vec::new();
@@ -368,22 +372,22 @@ fn cxx_msvc_steps(
         });
     }
 
-    let shim_object = object_path(object_directory, build.sources.len(), shim, "obj");
-    let mut shim_arguments = vec![
+    let support_object = object_path(object_directory, build.sources.len(), support_source, "obj");
+    let mut support_arguments = vec![
         "/nologo".into(),
         "/O2".into(),
         "/c".into(),
         "/std:c11".into(),
         format!("/I{}", sdk_include.display()),
     ];
-    push_definitions(build, function_name, "/D", &mut shim_arguments);
-    shim_arguments.extend([
-        format!("/TC{}", shim.display()),
-        format!("/Fo{}", shim_object.display()),
+    push_definitions(build, function_name, "/D", &mut support_arguments);
+    support_arguments.extend([
+        format!("/TC{}", support_source.display()),
+        format!("/Fo{}", support_object.display()),
     ]);
     steps.push(MexBuildStep {
         compiler: build.compiler.clone(),
-        arguments: shim_arguments,
+        arguments: support_arguments,
     });
 
     let mut link_arguments = vec!["/nologo".into(), "/LD".into()];
@@ -392,7 +396,7 @@ fn cxx_msvc_steps(
             .display()
             .to_string()
     }));
-    link_arguments.push(shim_object.display().to_string());
+    link_arguments.push(support_object.display().to_string());
     link_arguments.push("/link".into());
     link_arguments.extend(build.linker_arguments.iter().cloned());
     link_arguments.push(format!("/OUT:{}", module.display()));
@@ -547,7 +551,7 @@ mod tests {
     }
 
     #[test]
-    fn cpp_plan_uses_the_cxx_driver_contract_and_keeps_the_shim_in_c_mode() {
+    fn cpp_plan_uses_the_cxx_driver_contract_and_keeps_native_support_in_c_mode() {
         let temporary = tempfile::tempdir().unwrap();
         let source = temporary.path().join("demo.cpp");
         std::fs::write(&source, "class MexFunction {}; ").unwrap();

@@ -621,12 +621,12 @@ unsafe extern "C" fn create_sparse(
     rows: usize,
     cols: usize,
     nzmax: usize,
-    logical: i32,
+    storage_kind: i32,
 ) -> *mut MxArray {
     let Some(mut state) = (unsafe { state(host) }) else {
         return std::ptr::null_mut();
     };
-    match state.mx.create_sparse(rows, cols, nzmax, logical != 0) {
+    match state.mx.create_sparse(rows, cols, nzmax, storage_kind) {
         Ok(value) => value,
         Err(error) => {
             state.fail(error);
@@ -1034,7 +1034,7 @@ fn replace_data_component(
     let Some(mut state) = (unsafe { state(host) }) else {
         return 1;
     };
-    // SAFETY: the C shim transfers a buffer matching the array's reported size.
+    // SAFETY: the native support source transfers a buffer matching the array's reported size.
     match unsafe { state.mx.replace_data(value, source, imaginary) } {
         Ok(()) => 0,
         Err(error) => {
@@ -1441,7 +1441,7 @@ fn replace_sparse_indices(
     let Some(mut state) = (unsafe { state(host) }) else {
         return 1;
     };
-    // SAFETY: the shim transfers the fixed row-capacity or column-pointer buffer.
+    // SAFETY: the support source transfers the fixed row-capacity or column-pointer buffer.
     match unsafe { state.mx.replace_sparse_indices(value, source, columns) } {
         Ok(()) => 0,
         Err(error) => {
@@ -1544,7 +1544,7 @@ unsafe extern "C" fn call(
         let inputs = if nrhs == 0 {
             &[][..]
         } else {
-            // SAFETY: the shim supplies `nrhs` readable array pointers.
+            // SAFETY: the support source supplies `nrhs` readable array pointers.
             unsafe { std::slice::from_raw_parts(prhs, nrhs) }
         };
         let arguments = inputs
@@ -1574,7 +1574,7 @@ unsafe extern "C" fn call(
         let output_pointers = if nlhs == 0 {
             &mut [][..]
         } else {
-            // SAFETY: the shim supplies `nlhs` writable output slots.
+            // SAFETY: the support source supplies `nlhs` writable output slots.
             unsafe { std::slice::from_raw_parts_mut(plhs, nlhs) }
         };
         for (slot, output) in output_pointers.iter_mut().zip(outputs) {
@@ -1721,7 +1721,7 @@ fn c_string(value: *const c_char) -> Option<String> {
     if value.is_null() {
         return None;
     }
-    // SAFETY: strings originate in the bound C shim and are valid through the
+    // SAFETY: strings originate in the bound native support source and are valid through the
     // callback. Invalid UTF-8 is preserved lossily in diagnostics only.
     Some(
         unsafe { CStr::from_ptr(value) }

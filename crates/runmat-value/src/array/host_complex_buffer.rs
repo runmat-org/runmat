@@ -51,6 +51,13 @@ impl<T: Clone + Copy> HostComplexBuffer<T> {
         self.storage.make_unique();
     }
 
+    pub fn resize(&mut self, len: usize, value: ComplexElement<T>) {
+        if self.storage.is_shared() || self.storage.get().is_adopted() {
+            record_host_copy(HostCopyReason::CopyOnWriteMutation, self.byte_len());
+        }
+        self.storage.make_mut().ensure_rust_vec().resize(len, value);
+    }
+
     pub fn into_elements(self) -> Vec<ComplexElement<T>> {
         if self.storage.is_shared() || self.storage.get().is_adopted() {
             record_host_copy(HostCopyReason::OwnedMaterialization, self.byte_len());

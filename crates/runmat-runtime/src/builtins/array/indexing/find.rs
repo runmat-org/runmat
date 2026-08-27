@@ -955,11 +955,14 @@ fn sparse_find_values(
     sparse: &runmat_value::SparseTensor,
     real_values: Vec<f64>,
     single_values: Vec<f32>,
+    complex_values: Vec<(f64, f64)>,
     logical_values: Vec<u8>,
     integer_value_indices: &[usize],
 ) -> FindValues {
     if sparse.is_logical() {
         FindValues::Logical(logical_values)
+    } else if sparse.is_complex() {
+        FindValues::Complex(complex_values)
     } else if let Some(storage) = sparse.integer_storage() {
         FindValues::Integer(select_integer_values(storage, integer_value_indices))
     } else if sparse.as_f32_slice().is_some() {
@@ -970,6 +973,10 @@ fn sparse_find_values(
 }
 
 fn sparse_stored_value_is_nonzero(sparse: &runmat_value::SparseTensor, index: usize) -> bool {
+    if let Some(values) = sparse.as_complex_f64_slice() {
+        let value = values[index];
+        return value.0 != 0.0 || value.1 != 0.0;
+    }
     !sparse
         .numeric_value_at(index)
         .expect("SparseTensor value storage is consistent")
@@ -983,10 +990,12 @@ fn compute_find_sparse(sparse: &runmat_value::SparseTensor, options: &FindOption
     let mut indices = Vec::new();
     let mut values = Vec::new();
     let mut single_values = Vec::new();
+    let mut complex_values = Vec::new();
     let mut logical_values = Vec::new();
     let integer_storage = sparse.integer_storage();
     let floating_values = sparse.as_f64_slice();
     let native_single_values = sparse.as_f32_slice();
+    let native_complex_values = sparse.as_complex_f64_slice();
     let mut integer_value_indices = Vec::new();
 
     if matches!(limit, Some(0)) {
@@ -994,6 +1003,7 @@ fn compute_find_sparse(sparse: &runmat_value::SparseTensor, options: &FindOption
             sparse,
             values,
             single_values,
+            complex_values,
             logical_values,
             &integer_value_indices,
         );
@@ -1012,6 +1022,9 @@ fn compute_find_sparse(sparse: &runmat_value::SparseTensor, options: &FindOption
                         indices.push(linear_idx + 1);
                         if sparse.is_logical() {
                             logical_values.push(1);
+                        } else if let Some(native_complex_values) = native_complex_values {
+                            let value = native_complex_values[idx];
+                            complex_values.push((value.0, value.1));
                         } else if integer_storage.is_some() {
                             integer_value_indices.push(idx);
                         } else if let Some(native_single_values) = native_single_values {
@@ -1024,6 +1037,7 @@ fn compute_find_sparse(sparse: &runmat_value::SparseTensor, options: &FindOption
                                 sparse,
                                 values,
                                 single_values,
+                                complex_values,
                                 logical_values,
                                 &integer_value_indices,
                             );
@@ -1044,6 +1058,9 @@ fn compute_find_sparse(sparse: &runmat_value::SparseTensor, options: &FindOption
                         indices.push(linear_idx + 1);
                         if sparse.is_logical() {
                             logical_values.push(1);
+                        } else if let Some(native_complex_values) = native_complex_values {
+                            let value = native_complex_values[idx];
+                            complex_values.push((value.0, value.1));
                         } else if integer_storage.is_some() {
                             integer_value_indices.push(idx);
                         } else if let Some(native_single_values) = native_single_values {
@@ -1055,12 +1072,14 @@ fn compute_find_sparse(sparse: &runmat_value::SparseTensor, options: &FindOption
                             indices.reverse();
                             values.reverse();
                             single_values.reverse();
+                            complex_values.reverse();
                             logical_values.reverse();
                             integer_value_indices.reverse();
                             let values = sparse_find_values(
                                 sparse,
                                 values,
                                 single_values,
+                                complex_values,
                                 logical_values,
                                 &integer_value_indices,
                             );
@@ -1076,6 +1095,7 @@ fn compute_find_sparse(sparse: &runmat_value::SparseTensor, options: &FindOption
         indices.reverse();
         values.reverse();
         single_values.reverse();
+        complex_values.reverse();
         logical_values.reverse();
         integer_value_indices.reverse();
     }
@@ -1083,6 +1103,7 @@ fn compute_find_sparse(sparse: &runmat_value::SparseTensor, options: &FindOption
         sparse,
         values,
         single_values,
+        complex_values,
         logical_values,
         &integer_value_indices,
     );
@@ -1804,6 +1825,29 @@ pub(crate) mod tests {
         };
         assert_eq!(values.shape, vec![3, 1]);
         assert_eq!(values.data, vec![1, 1, 1]);
+    }
+
+    #[test]
+    fn find_sparse_complex_uses_both_components_and_preserves_values() {
+        let sparse = runmat_value::SparseTensor::new_complex(
+            3,
+            2,
+            vec![0, 3, 4],
+            vec![0, 1, 2, 1],
+            vec![(0.0, 2.0), (0.0, 0.0), (3.0, 0.0), (-4.0, 5.0)],
+        )
+        .expect("complex sparse");
+        let eval = evaluate(Value::SparseTensor(sparse), &[]).expect("find sparse");
+        let linear = tensor::value_into_tensor_for("find", eval.linear_value().expect("linear"))
+            .expect("linear tensor");
+        assert_eq!(linear.materialize_f64(), vec![1.0, 3.0, 5.0]);
+        let Value::ComplexTensor(values) = eval.values_value().expect("values") else {
+            panic!("expected complex sparse find values");
+        };
+        assert_eq!(
+            values.materialize_f64(),
+            vec![(0.0, 2.0), (3.0, 0.0), (-4.0, 5.0)]
+        );
     }
 
     #[test]

@@ -12,7 +12,7 @@ mod tests {
     use runmat_value::{
         CellArray, CharArray, ComplexTensor, ForeignAffinity, ForeignLifetime, ForeignOwnership,
         ForeignRef, ForeignResourceKey, ForeignTypeIdentity, IntValue, IntegerComplexStorage,
-        IntegerStorage, MException, StringArray, StructValue, Tensor, Value,
+        IntegerStorage, MException, SparseTensor, StringArray, StructValue, Tensor, Value,
     };
 
     use runmat_execution::value::{InlineValue, ValuePayload};
@@ -148,6 +148,45 @@ mod tests {
                 value
             );
         }
+    }
+
+    #[test]
+    fn sparse_complex_and_logical_values_round_trip_without_losing_storage_semantics() {
+        let complex = Value::SparseTensor(
+            SparseTensor::new_complex(
+                3,
+                2,
+                vec![0, 2, 3],
+                vec![0, 2, 1],
+                vec![
+                    (f64::from_bits(0x8000_0000_0000_0000), 2.5),
+                    (3.0, f64::from_bits(0x7ff8_0000_0000_0042)),
+                    (-4.0, 5.0),
+                ],
+            )
+            .unwrap(),
+        );
+        let Value::SparseTensor(decoded) =
+            decode_inline_value(&encode_inline_value(&complex).unwrap()).unwrap()
+        else {
+            panic!("expected sparse complex value");
+        };
+        assert!(decoded.is_complex());
+        assert_eq!(decoded.col_ptrs, vec![0, 2, 3]);
+        assert_eq!(decoded.row_indices, vec![0, 2, 1]);
+        let values = decoded.as_complex_f64_slice().unwrap();
+        assert_eq!(values[0].0.to_bits(), 0x8000_0000_0000_0000);
+        assert_eq!(values[0].1, 2.5);
+        assert_eq!(values[1].1.to_bits(), 0x7ff8_0000_0000_0042);
+        assert_eq!(values[2], runmat_value::ComplexElement(-4.0, 5.0));
+
+        let logical = Value::SparseTensor(
+            SparseTensor::new_logical(3, 2, vec![0, 2, 3], vec![0, 2, 1]).unwrap(),
+        );
+        assert_eq!(
+            decode_inline_value(&encode_inline_value(&logical).unwrap()).unwrap(),
+            logical
+        );
     }
 
     #[test]
