@@ -31,7 +31,8 @@ async fn detached_file_backed_child_survives_its_host_handle() {
     let process_id = child.id().unwrap();
     drop(child);
 
-    for _ in 0..50 {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    while tokio::time::Instant::now() < deadline {
         if std::fs::read_to_string(&stdout).ok().as_deref() == Some("detached") {
             return;
         }
