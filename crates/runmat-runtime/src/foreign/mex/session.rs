@@ -4,12 +4,14 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::Ordering;
 
-use runmat_mex::{MexInvocation, MexLoadError, MexModule};
+use runmat_mex::{
+    DirectMexBoundaryHostServices, MexInvocation, MexNativeInvocation, MxValueContext,
+};
 use runmat_value::Value;
 
 use super::{
-    IsolatedMexClient, MexBinaryTier, MexIsolationPolicy, MexLifecycleOutcome, MexWireError,
-    RuntimeMexHostServices, UnmanifestedMexPolicy,
+    native_lane::NativeMexLane, IsolatedMexClient, MexBinaryTier, MexIsolationPolicy,
+    MexLifecycleOutcome, MexWireError, RuntimeMexHostServices, UnmanifestedMexPolicy,
 };
 use crate::context::RuntimeContext;
 use crate::user_functions::DynamicFunctionClearRequest;
@@ -22,7 +24,9 @@ use crate::{build_runtime_error, RuntimeError};
 /// `mexAtExit` lifecycle behavior cannot drift between execution modes.
 #[derive(Default)]
 pub struct MexRuntimeSession {
-    modules: RefCell<HashMap<PathBuf, Rc<MexModule>>>,
+    native_lane: RefCell<Option<Rc<NativeMexLane>>>,
+    native_modules: RefCell<HashSet<PathBuf>>,
+    native_values: RefCell<HashMap<PathBuf, Rc<MxValueContext>>>,
     isolated: RefCell<HashMap<PathBuf, IsolatedMexClient>>,
     active_isolated: RefCell<HashSet<PathBuf>>,
     isolation_policy: RefCell<MexIsolationPolicy>,
@@ -113,18 +117,52 @@ impl MexRuntimeSession {
                 "in-process MEX invocation requires the process thread stack",
             )));
         }
-        let module = match self.module(&canonical) {
-            Ok(module) => module,
+        let lane = match self.native_lane() {
+            Ok(lane) => lane,
             Err(error) => return Some(Err(error)),
         };
-        let result = module.invoke_with_services(
-            &arguments,
-            requested_outputs,
-            module.api_mode(),
+        let metadata = match lane.load(&canonical).await {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                return Some(Err(runtime_error(
+                    "MexLoad",
+                    format!(
+                        "could not load MEX function '{}': {error}",
+                        canonical.display()
+                    ),
+                )))
+            }
+        };
+        self.native_modules.borrow_mut().insert(canonical.clone());
+        let values = self
+            .native_values
+            .borrow_mut()
+            .entry(canonical.clone())
+            .or_insert_with(|| Rc::new(MxValueContext::new()))
+            .clone();
+        let mut inputs = Vec::with_capacity(arguments.len());
+        for argument in &arguments {
+            let argument = match crate::gather_if_needed_async(argument).await {
+                Ok(argument) => argument,
+                Err(error) => return Some(Err(error)),
+            };
+            match values.encode(&argument, metadata.mode, metadata.interface) {
+                Ok(argument) => inputs.push(argument),
+                Err(error) => return Some(Err(runtime_error("MEX:Conversion", error.to_string()))),
+            }
+        }
+        let services = DirectMexBoundaryHostServices::new(
             Rc::new(RuntimeMexHostServices::new(runtime)),
+            values.clone(),
+            metadata.mode,
+            metadata.interface,
         );
+        let result = lane
+            .invoke(&canonical, inputs, requested_outputs, &services)
+            .await;
         Some(match result {
-            Ok(invocation) => finish_invocation(invocation, requested_outputs),
+            Ok(invocation) => decode_native_invocation(invocation, &values)
+                .and_then(|invocation| finish_invocation(invocation, requested_outputs)),
             Err(error) => Err(runtime_error("MexInvocation", error.to_string())),
         })
     }
@@ -199,24 +237,7 @@ impl MexRuntimeSession {
     /// Force final teardown of every module owned by this runtime session.
     pub fn shutdown(&self, runtime: RuntimeContext) -> Result<(), RuntimeError> {
         self.isolated.borrow_mut().clear();
-        let modules = self.modules.borrow_mut().drain().collect::<Vec<_>>();
-        let mut first_error = None;
-        for (path, module) in modules {
-            if let Err(error) =
-                module.shutdown_with_services(Rc::new(RuntimeMexHostServices::new(runtime.clone())))
-            {
-                first_error.get_or_insert_with(|| {
-                    runtime_error(
-                        "MexShutdown",
-                        format!(
-                            "could not shut down MEX function '{}': {error}",
-                            path.display()
-                        ),
-                    )
-                });
-            }
-        }
-        first_error.map_or(Ok(()), Err)
+        self.shutdown_native(runtime)
     }
 
     /// Complete isolated and in-process final lifecycle before session exit.
@@ -245,20 +266,15 @@ impl MexRuntimeSession {
         first_error.map_or(Ok(()), Err)
     }
 
-    fn module(&self, path: &Path) -> Result<Rc<MexModule>, RuntimeError> {
-        if let Some(module) = self.modules.borrow().get(path).cloned() {
-            return Ok(module);
+    fn native_lane(&self) -> Result<Rc<NativeMexLane>, RuntimeError> {
+        if let Some(lane) = self.native_lane.borrow().as_ref() {
+            return Ok(lane.clone());
         }
-        let module = Rc::new(MexModule::load(path).map_err(|error| {
-            runtime_error(
-                "MexLoad",
-                format!("could not load MEX function '{}': {error}", path.display()),
-            )
-        })?);
-        self.modules
-            .borrow_mut()
-            .insert(path.to_path_buf(), Rc::clone(&module));
-        Ok(module)
+        let lane = Rc::new(
+            NativeMexLane::spawn().map_err(|error| runtime_error("MEX:NativeLane", error))?,
+        );
+        *self.native_lane.borrow_mut() = Some(lane.clone());
+        Ok(lane)
     }
 
     async fn take_isolated_module(&self, path: &Path) -> Result<IsolatedMexClient, RuntimeError> {
@@ -286,26 +302,96 @@ impl MexRuntimeSession {
         request: &DynamicFunctionClearRequest,
         runtime: RuntimeContext,
     ) -> Result<(), RuntimeError> {
+        let Some(lane) = self.native_lane.borrow().as_ref().cloned() else {
+            return Ok(());
+        };
+        let paths = self
+            .native_modules
+            .borrow()
+            .iter()
+            .filter(|path| selected_by_request(path, request))
+            .cloned()
+            .collect::<Vec<_>>();
         let mut first_error = None;
-        self.modules.borrow_mut().retain(|path, module| {
-            if !selected_by_request(path, request) {
-                return true;
-            }
-            match module.clear_with_services(Rc::new(RuntimeMexHostServices::new(runtime.clone())))
-            {
-                Ok(cleared) => !cleared,
+        for path in paths {
+            let Some(values) = self.native_values.borrow().get(&path).cloned() else {
+                continue;
+            };
+            let metadata = match futures::executor::block_on(lane.load(&path)) {
+                Ok(metadata) => metadata,
                 Err(error) => {
-                    let lifecycle_finished = matches!(&error, MexLoadError::Invocation { .. });
+                    first_error.get_or_insert_with(|| runtime_error("MexClear", error));
+                    continue;
+                }
+            };
+            let services = DirectMexBoundaryHostServices::new(
+                Rc::new(RuntimeMexHostServices::new(runtime.clone())),
+                values,
+                metadata.mode,
+                metadata.interface,
+            );
+            match futures::executor::block_on(lane.clear(&path, &services)) {
+                Ok(true) => {
+                    self.native_modules.borrow_mut().remove(&path);
+                    self.native_values.borrow_mut().remove(&path);
+                }
+                Ok(false) => {}
+                Err(error) => {
                     first_error.get_or_insert_with(|| {
                         runtime_error(
                             "MexClear",
                             format!("could not clear MEX function '{}': {error}", path.display()),
                         )
                     });
-                    !lifecycle_finished
                 }
             }
-        });
+        }
+        first_error.map_or(Ok(()), Err)
+    }
+
+    fn shutdown_native(&self, runtime: RuntimeContext) -> Result<(), RuntimeError> {
+        let Some(lane) = self.native_lane.borrow().as_ref().cloned() else {
+            return Ok(());
+        };
+        let paths = self
+            .native_modules
+            .borrow()
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut first_error = None;
+        for path in paths {
+            let Some(values) = self.native_values.borrow().get(&path).cloned() else {
+                continue;
+            };
+            let metadata = match futures::executor::block_on(lane.load(&path)) {
+                Ok(metadata) => metadata,
+                Err(error) => {
+                    first_error.get_or_insert_with(|| runtime_error("MexShutdown", error));
+                    continue;
+                }
+            };
+            let services = DirectMexBoundaryHostServices::new(
+                Rc::new(RuntimeMexHostServices::new(runtime.clone())),
+                values,
+                metadata.mode,
+                metadata.interface,
+            );
+            if let Err(error) = futures::executor::block_on(lane.shutdown_module(&path, &services))
+            {
+                first_error.get_or_insert_with(|| {
+                    runtime_error(
+                        "MexShutdown",
+                        format!(
+                            "could not shut down MEX function '{}': {error}",
+                            path.display()
+                        ),
+                    )
+                });
+            }
+        }
+        self.native_modules.borrow_mut().clear();
+        self.native_values.borrow_mut().clear();
         first_error.map_or(Ok(()), Err)
     }
 }
@@ -352,6 +438,26 @@ fn finish_invocation(
             .next()
             .unwrap_or_else(|| Value::OutputList(Vec::new())),
         _ => Value::OutputList(invocation.outputs),
+    })
+}
+
+fn decode_native_invocation(
+    invocation: MexNativeInvocation,
+    values: &MxValueContext,
+) -> Result<MexInvocation, RuntimeError> {
+    let outputs = invocation
+        .outputs
+        .iter()
+        .map(|output| {
+            values
+                .decode(output)
+                .map_err(|error| runtime_error("MEX:Conversion", error.to_string()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(MexInvocation {
+        outputs,
+        warnings: invocation.warnings,
+        console: invocation.console,
     })
 }
 

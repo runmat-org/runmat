@@ -7,9 +7,9 @@ use runmat_value::Value;
 use thiserror::Error;
 
 use crate::{
-    value_from_mx, value_to_mx_for_interface, MexArtifactManifest, MexCallState, MexHostApiV1,
-    MexHostServices, MexSourceLanguage, MxApiMode, MxArray, MxBoundaryInterface,
-    UnavailableMexHostServices,
+    value_from_mx_in_context, value_to_mx_for_interface_in_context, MexArtifactManifest,
+    MexBoundaryHostServices, MexCallState, MexHostApiV1, MexHostServices, MexSourceLanguage,
+    MxApiMode, MxArray, MxBoundaryInterface, UnavailableMexHostServices,
 };
 
 type BindHost = unsafe extern "C" fn(*const MexHostApiV1) -> i32;
@@ -27,6 +27,19 @@ static MEX_PROCESS_GATE: LazyLock<ReentrantMutex<()>> = LazyLock::new(|| Reentra
 #[derive(Debug, Clone, PartialEq)]
 pub struct MexInvocation {
     pub outputs: Vec<Value>,
+    pub warnings: Vec<crate::MexDiagnostic>,
+    pub console: String,
+}
+
+/// Result of an invocation at the native array boundary.
+///
+/// This workspace-facing form preserves shared array storage and opaque handle
+/// tokens. Runtime `Value` conversion remains the responsibility of the
+/// originating runtime task.
+#[doc(hidden)]
+#[derive(Debug, Clone)]
+pub struct MexNativeInvocation {
+    pub outputs: Vec<MxArray>,
     pub warnings: Vec<crate::MexDiagnostic>,
     pub console: String,
 }
@@ -257,6 +270,11 @@ impl MexModule {
         self.mode
     }
 
+    #[doc(hidden)]
+    pub fn boundary_interface(&self) -> MxBoundaryInterface {
+        self.interface
+    }
+
     pub fn invoke(
         &self,
         inputs: &[Value],
@@ -301,57 +319,133 @@ impl MexModule {
         state.set_services(services);
         state.begin_call();
         let result = (|| {
-            let mut input_pointers = Vec::with_capacity(inputs.len());
+            let mut arrays = Vec::with_capacity(inputs.len());
             for input in inputs {
-                let value = value_to_mx_for_interface(input, mode, self.interface)
-                    .map_err(|error| MexLoadError::Input(error.message))?;
-                input_pointers.push(state.mx.allocate(value).cast_const());
+                let value = value_to_mx_for_interface_in_context(
+                    input,
+                    mode,
+                    self.interface,
+                    Some(state.value_context()),
+                )
+                .map_err(|error| MexLoadError::Input(error.message))?;
+                arrays.push(value);
             }
-            let mut outputs = vec![std::ptr::null_mut(); output_count];
-            let api = state.host_api();
-            // SAFETY: the API and call arena live through this synchronous call;
-            // input/output arrays have the exact lengths passed to the module.
-            let status = unsafe {
-                if (self.bind)(&api) != 0 {
-                    1
-                } else {
-                    let status = (self.invoke)(
-                        i32::try_from(outputs.len()).unwrap_or(i32::MAX),
-                        outputs.as_mut_ptr(),
-                        i32::try_from(input_pointers.len()).unwrap_or(i32::MAX),
-                        input_pointers.as_ptr(),
-                    );
-                    let _ = (self.bind)(std::ptr::null());
-                    status
-                }
-            };
-            if status != 0 || state.error.is_some() {
-                let error = state.error.clone().unwrap_or(crate::MexDiagnostic {
-                    identifier: None,
-                    message: format!("gateway returned status {status}"),
-                });
-                return Err(invocation_error(error));
-            }
-            let outputs = outputs
-                .into_iter()
-                .enumerate()
-                .map(|(index, pointer)| {
-                    let value = state
-                        .mx
-                        .arena()
-                        .get(pointer)
-                        .map_err(|_| MexLoadError::MissingOutput(index))?;
-                    value_from_mx(value).map_err(|error| MexLoadError::Output(error.message))
+            let invocation = self.invoke_arrays(state, arrays, output_count)?;
+            let outputs = invocation
+                .outputs
+                .iter()
+                .map(|value| {
+                    value_from_mx_in_context(value, Some(state.value_context()))
+                        .map_err(|error| MexLoadError::Output(error.message))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(MexInvocation {
                 outputs,
-                warnings: std::mem::take(&mut state.warnings),
-                console: std::mem::take(&mut state.console),
+                warnings: invocation.warnings,
+                console: invocation.console,
             })
         })();
         state.finish_call();
         result
+    }
+
+    /// Invoke a module using the thread-transferable native array boundary.
+    ///
+    /// The caller must execute this method on the lane that owns the module.
+    /// Host callbacks are delegated to `services`; they may proxy requests to
+    /// an originating runtime task without moving runtime-owned values or
+    /// garbage-collected handles onto this thread.
+    #[doc(hidden)]
+    pub fn invoke_native(
+        &self,
+        inputs: Vec<MxArray>,
+        output_count: usize,
+        mode: MxApiMode,
+        services: std::rc::Rc<dyn MexBoundaryHostServices>,
+    ) -> Result<MexNativeInvocation, MexLoadError> {
+        if mode != self.mode {
+            return Err(MexLoadError::Input(format!(
+                "MEX module was built for {:?}, not {:?}",
+                self.mode, mode
+            )));
+        }
+        let _process_guard = MEX_PROCESS_GATE.lock();
+        let mut state_slot = match self.state.try_lock() {
+            Ok(state) => state,
+            Err(std::sync::TryLockError::WouldBlock) => return Err(MexLoadError::ReentrantModule),
+            Err(std::sync::TryLockError::Poisoned(_)) => return Err(MexLoadError::Poisoned),
+        };
+        let state = state_slot.get_or_insert_with(|| {
+            MexCallState::with_boundary_services_for_interface(
+                mode,
+                self.interface,
+                services.clone(),
+            )
+        });
+        if state.mx.mode() != mode {
+            return Err(MexLoadError::Input(
+                "a loaded MEX module cannot switch complex API mode".into(),
+            ));
+        }
+        state.set_boundary_services(services);
+        state.begin_call();
+        let result = self.invoke_arrays(state, inputs, output_count);
+        state.finish_call();
+        result
+    }
+
+    fn invoke_arrays(
+        &self,
+        state: &mut MexCallState,
+        inputs: Vec<MxArray>,
+        output_count: usize,
+    ) -> Result<MexNativeInvocation, MexLoadError> {
+        let input_pointers = inputs
+            .into_iter()
+            .map(|value| state.mx.allocate(value).cast_const())
+            .collect::<Vec<_>>();
+        let mut output_pointers = vec![std::ptr::null_mut(); output_count];
+        let api = state.host_api();
+        // SAFETY: the API and call arena live through this synchronous call;
+        // input/output arrays have the exact lengths passed to the module.
+        let status = unsafe {
+            if (self.bind)(&api) != 0 {
+                1
+            } else {
+                let status = (self.invoke)(
+                    i32::try_from(output_pointers.len()).unwrap_or(i32::MAX),
+                    output_pointers.as_mut_ptr(),
+                    i32::try_from(input_pointers.len()).unwrap_or(i32::MAX),
+                    input_pointers.as_ptr(),
+                );
+                let _ = (self.bind)(std::ptr::null());
+                status
+            }
+        };
+        if status != 0 || state.error.is_some() {
+            let error = state.error.clone().unwrap_or(crate::MexDiagnostic {
+                identifier: None,
+                message: format!("gateway returned status {status}"),
+            });
+            return Err(invocation_error(error));
+        }
+        let outputs = output_pointers
+            .into_iter()
+            .enumerate()
+            .map(|(index, pointer)| {
+                state
+                    .mx
+                    .arena()
+                    .get(pointer)
+                    .cloned()
+                    .map_err(|_| MexLoadError::MissingOutput(index))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(MexNativeInvocation {
+            outputs,
+            warnings: std::mem::take(&mut state.warnings),
+            console: std::mem::take(&mut state.console),
+        })
     }
 
     pub fn is_locked(&self) -> bool {
@@ -394,6 +488,38 @@ impl MexModule {
         lifecycle_error.map_or(Ok(true), |error| Err(invocation_error(error)))
     }
 
+    #[doc(hidden)]
+    pub fn clear_with_boundary_services(
+        &self,
+        services: std::rc::Rc<dyn MexBoundaryHostServices>,
+    ) -> Result<bool, MexLoadError> {
+        let _process_guard = MEX_PROCESS_GATE.lock();
+        let mut state = match self.state.try_lock() {
+            Ok(state) => state,
+            Err(std::sync::TryLockError::WouldBlock) => return Ok(false),
+            Err(std::sync::TryLockError::Poisoned(_)) => return Err(MexLoadError::Poisoned),
+        };
+        if self.is_locked() {
+            return Ok(false);
+        }
+        let lifecycle_error = if let Some(call_state) = state.as_mut() {
+            call_state.set_boundary_services(services);
+            let api = call_state.host_api();
+            // SAFETY: at-exit runs synchronously while this state and API live.
+            unsafe {
+                let _ = (self.bind)(&api);
+                (self.unload)();
+            }
+            call_state.error.take()
+        } else {
+            // SAFETY: no state exists, so no registered callback can access it.
+            unsafe { (self.unload)() };
+            None
+        };
+        *state = None;
+        lifecycle_error.map_or(Ok(true), |error| Err(invocation_error(error)))
+    }
+
     /// Force final lifecycle teardown when the owning session exits.
     ///
     /// `mexLock` prevents an interactive `clear`, but cannot extend native
@@ -411,6 +537,37 @@ impl MexModule {
         };
         let lifecycle_error = if let Some(call_state) = state.as_mut() {
             call_state.set_services(services);
+            let api = call_state.host_api();
+            // SAFETY: teardown and registered at-exit callbacks run
+            // synchronously while the state and host API remain alive.
+            unsafe {
+                let _ = (self.bind)(&api);
+                (self.unload)();
+            }
+            call_state.error.take()
+        } else {
+            // SAFETY: no state exists, so no registered callback can reach a
+            // host allocation owned by this loader.
+            unsafe { (self.unload)() };
+            None
+        };
+        *state = None;
+        lifecycle_error.map_or(Ok(()), |error| Err(invocation_error(error)))
+    }
+
+    #[doc(hidden)]
+    pub fn shutdown_with_boundary_services(
+        &self,
+        services: std::rc::Rc<dyn MexBoundaryHostServices>,
+    ) -> Result<(), MexLoadError> {
+        let _process_guard = MEX_PROCESS_GATE.lock();
+        let mut state = match self.state.try_lock() {
+            Ok(state) => state,
+            Err(std::sync::TryLockError::WouldBlock) => return Err(MexLoadError::ReentrantModule),
+            Err(std::sync::TryLockError::Poisoned(_)) => return Err(MexLoadError::Poisoned),
+        };
+        let lifecycle_error = if let Some(call_state) = state.as_mut() {
+            call_state.set_boundary_services(services);
             let api = call_state.host_api();
             // SAFETY: teardown and registered at-exit callbacks run
             // synchronously while the state and host API remain alive.

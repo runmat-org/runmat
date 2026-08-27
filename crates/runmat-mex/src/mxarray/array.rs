@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::ffi::c_void;
 
 use runmat_value::{
-    AdoptedHostAllocation, HandleRef, HostComplexBuffer, HostIndexBuffer, HostLogicalBuffer,
+    AdoptedHostAllocation, HostComplexBuffer, HostIndexBuffer, HostLogicalBuffer,
     HostNumericBuffer, NumericDType, NumericStorage,
 };
 
@@ -15,9 +15,22 @@ pub enum MxApiMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MxBoundaryInterface {
+#[doc(hidden)]
+pub enum MxBoundaryInterface {
     CMatrix,
     CxxData,
+}
+
+/// Origin-thread value identity carried through a native MEX lane.
+///
+/// The token is safe to move between threads because it cannot dereference the
+/// underlying garbage-collected object. Resolution remains with the invocation
+/// context on the originating runtime thread.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MxHandleToken {
+    pub resource: u64,
+    pub generation: u64,
+    pub class_name: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -66,7 +79,7 @@ pub enum MxArrayData {
         properties: Vec<String>,
         values: Vec<Option<Box<MxArray>>>,
     },
-    Handle(HandleRef),
+    Handle(MxHandleToken),
     Sparse(MxSparse),
 }
 
@@ -336,7 +349,7 @@ impl MxArray {
         })
     }
 
-    pub fn handle(value: HandleRef) -> Self {
+    pub fn handle(value: MxHandleToken) -> Self {
         Self {
             class_id: MxClassId::Object,
             shape: vec![1, 1],
@@ -743,6 +756,12 @@ fn validate_shape(len: usize, shape: &[usize]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn boundary_arrays_are_native_lane_transferable_without_runtime_handles() {
+        fn assert_send<T: Send>() {}
+        assert_send::<MxArray>();
+    }
 
     #[test]
     fn complex_mode_selects_one_boundary_storage_contract() {

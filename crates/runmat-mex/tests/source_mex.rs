@@ -547,6 +547,40 @@ public:
 }
 
 #[test]
+fn modern_cpp_gateway_object_retains_module_state_between_calls() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("modern_state.cpp");
+    fs::write(
+        &source,
+        r#"
+#include "mex.hpp"
+#include "mexAdapter.hpp"
+
+class MexFunction : public matlab::mex::Function {
+public:
+    void operator()(matlab::mex::ArgumentList outputs,
+                    matlab::mex::ArgumentList inputs) override {
+        (void)inputs;
+        matlab::data::ArrayFactory factory;
+        outputs[0] = factory.createScalar<double>(++calls_);
+    }
+
+private:
+    double calls_ = 0.0;
+};
+"#,
+    )
+    .unwrap();
+
+    let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+    let module = MexModule::load(&artifact.module).unwrap();
+    let first = module.invoke(&[], 1, module.api_mode()).unwrap();
+    let second = module.invoke(&[], 1, module.api_mode()).unwrap();
+    assert_eq!(first.outputs, vec![Value::Num(1.0)]);
+    assert_eq!(second.outputs, vec![Value::Num(2.0)]);
+}
+
+#[test]
 fn modern_cpp_builds_keep_c_support_translation_units_in_c_mode() {
     let directory = tempfile::tempdir().unwrap();
     let source = directory.path().join("mixed_gateway.cpp");

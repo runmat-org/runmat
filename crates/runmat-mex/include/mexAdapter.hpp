@@ -14,7 +14,7 @@ namespace runmat_mex_detail {
 template <typename Gateway>
 void invokeCppGateway(int outputCount, mxArray **outputValues, int inputCount,
                       const mxArray **inputValues) {
-    Gateway gateway;
+    static Gateway gateway;
     auto outputs = matlab::mex::ArgumentList::outputs(outputCount);
     auto inputs = matlab::mex::ArgumentList::inputs(inputCount, inputValues);
     gateway(outputs, inputs);
