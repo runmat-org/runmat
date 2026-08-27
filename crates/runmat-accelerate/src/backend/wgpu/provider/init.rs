@@ -482,6 +482,11 @@ impl WgpuProvider {
         }
     }
 
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn test_device_handle(&self) -> Arc<wgpu::Device> {
+        self.device.clone()
+    }
+
     #[cfg(target_arch = "wasm32")]
     pub fn new(opts: WgpuProviderOptions) -> Result<Self> {
         Err(anyhow!(

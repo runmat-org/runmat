@@ -98,7 +98,7 @@ mod test_session {
     /// the next. The physical device remains stable across sessions because
     /// repeatedly creating native devices can itself exhaust a backend.
     pub(crate) struct WgpuTestSession {
-        provider: WgpuProvider,
+        provider: Option<WgpuProvider>,
         _guard: MutexGuard<'static, ()>,
     }
 
@@ -106,19 +106,25 @@ mod test_session {
         type Target = WgpuProvider;
 
         fn deref(&self) -> &Self::Target {
-            &self.provider
+            self.provider
+                .as_ref()
+                .expect("test provider session is active")
         }
     }
 
     impl WgpuTestSession {
         pub(crate) fn provider(&self) -> &WgpuProvider {
-            &self.provider
+            self
         }
     }
 
     impl Drop for WgpuTestSession {
         fn drop(&mut self) {
-            self.provider.device_ref().poll(wgpu::Maintain::Wait);
+            if let Some(provider) = self.provider.take() {
+                let device = provider.test_device_handle();
+                drop(provider);
+                device.poll(wgpu::Maintain::Wait);
+            }
         }
     }
 
@@ -131,7 +137,7 @@ mod test_session {
         let runtime = TEST_GPU_RUNTIME.get_or_try_init(|| WgpuProvider::new(options))?;
         let provider = runtime.new_session();
         Ok(WgpuTestSession {
-            provider,
+            provider: Some(provider),
             _guard: guard,
         })
     }
