@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 use std::ffi::c_void;
 
-use runmat_value::{HostLogicalBuffer, HostNumericBuffer, NumericDType, NumericStorage};
+use runmat_value::{
+    HostIndexBuffer, HostLogicalBuffer, HostNumericBuffer, NumericDType, NumericStorage,
+};
 
 use super::{MxClassId, MxInterleavedStorage};
 
@@ -24,7 +26,7 @@ pub struct MxInterleaved {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum MxSparseValues {
-    Numeric(NumericStorage),
+    Numeric(HostNumericBuffer),
     Logical(HostLogicalBuffer),
 }
 
@@ -32,8 +34,8 @@ pub enum MxSparseValues {
 pub struct MxSparse {
     pub rows: usize,
     pub cols: usize,
-    pub col_ptrs: Vec<usize>,
-    pub row_indices: Vec<usize>,
+    pub col_ptrs: HostIndexBuffer,
+    pub row_indices: HostIndexBuffer,
     pub values: MxSparseValues,
     pub nzmax: usize,
 }
@@ -93,10 +95,26 @@ impl MxArray {
             }
             MxArrayData::Logical(values) => values.make_unique(),
             MxArrayData::Sparse(MxSparse {
+                col_ptrs,
+                row_indices,
                 values: MxSparseValues::Logical(values),
                 ..
-            }) => values.make_unique(),
-            MxArrayData::Interleaved(_) | MxArrayData::Char(_) | MxArrayData::Sparse(_) => {}
+            }) => {
+                col_ptrs.make_unique();
+                row_indices.make_unique();
+                values.make_unique();
+            }
+            MxArrayData::Sparse(MxSparse {
+                col_ptrs,
+                row_indices,
+                values: MxSparseValues::Numeric(values),
+                ..
+            }) => {
+                col_ptrs.make_unique();
+                row_indices.make_unique();
+                values.make_unique();
+            }
+            MxArrayData::Interleaved(_) | MxArrayData::Char(_) => {}
         }
     }
 
@@ -365,8 +383,14 @@ impl MxArray {
             }
             MxArrayData::Char(values) => values.as_mut_ptr().cast(),
             MxArrayData::Sparse(value) => match &mut value.values {
-                MxSparseValues::Numeric(values) => owned_numeric_pointer(values),
-                MxSparseValues::Logical(values) => values.as_mut_ptr().cast(),
+                MxSparseValues::Numeric(values) => {
+                    // SAFETY: the sparse mxArray retains the invocation lease.
+                    unsafe { values.foreign_data_pointer() }
+                }
+                MxSparseValues::Logical(values) => {
+                    // SAFETY: the sparse mxArray retains the invocation lease.
+                    unsafe { values.foreign_data_pointer() }
+                }
             },
             MxArrayData::Cell(_) | MxArrayData::Struct { .. } | MxArrayData::Object { .. } => {
                 std::ptr::null_mut()
@@ -385,6 +409,16 @@ impl MxArray {
                 // SAFETY: the mutable mxArray borrow spans the synchronous write.
                 unsafe { values.foreign_data_pointer_mut() }
             }
+            MxArrayData::Sparse(value) => match &mut value.values {
+                MxSparseValues::Numeric(values) => {
+                    // SAFETY: the mutable mxArray borrow spans the synchronous write.
+                    unsafe { values.foreign_data_pointer_mut() }
+                }
+                MxSparseValues::Logical(values) => {
+                    // SAFETY: the mutable mxArray borrow spans the synchronous write.
+                    unsafe { values.foreign_data_pointer_mut() }
+                }
+            },
             _ => self.data_pointer(),
         }
     }
@@ -519,21 +553,6 @@ fn numeric_pointer(values: &HostNumericBuffer) -> *mut c_void {
     unsafe { values.foreign_data_pointer() }
 }
 
-fn owned_numeric_pointer(values: &mut NumericStorage) -> *mut c_void {
-    match values {
-        NumericStorage::F64(values) => values.as_mut_ptr().cast(),
-        NumericStorage::F32(values) => values.as_mut_ptr().cast(),
-        NumericStorage::I8(values) => values.as_mut_ptr().cast(),
-        NumericStorage::I16(values) => values.as_mut_ptr().cast(),
-        NumericStorage::I32(values) => values.as_mut_ptr().cast(),
-        NumericStorage::I64(values) => values.as_mut_ptr().cast(),
-        NumericStorage::U8(values) => values.as_mut_ptr().cast(),
-        NumericStorage::U16(values) => values.as_mut_ptr().cast(),
-        NumericStorage::U32(values) => values.as_mut_ptr().cast(),
-        NumericStorage::U64(values) => values.as_mut_ptr().cast(),
-    }
-}
-
 fn interleaved_pointer(values: &mut MxInterleavedStorage) -> *mut c_void {
     match values {
         MxInterleavedStorage::F64(values) => values.as_mut_ptr().cast(),
@@ -632,5 +651,32 @@ mod tests {
         };
         assert!(!numeric.shares_allocation_with(&duplicate_numeric.real));
         assert!(!logical.shares_allocation_with(duplicate_logical));
+    }
+
+    #[test]
+    fn deep_duplicate_detaches_sparse_indices_and_values() {
+        let columns = HostIndexBuffer::new(vec![0, 1, 2]);
+        let rows = HostIndexBuffer::new(vec![0, 1]);
+        let values = HostNumericBuffer::from_numeric_storage(NumericStorage::F64(vec![1.0, 2.0]));
+        let source = MxArray::sparse(MxSparse {
+            rows: 2,
+            cols: 2,
+            col_ptrs: columns.clone(),
+            row_indices: rows.clone(),
+            values: MxSparseValues::Numeric(values.clone()),
+            nzmax: 2,
+        })
+        .unwrap();
+
+        let duplicate = source.deep_duplicate();
+        let MxArrayData::Sparse(duplicate) = duplicate.data() else {
+            panic!("duplicate must remain sparse");
+        };
+        let MxSparseValues::Numeric(duplicate_values) = &duplicate.values else {
+            panic!("duplicate must remain numeric");
+        };
+        assert!(!columns.shares_allocation_with(&duplicate.col_ptrs));
+        assert!(!rows.shares_allocation_with(&duplicate.row_indices));
+        assert!(!values.shares_allocation_with(duplicate_values));
     }
 }

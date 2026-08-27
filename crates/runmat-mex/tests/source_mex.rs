@@ -66,6 +66,89 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
 }
 
 #[test]
+fn sparse_numeric_inputs_and_outputs_keep_compatible_host_allocations() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("sparse_allocation_identity.c");
+    fs::write(
+        &source,
+        r#"
+#include "mex.h"
+#include <stdint.h>
+
+static mxArray *address_of(const void *pointer) {
+    mxArray *value = mxCreateNumericMatrix(1, 1, mxUINT64_CLASS, mxREAL);
+    mxGetUint64s(value)[0] = (mxUint64)(uintptr_t)pointer;
+    return value;
+}
+
+void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
+    if (nlhs != 7 || nrhs != 1 || !mxIsSparse(prhs[0])) {
+        mexErrMsgTxt("expected one sparse input and seven outputs");
+    }
+    plhs[0] = mxCreateSparse(2, 2, 2, mxREAL);
+    double *values = mxGetDoubles(plhs[0]);
+    mwIndex *rows = mxGetIr(plhs[0]);
+    mwIndex *columns = mxGetJc(plhs[0]);
+    values[0] = 5.0;
+    values[1] = -2.0;
+    rows[0] = 0;
+    rows[1] = 1;
+    columns[0] = 0;
+    columns[1] = 1;
+    columns[2] = 2;
+    plhs[1] = address_of(mxGetData(prhs[0]));
+    plhs[2] = address_of(mxGetIr(prhs[0]));
+    plhs[3] = address_of(mxGetJc(prhs[0]));
+    plhs[4] = address_of(values);
+    plhs[5] = address_of(rows);
+    plhs[6] = address_of(columns);
+}
+"#,
+    )
+    .unwrap();
+
+    let input =
+        runmat_value::SparseTensor::new(2, 2, vec![0, 1, 2], vec![1, 0], vec![3.0, 4.0]).unwrap();
+    // SAFETY: the test observes pointer identity only while the owning sparse
+    // value remains live through the synchronous invocation.
+    let input_data =
+        unsafe { input.numeric_host_buffer().unwrap().foreign_data_pointer() } as usize as u64;
+    let input_rows = unsafe { input.row_indices.foreign_data_pointer() } as usize as u64;
+    let input_columns = unsafe { input.col_ptrs.foreign_data_pointer() } as usize as u64;
+
+    let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+    let module = MexModule::load(&artifact.module).unwrap();
+    let result = module
+        .invoke(&[Value::SparseTensor(input)], 7, module.api_mode())
+        .unwrap();
+    let Value::SparseTensor(output) = &result.outputs[0] else {
+        panic!("first output must remain sparse");
+    };
+    let output_data =
+        unsafe { output.numeric_host_buffer().unwrap().foreign_data_pointer() } as usize as u64;
+    let output_rows = unsafe { output.row_indices.foreign_data_pointer() } as usize as u64;
+    let output_columns = unsafe { output.col_ptrs.foreign_data_pointer() } as usize as u64;
+    let addresses = result.outputs[1..]
+        .iter()
+        .map(|value| match value {
+            Value::Int(value) => value.try_to_u64().unwrap(),
+            _ => panic!("pointer address must remain uint64"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        addresses,
+        vec![
+            input_data,
+            input_rows,
+            input_columns,
+            output_data,
+            output_rows,
+            output_columns
+        ]
+    );
+}
+
+#[test]
 fn documented_matrix_api_helpers_preserve_types_objects_and_ownership() {
     let directory = tempfile::tempdir().unwrap();
     let source = directory.path().join("matrix_api.c");

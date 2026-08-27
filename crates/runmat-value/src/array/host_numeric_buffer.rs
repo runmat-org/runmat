@@ -178,6 +178,21 @@ impl HostNumericBuffer {
         Ok(())
     }
 
+    pub fn resize_zeroed(&mut self, len: usize) {
+        if self.storage.is_shared() {
+            record_host_copy(
+                HostCopyReason::CopyOnWriteMutation,
+                self.checked_byte_len()
+                    .expect("allocated numeric buffer byte length fits usize"),
+            );
+        }
+        match self.storage.make_mut() {
+            HostNumericStorage::F64(values) => values.resize(len, 0.0),
+            HostNumericStorage::F32(values) => values.resize(len, 0.0),
+            HostNumericStorage::Integer(storage) => resize_integer_zeroed(storage, len),
+        }
+    }
+
     pub fn shares_allocation_with(&self, other: &Self) -> bool {
         self.storage.shares_allocation_with(&other.storage)
     }
@@ -291,6 +306,19 @@ fn copy_integer_storage(destination: &mut IntegerStorage, source: &IntegerStorag
             destination.copy_from_slice(source)
         }
         _ => unreachable!("numeric dtype equality guarantees matching integer storage"),
+    }
+}
+
+fn resize_integer_zeroed(storage: &mut IntegerStorage, len: usize) {
+    match storage {
+        IntegerStorage::I8(values) => values.resize(len, 0),
+        IntegerStorage::I16(values) => values.resize(len, 0),
+        IntegerStorage::I32(values) => values.resize(len, 0),
+        IntegerStorage::I64(values) => values.resize(len, 0),
+        IntegerStorage::U8(values) => values.resize(len, 0),
+        IntegerStorage::U16(values) => values.resize(len, 0),
+        IntegerStorage::U32(values) => values.resize(len, 0),
+        IntegerStorage::U64(values) => values.resize(len, 0),
     }
 }
 

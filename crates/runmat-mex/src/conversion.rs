@@ -1,9 +1,10 @@
 use std::fmt;
 
 use runmat_value::{
-    CellArray, CharArray, ComplexStorage, ComplexTensor, HostNumericBuffer, IntegerComplexStorage,
-    IntegerStorage, LogicalArray, NumericScalar, NumericStorage, ObjectArray, ObjectInstance,
-    SparseTensor, StructValue, Tensor, Value,
+    record_host_copy, CellArray, CharArray, ComplexStorage, ComplexTensor, HostCopyReason,
+    HostIndexBuffer, HostNumericBuffer, IntegerComplexStorage, IntegerStorage, LogicalArray,
+    NumericScalar, NumericStorage, ObjectArray, ObjectInstance, SparseTensor, StructValue, Tensor,
+    Value,
 };
 
 use crate::mxarray::{
@@ -174,23 +175,15 @@ fn char_to_mx(value: &CharArray) -> Result<MxArray, MxConversionError> {
 
 fn sparse_to_mx(value: &SparseTensor) -> Result<MxArray, MxConversionError> {
     let values = if value.is_logical() {
+        record_host_copy(HostCopyReason::SparseLayoutConversion, value.nnz());
         MxSparseValues::Logical(vec![1; value.nnz()].into())
     } else {
-        let dtype = value
-            .numeric_dtype()
-            .ok_or_else(|| MxConversionError::new("sparse value has no numeric class"))?;
-        let mut storage = NumericStorage::zeros(dtype, value.nnz());
-        for index in 0..value.nnz() {
-            storage
-                .set_value(
-                    index,
-                    value.numeric_value_at(index).ok_or_else(|| {
-                        MxConversionError::new("sparse numeric storage is incomplete")
-                    })?,
-                )
-                .map_err(MxConversionError::new)?;
-        }
-        MxSparseValues::Numeric(storage)
+        MxSparseValues::Numeric(
+            value
+                .numeric_host_buffer()
+                .ok_or_else(|| MxConversionError::new("sparse value has no numeric class"))?
+                .clone(),
+        )
     };
     MxArray::sparse(MxSparse {
         rows: value.rows,
@@ -474,53 +467,60 @@ fn sparse_from_mx(value: &MxSparse) -> Result<Value, MxConversionError> {
             "sparse column pointers exceed allocated nzmax",
         ));
     }
-    let row_indices = value.row_indices[..nnz].to_vec();
+    let exact_capacity = value.row_indices.len() == nnz;
+    let row_indices = if exact_capacity {
+        value.row_indices.clone()
+    } else {
+        record_host_copy(
+            HostCopyReason::SparseLayoutConversion,
+            nnz.saturating_mul(std::mem::size_of::<usize>()),
+        );
+        HostIndexBuffer::new(value.row_indices[..nnz].to_vec())
+    };
     let result = match &value.values {
-        MxSparseValues::Logical(_) => {
-            SparseTensor::new_logical(value.rows, value.cols, value.col_ptrs.clone(), row_indices)
+        MxSparseValues::Logical(_) => SparseTensor::from_host_logical_pattern(
+            value.rows,
+            value.cols,
+            value.col_ptrs.clone(),
+            row_indices,
+        ),
+        MxSparseValues::Numeric(values) if exact_capacity && values.len() == nnz => {
+            SparseTensor::from_host_numeric_buffers(
+                value.rows,
+                value.cols,
+                value.col_ptrs.clone(),
+                row_indices,
+                values.clone(),
+            )
         }
-        MxSparseValues::Numeric(NumericStorage::F64(values)) => SparseTensor::new(
-            value.rows,
-            value.cols,
-            value.col_ptrs.clone(),
-            row_indices,
-            values[..nnz].to_vec(),
-        ),
-        MxSparseValues::Numeric(NumericStorage::F32(values)) => SparseTensor::new_f32(
-            value.rows,
-            value.cols,
-            value.col_ptrs.clone(),
-            row_indices,
-            values[..nnz].to_vec(),
-        ),
-        MxSparseValues::Numeric(values) => SparseTensor::new_integer(
-            value.rows,
-            value.cols,
-            value.col_ptrs.clone(),
-            row_indices,
-            truncate_numeric(values, nnz)
-                .into_integer_storage()
-                .map_err(|_| MxConversionError::new("sparse numeric class is not integer"))?,
-        ),
+        MxSparseValues::Numeric(values) => {
+            let mut compact = NumericStorage::zeros(values.numeric_dtype(), nnz);
+            for index in 0..nnz {
+                compact
+                    .set_value(
+                        index,
+                        values.value_at(index).ok_or_else(|| {
+                            MxConversionError::new("sparse numeric storage is incomplete")
+                        })?,
+                    )
+                    .map_err(MxConversionError::new)?;
+            }
+            record_host_copy(
+                HostCopyReason::SparseLayoutConversion,
+                compact.checked_byte_len().unwrap_or(usize::MAX),
+            );
+            SparseTensor::from_host_numeric_buffers(
+                value.rows,
+                value.cols,
+                value.col_ptrs.clone(),
+                row_indices,
+                HostNumericBuffer::from_numeric_storage(compact),
+            )
+        }
     };
     result
         .map(Value::SparseTensor)
         .map_err(MxConversionError::new)
-}
-
-fn truncate_numeric(values: &NumericStorage, len: usize) -> NumericStorage {
-    match values {
-        NumericStorage::F64(values) => NumericStorage::F64(values[..len].to_vec()),
-        NumericStorage::F32(values) => NumericStorage::F32(values[..len].to_vec()),
-        NumericStorage::I8(values) => NumericStorage::I8(values[..len].to_vec()),
-        NumericStorage::I16(values) => NumericStorage::I16(values[..len].to_vec()),
-        NumericStorage::I32(values) => NumericStorage::I32(values[..len].to_vec()),
-        NumericStorage::I64(values) => NumericStorage::I64(values[..len].to_vec()),
-        NumericStorage::U8(values) => NumericStorage::U8(values[..len].to_vec()),
-        NumericStorage::U16(values) => NumericStorage::U16(values[..len].to_vec()),
-        NumericStorage::U32(values) => NumericStorage::U32(values[..len].to_vec()),
-        NumericStorage::U64(values) => NumericStorage::U64(values[..len].to_vec()),
-    }
 }
 
 fn value_kind(value: &Value) -> &'static str {

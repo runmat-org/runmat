@@ -187,8 +187,8 @@ fn preserve_sparse_with_dtype(
     sparse_from_f64_values(
         sparse.rows,
         sparse.cols,
-        sparse.col_ptrs.clone(),
-        sparse.row_indices.clone(),
+        sparse.col_ptrs.to_vec(),
+        sparse.row_indices.to_vec(),
         sparse.materialize_f64(),
         dtype,
         builtin,

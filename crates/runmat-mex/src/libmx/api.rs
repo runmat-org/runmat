@@ -1,6 +1,6 @@
 use std::ffi::c_void;
 
-use runmat_value::NumericStorage;
+use runmat_value::{HostNumericBuffer, NumericStorage};
 
 use crate::mxarray::MxArrayData;
 use crate::{MxApiMode, MxArena, MxArenaError, MxArray, MxClassId, MxSparse, MxSparseValues};
@@ -104,13 +104,15 @@ impl MxApi {
         let values = if logical {
             MxSparseValues::Logical(vec![0; nzmax].into())
         } else {
-            MxSparseValues::Numeric(NumericStorage::F64(vec![0.0; nzmax]))
+            MxSparseValues::Numeric(HostNumericBuffer::from_numeric_storage(
+                NumericStorage::F64(vec![0.0; nzmax]),
+            ))
         };
         Ok(self.arena.allocate(MxArray::sparse(MxSparse {
             rows,
             cols,
-            col_ptrs: vec![0; cols.saturating_add(1)],
-            row_indices: vec![0; nzmax],
+            col_ptrs: vec![0; cols.saturating_add(1)].into(),
+            row_indices: vec![0; nzmax].into(),
             values,
             nzmax,
         })?))
@@ -432,8 +434,12 @@ impl MxApi {
             return Err("mxArray is not sparse".into());
         };
         Ok((
-            value.row_indices.as_mut_ptr(),
-            value.col_ptrs.as_mut_ptr(),
+            // SAFETY: the mxArray retains both invocation-scoped index leases.
+            // Inputs are logically read-only even though the compatibility API
+            // exposes mutable pointer types. Explicit replacement and resizing
+            // enter the copy-on-write mutation path separately.
+            unsafe { value.row_indices.foreign_data_pointer().cast() },
+            unsafe { value.col_ptrs.foreign_data_pointer().cast() },
             value.nzmax,
         ))
     }
@@ -452,26 +458,11 @@ impl MxApi {
         }
         value.row_indices.resize(nzmax, 0);
         match &mut value.values {
-            MxSparseValues::Numeric(values) => resize_numeric(values, nzmax),
+            MxSparseValues::Numeric(values) => values.resize_zeroed(nzmax),
             MxSparseValues::Logical(values) => values.resize(nzmax, 0),
         }
         value.nzmax = nzmax;
         Ok(())
-    }
-}
-
-fn resize_numeric(values: &mut NumericStorage, len: usize) {
-    match values {
-        NumericStorage::F64(values) => values.resize(len, 0.0),
-        NumericStorage::F32(values) => values.resize(len, 0.0),
-        NumericStorage::I8(values) => values.resize(len, 0),
-        NumericStorage::I16(values) => values.resize(len, 0),
-        NumericStorage::I32(values) => values.resize(len, 0),
-        NumericStorage::I64(values) => values.resize(len, 0),
-        NumericStorage::U8(values) => values.resize(len, 0),
-        NumericStorage::U16(values) => values.resize(len, 0),
-        NumericStorage::U32(values) => values.resize(len, 0),
-        NumericStorage::U64(values) => values.resize(len, 0),
     }
 }
 
