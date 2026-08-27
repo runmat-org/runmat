@@ -13,8 +13,10 @@ extern "C" {
 
 typedef void (*mexExitFcn)(void);
 
+#if !defined(RUNMAT_CPP_MEX_ADAPTER)
 RUNMAT_MEX_LOCAL void mexFunction(int nlhs, mxArray *plhs[], int nrhs,
                                   const mxArray *prhs[]);
+#endif
 
 RUNMAT_MEX_EXPORT int mexAtExit(mexExitFcn function);
 RUNMAT_MEX_EXPORT void mexLock(void);

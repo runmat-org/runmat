@@ -1,4 +1,4 @@
-//! MATLAB-compatible C Matrix and MEX boundary.
+//! MATLAB-compatible C Matrix, C MEX, and modern C++ MEX/Data API boundary.
 //!
 //! `runmat-mex` owns compatibility objects and adapter lifecycle. It does not
 //! define a second RunMat value model. Compatible in-process arrays retain the
@@ -18,8 +18,9 @@ pub mod mxarray;
 pub use arena::{MxArena, MxArenaError};
 pub use build::{
     mex_suffix, MexApi, MexArgumentError, MexArtifactIdentity, MexArtifactManifest, MexBuild,
-    MexBuildError, MexBuildInvocation, MexBuildOutput, MexBuildPlan, MexTarget, MEX_ADAPTER_ID,
-    MEX_ADAPTER_VERSION, MEX_ARTIFACT_SCHEMA_VERSION, MEX_EXTENSIONS,
+    MexBuildError, MexBuildInvocation, MexBuildOutput, MexBuildPlan, MexBuildStep,
+    MexSourceLanguage, MexTarget, MEX_ADAPTER_ID, MEX_ADAPTER_VERSION, MEX_ARTIFACT_SCHEMA_VERSION,
+    MEX_EXTENSIONS,
 };
 pub use compatibility::{MexApiAvailability, MexApiSymbol, C_MATRIX_API, C_MEX_API};
 pub use conversion::{value_from_mx, value_to_mx, MxConversionError};

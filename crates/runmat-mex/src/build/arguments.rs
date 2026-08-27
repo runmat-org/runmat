@@ -12,7 +12,7 @@ pub enum MexArgumentError {
     MissingOptionValue(String),
     #[error("mex: unsupported option {0}")]
     UnsupportedOption(String),
-    #[error("mex: -setup is not interactive; set CC or pass --compiler to select a toolchain")]
+    #[error("mex: -setup is not interactive; set CC/CXX or pass --compiler to select a toolchain")]
     SetupUnsupported,
     #[error("mex: API options {first} and {second} cannot be combined")]
     ConflictingApiOptions { first: String, second: String },
@@ -78,8 +78,14 @@ impl MexBuildInvocation {
                 _ if argument.starts_with("CC=") => {
                     compiler = Some(PathBuf::from(&argument[3..]));
                 }
+                _ if argument.starts_with("CXX=") => {
+                    compiler = Some(PathBuf::from(&argument[4..]));
+                }
                 _ if argument.starts_with("CFLAGS=") => {
                     compiler_arguments.extend(split_driver_arguments(&argument[7..]));
+                }
+                _ if argument.starts_with("CXXFLAGS=") => {
+                    compiler_arguments.extend(split_driver_arguments(&argument[9..]));
                 }
                 _ if argument.starts_with("LDFLAGS=") => {
                     linker_arguments.extend(split_driver_arguments(&argument[8..]));
@@ -93,8 +99,10 @@ impl MexBuildInvocation {
         }
         let mut sources = sources.into_iter();
         let first = sources.next().ok_or(MexArgumentError::MissingSource)?;
-        let mut build =
-            MexBuild::new(first, output_directory).api(api.map(|(api, _)| api).unwrap_or_default());
+        let mut build = MexBuild::new(first, output_directory);
+        if let Some((api, _)) = api {
+            build = build.api(api);
+        }
         for source in sources {
             build = build.source(source);
         }
@@ -211,5 +219,28 @@ mod tests {
                 second: "-R2018a".into(),
             }
         );
+    }
+
+    #[test]
+    fn cpp_sources_select_the_modern_api_and_cxx_overrides() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = temporary.path().join("gateway.cpp");
+        std::fs::write(&source, "class MexFunction {}; ").unwrap();
+        let arguments = vec![
+            "CXX=custom-cxx".into(),
+            "CXXFLAGS=-g -fno-exceptions".into(),
+            "gateway.cpp".into(),
+        ];
+        let invocation = MexBuildInvocation::parse(&arguments, temporary.path()).unwrap();
+        assert_eq!(
+            invocation.build.language,
+            crate::build::MexSourceLanguage::Cxx
+        );
+        assert_eq!(invocation.build.api, MexApi::R2018a);
+        assert_eq!(invocation.build.compiler, PathBuf::from("custom-cxx"));
+        assert!(invocation
+            .build
+            .compiler_arguments
+            .contains(&"-fno-exceptions".to_string()));
     }
 }

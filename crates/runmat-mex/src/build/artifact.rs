@@ -9,10 +9,10 @@ use runmat_types::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
-use super::{sdk, CCompilerFamily, MexApi, MexBuildError, MexTarget};
+use super::{sdk, CCompilerFamily, MexApi, MexBuildError, MexSourceLanguage, MexTarget};
 use crate::MEX_HOST_ABI_VERSION;
 
-pub const MEX_ARTIFACT_SCHEMA_VERSION: u16 = 1;
+pub const MEX_ARTIFACT_SCHEMA_VERSION: u16 = 2;
 pub const MEX_ADAPTER_ID: &str = "mex-c";
 pub const MEX_ADAPTER_VERSION: u32 = 1;
 
@@ -40,6 +40,7 @@ pub struct MexArtifactManifest {
     pub module_name: String,
     pub target: MexTarget,
     pub api: MexApi,
+    pub source_language: MexSourceLanguage,
     pub compiler_family: String,
     pub host_abi_version: u32,
     pub sdk_digest: String,
@@ -53,6 +54,7 @@ struct IdentityInput<'a> {
     module_name: &'a str,
     target: &'a MexTarget,
     api: MexApi,
+    source_language: MexSourceLanguage,
     compiler_family: &'a str,
     host_abi_version: u32,
     sdk_digest: &'a str,
@@ -75,6 +77,7 @@ impl MexArtifactManifest {
         module_name: &str,
         target: MexTarget,
         api: MexApi,
+        source_language: MexSourceLanguage,
         compiler_family: CCompilerFamily,
         module: &[u8],
     ) -> Result<Self, MexBuildError> {
@@ -86,6 +89,7 @@ impl MexArtifactManifest {
             module_name,
             target: &target,
             api,
+            source_language,
             compiler_family,
             host_abi_version: MEX_HOST_ABI_VERSION,
             sdk_digest: &sdk_digest,
@@ -94,13 +98,14 @@ impl MexArtifactManifest {
         };
         let identity_bytes = serde_json::to_vec(&input)
             .map_err(|source| MexBuildError::ArtifactEncoding { source })?;
-        let identity = MexArtifactIdentity(format!("mex:v1:{}", digest(&identity_bytes)));
+        let identity = MexArtifactIdentity(format!("mex:v2:{}", digest(&identity_bytes)));
         let manifest = Self {
             schema_version: MEX_ARTIFACT_SCHEMA_VERSION,
             identity,
             module_name: module_name.to_string(),
             target,
             api,
+            source_language,
             compiler_family: compiler_family.to_string(),
             host_abi_version: MEX_HOST_ABI_VERSION,
             sdk_digest,
@@ -163,6 +168,7 @@ impl MexArtifactManifest {
             module_name: &self.module_name,
             target: &self.target,
             api: self.api,
+            source_language: self.source_language,
             compiler_family: &self.compiler_family,
             host_abi_version: self.host_abi_version,
             sdk_digest: &self.sdk_digest,
@@ -171,7 +177,7 @@ impl MexArtifactManifest {
         };
         let identity_bytes = serde_json::to_vec(&input)
             .map_err(|source| MexBuildError::ArtifactEncoding { source })?;
-        let expected = format!("mex:v1:{}", digest(&identity_bytes));
+        let expected = format!("mex:v2:{}", digest(&identity_bytes));
         if self.identity.as_str() != expected {
             return Err(MexBuildError::InvalidArtifactManifest);
         }
@@ -232,6 +238,7 @@ mod tests {
             "fixture",
             target.clone(),
             MexApi::R2017b,
+            MexSourceLanguage::C,
             compiler_family,
             b"module bytes",
         )
@@ -240,6 +247,7 @@ mod tests {
             "fixture",
             target,
             MexApi::R2017b,
+            MexSourceLanguage::C,
             compiler_family,
             b"module bytes",
         )

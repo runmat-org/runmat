@@ -1,13 +1,22 @@
 use std::path::{Path, PathBuf};
 
-use super::{compiler_family, sdk, CCompilerFamily, MexApi, MexBuild, MexBuildError};
+use super::{
+    compiler_family, sdk, CCompilerFamily, MexApi, MexBuild, MexBuildError, MexSourceLanguage,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MexBuildPlan {
     pub compiler: PathBuf,
     pub arguments: Vec<String>,
+    pub steps: Vec<MexBuildStep>,
     pub module: PathBuf,
     pub target: super::MexTarget,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MexBuildStep {
+    pub compiler: PathBuf,
+    pub arguments: Vec<String>,
 }
 
 impl MexBuildPlan {
@@ -28,36 +37,78 @@ impl MexBuildPlan {
             .join(format!("{}.{}", build.output_name, build.target.suffix));
         let function_name = c_identifier(&build.output_name);
         let sdk = sdk::prepare()?;
-        let arguments = match family {
-            CCompilerFamily::GnuLike => gnu_arguments(
+        let object_directory = object_directory.unwrap_or(&build.output_directory);
+        let steps = match (family, build.language) {
+            (CCompilerFamily::GnuLike, MexSourceLanguage::C) => vec![MexBuildStep {
+                compiler: build.compiler.clone(),
+                arguments: gnu_arguments(
+                    build,
+                    &module,
+                    &function_name,
+                    &sdk.include_directory,
+                    &sdk.shim,
+                ),
+            }],
+            (CCompilerFamily::Msvc, MexSourceLanguage::C) => vec![MexBuildStep {
+                compiler: build.compiler.clone(),
+                arguments: msvc_arguments(
+                    build,
+                    &module,
+                    &function_name,
+                    &sdk.include_directory,
+                    &sdk.shim,
+                    object_directory,
+                ),
+            }],
+            (CCompilerFamily::GnuLike, MexSourceLanguage::Cxx) => cxx_gnu_steps(
                 build,
                 &module,
                 &function_name,
                 &sdk.include_directory,
                 &sdk.shim,
+                object_directory,
             ),
-            CCompilerFamily::Msvc => msvc_arguments(
+            (CCompilerFamily::Msvc, MexSourceLanguage::Cxx) => cxx_msvc_steps(
                 build,
                 &module,
                 &function_name,
                 &sdk.include_directory,
                 &sdk.shim,
-                object_directory.unwrap_or(&build.output_directory),
+                object_directory,
             ),
         };
+        let arguments = flatten_step_arguments(&steps);
         Ok(Self {
             compiler: build.compiler.clone(),
             arguments,
+            steps,
             module,
             target: build.target.clone(),
         })
     }
 
     pub fn command(&self) -> Vec<String> {
-        std::iter::once(self.compiler.display().to_string())
-            .chain(self.arguments.iter().cloned())
-            .collect()
+        flatten_steps(&self.steps)
     }
+}
+
+fn flatten_step_arguments(steps: &[MexBuildStep]) -> Vec<String> {
+    steps
+        .iter()
+        .flat_map(|step| step.arguments.iter().cloned())
+        .collect()
+}
+
+fn flatten_steps(steps: &[MexBuildStep]) -> Vec<String> {
+    let mut command = Vec::new();
+    for (index, step) in steps.iter().enumerate() {
+        if index != 0 {
+            command.push("&&".into());
+        }
+        command.push(step.compiler.display().to_string());
+        command.extend(step.arguments.iter().cloned());
+    }
+    command
 }
 
 fn validate(build: &MexBuild) -> Result<(), MexBuildError> {
@@ -102,15 +153,37 @@ fn gnu_arguments(
     if !cfg!(target_os = "windows") {
         arguments.push("-fPIC".into());
     }
-    arguments.extend(["-std=c11".into(), "-O2".into()]);
+    arguments.extend([
+        match build.language {
+            MexSourceLanguage::C => "-std=c11",
+            MexSourceLanguage::Cxx => "-std=c++17",
+        }
+        .into(),
+        "-O2".into(),
+    ]);
     arguments.push(format!("-I{}", sdk_include.display()));
     for include in &build.include_directories {
         arguments.push(format!("-I{}", include.display()));
     }
     push_definitions(build, function_name, "-D", &mut arguments);
     arguments.extend(build.compiler_arguments.iter().cloned());
-    arguments.extend(build.sources.iter().map(|path| path.display().to_string()));
-    arguments.push(shim.display().to_string());
+    if build.language == MexSourceLanguage::Cxx {
+        for source in &build.sources {
+            arguments.extend([
+                "-x".into(),
+                match MexSourceLanguage::detect(source) {
+                    MexSourceLanguage::C => "c",
+                    MexSourceLanguage::Cxx => "c++",
+                }
+                .into(),
+                source.display().to_string(),
+            ]);
+        }
+        arguments.extend(["-x".into(), "c++".into(), shim.display().to_string()]);
+    } else {
+        arguments.extend(build.sources.iter().map(|path| path.display().to_string()));
+        arguments.push(shim.display().to_string());
+    }
     arguments.extend(build.linker_arguments.iter().cloned());
     arguments.extend(["-o".into(), module.display().to_string()]);
     arguments
@@ -128,7 +201,11 @@ fn msvc_arguments(
         "/nologo".into(),
         "/LD".into(),
         "/O2".into(),
-        "/std:c11".into(),
+        match build.language {
+            MexSourceLanguage::C => "/std:c11",
+            MexSourceLanguage::Cxx => "/std:c++17",
+        }
+        .into(),
         format!("/I{}", sdk_include.display()),
         format!(
             "/Fo{}{}",
@@ -141,12 +218,204 @@ fn msvc_arguments(
     }
     push_definitions(build, function_name, "/D", &mut arguments);
     arguments.extend(build.compiler_arguments.iter().cloned());
-    arguments.extend(build.sources.iter().map(|path| path.display().to_string()));
-    arguments.push(shim.display().to_string());
+    if build.language == MexSourceLanguage::Cxx {
+        arguments.extend(build.sources.iter().map(|path| {
+            let mode = match MexSourceLanguage::detect(path) {
+                MexSourceLanguage::C => "/TC",
+                MexSourceLanguage::Cxx => "/TP",
+            };
+            format!("{mode}{}", path.display())
+        }));
+        arguments.push(format!("/TP{}", shim.display()));
+    } else {
+        arguments.extend(build.sources.iter().map(|path| path.display().to_string()));
+        arguments.push(shim.display().to_string());
+    }
     arguments.push("/link".into());
     arguments.extend(build.linker_arguments.iter().cloned());
     arguments.push(format!("/OUT:{}", module.display()));
     arguments
+}
+
+fn cxx_gnu_steps(
+    build: &MexBuild,
+    module: &Path,
+    function_name: &str,
+    sdk_include: &Path,
+    shim: &Path,
+    object_directory: &Path,
+) -> Vec<MexBuildStep> {
+    let mut steps = Vec::new();
+    for (index, source) in build.sources.iter().enumerate() {
+        let language = MexSourceLanguage::detect(source);
+        let object = object_path(object_directory, index, source, "o");
+        let mut arguments = vec![
+            "-fPIC".into(),
+            "-O2".into(),
+            "-x".into(),
+            match language {
+                MexSourceLanguage::C => "c",
+                MexSourceLanguage::Cxx => "c++",
+            }
+            .into(),
+            match language {
+                MexSourceLanguage::C => "-std=c11",
+                MexSourceLanguage::Cxx => "-std=c++17",
+            }
+            .into(),
+            format!("-I{}", sdk_include.display()),
+        ];
+        for include in &build.include_directories {
+            arguments.push(format!("-I{}", include.display()));
+        }
+        push_definitions(build, function_name, "-D", &mut arguments);
+        arguments.extend(build.compiler_arguments.iter().cloned());
+        arguments.extend([
+            "-c".into(),
+            source.display().to_string(),
+            "-o".into(),
+            object.display().to_string(),
+        ]);
+        steps.push(MexBuildStep {
+            compiler: build.compiler.clone(),
+            arguments,
+        });
+    }
+
+    let shim_object = object_path(object_directory, build.sources.len(), shim, "o");
+    let mut shim_arguments = vec![
+        "-fPIC".into(),
+        "-O2".into(),
+        "-x".into(),
+        "c".into(),
+        "-std=c11".into(),
+        format!("-I{}", sdk_include.display()),
+    ];
+    push_definitions(build, function_name, "-D", &mut shim_arguments);
+    shim_arguments.extend([
+        "-c".into(),
+        shim.display().to_string(),
+        "-o".into(),
+        shim_object.display().to_string(),
+    ]);
+    steps.push(MexBuildStep {
+        compiler: build.compiler.clone(),
+        arguments: shim_arguments,
+    });
+
+    let mut link_arguments = vec![if cfg!(target_os = "macos") {
+        "-dynamiclib".into()
+    } else {
+        "-shared".into()
+    }];
+    link_arguments.extend((0..build.sources.len()).map(|index| {
+        object_path(object_directory, index, &build.sources[index], "o")
+            .display()
+            .to_string()
+    }));
+    link_arguments.push(shim_object.display().to_string());
+    link_arguments.extend(build.linker_arguments.iter().cloned());
+    link_arguments.extend(["-o".into(), module.display().to_string()]);
+    steps.push(MexBuildStep {
+        compiler: build.compiler.clone(),
+        arguments: link_arguments,
+    });
+    steps
+}
+
+fn cxx_msvc_steps(
+    build: &MexBuild,
+    module: &Path,
+    function_name: &str,
+    sdk_include: &Path,
+    shim: &Path,
+    object_directory: &Path,
+) -> Vec<MexBuildStep> {
+    let mut steps = Vec::new();
+    for (index, source) in build.sources.iter().enumerate() {
+        let language = MexSourceLanguage::detect(source);
+        let object = object_path(object_directory, index, source, "obj");
+        let mut arguments = vec![
+            "/nologo".into(),
+            "/O2".into(),
+            "/c".into(),
+            match language {
+                MexSourceLanguage::C => "/std:c11",
+                MexSourceLanguage::Cxx => "/std:c++17",
+            }
+            .into(),
+            format!("/I{}", sdk_include.display()),
+        ];
+        for include in &build.include_directories {
+            arguments.push(format!("/I{}", include.display()));
+        }
+        push_definitions(build, function_name, "/D", &mut arguments);
+        arguments.extend(build.compiler_arguments.iter().cloned());
+        arguments.push(format!(
+            "{}{}",
+            match language {
+                MexSourceLanguage::C => "/TC",
+                MexSourceLanguage::Cxx => "/TP",
+            },
+            source.display()
+        ));
+        arguments.push(format!("/Fo{}", object.display()));
+        steps.push(MexBuildStep {
+            compiler: build.compiler.clone(),
+            arguments,
+        });
+    }
+
+    let shim_object = object_path(object_directory, build.sources.len(), shim, "obj");
+    let mut shim_arguments = vec![
+        "/nologo".into(),
+        "/O2".into(),
+        "/c".into(),
+        "/std:c11".into(),
+        format!("/I{}", sdk_include.display()),
+    ];
+    push_definitions(build, function_name, "/D", &mut shim_arguments);
+    shim_arguments.extend([
+        format!("/TC{}", shim.display()),
+        format!("/Fo{}", shim_object.display()),
+    ]);
+    steps.push(MexBuildStep {
+        compiler: build.compiler.clone(),
+        arguments: shim_arguments,
+    });
+
+    let mut link_arguments = vec!["/nologo".into(), "/LD".into()];
+    link_arguments.extend((0..build.sources.len()).map(|index| {
+        object_path(object_directory, index, &build.sources[index], "obj")
+            .display()
+            .to_string()
+    }));
+    link_arguments.push(shim_object.display().to_string());
+    link_arguments.push("/link".into());
+    link_arguments.extend(build.linker_arguments.iter().cloned());
+    link_arguments.push(format!("/OUT:{}", module.display()));
+    steps.push(MexBuildStep {
+        compiler: build.compiler.clone(),
+        arguments: link_arguments,
+    });
+    steps
+}
+
+fn object_path(directory: &Path, index: usize, source: &Path, extension: &str) -> PathBuf {
+    let stem = source
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("source")
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '_' {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    directory.join(format!("{index:04}-{stem}.{extension}"))
 }
 
 fn push_definitions(
@@ -273,6 +542,58 @@ mod tests {
         assert!(compatible.contains(&"RUNMAT_MX_COMPATIBLE_ARRAY_DIMS=1".to_string()));
         assert!(compatible.contains(&"MX_COMPAT_32=1".to_string()));
         assert!(compatible.contains(&"TARGET_API_VERSION=700".to_string()));
+    }
+
+    #[test]
+    fn cpp_plan_uses_the_cxx_driver_contract_and_keeps_the_shim_in_c_mode() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = temporary.path().join("demo.cpp");
+        std::fs::write(&source, "class MexFunction {}; ").unwrap();
+        let plan = MexBuild::new(&source, temporary.path()).plan().unwrap();
+        assert!(plan.arguments.contains(&"-std=c++17".to_string()));
+        assert!(plan.arguments.contains(&"c++".to_string()));
+        assert!(plan.arguments.contains(&"-std=c11".to_string()));
+        assert!(plan
+            .arguments
+            .iter()
+            .any(|argument| argument == "RUNMAT_MX_INTERLEAVED_COMPLEX=1"
+                || argument.ends_with("RUNMAT_MX_INTERLEAVED_COMPLEX=1")));
+    }
+
+    #[test]
+    fn msvc_cpp_plan_compiles_each_language_then_links_once() {
+        let temporary = tempfile::tempdir().unwrap();
+        let cpp = temporary.path().join("gateway.cpp");
+        let c = temporary.path().join("support.c");
+        std::fs::write(&cpp, "class MexFunction {}; ").unwrap();
+        std::fs::write(&c, "void support(void) {} ").unwrap();
+        let build = MexBuild::new(&cpp, temporary.path())
+            .source(&c)
+            .compiler("cl.exe")
+            .target(MexTarget {
+                triple: "x86_64-pc-windows-msvc".into(),
+                architecture: "x86_64".into(),
+                operating_system: "windows".into(),
+                pointer_width: 64,
+                suffix: "mexw64".into(),
+            });
+        let plan =
+            MexBuildPlan::for_build_with_msvc_object_directory(&build, Some(temporary.path()))
+                .unwrap();
+        assert_eq!(plan.steps.len(), 4);
+        assert!(plan.steps[0]
+            .arguments
+            .iter()
+            .any(|argument| argument.starts_with("/TP")));
+        assert!(plan.steps[1]
+            .arguments
+            .iter()
+            .any(|argument| argument.starts_with("/TC")));
+        assert!(plan.steps[2]
+            .arguments
+            .iter()
+            .any(|argument| argument.starts_with("/TC")));
+        assert!(plan.steps[3].arguments.contains(&"/LD".to_string()));
     }
 
     #[test]

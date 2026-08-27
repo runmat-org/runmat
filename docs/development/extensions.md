@@ -26,6 +26,14 @@ The checked-in [`C_MATRIX_API` and `C_MEX_API` catalogs](https://github.com/runm
 
 Input pointers are invocation-scoped read-only aliases. Mutating an input obtained through a compatibility API violates the extension contract. Writable outputs and explicit duplicates apply RunMat's copy-on-write value semantics, and no pointer may outlive the array or lease that owns it.
 
+### Modern C++ MEX and Data API
+
+Passing a `.cpp`, `.cc`, `.cxx`, or `.c++` source to `mex` selects a C++17 driver and the interleaved-complex API by default. `CXX` and `CXXFLAGS` select and configure the C++ toolchain; an explicit release pin still takes precedence. Modern gateways include `mex.hpp` and `mexAdapter.hpp`, derive `MexFunction` from `matlab::mex::Function`, and receive `matlab::mex::ArgumentList` inputs and outputs.
+
+The bundled Data API uses shared copy-on-write array controls over the same host buffers as the C Matrix API and ordinary RunMat values. Copying an `Array`, assigning an input to an output, or placing an array inside a cell or structure shares the underlying allocation. The first mutable access detaches only that value. `ArrayFactory::createBuffer` uses the MEX host allocator, and `createArrayFromBuffer` transfers a compatible column-major buffer into the result without copying. A row-major buffer is reordered once and reported as a memory-layout conversion. Typed real, logical, character, floating and fixed-width complex arrays, cells, structures, synchronous engine callbacks, and C++ exception translation use this ownership model.
+
+The modern Data API and the C Matrix API are separate source interfaces. A C++ gateway should not use C Matrix functions to mutate an object managed by a Data API wrapper. The adapter itself uses the private host boundary to implement shared copies, allocator transfer, callbacks, and output publication while keeping those mechanics out of extension source.
+
 Each successful build writes a canonical `.runmat.json` manifest beside the platform MEX module. The manifest binds the module name and bytes to its target triple, Matrix API selection, compiler family, embedded SDK revision, and RunMat MEX host ABI. Its content identity can be carried in executable and package interop manifests for capability admission and cache validation. Moving a module does not change its identity, while changing the module or its compatibility contract does.
 
 Loaded modules belong to the current session. `clear mex`, `clear functions`, `clear all`, and named `clear` requests unload eligible modules and run registered `mexAtExit` handlers. A locked or currently executing module stays loaded. Native MEX loading is not available in a browser/WASM runtime; capability checks report that boundary before native execution.

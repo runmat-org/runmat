@@ -11,9 +11,10 @@ pub enum HostCopyReason {
     ForeignStorageConversion = 5,
     ProviderReadback = 6,
     ProcessSnapshot = 7,
+    MemoryLayoutConversion = 8,
 }
 
-const REASON_COUNT: usize = 8;
+const REASON_COUNT: usize = 9;
 static COPY_COUNTS: [AtomicU64; REASON_COUNT] = [const { AtomicU64::new(0) }; REASON_COUNT];
 static COPY_BYTES: [AtomicU64; REASON_COUNT] = [const { AtomicU64::new(0) }; REASON_COUNT];
 

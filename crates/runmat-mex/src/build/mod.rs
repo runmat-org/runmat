@@ -13,9 +13,9 @@ pub use artifact::{
     MexArtifactIdentity, MexArtifactManifest, MEX_ADAPTER_ID, MEX_ADAPTER_VERSION,
     MEX_ARTIFACT_SCHEMA_VERSION,
 };
-pub use command::{MexApi, MexBuild, MexBuildOutput};
+pub use command::{MexApi, MexBuild, MexBuildOutput, MexSourceLanguage};
 pub use error::MexBuildError;
-pub use plan::MexBuildPlan;
+pub use plan::{MexBuildPlan, MexBuildStep};
 pub use suffix::{mex_suffix, MEX_EXTENSIONS};
 pub use target::MexTarget;
-use toolchain::{compiler_family, default_c_compiler, CCompilerFamily};
+use toolchain::{compiler_family, default_c_compiler, default_cxx_compiler, CCompilerFamily};

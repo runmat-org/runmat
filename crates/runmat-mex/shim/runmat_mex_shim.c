@@ -531,6 +531,22 @@ mxArray *mxDuplicateArray(const mxArray *array) {
     return runmat_host->duplicate_array(runmat_host->host, array);
 }
 
+mxArray *runmatDataArrayShare(const mxArray *array) {
+    runmat_require_host();
+    return runmat_host->share_array(runmat_host->host, array);
+}
+
+void runmatDataArrayRecordMemoryLayoutCopy(size_t byte_length) {
+    runmat_require_host();
+    runmat_host->record_host_copy(runmat_host->host,
+                                 RUNMAT_HOST_COPY_MEMORY_LAYOUT, byte_length);
+}
+
+void runmatDataArraySetError(const char *identifier, const char *message) {
+    runmat_require_host();
+    runmat_host->set_error(runmat_host->host, identifier, message);
+}
+
 void mxDestroyArray(mxArray *array) {
     runmat_require_host();
     if (runmat_host->destroy_array(runmat_host->host, array) != 0) {

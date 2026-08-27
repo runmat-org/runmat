@@ -27,6 +27,18 @@ pub(super) fn default_c_compiler() -> PathBuf {
         })
 }
 
+pub(super) fn default_cxx_compiler() -> PathBuf {
+    std::env::var_os("CXX")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            if cfg!(target_os = "windows") {
+                PathBuf::from("cl.exe")
+            } else {
+                PathBuf::from("c++")
+            }
+        })
+}
+
 pub(super) fn compiler_family(compiler: &Path) -> CCompilerFamily {
     let executable = compiler
         .file_name()

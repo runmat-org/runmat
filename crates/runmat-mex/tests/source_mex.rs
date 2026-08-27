@@ -6,9 +6,291 @@ use std::rc::Rc;
 use std::sync::Mutex;
 
 use runmat_mex::{
-    MexApi, MexBuild, MexDiagnostic, MexHostServices, MexLoadError, MexModule, MxApiMode,
+    MexApi, MexBuild, MexDiagnostic, MexHostServices, MexLoadError, MexModule, MexSourceLanguage,
+    MxApiMode,
 };
 use runmat_value::Value;
+
+#[test]
+fn modern_cpp_data_api_shares_inputs_detaches_mutation_and_adopts_buffers() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("modern_data_api.cpp");
+    fs::write(
+        &source,
+        r#"
+#include "mex.hpp"
+#include "mexAdapter.hpp"
+#include <cstdint>
+#include <vector>
+
+class MexFunction : public matlab::mex::Function {
+public:
+    void operator()(matlab::mex::ArgumentList outputs,
+                    matlab::mex::ArgumentList inputs) override {
+        if (outputs.size() != 5 || inputs.size() != 1) {
+            throw matlab::Exception("expected one input and five outputs");
+        }
+        matlab::data::ArrayFactory factory;
+
+        outputs[0] = inputs[0];
+
+        matlab::data::TypedArray<double> changed(inputs[0]);
+        changed[0] = 19.0;
+        outputs[1] = changed;
+
+        auto buffer = factory.createBuffer<double>(2);
+        double *allocation = buffer.get();
+        buffer.get()[0] = 7.0;
+        buffer.get()[1] = -4.0;
+        outputs[2] = factory.createArrayFromBuffer<double>({1, 2}, std::move(buffer));
+        outputs[3] = factory.createScalar<std::uint64_t>(
+            static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(allocation)));
+
+        std::vector<matlab::data::Array> callbackInputs{
+            factory.createScalar<double>(5.0)};
+        outputs[4] = getEngine()->feval(u"plus_one", callbackInputs);
+    }
+};
+"#,
+    )
+    .unwrap();
+
+    let input = runmat_value::Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
+    // SAFETY: the test observes the address only while the input or its shared
+    // output owns the canonical host allocation.
+    let input_address = unsafe { input.host_buffer().foreign_data_pointer() } as usize as u64;
+    let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+    assert_eq!(artifact.artifact.source_language, MexSourceLanguage::Cxx);
+    assert_eq!(artifact.artifact.api, MexApi::R2018a);
+    let module = MexModule::load(&artifact.module).unwrap();
+    let copies_before =
+        runmat_value::host_copy_metrics(runmat_value::HostCopyReason::CopyOnWriteMutation);
+    let result = module
+        .invoke_with_services(
+            &[Value::Tensor(input)],
+            5,
+            module.api_mode(),
+            Rc::new(FixtureHost::default()),
+        )
+        .unwrap();
+    let copies_after =
+        runmat_value::host_copy_metrics(runmat_value::HostCopyReason::CopyOnWriteMutation);
+    assert!(copies_after.operations > copies_before.operations);
+    assert!(copies_after.bytes >= copies_before.bytes + 2 * std::mem::size_of::<f64>() as u64);
+
+    let Value::Tensor(shared) = &result.outputs[0] else {
+        panic!("shared C++ output must remain a tensor");
+    };
+    let shared_address = unsafe { shared.host_buffer().foreign_data_pointer() } as usize as u64;
+    assert_eq!(shared_address, input_address);
+    assert_eq!(shared.materialize_f64(), vec![3.0, 4.0]);
+
+    let Value::Tensor(changed) = &result.outputs[1] else {
+        panic!("mutated C++ copy must remain a tensor");
+    };
+    assert_eq!(changed.materialize_f64(), vec![19.0, 4.0]);
+    let changed_address = unsafe { changed.host_buffer().foreign_data_pointer() } as usize as u64;
+    assert_ne!(changed_address, input_address);
+
+    let Value::Tensor(adopted) = &result.outputs[2] else {
+        panic!("buffer-created C++ output must remain a tensor");
+    };
+    let adopted_address = unsafe { adopted.host_buffer().foreign_data_pointer() } as usize as u64;
+    let Value::Int(recorded_address) = &result.outputs[3] else {
+        panic!("recorded buffer address must remain uint64");
+    };
+    assert_eq!(recorded_address.try_to_u64(), Some(adopted_address));
+    assert_eq!(adopted.materialize_f64(), vec![7.0, -4.0]);
+    assert_eq!(result.outputs[4], Value::Num(6.0));
+}
+
+#[test]
+fn modern_cpp_data_api_preserves_aggregate_complex_and_layout_semantics() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("modern_aggregate_api.cpp");
+    fs::write(
+        &source,
+        r#"
+#include "mex.hpp"
+#include "mexAdapter.hpp"
+#include <complex>
+#include <cstdint>
+
+class MexFunction : public matlab::mex::Function {
+public:
+    void operator()(matlab::mex::ArgumentList outputs,
+                    matlab::mex::ArgumentList inputs) override {
+        (void)inputs;
+        matlab::data::ArrayFactory factory;
+        outputs[0] = factory.createCellArray(
+            {1, 2}, factory.createScalar<std::uint64_t>(UINT64_MAX),
+            factory.createCharArray("cell"));
+
+        auto record = factory.createStructArray({1, 1}, {"value", "label"});
+        record[0]["value"] = factory.createScalar<std::int32_t>(-17);
+        record[0]["label"] = factory.createCharArray("record");
+        matlab::data::Reference<matlab::data::Array> field = record[0]["value"];
+        (void)field;
+        outputs[1] = record;
+
+        auto complexValues = factory.createArray<std::complex<double>>(
+            {1, 2}, {{3.0, -4.0}, {5.0, 12.0}});
+        complexValues[1] = std::complex<double>(8.0, -6.0);
+        outputs[2] = complexValues;
+
+        auto rowMajor = factory.createBuffer<double>(6);
+        for (std::size_t index = 0; index < 6; ++index) {
+            rowMajor.get()[index] = static_cast<double>(index + 1);
+        }
+        outputs[3] = factory.createArrayFromBuffer<double>(
+            {2, 3}, std::move(rowMajor), matlab::data::MemoryLayout::ROW_MAJOR);
+    }
+};
+"#,
+    )
+    .unwrap();
+
+    let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+    let module = MexModule::load(&artifact.module).unwrap();
+    let layout_copies_before =
+        runmat_value::host_copy_metrics(runmat_value::HostCopyReason::MemoryLayoutConversion);
+    let result = module.invoke(&[], 4, module.api_mode()).unwrap();
+    let layout_copies_after =
+        runmat_value::host_copy_metrics(runmat_value::HostCopyReason::MemoryLayoutConversion);
+    assert_eq!(
+        layout_copies_after.operations,
+        layout_copies_before.operations + 1
+    );
+    assert_eq!(
+        layout_copies_after.bytes,
+        layout_copies_before.bytes + 6 * std::mem::size_of::<f64>() as u64
+    );
+
+    let Value::Cell(cell) = &result.outputs[0] else {
+        panic!("C++ cell output must remain a cell");
+    };
+    assert_eq!(
+        cell.get(0, 0).unwrap(),
+        Value::Int(runmat_value::IntValue::U64(u64::MAX))
+    );
+    assert_eq!(
+        cell.get(0, 1).unwrap(),
+        Value::CharArray(runmat_value::CharArray::new_row("cell"))
+    );
+
+    let Value::Struct(record) = &result.outputs[1] else {
+        panic!("C++ struct output must remain a struct");
+    };
+    assert_eq!(
+        record.fields.get("value"),
+        Some(&Value::Int(runmat_value::IntValue::I32(-17)))
+    );
+    assert_eq!(
+        record.fields.get("label"),
+        Some(&Value::CharArray(runmat_value::CharArray::new_row(
+            "record"
+        )))
+    );
+
+    let Value::ComplexTensor(complex) = &result.outputs[2] else {
+        panic!("C++ complex output must remain complex");
+    };
+    assert_eq!(complex.materialize_f64(), vec![(3.0, -4.0), (8.0, -6.0)]);
+
+    let Value::Tensor(row_major) = &result.outputs[3] else {
+        panic!("row-major C++ buffer output must remain a tensor");
+    };
+    assert_eq!(row_major.shape, vec![2, 3]);
+    assert_eq!(
+        row_major.materialize_f64(),
+        vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]
+    );
+}
+
+#[test]
+fn modern_cpp_exceptions_unwind_before_the_host_reports_the_error() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("modern_exception.cpp");
+    fs::write(
+        &source,
+        r#"
+#include "mex.hpp"
+#include "mexAdapter.hpp"
+
+static bool destroyed = false;
+struct Guard { ~Guard() { destroyed = true; } };
+
+class MexFunction : public matlab::mex::Function {
+public:
+    void operator()(matlab::mex::ArgumentList outputs,
+                    matlab::mex::ArgumentList inputs) override {
+        matlab::data::ArrayFactory factory;
+        if (inputs.empty()) {
+            Guard guard;
+            throw matlab::Exception("fixture failure");
+        }
+        outputs[0] = factory.createScalar<bool>(destroyed);
+    }
+};
+"#,
+    )
+    .unwrap();
+
+    let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+    let module = MexModule::load(&artifact.module).unwrap();
+    let error = module.invoke(&[], 0, module.api_mode()).unwrap_err();
+    assert!(error.to_string().contains("RunMat:mex:cppException"));
+    assert!(error.to_string().contains("fixture failure"));
+    let result = module
+        .invoke(&[Value::Bool(true)], 1, module.api_mode())
+        .unwrap();
+    assert_eq!(result.outputs, vec![Value::Bool(true)]);
+}
+
+#[test]
+fn modern_cpp_builds_keep_c_support_translation_units_in_c_mode() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("mixed_gateway.cpp");
+    let support = directory.path().join("support.c");
+    fs::write(
+        &source,
+        r#"
+#include "mex.hpp"
+#include "mexAdapter.hpp"
+extern "C" double c_support(double value);
+
+class MexFunction : public matlab::mex::Function {
+public:
+    void operator()(matlab::mex::ArgumentList outputs,
+                    matlab::mex::ArgumentList inputs) override {
+        (void)inputs;
+        matlab::data::ArrayFactory factory;
+        outputs[0] = factory.createScalar<double>(c_support(5.0));
+    }
+};
+"#,
+    )
+    .unwrap();
+    fs::write(
+        &support,
+        r#"
+double c_support(double value) {
+    return _Generic(value, double: value + 2.0, default: 0.0);
+}
+"#,
+    )
+    .unwrap();
+
+    let build = MexBuild::new(&source, directory.path()).source(&support);
+    let plan = build.plan().unwrap();
+    assert_eq!(plan.steps.len(), 4);
+    assert!(plan.steps[0].arguments.contains(&"-std=c++17".to_string()));
+    assert!(plan.steps[1].arguments.contains(&"-std=c11".to_string()));
+    let artifact = build.compile().unwrap();
+    let module = MexModule::load(&artifact.module).unwrap();
+    let result = module.invoke(&[], 1, module.api_mode()).unwrap();
+    assert_eq!(result.outputs, vec![Value::Num(7.0)]);
+}
 
 #[test]
 fn dense_numeric_inputs_and_outputs_keep_their_host_allocation() {
