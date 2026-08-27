@@ -451,6 +451,62 @@ impl<R: Read, W: Write> MexHostServices for IsolatedMexHostServices<R, W> {
             )),
         }
     }
+
+    fn get_object_property_at(
+        &self,
+        object: Value,
+        index: usize,
+        name: &str,
+    ) -> Result<Value, MexDiagnostic> {
+        let object = encode_value_transfer(&object, &self.snapshots)
+            .map_err(|error| diagnostic(&error.identifier, error.message))?;
+        let index = u64::try_from(index)
+            .map_err(|_| diagnostic("RunMat:MEX:ObjectIndex", "object index exceeds u64"))?;
+        match self.callback(MexCallbackOperation::GetObjectProperty {
+            object,
+            index,
+            name: name.into(),
+        })? {
+            MexCallbackOutput::Values(values) if values.len() == 1 => {
+                decode_value_transfer(&values[0], &self.snapshots)
+                    .map_err(|error| diagnostic(&error.identifier, error.message))
+            }
+            _ => Err(diagnostic(
+                "RunMat:MEX:CallbackProtocol",
+                "property read returned an invalid result",
+            )),
+        }
+    }
+
+    fn set_object_property_at(
+        &self,
+        object: Value,
+        index: usize,
+        name: &str,
+        value: Value,
+    ) -> Result<Value, MexDiagnostic> {
+        let object = encode_value_transfer(&object, &self.snapshots)
+            .map_err(|error| diagnostic(&error.identifier, error.message))?;
+        let value = encode_value_transfer(&value, &self.snapshots)
+            .map_err(|error| diagnostic(&error.identifier, error.message))?;
+        let index = u64::try_from(index)
+            .map_err(|_| diagnostic("RunMat:MEX:ObjectIndex", "object index exceeds u64"))?;
+        match self.callback(MexCallbackOperation::SetObjectProperty {
+            object,
+            index,
+            name: name.into(),
+            value,
+        })? {
+            MexCallbackOutput::Values(values) if values.len() == 1 => {
+                decode_value_transfer(&values[0], &self.snapshots)
+                    .map_err(|error| diagnostic(&error.identifier, error.message))
+            }
+            _ => Err(diagnostic(
+                "RunMat:MEX:CallbackProtocol",
+                "property write returned an invalid result",
+            )),
+        }
+    }
 }
 
 fn diagnostic(identifier: &str, message: impl Into<String>) -> MexDiagnostic {
