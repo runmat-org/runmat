@@ -214,12 +214,9 @@ fn inline_erfcinv_body(precision: NumericPrecision) -> String {
     };
     format!(
         r#"
-if a != a {{ return a; }}
-if a < {ty}(0.0) || a > {ty}(2.0) {{ return {nan}(); }}
-if a == {ty}(0.0) {{ return {positive_infinity}(); }}
-if a == {ty}(2.0) {{ return {negative_infinity}(); }}
-if a == {ty}(1.0) {{ return {ty}(0.0); }}
-let p = a * {ty}(0.5);
+var safe_a = {ty}(1.0);
+if a > {ty}(0.0) && a < {ty}(2.0) {{ safe_a = a; }}
+let p = safe_a * {ty}(0.5);
 var normal: {ty};
 if p < {ty}(0.02425) {{
     let q = sqrt(-{ty}(2.0) * log(p));
@@ -266,7 +263,12 @@ if p < {ty}(0.02425) {{
     denominator = denominator * r + {ty}(1.0);
     normal = (numerator * q) / denominator;
 }}
-return -normal * {ty}(0.7071067811865476);
+var result = -normal * {ty}(0.7071067811865476);
+if a != a {{ result = a; }}
+if a < {ty}(0.0) || a > {ty}(2.0) {{ result = {nan}(); }}
+if a == {ty}(0.0) {{ result = {positive_infinity}(); }}
+if a == {ty}(2.0) {{ result = {negative_infinity}(); }}
+return result;
 "#
     )
 }
@@ -387,12 +389,14 @@ mod real_unary_tests {
         assert!(f32_shader.contains("fn pos_inf_f32() -> f32"));
         assert!(f32_shader.contains("fn neg_inf_f32() -> f32"));
         assert!(f32_shader.contains("fn nan_f32() -> f32"));
+        assert!(f32_shader.find("let p = safe_a").unwrap() < f32_shader.find("if a != a").unwrap());
 
         let f64_shader = real_unary_shader(UnaryOpCode::Erfcinv, NumericPrecision::F64);
         assert!(f64_shader.contains("struct OutputTensor { data: array<f64> }"));
         assert!(f64_shader.contains("fn pos_inf_f64() -> f64"));
         assert!(f64_shader.contains("fn neg_inf_f64() -> f64"));
         assert!(f64_shader.contains("fn nan_f64() -> f64"));
+        assert!(f64_shader.find("let p = safe_a").unwrap() < f64_shader.find("if a != a").unwrap());
     }
 }
 
