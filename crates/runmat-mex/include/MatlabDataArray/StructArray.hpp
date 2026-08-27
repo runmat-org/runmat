@@ -20,7 +20,7 @@ public:
     }
 
     StructFieldReference &operator=(Array value) {
-        detail::ArrayAccess::ensureWritable(*owner_);
+        detail::ArrayAccess::ensureContainerWritable(*owner_);
         mxArray *native = value ? detail::ArrayAccess::releaseForOutput(value) : nullptr;
         mxSetField(detail::ArrayAccess::native(*owner_), index_, field_.c_str(), native);
         return *this;

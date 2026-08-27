@@ -2,6 +2,9 @@
 #define RUNMAT_MATLAB_DATA_ARRAY_ARRAY_FACTORY_HPP
 
 #include "TypedArray.hpp"
+#include "StringArray.hpp"
+#include "SparseArray.hpp"
+#include "EnumArray.hpp"
 #include "CellArray.hpp"
 #include "StructArray.hpp"
 #include "mex.h"
@@ -10,7 +13,9 @@
 #include <initializer_list>
 #include <limits>
 #include <memory>
+#include <new>
 #include <numeric>
+#include <tuple>
 #include <string>
 #include <type_traits>
 
@@ -75,6 +80,18 @@ public:
         return createArray<T>({1, 1}, {value});
     }
 
+    StringArray createScalar(const String &value) const {
+        return createArray<MATLABString>({1, 1}, {MATLABString(value)});
+    }
+
+    StringArray createScalar(const MATLABString &value) const {
+        return createArray<MATLABString>({1, 1}, {value});
+    }
+
+    StringArray createScalar(const std::string &value) const {
+        return createScalar(detail::decodeUTF8(value));
+    }
+
     CharArray createCharArray(const std::u16string &value) const {
         return createArray({1, value.size()}, value.begin(), value.end());
     }
@@ -130,6 +147,113 @@ public:
     }
 
     template <typename T>
+    SparseArray<T> createSparseArray(
+        ArrayDimensions dimensions, std::size_t nonzeroCount,
+        buffer_ptr_t<T> data, buffer_ptr_t<std::size_t> rows,
+        buffer_ptr_t<std::size_t> columns) const {
+        static_assert(std::is_same<T, double>::value ||
+                          std::is_same<T, bool>::value,
+                      "this compatibility level supports real double and logical sparse arrays");
+        if (dimensions.size() != 2) {
+            throw std::invalid_argument("sparse arrays must have two dimensions");
+        }
+        if (data.get_deleter().elements < nonzeroCount ||
+            rows.get_deleter().elements < nonzeroCount ||
+            columns.get_deleter().elements < nonzeroCount) {
+            throw std::invalid_argument("sparse coordinate buffer is too small");
+        }
+
+        std::vector<std::size_t> order(nonzeroCount);
+        std::iota(order.begin(), order.end(), 0);
+        for (std::size_t index = 0; index < nonzeroCount; ++index) {
+            if (rows.get()[index] >= dimensions[0] ||
+                columns.get()[index] >= dimensions[1]) {
+                throw std::out_of_range("sparse coordinate exceeds dimensions");
+            }
+        }
+        const auto less = [&](std::size_t left, std::size_t right) {
+            return std::tie(columns.get()[left], rows.get()[left]) <
+                   std::tie(columns.get()[right], rows.get()[right]);
+        };
+        const bool ordered = std::is_sorted(order.begin(), order.end(), less);
+        if (!ordered) {
+            std::stable_sort(order.begin(), order.end(), less);
+            auto sortedData = createBuffer<T>(nonzeroCount);
+            auto sortedRows = createBuffer<std::size_t>(nonzeroCount);
+            for (std::size_t destination = 0; destination < nonzeroCount;
+                 ++destination) {
+                sortedData.get()[destination] = data.get()[order[destination]];
+                sortedRows.get()[destination] = rows.get()[order[destination]];
+            }
+            runmatDataArrayRecordSparseLayoutCopy(
+                nonzeroCount * (sizeof(T) + sizeof(std::size_t)));
+            data = std::move(sortedData);
+            rows = std::move(sortedRows);
+        }
+
+        auto columnPointers = createBuffer<std::size_t>(dimensions[1] + 1);
+        std::fill(columnPointers.get(), columnPointers.get() + dimensions[1] + 1,
+                  0);
+        for (std::size_t destination = 0; destination < nonzeroCount;
+             ++destination) {
+            const std::size_t source = ordered ? destination : order[destination];
+            ++columnPointers.get()[columns.get()[source] + 1];
+        }
+        for (std::size_t column = 0; column < dimensions[1]; ++column) {
+            columnPointers.get()[column + 1] += columnPointers.get()[column];
+        }
+        runmatDataArrayRecordSparseLayoutCopy(nonzeroCount * sizeof(std::size_t));
+
+        mxArray *native = std::is_same<T, bool>::value
+                              ? mxCreateSparseLogicalMatrix(
+                                    dimensions[0], dimensions[1], nonzeroCount)
+                              : mxCreateSparse(dimensions[0], dimensions[1],
+                                               nonzeroCount, mxREAL);
+        if (native == nullptr) throw std::bad_alloc();
+        mxSetData(native, data.get());
+        (void)data.release();
+        mxSetIr(native, rows.get());
+        (void)rows.release();
+        mxSetJc(native, columnPointers.get());
+        (void)columnPointers.release();
+        return SparseArray<T>(Array::adopt(native));
+    }
+
+    EnumArray createEnumArray(ArrayDimensions dimensions,
+                              const std::string &className,
+                              const std::vector<std::string> &members) const {
+        if (className.empty()) {
+            throw std::invalid_argument("enumeration class name is empty");
+        }
+        const std::size_t count = elementCount(dimensions);
+        if (members.size() != count) {
+            throw std::invalid_argument(
+                "enumeration member count does not match dimensions");
+        }
+        const char *property = "__enum_member__";
+        mxArray *native = mxCreateStructArray(dimensions.size(), dimensions.data(),
+                                              1, &property);
+        if (native == nullptr) throw std::bad_alloc();
+        if (mxSetClassName(native, className.c_str()) != 0) {
+            mxDestroyArray(native);
+            throw std::invalid_argument("invalid enumeration class name");
+        }
+        for (std::size_t index = 0; index < count; ++index) {
+            auto member = createScalar(detail::decodeUTF8(members[index]));
+            mxSetProperty(native, index, property,
+                          detail::ArrayAccess::releaseForOutput(member));
+        }
+        return EnumArray(Array::adopt(native));
+    }
+
+    EnumArray createEnumArray(ArrayDimensions dimensions,
+                              const std::string &className) const {
+        const std::size_t count = elementCount(dimensions);
+        return createEnumArray(std::move(dimensions), className,
+                               std::vector<std::string>(count, std::string()));
+    }
+
+    template <typename T>
     buffer_ptr_t<T> createBuffer(std::size_t elements) const {
         static_assert(bufferCompatible<T>(),
                       "this element type requires an explicit representation conversion");
@@ -139,6 +263,24 @@ public:
         auto *pointer = static_cast<T *>(mxMalloc(elements * sizeof(T)));
         if (pointer == nullptr && elements != 0) {
             throw std::bad_alloc();
+        }
+        if constexpr (!std::is_same<T, bool>::value &&
+                      !std::is_same<T, std::size_t>::value) {
+            if constexpr (detail::ElementTraits<T>::complex) {
+                using Storage = typename detail::ElementTraits<T>::Storage;
+                static_assert(
+                    std::is_trivially_destructible<T>::value,
+                    "complex buffer elements must have trivial destruction");
+                static_assert(
+                    sizeof(T) == sizeof(Storage),
+                    "complex buffer element size does not match the host ABI");
+                static_assert(
+                    alignof(T) == alignof(Storage),
+                    "complex buffer element alignment does not match the host ABI");
+                for (std::size_t index = 0; index < elements; ++index) {
+                    ::new (static_cast<void *>(pointer + index)) T();
+                }
+            }
         }
         return buffer_ptr_t<T>(pointer, buffer_deleter_t{elements});
     }
@@ -181,7 +323,9 @@ public:
 
 private:
     Array toArray(Array value) const { return value; }
-    Array toArray(const std::string &value) const { return createCharArray(value); }
+    Array toArray(const String &value) const { return createScalar(value); }
+    Array toArray(const MATLABString &value) const { return createScalar(value); }
+    Array toArray(const std::string &value) const { return createScalar(value); }
     Array toArray(const char *value) const {
         return createCharArray(value == nullptr ? std::string() : std::string(value));
     }
@@ -204,23 +348,35 @@ private:
     }
 
     template <typename T> static constexpr bool bufferCompatible() {
-        using Traits = detail::ElementTraits<T>;
-        return !Traits::complex &&
-               std::is_same<typename Traits::Storage, T>::value;
+        if constexpr (std::is_same<T, bool>::value ||
+                      std::is_same<T, std::size_t>::value) {
+            return true;
+        } else {
+            using Traits = detail::ElementTraits<T>;
+            if constexpr (Traits::complex) {
+                return std::is_same<T, std::complex<double>>::value ||
+                       std::is_same<T, std::complex<float>>::value;
+            } else {
+                return std::is_same<typename Traits::Storage, T>::value;
+            }
+        }
     }
 
     template <typename T>
     static mxArray *createUninitialized(const ArrayDimensions &dimensions) {
         const std::size_t count = elementCount(dimensions);
         (void)count;
-        const mxComplexity complexity =
-            detail::ElementTraits<T>::complex ? mxCOMPLEX : mxREAL;
         mxArray *array = nullptr;
-        if constexpr (std::is_same<T, bool>::value) {
+        if constexpr (std::is_same<T, MATLABString>::value) {
+            array = runmatDataArrayCreateStringArray(dimensions.size(),
+                                                     dimensions.data());
+        } else if constexpr (std::is_same<T, bool>::value) {
             array = mxCreateLogicalArray(dimensions.size(), dimensions.data());
         } else if constexpr (std::is_same<T, char16_t>::value) {
             array = mxCreateCharArray(dimensions.size(), dimensions.data());
         } else {
+            const mxComplexity complexity =
+                detail::ElementTraits<T>::complex ? mxCOMPLEX : mxREAL;
             array = mxCreateUninitNumericArray(
                 dimensions.size(), dimensions.data(),
                 detail::ElementTraits<T>::classId, complexity);

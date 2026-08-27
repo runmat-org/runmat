@@ -2,9 +2,13 @@ use std::collections::BTreeSet;
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::rc::Rc;
 
-use crate::{value_from_mx, value_to_mx, MexHostServices, MxApi, MxApiMode, MxArray, MxClassId};
+use crate::mxarray::{MxArrayData, MxSparse, MxSparseValues};
+use crate::{
+    value_from_mx, value_to_mx_for_interface, MexHostServices, MxApi, MxApiMode, MxArray,
+    MxBoundaryInterface, MxClassId,
+};
 
-pub const MEX_HOST_ABI_VERSION: u32 = 5;
+pub const MEX_HOST_ABI_VERSION: u32 = 6;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MexDiagnostic {
@@ -20,6 +24,7 @@ pub struct MexCallState {
     field_name_cache: Vec<CString>,
     services: Rc<dyn MexHostServices>,
     global_arrays: BTreeSet<usize>,
+    interface: MxBoundaryInterface,
 }
 
 impl MexCallState {
@@ -32,12 +37,26 @@ impl MexCallState {
             field_name_cache: Vec::new(),
             services: Rc::new(super::UnavailableMexHostServices),
             global_arrays: BTreeSet::new(),
+            interface: MxBoundaryInterface::CMatrix,
         }
     }
 
     pub fn with_services(mode: MxApiMode, services: Rc<dyn MexHostServices>) -> Self {
         Self {
             services,
+            ..Self::new(mode)
+        }
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    pub(crate) fn with_services_for_interface(
+        mode: MxApiMode,
+        interface: MxBoundaryInterface,
+        services: Rc<dyn MexHostServices>,
+    ) -> Self {
+        Self {
+            services,
+            interface,
             ..Self::new(mode)
         }
     }
@@ -108,6 +127,11 @@ impl MexCallState {
             make_memory_persistent,
             share_array,
             record_host_copy,
+            data_array_type,
+            create_string_array,
+            string_length,
+            copy_string,
+            set_string,
         }
     }
 
@@ -224,6 +248,14 @@ pub struct MexHostApiV1 {
     pub share_array: unsafe extern "C" fn(*mut c_void, *const MxArray) -> *mut MxArray,
     // ABI v5 field is appended after the complete v4 prefix.
     pub record_host_copy: unsafe extern "C" fn(*mut c_void, u32, usize),
+    // ABI v6 fields are appended after the complete v5 prefix.
+    pub data_array_type: unsafe extern "C" fn(*mut c_void, *const MxArray) -> i32,
+    pub create_string_array: unsafe extern "C" fn(*mut c_void, usize, *const usize) -> *mut MxArray,
+    pub string_length: unsafe extern "C" fn(*mut c_void, *const MxArray, usize) -> usize,
+    pub copy_string:
+        unsafe extern "C" fn(*mut c_void, *const MxArray, usize, *mut u16, usize) -> i32,
+    pub set_string:
+        unsafe extern "C" fn(*mut c_void, *mut MxArray, usize, *const u16, usize) -> i32,
 }
 
 unsafe fn state<'a>(host: *mut c_void) -> Option<&'a mut MexCallState> {
@@ -437,12 +469,185 @@ unsafe extern "C" fn share_array(host: *mut c_void, value: *const MxArray) -> *m
 }
 
 unsafe extern "C" fn record_host_copy(_host: *mut c_void, reason: u32, byte_length: usize) {
-    if reason == runmat_value::HostCopyReason::MemoryLayoutConversion as u32 {
-        runmat_value::record_host_copy(
-            runmat_value::HostCopyReason::MemoryLayoutConversion,
-            byte_length,
-        );
+    let reason = match reason {
+        value if value == runmat_value::HostCopyReason::MemoryLayoutConversion as u32 => {
+            Some(runmat_value::HostCopyReason::MemoryLayoutConversion)
+        }
+        value if value == runmat_value::HostCopyReason::SparseLayoutConversion as u32 => {
+            Some(runmat_value::HostCopyReason::SparseLayoutConversion)
+        }
+        _ => None,
+    };
+    if let Some(reason) = reason {
+        runmat_value::record_host_copy(reason, byte_length);
     }
+}
+
+unsafe extern "C" fn data_array_type(host: *mut c_void, value: *const MxArray) -> i32 {
+    let Some(state) = (unsafe { state(host) }) else {
+        return 0;
+    };
+    let Ok(value) = state.mx.arena().get(value) else {
+        state.fail("invalid Data API array");
+        return 0;
+    };
+    match value.data() {
+        MxArrayData::String(_) => 31,
+        MxArrayData::Object { properties, .. }
+            if properties
+                .iter()
+                .any(|property| property == "__enum_member__") =>
+        {
+            27
+        }
+        MxArrayData::Object { .. } => 25,
+        MxArrayData::Handle(_) => 26,
+        MxArrayData::Sparse(MxSparse {
+            values: MxSparseValues::Logical(_),
+            ..
+        }) => 28,
+        MxArrayData::Sparse(_) if value.is_complex() => 30,
+        MxArrayData::Sparse(_) => 29,
+        _ => 0,
+    }
+}
+
+unsafe extern "C" fn create_string_array(
+    host: *mut c_void,
+    ndim: usize,
+    dims: *const usize,
+) -> *mut MxArray {
+    let Some(state) = (unsafe { state(host) }) else {
+        return std::ptr::null_mut();
+    };
+    let shape = match unsafe { shape(ndim, dims) } {
+        Ok(shape) => shape,
+        Err(error) => {
+            state.fail(error);
+            return std::ptr::null_mut();
+        }
+    };
+    let Some(count) = shape
+        .iter()
+        .try_fold(1usize, |count, dimension| count.checked_mul(*dimension))
+    else {
+        state.fail("string array dimensions exceed platform limits");
+        return std::ptr::null_mut();
+    };
+    match MxArray::string(vec!["<missing>".to_string(); count], shape) {
+        Ok(value) => state.mx.allocate(value),
+        Err(error) => {
+            state.fail(error);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+unsafe extern "C" fn string_length(
+    host: *mut c_void,
+    value: *const MxArray,
+    index: usize,
+) -> usize {
+    let Some(state) = (unsafe { state(host) }) else {
+        return usize::MAX;
+    };
+    let Ok(value) = state.mx.arena().get(value) else {
+        state.fail("invalid Data API string array");
+        return usize::MAX;
+    };
+    let MxArrayData::String(values) = value.data() else {
+        state.fail("array is not a Data API string array");
+        return usize::MAX;
+    };
+    let Some(value) = values.get(index) else {
+        state.fail("string array index is out of range");
+        return usize::MAX;
+    };
+    value.encode_utf16().count()
+}
+
+unsafe extern "C" fn copy_string(
+    host: *mut c_void,
+    value: *const MxArray,
+    index: usize,
+    output: *mut u16,
+    output_length: usize,
+) -> i32 {
+    let Some(state) = (unsafe { state(host) }) else {
+        return 1;
+    };
+    let Ok(value) = state.mx.arena().get(value) else {
+        state.fail("invalid Data API string array");
+        return 1;
+    };
+    let MxArrayData::String(values) = value.data() else {
+        state.fail("array is not a Data API string array");
+        return 1;
+    };
+    let Some(value) = values.get(index) else {
+        state.fail("string array index is out of range");
+        return 1;
+    };
+    let encoded = value.encode_utf16().collect::<Vec<_>>();
+    if encoded.len() != output_length || (output.is_null() && output_length != 0) {
+        state.fail("Data API string output buffer has the wrong length");
+        return 1;
+    }
+    if output_length != 0 {
+        // SAFETY: the C++ caller supplies exactly `output_length` writable UTF-16 units.
+        unsafe { std::ptr::copy_nonoverlapping(encoded.as_ptr(), output, output_length) };
+    }
+    runmat_value::record_host_copy(
+        runmat_value::HostCopyReason::CharacterEncoding,
+        output_length.saturating_mul(std::mem::size_of::<u16>()),
+    );
+    0
+}
+
+unsafe extern "C" fn set_string(
+    host: *mut c_void,
+    value: *mut MxArray,
+    index: usize,
+    input: *const u16,
+    input_length: usize,
+) -> i32 {
+    let Some(state) = (unsafe { state(host) }) else {
+        return 1;
+    };
+    let units = if input_length == 0 {
+        &[][..]
+    } else if input.is_null() {
+        state.fail("Data API string input pointer is null");
+        return 1;
+    } else {
+        // SAFETY: the C++ caller supplies `input_length` readable UTF-16 units.
+        unsafe { std::slice::from_raw_parts(input, input_length) }
+    };
+    let text = match String::from_utf16(units) {
+        Ok(text) => text,
+        Err(_) => {
+            state.fail("Data API string contains invalid UTF-16");
+            return 1;
+        }
+    };
+    runmat_value::record_host_copy(
+        runmat_value::HostCopyReason::CharacterEncoding,
+        input_length.saturating_mul(std::mem::size_of::<u16>()),
+    );
+    let Ok(value) = state.mx.arena_mut().get_mut(value) else {
+        state.fail("invalid Data API string array");
+        return 1;
+    };
+    let MxArrayData::String(values) = value.data_mut() else {
+        state.fail("array is not a Data API string array");
+        return 1;
+    };
+    let Some(slot) = values.get_mut(index) else {
+        state.fail("string array index is out of range");
+        return 1;
+    };
+    *slot = text;
+    0
 }
 
 unsafe extern "C" fn destroy_array(host: *mut c_void, value: *mut MxArray) -> i32 {
@@ -832,6 +1037,38 @@ unsafe extern "C" fn get_property(
         state.fail("object property name is null");
         return std::ptr::null_mut();
     };
+    let handle = state
+        .mx
+        .arena()
+        .get(value)
+        .ok()
+        .and_then(|array| match array.data() {
+            MxArrayData::Handle(handle) => Some(handle.clone()),
+            _ => None,
+        });
+    if let Some(handle) = handle {
+        if index != 0 {
+            state.fail("handle object index is out of range");
+            return std::ptr::null_mut();
+        }
+        return match state
+            .services
+            .get_object_property(runmat_value::Value::HandleObject(handle), &property_name)
+            .and_then(|value| {
+                value_to_mx_for_interface(&value, state.mx.mode(), state.interface).map_err(
+                    |error| MexDiagnostic {
+                        identifier: Some("RunMat:MEX:Conversion".into()),
+                        message: error.message,
+                    },
+                )
+            }) {
+            Ok(value) => state.mx.allocate(value),
+            Err(error) => {
+                state.error = Some(error);
+                std::ptr::null_mut()
+            }
+        };
+    }
     match state.mx.get_property(value, index, &property_name) {
         Ok(value) => value,
         Err(error) => {
@@ -855,6 +1092,55 @@ unsafe extern "C" fn set_property(
         state.fail("object property name is null");
         return 1;
     };
+    let handle = state
+        .mx
+        .arena()
+        .get(value)
+        .ok()
+        .and_then(|array| match array.data() {
+            MxArrayData::Handle(handle) => Some(handle.clone()),
+            _ => None,
+        });
+    if let Some(handle) = handle {
+        if index != 0 {
+            state.fail("handle object index is out of range");
+            return 1;
+        }
+        let property_value = match state
+            .mx
+            .arena()
+            .get(child)
+            .map_err(|error| error.to_string())
+            .and_then(|value| value_from_mx(value).map_err(|error| error.message))
+        {
+            Ok(value) => value,
+            Err(error) => {
+                state.fail(error);
+                return 1;
+            }
+        };
+        if state.mx.destroy(child).is_err() {
+            state.fail("could not consume handle property value");
+            return 1;
+        }
+        return match state.services.set_object_property(
+            runmat_value::Value::HandleObject(handle),
+            &property_name,
+            property_value,
+        ) {
+            Ok(runmat_value::Value::HandleObject(updated)) => {
+                if let Ok(array) = state.mx.arena_mut().get_mut(value) {
+                    *array.data_mut() = MxArrayData::Handle(updated);
+                }
+                0
+            }
+            Ok(_) => 0,
+            Err(error) => {
+                state.error = Some(error);
+                1
+            }
+        };
+    }
     match state.mx.set_property(value, index, &property_name, child) {
         Ok(()) => 0,
         Err(error) => {
@@ -1077,10 +1363,11 @@ unsafe extern "C" fn call(
             unsafe { std::slice::from_raw_parts_mut(plhs, nlhs) }
         };
         for (slot, output) in output_pointers.iter_mut().zip(outputs) {
-            let value = value_to_mx(&output, state.mx.mode()).map_err(|error| MexDiagnostic {
-                identifier: Some("RunMat:MEX:Conversion".into()),
-                message: error.message,
-            })?;
+            let value = value_to_mx_for_interface(&output, state.mx.mode(), state.interface)
+                .map_err(|error| MexDiagnostic {
+                    identifier: Some("RunMat:MEX:Conversion".into()),
+                    message: error.message,
+                })?;
             *slot = state.mx.allocate(value);
         }
         Ok(())
@@ -1111,19 +1398,21 @@ unsafe extern "C" fn get_variable(
         return std::ptr::null_mut();
     };
     match state.services.get_variable(&workspace, &name) {
-        Ok(Some(value)) => match value_to_mx(&value, state.mx.mode()) {
-            Ok(value) => {
-                let pointer = state.mx.allocate(value);
-                if workspace == "global" {
-                    state.global_arrays.insert(pointer as usize);
+        Ok(Some(value)) => {
+            match value_to_mx_for_interface(&value, state.mx.mode(), state.interface) {
+                Ok(value) => {
+                    let pointer = state.mx.allocate(value);
+                    if workspace == "global" {
+                        state.global_arrays.insert(pointer as usize);
+                    }
+                    pointer
                 }
-                pointer
+                Err(error) => {
+                    state.fail(error.message);
+                    std::ptr::null_mut()
+                }
             }
-            Err(error) => {
-                state.fail(error.message);
-                std::ptr::null_mut()
-            }
-        },
+        }
         Ok(None) => std::ptr::null_mut(),
         Err(error) => {
             state.error = Some(error);
@@ -1177,11 +1466,16 @@ unsafe extern "C" fn take_error(host: *mut c_void) -> *mut MxArray {
         return std::ptr::null_mut();
     };
     let mode = state.mx.mode();
-    let identifier = value_to_mx(
+    let identifier = value_to_mx_for_interface(
         &runmat_value::Value::String(error.identifier.unwrap_or_default()),
         mode,
+        state.interface,
     );
-    let message = value_to_mx(&runmat_value::Value::String(error.message), mode);
+    let message = value_to_mx_for_interface(
+        &runmat_value::Value::String(error.message),
+        mode,
+        state.interface,
+    );
     match (identifier, message) {
         (Ok(identifier), Ok(message)) => {
             let value = crate::MxArray::structure(
@@ -1278,18 +1572,26 @@ mod tests {
         let pointer_size = std::mem::size_of::<usize>();
         assert_eq!(
             std::mem::offset_of!(MexHostApiV1, allocate_memory),
-            std::mem::size_of::<MexHostApiV1>() - 6 * pointer_size
+            std::mem::size_of::<MexHostApiV1>() - 11 * pointer_size
         );
         assert_eq!(
             std::mem::offset_of!(MexHostApiV1, make_memory_persistent),
-            std::mem::size_of::<MexHostApiV1>() - 3 * pointer_size
+            std::mem::size_of::<MexHostApiV1>() - 8 * pointer_size
         );
         assert_eq!(
             std::mem::offset_of!(MexHostApiV1, share_array),
-            std::mem::size_of::<MexHostApiV1>() - 2 * pointer_size
+            std::mem::size_of::<MexHostApiV1>() - 7 * pointer_size
         );
         assert_eq!(
             std::mem::offset_of!(MexHostApiV1, record_host_copy),
+            std::mem::size_of::<MexHostApiV1>() - 6 * pointer_size
+        );
+        assert_eq!(
+            std::mem::offset_of!(MexHostApiV1, data_array_type),
+            std::mem::size_of::<MexHostApiV1>() - 5 * pointer_size
+        );
+        assert_eq!(
+            std::mem::offset_of!(MexHostApiV1, set_string),
             std::mem::size_of::<MexHostApiV1>() - pointer_size
         );
     }

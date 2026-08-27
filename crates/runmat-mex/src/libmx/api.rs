@@ -157,7 +157,15 @@ impl MxApi {
     }
 
     pub fn share(&mut self, source: *const MxArray) -> Result<*mut MxArray, MxArenaError> {
-        let shared = self.arena.get(source)?.clone();
+        let source = self.arena.get(source)?;
+        let encoded_bytes = source.encoded_storage_bytes();
+        if encoded_bytes != 0 {
+            runmat_value::record_host_copy(
+                runmat_value::HostCopyReason::CharacterEncoding,
+                encoded_bytes,
+            );
+        }
+        let shared = source.clone();
         Ok(self.arena.allocate(shared))
     }
 

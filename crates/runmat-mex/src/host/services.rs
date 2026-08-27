@@ -17,6 +17,19 @@ pub trait MexHostServices {
     ) -> Result<Vec<Value>, MexDiagnostic>;
     fn get_variable(&self, workspace: &str, name: &str) -> Result<Option<Value>, MexDiagnostic>;
     fn put_variable(&self, workspace: &str, name: &str, value: Value) -> Result<(), MexDiagnostic>;
+    fn get_object_property(&self, object: Value, name: &str) -> Result<Value, MexDiagnostic> {
+        let _ = (object, name);
+        Err(unavailable("C++ MEX getProperty"))
+    }
+    fn set_object_property(
+        &self,
+        object: Value,
+        name: &str,
+        value: Value,
+    ) -> Result<Value, MexDiagnostic> {
+        let _ = (object, name, value);
+        Err(unavailable("C++ MEX setProperty"))
+    }
 }
 
 #[derive(Debug, Default)]

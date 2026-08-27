@@ -8,7 +8,8 @@ use runmat_value::{
 };
 
 use crate::mxarray::{
-    MxApiMode, MxArray, MxArrayData, MxInterleavedStorage, MxNumeric, MxSparse, MxSparseValues,
+    MxApiMode, MxArray, MxArrayData, MxBoundaryInterface, MxInterleavedStorage, MxNumeric,
+    MxSparse, MxSparseValues,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +34,14 @@ impl fmt::Display for MxConversionError {
 impl std::error::Error for MxConversionError {}
 
 pub fn value_to_mx(value: &Value, mode: MxApiMode) -> Result<MxArray, MxConversionError> {
+    value_to_mx_for_interface(value, mode, MxBoundaryInterface::CMatrix)
+}
+
+pub(crate) fn value_to_mx_for_interface(
+    value: &Value,
+    mode: MxApiMode,
+    interface: MxBoundaryInterface,
+) -> Result<MxArray, MxConversionError> {
     match value {
         Value::Num(value) => numeric_to_mx(NumericStorage::F64(vec![*value]), vec![1, 1]),
         Value::Int(value) => numeric_to_mx(
@@ -52,7 +61,18 @@ pub fn value_to_mx(value: &Value, mode: MxApiMode) -> Result<MxArray, MxConversi
             MxArray::logical_buffer(value.data.clone(), value.shape.clone())
                 .map_err(MxConversionError::new)
         }
+        Value::String(value) if interface == MxBoundaryInterface::CxxData => {
+            record_host_copy(HostCopyReason::CharacterEncoding, value.len());
+            MxArray::string(vec![value.clone()], vec![1, 1]).map_err(MxConversionError::new)
+        }
         Value::String(value) => string_to_mx(value),
+        Value::StringArray(value) if interface == MxBoundaryInterface::CxxData => {
+            record_host_copy(
+                HostCopyReason::CharacterEncoding,
+                value.data.iter().map(String::len).sum(),
+            );
+            MxArray::string(value.data.clone(), value.shape.clone()).map_err(MxConversionError::new)
+        }
         Value::CharArray(value) => char_to_mx(value),
         Value::Tensor(value) => {
             MxArray::numeric_buffer(value.host_buffer().clone(), value.shape.clone(), None)
@@ -60,9 +80,11 @@ pub fn value_to_mx(value: &Value, mode: MxApiMode) -> Result<MxArray, MxConversi
         }
         Value::ComplexTensor(value) => complex_tensor_to_mx(value, mode),
         Value::SparseTensor(value) => sparse_to_mx(value),
-        Value::Cell(value) => cell_to_mx(value, mode),
-        Value::Struct(value) => struct_to_mx(value, mode),
-        Value::Object(value) => object_to_mx(&value.class_name, &[value], vec![1, 1], mode),
+        Value::Cell(value) => cell_to_mx(value, mode, interface),
+        Value::Struct(value) => struct_to_mx(value, mode, interface),
+        Value::Object(value) => {
+            object_to_mx(&value.class_name, &[value], vec![1, 1], mode, interface)
+        }
         Value::ObjectArray(value) => {
             let objects = value
                 .data()
@@ -75,8 +97,15 @@ pub fn value_to_mx(value: &Value, mode: MxApiMode) -> Result<MxArray, MxConversi
                     _ => unreachable!("ObjectArray validates its elements"),
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            object_to_mx(value.class_name(), &objects, value.shape().to_vec(), mode)
+            object_to_mx(
+                value.class_name(),
+                &objects,
+                value.shape().to_vec(),
+                mode,
+                interface,
+            )
         }
+        Value::HandleObject(value) => Ok(MxArray::handle(value.clone())),
         other => Err(MxConversionError::new(format!(
             "{} values do not have a C Matrix API representation",
             value_kind(other)
@@ -118,6 +147,19 @@ pub fn value_from_mx(value: &MxArray) -> Result<Value, MxConversionError> {
             }
         }
         MxArrayData::Char(values) => char_from_mx(values, value.shape()),
+        MxArrayData::String(values) => {
+            record_host_copy(
+                HostCopyReason::CharacterEncoding,
+                values.iter().map(String::len).sum(),
+            );
+            if values.len() == 1 {
+                Ok(Value::String(values[0].clone()))
+            } else {
+                runmat_value::StringArray::new(values.clone(), value.shape().to_vec())
+                    .map(Value::StringArray)
+                    .map_err(MxConversionError::new)
+            }
+        }
         MxArrayData::Cell(values) => cell_from_mx(values, value.shape()),
         MxArrayData::Struct { fields, values } => struct_from_mx(fields, values, value.shape()),
         MxArrayData::Object {
@@ -125,6 +167,7 @@ pub fn value_from_mx(value: &MxArray) -> Result<Value, MxConversionError> {
             properties,
             values,
         } => object_from_mx(class_name, properties, values, value.shape()),
+        MxArrayData::Handle(value) => Ok(Value::HandleObject(value.clone())),
         MxArrayData::Sparse(value) => sparse_from_mx(value),
     }
 }
@@ -190,7 +233,12 @@ fn complex_components(
 
 fn string_to_mx(value: &str) -> Result<MxArray, MxConversionError> {
     let encoded = value.encode_utf16().collect::<Vec<_>>();
-    MxArray::character(encoded.clone(), vec![1, encoded.len()]).map_err(MxConversionError::new)
+    let length = encoded.len();
+    record_host_copy(
+        HostCopyReason::CharacterEncoding,
+        length.saturating_mul(std::mem::size_of::<u16>()),
+    );
+    MxArray::character(encoded, vec![1, length]).map_err(MxConversionError::new)
 }
 
 fn char_to_mx(value: &CharArray) -> Result<MxArray, MxConversionError> {
@@ -204,6 +252,10 @@ fn char_to_mx(value: &CharArray) -> Result<MxArray, MxConversionError> {
         })?;
         encoded.push(unit);
     }
+    record_host_copy(
+        HostCopyReason::CharacterEncoding,
+        encoded.len().saturating_mul(std::mem::size_of::<u16>()),
+    );
     MxArray::character(encoded, value.shape().to_vec()).map_err(MxConversionError::new)
 }
 
@@ -230,7 +282,11 @@ fn sparse_to_mx(value: &SparseTensor) -> Result<MxArray, MxConversionError> {
     .map_err(MxConversionError::new)
 }
 
-fn cell_to_mx(value: &CellArray, mode: MxApiMode) -> Result<MxArray, MxConversionError> {
+fn cell_to_mx(
+    value: &CellArray,
+    mode: MxApiMode,
+    interface: MxBoundaryInterface,
+) -> Result<MxArray, MxConversionError> {
     let column_major = value.to_column_major();
     if let Some(fields) = uniform_struct_fields(&column_major) {
         let mut values = Vec::with_capacity(fields.len() * column_major.len());
@@ -243,7 +299,9 @@ fn cell_to_mx(value: &CellArray, mode: MxApiMode) -> Result<MxArray, MxConversio
                     element
                         .fields
                         .get(field)
-                        .map(|value| value_to_mx(value, mode).map(Box::new))
+                        .map(|value| {
+                            value_to_mx_for_interface(value, mode, interface).map(Box::new)
+                        })
                         .transpose()?,
                 );
             }
@@ -253,22 +311,31 @@ fn cell_to_mx(value: &CellArray, mode: MxApiMode) -> Result<MxArray, MxConversio
     }
     let values = column_major
         .iter()
-        .map(|value| value_to_mx(value, mode).map(Box::new).map(Some))
+        .map(|value| {
+            value_to_mx_for_interface(value, mode, interface)
+                .map(Box::new)
+                .map(Some)
+        })
         .collect::<Result<Vec<_>, _>>()?;
     MxArray::cell(values, value.shape.clone()).map_err(MxConversionError::new)
 }
 
-fn struct_to_mx(value: &StructValue, mode: MxApiMode) -> Result<MxArray, MxConversionError> {
+fn struct_to_mx(
+    value: &StructValue,
+    mode: MxApiMode,
+    interface: MxBoundaryInterface,
+) -> Result<MxArray, MxConversionError> {
     let fields = value.field_names().cloned().collect::<Vec<_>>();
     let values = fields
         .iter()
         .map(|field| {
-            value_to_mx(
+            value_to_mx_for_interface(
                 value
                     .fields
                     .get(field)
                     .expect("field name came from the same struct"),
                 mode,
+                interface,
             )
             .map(Box::new)
             .map(Some)
@@ -282,6 +349,7 @@ fn object_to_mx(
     objects: &[&ObjectInstance],
     shape: Vec<usize>,
     mode: MxApiMode,
+    interface: MxBoundaryInterface,
 ) -> Result<MxArray, MxConversionError> {
     if objects.iter().any(|object| object.class_name != class_name) {
         return Err(MxConversionError::new(
@@ -301,7 +369,7 @@ fn object_to_mx(
                 object
                     .properties
                     .get(property)
-                    .map(|value| value_to_mx(value, mode).map(Box::new))
+                    .map(|value| value_to_mx_for_interface(value, mode, interface).map(Box::new))
                     .transpose()?,
             );
         }
@@ -413,6 +481,10 @@ fn complex_from_components(
 }
 
 fn char_from_mx(values: &[u16], shape: &[usize]) -> Result<Value, MxConversionError> {
+    record_host_copy(
+        HostCopyReason::CharacterEncoding,
+        values.len().saturating_mul(std::mem::size_of::<u16>()),
+    );
     let mut characters = Vec::with_capacity(values.len());
     for value in values {
         let character = char::from_u32(u32::from(*value)).ok_or_else(|| {

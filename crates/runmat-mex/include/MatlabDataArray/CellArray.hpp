@@ -16,7 +16,7 @@ public:
     }
 
     CellReference &operator=(Array value) {
-        detail::ArrayAccess::ensureWritable(*owner_);
+        detail::ArrayAccess::ensureContainerWritable(*owner_);
         mxArray *native = value ? detail::ArrayAccess::releaseForOutput(value) : nullptr;
         mxSetCell(detail::ArrayAccess::native(*owner_), index_, native);
         return *this;

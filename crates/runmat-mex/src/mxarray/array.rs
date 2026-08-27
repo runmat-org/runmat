@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::ffi::c_void;
 
 use runmat_value::{
-    AdoptedHostAllocation, HostComplexBuffer, HostIndexBuffer, HostLogicalBuffer,
+    AdoptedHostAllocation, HandleRef, HostComplexBuffer, HostIndexBuffer, HostLogicalBuffer,
     HostNumericBuffer, NumericDType, NumericStorage,
 };
 
@@ -12,6 +12,12 @@ use super::{MxClassId, MxInterleavedStorage};
 pub enum MxApiMode {
     SeparateComplex,
     InterleavedComplex,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MxBoundaryInterface {
+    CMatrix,
+    CxxData,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -47,6 +53,7 @@ pub enum MxArrayData {
     Interleaved(MxInterleaved),
     Logical(HostLogicalBuffer),
     Char(Vec<u16>),
+    String(Vec<String>),
     Cell(Vec<Option<Box<MxArray>>>),
     Struct {
         fields: Vec<String>,
@@ -59,6 +66,7 @@ pub enum MxArrayData {
         properties: Vec<String>,
         values: Vec<Option<Box<MxArray>>>,
     },
+    Handle(HandleRef),
     Sparse(MxSparse),
 }
 
@@ -127,7 +135,30 @@ impl MxArray {
                 | MxInterleavedStorage::U32(_)
                 | MxInterleavedStorage::U64(_) => {}
             },
-            MxArrayData::Char(_) => {}
+            MxArrayData::Char(values) => runmat_value::record_host_copy(
+                runmat_value::HostCopyReason::CopyOnWriteMutation,
+                values.len().saturating_mul(std::mem::size_of::<u16>()),
+            ),
+            MxArrayData::String(values) => runmat_value::record_host_copy(
+                runmat_value::HostCopyReason::CopyOnWriteMutation,
+                values.iter().map(String::len).sum(),
+            ),
+            MxArrayData::Handle(_) => {}
+        }
+    }
+
+    pub(crate) fn encoded_storage_bytes(&self) -> usize {
+        match &self.data {
+            MxArrayData::Char(values) => values.len().saturating_mul(std::mem::size_of::<u16>()),
+            MxArrayData::String(values) => values.iter().map(String::len).sum(),
+            MxArrayData::Cell(values)
+            | MxArrayData::Struct { values, .. }
+            | MxArrayData::Object { values, .. } => values
+                .iter()
+                .filter_map(Option::as_deref)
+                .map(Self::encoded_storage_bytes)
+                .fold(0usize, usize::saturating_add),
+            _ => 0,
         }
     }
 
@@ -221,6 +252,16 @@ impl MxArray {
         })
     }
 
+    pub fn string(values: Vec<String>, shape: Vec<usize>) -> Result<Self, String> {
+        validate_shape(values.len(), &shape)?;
+        Ok(Self {
+            class_id: MxClassId::Unknown,
+            shape,
+            data: MxArrayData::String(values),
+            persistent: false,
+        })
+    }
+
     pub fn cell(values: Vec<Option<Box<Self>>>, shape: Vec<usize>) -> Result<Self, String> {
         validate_shape(values.len(), &shape)?;
         Ok(Self {
@@ -295,6 +336,15 @@ impl MxArray {
         })
     }
 
+    pub fn handle(value: HandleRef) -> Self {
+        Self {
+            class_id: MxClassId::Object,
+            shape: vec![1, 1],
+            data: MxArrayData::Handle(value),
+            persistent: false,
+        }
+    }
+
     pub fn sparse(value: MxSparse) -> Result<Self, String> {
         if value.col_ptrs.len() != value.cols.saturating_add(1)
             || value.col_ptrs.first().copied() != Some(0)
@@ -337,6 +387,7 @@ impl MxArray {
     pub fn class_name(&self) -> &str {
         match &self.data {
             MxArrayData::Object { class_name, .. } => class_name,
+            MxArrayData::Handle(value) => &value.class_name,
             _ => super::super::libmx::class_name(self.class_id),
         }
     }
@@ -405,9 +456,11 @@ impl MxArray {
                     unsafe { values.foreign_data_pointer() }
                 }
             },
-            MxArrayData::Cell(_) | MxArrayData::Struct { .. } | MxArrayData::Object { .. } => {
-                std::ptr::null_mut()
-            }
+            MxArrayData::String(_)
+            | MxArrayData::Cell(_)
+            | MxArrayData::Struct { .. }
+            | MxArrayData::Object { .. }
+            | MxArrayData::Handle(_) => std::ptr::null_mut(),
         }
     }
 
@@ -472,7 +525,11 @@ impl MxArray {
                 MxSparseValues::Numeric(values) => values.checked_byte_len(),
                 MxSparseValues::Logical(values) => Some(values.len()),
             },
-            MxArrayData::Cell(_) | MxArrayData::Struct { .. } | MxArrayData::Object { .. } => None,
+            MxArrayData::String(_)
+            | MxArrayData::Cell(_)
+            | MxArrayData::Struct { .. }
+            | MxArrayData::Object { .. }
+            | MxArrayData::Handle(_) => None,
         }
     }
 
@@ -552,11 +609,16 @@ impl MxArray {
                 }
             },
             MxArrayData::Char(_)
+            | MxArrayData::String(_)
             | MxArrayData::Cell(_)
             | MxArrayData::Struct { .. }
             | MxArrayData::Object { .. } => Err((
                 allocation,
                 "mxArray data layout requires explicit conversion".into(),
+            )),
+            MxArrayData::Handle(_) => Err((
+                allocation,
+                "handle objects do not expose replaceable storage".into(),
             )),
         }
     }

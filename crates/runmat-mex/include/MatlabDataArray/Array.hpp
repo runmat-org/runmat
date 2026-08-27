@@ -13,7 +13,20 @@ extern "C" RUNMAT_MEX_LOCAL mxArray *runmatDataArrayShare(const mxArray *array);
 extern "C" RUNMAT_MEX_LOCAL void
 runmatDataArrayRecordMemoryLayoutCopy(std::size_t byteLength);
 extern "C" RUNMAT_MEX_LOCAL void
+runmatDataArrayRecordSparseLayoutCopy(std::size_t byteLength);
+extern "C" RUNMAT_MEX_LOCAL void
 runmatDataArraySetError(const char *identifier, const char *message);
+extern "C" RUNMAT_MEX_LOCAL int runmatDataArrayType(const mxArray *array);
+extern "C" RUNMAT_MEX_LOCAL mxArray *
+runmatDataArrayCreateStringArray(std::size_t ndim, const std::size_t *dims);
+extern "C" RUNMAT_MEX_LOCAL std::size_t
+runmatDataArrayStringLength(const mxArray *array, std::size_t index);
+extern "C" RUNMAT_MEX_LOCAL int
+runmatDataArrayCopyString(const mxArray *array, std::size_t index,
+                         unsigned short *output, std::size_t outputLength);
+extern "C" RUNMAT_MEX_LOCAL int
+runmatDataArraySetString(mxArray *array, std::size_t index,
+                        const unsigned short *input, std::size_t inputLength);
 
 namespace matlab {
 namespace data {
@@ -29,7 +42,7 @@ inline std::size_t getNumElements(const ArrayDimensions &dimensions) {
 }
 
 enum class ArrayType {
-    UNKNOWN,
+    UNKNOWN = 0,
     LOGICAL,
     CHAR,
     DOUBLE,
@@ -95,6 +108,8 @@ public:
 
     ArrayType getType() const {
         requireValue();
+        const int dataApiType = runmatDataArrayType(control_->value);
+        if (dataApiType != 0) return static_cast<ArrayType>(dataApiType);
         const bool complex = mxIsComplex(control_->value) != 0;
         if (mxIsSparse(control_->value)) {
             if (mxIsLogical(control_->value)) return ArrayType::SPARSE_LOGICAL;
@@ -180,6 +195,14 @@ protected:
         control_ = std::make_shared<detail::ArrayControl>(copy, true);
     }
 
+    void ensureContainerWritable() {
+        requireValue();
+        if (control_.use_count() == 1 && control_->owned) return;
+        mxArray *copy = runmatDataArrayShare(control_->value);
+        if (copy == nullptr) throw std::bad_alloc();
+        control_ = std::make_shared<detail::ArrayControl>(copy, true);
+    }
+
 private:
     void requireValue() const {
         if (!control_ || control_->value == nullptr) {
@@ -198,6 +221,9 @@ namespace detail {
 struct ArrayAccess {
     static mxArray *native(const Array &array) { return array.native(); }
     static void ensureWritable(Array &array) { array.ensureWritable(); }
+    static void ensureContainerWritable(Array &array) {
+        array.ensureContainerWritable();
+    }
     static mxArray *releaseForOutput(Array &array) {
         return array.releaseForOutput();
     }

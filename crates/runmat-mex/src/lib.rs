@@ -23,6 +23,7 @@ pub use build::{
     MEX_EXTENSIONS,
 };
 pub use compatibility::{MexApiAvailability, MexApiSymbol, C_MATRIX_API, C_MEX_API};
+pub(crate) use conversion::value_to_mx_for_interface;
 pub use conversion::{value_from_mx, value_to_mx, MxConversionError};
 pub use host::{
     MexCallState, MexDiagnostic, MexHostApiV1, MexHostServices, UnavailableMexHostServices,
@@ -31,6 +32,7 @@ pub use host::{
 pub use libmx::MxApi;
 #[cfg(not(target_family = "wasm"))]
 pub use loader::{MexInvocation, MexLoadError, MexModule};
+pub(crate) use mxarray::MxBoundaryInterface;
 pub use mxarray::{
     MxApiMode, MxArray, MxClassId, MxComplexity, MxInterleaved, MxNumeric, MxSparse, MxSparseValues,
 };

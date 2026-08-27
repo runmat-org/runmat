@@ -83,6 +83,33 @@ impl MexHostServices for RuntimeMexHostServices {
             })
         }
     }
+
+    fn get_object_property(&self, object: Value, name: &str) -> Result<Value, MexDiagnostic> {
+        pollster::block_on(self.runtime.scope(crate::object::resolve::load_member(
+            object,
+            name.to_string(),
+            false,
+            None,
+        )))
+        .map_err(runtime_diagnostic)
+    }
+
+    fn set_object_property(
+        &self,
+        object: Value,
+        name: &str,
+        value: Value,
+    ) -> Result<Value, MexDiagnostic> {
+        pollster::block_on(self.runtime.scope(crate::object::resolve::store_member(
+            object,
+            name.to_string(),
+            value,
+            false,
+            None,
+            |_, _| {},
+        )))
+        .map_err(runtime_diagnostic)
+    }
 }
 
 fn validate_workspace(workspace: &str) -> Result<(), MexDiagnostic> {
@@ -108,8 +135,10 @@ mod tests {
     use super::*;
     use crate::context::{RuntimeServicePorts, RuntimeWorkspaceService};
     use crate::execution::RuntimeExecutionService;
+    use runmat_value::{HandleRef, ObjectInstance};
     use std::cell::RefCell;
     use std::collections::BTreeMap;
+    use std::fs;
     use std::rc::Rc;
 
     #[derive(Default)]
@@ -178,5 +207,111 @@ mod tests {
             .expect_err("unknown workspace must fail");
 
         assert_eq!(error.identifier.as_deref(), Some("RunMat:MEX:Workspace"));
+    }
+
+    #[test]
+    fn object_callbacks_preserve_handle_identity_and_mutate_its_target() {
+        let mut target = ObjectInstance::new("FixtureHandle".into());
+        target.properties.insert("Value".into(), Value::Num(4.0));
+        let target = runmat_gc::gc_allocate(Value::Object(target)).expect("allocate handle target");
+        let handle = HandleRef {
+            class_name: "FixtureHandle".into(),
+            target,
+            valid: true,
+        };
+        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        let services = RuntimeMexHostServices::new(runtime);
+
+        assert_eq!(
+            services
+                .get_object_property(Value::HandleObject(handle.clone()), "Value")
+                .expect("read handle property"),
+            Value::Num(4.0)
+        );
+        let updated = services
+            .set_object_property(
+                Value::HandleObject(handle.clone()),
+                "Value",
+                Value::Num(9.0),
+            )
+            .expect("write handle property");
+        let Value::HandleObject(updated) = updated else {
+            panic!("handle property assignment must return the same handle kind");
+        };
+        assert_eq!(updated, handle);
+        assert_eq!(
+            services
+                .get_object_property(Value::HandleObject(handle), "Value")
+                .expect("read updated handle property"),
+            Value::Num(9.0)
+        );
+    }
+
+    #[test]
+    fn compiled_cpp_engine_properties_preserve_runtime_handle_identity() {
+        let directory = tempfile::tempdir().expect("temporary C++ MEX directory");
+        let source = directory.path().join("handle_properties.cpp");
+        fs::write(
+            &source,
+            r#"
+#include "mex.hpp"
+#include "mexAdapter.hpp"
+
+class MexFunction : public matlab::mex::Function {
+public:
+    void operator()(matlab::mex::ArgumentList outputs,
+                    matlab::mex::ArgumentList inputs) override {
+        matlab::data::Array object = inputs[0];
+        if (object.getType() != matlab::data::ArrayType::HANDLE_OBJECT_REF) {
+            throw matlab::Exception("input is not a handle object");
+        }
+        auto engine = getEngine();
+        matlab::data::TypedArray<double> before =
+            engine->getProperty(object, u"Value");
+        if (static_cast<double>(before[0]) != 4.0) {
+            throw matlab::Exception("handle property was not retained");
+        }
+        matlab::data::ArrayFactory factory;
+        engine->setProperty(object, u"Value", factory.createScalar<double>(9.0));
+        outputs[0] = object;
+    }
+};
+"#,
+        )
+        .expect("write C++ MEX fixture");
+
+        let mut target = ObjectInstance::new("FixtureHandle".into());
+        target.properties.insert("Value".into(), Value::Num(4.0));
+        let target = runmat_gc::gc_allocate(Value::Object(target)).expect("allocate handle target");
+        let handle = HandleRef {
+            class_name: "FixtureHandle".into(),
+            target,
+            valid: true,
+        };
+        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        let services = Rc::new(RuntimeMexHostServices::new(runtime));
+        let artifact = runmat_mex::MexBuild::new(&source, directory.path())
+            .compile()
+            .expect("compile C++ MEX fixture");
+        let module = runmat_mex::MexModule::load(&artifact.module).expect("load C++ MEX fixture");
+        let invocation = module
+            .invoke_with_services(
+                &[Value::HandleObject(handle.clone())],
+                1,
+                module.api_mode(),
+                services,
+            )
+            .expect("invoke C++ MEX fixture");
+        let [Value::HandleObject(output)] = invocation.outputs.as_slice() else {
+            panic!("C++ MEX output must retain handle-object identity");
+        };
+        assert_eq!(output, &handle);
+        runmat_gc::gc_with_value(&handle.target, |value| {
+            let Value::Object(value) = value else {
+                panic!("handle target must remain an object");
+            };
+            assert_eq!(value.properties.get("Value"), Some(&Value::Num(9.0)));
+        })
+        .expect("inspect updated handle target");
     }
 }
