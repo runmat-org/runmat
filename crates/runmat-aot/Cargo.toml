@@ -26,6 +26,7 @@ zstd = "0.13"
 
 [target.'cfg(windows)'.dependencies]
 ar_archive_writer = "0.5.2"
+cc = "1.2"
 object = { version = "0.37.3", default-features = false, features = ["read"] }
 
 [dev-dependencies]

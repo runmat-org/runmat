@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -14,6 +15,16 @@ pub enum LinkerFamily {
 pub struct LinkerDriver {
     pub path: PathBuf,
     pub family: LinkerFamily,
+    #[serde(skip)]
+    pub environment: Vec<(OsString, OsString)>,
+}
+
+impl LinkerDriver {
+    pub fn command(&self) -> Command {
+        let mut command = Command::new(&self.path);
+        command.envs(self.environment.iter().cloned());
+        command
+    }
 }
 
 pub fn discover_linker(explicit: Option<&Path>) -> AotResult<LinkerDriver> {
@@ -27,6 +38,7 @@ pub fn discover_linker(explicit: Option<&Path>) -> AotResult<LinkerDriver> {
             return Ok(LinkerDriver {
                 path: path.to_path_buf(),
                 family,
+                environment: Vec::new(),
             });
         }
         return Err(AotError::contract(
@@ -37,6 +49,14 @@ pub fn discover_linker(explicit: Option<&Path>) -> AotResult<LinkerDriver> {
     if let Some(path) = std::env::var_os("RUNMAT_LINKER").map(PathBuf::from) {
         return discover_linker(Some(&path));
     }
+    #[cfg(target_os = "windows")]
+    if let Some(tool) = cc::windows_registry::find_tool(msvc_target(), "link.exe") {
+        return Ok(LinkerDriver {
+            path: tool.path().to_path_buf(),
+            family,
+            environment: tool.env().to_vec(),
+        });
+    }
     let candidates: &[&str] = if cfg!(target_os = "windows") {
         &["lld-link.exe", "link.exe"]
     } else {
@@ -45,7 +65,11 @@ pub fn discover_linker(explicit: Option<&Path>) -> AotResult<LinkerDriver> {
     for candidate in candidates {
         for path in find_all_on_path(candidate) {
             if family != LinkerFamily::Msvc || is_msvc_linker(&path) {
-                return Ok(LinkerDriver { path, family });
+                return Ok(LinkerDriver {
+                    path,
+                    family,
+                    environment: Vec::new(),
+                });
             }
         }
     }
@@ -53,6 +77,21 @@ pub fn discover_linker(explicit: Option<&Path>) -> AotResult<LinkerDriver> {
         "aot.linker.missing",
         "no supported system linker driver was found; install a C toolchain or set RUNMAT_LINKER",
     ))
+}
+
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+fn msvc_target() -> &'static str {
+    "x86_64-pc-windows-msvc"
+}
+
+#[cfg(all(target_os = "windows", target_arch = "x86"))]
+fn msvc_target() -> &'static str {
+    "i686-pc-windows-msvc"
+}
+
+#[cfg(all(target_os = "windows", target_arch = "aarch64"))]
+fn msvc_target() -> &'static str {
+    "aarch64-pc-windows-msvc"
 }
 
 fn find_all_on_path(name: &str) -> Vec<PathBuf> {
@@ -83,7 +122,27 @@ fn is_msvc_linker_diagnostic(diagnostic: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::is_msvc_linker_diagnostic;
+    use std::ffi::{OsStr, OsString};
+
+    use super::{is_msvc_linker_diagnostic, LinkerDriver, LinkerFamily};
+
+    #[test]
+    fn command_applies_discovered_tool_environment() {
+        let driver = LinkerDriver {
+            path: "linker".into(),
+            family: LinkerFamily::Msvc,
+            environment: vec![(OsString::from("LIB"), OsString::from("sdk-libraries"))],
+        };
+
+        let command = driver.command();
+        assert_eq!(
+            command
+                .get_envs()
+                .find(|(name, _)| *name == OsStr::new("LIB"))
+                .and_then(|(_, value)| value),
+            Some(OsStr::new("sdk-libraries"))
+        );
+    }
 
     #[test]
     fn recognizes_supported_windows_linker_banners() {

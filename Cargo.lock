@@ -6322,6 +6322,7 @@ name = "runmat-aot"
 version = "0.6.2"
 dependencies = [
  "ar_archive_writer",
+ "cc",
  "object 0.37.3",
  "runmat-builtins",
  "runmat-core",
