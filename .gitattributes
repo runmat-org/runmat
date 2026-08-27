@@ -1,0 +1,5 @@
+# Exact CAD fixtures are byte-stable inputs. Preserve canonical line endings on
+# every checkout so parsing, mutation tests, and content identities agree across
+# Linux, macOS, and Windows.
+*.brep text eol=lf
+*.step text eol=lf

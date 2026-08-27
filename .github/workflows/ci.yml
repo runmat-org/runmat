@@ -176,16 +176,16 @@ jobs:
         run: ./infra/scripts/prepare-windows-cross-dependencies.ps1 -Target x86_64-pc-windows-msvc
 
       - name: Format
-        if: matrix.task == 'quality'
+        if: matrix.task == 'quality' && runner.os != 'Windows'
         run: cargo fmt -- --check
 
       - name: Validate crate architecture boundaries
-        if: matrix.task == 'quality'
+        if: matrix.task == 'quality' && runner.os != 'Windows'
         shell: bash
         run: scripts/development/check-architecture-boundaries.sh
 
       - name: Validate public FEA field ids
-        if: matrix.task == 'quality'
+        if: matrix.task == 'quality' && runner.os != 'Windows'
         run: python3 scripts/fea/governance/validate_public_field_ids.py
 
       - name: Clippy (Unix)
