@@ -205,17 +205,32 @@ return value;
 }
 
 fn inline_erfcinv_body(precision: NumericPrecision) -> String {
-    let (ty, positive_infinity, negative_infinity, nan) = match precision {
-        NumericPrecision::F64 => ("f64", "pos_inf_f64", "neg_inf_f64", "nan_f64"),
-        NumericPrecision::F32 => ("f32", "pos_inf_f32", "neg_inf_f32", "nan_f32"),
+    // Some D3D12 drivers reject kernels that construct non-finite floating-point
+    // values in shader arithmetic. Encode every result as its IEEE storage bits;
+    // ordinary finite lanes are still computed by the GPU before the bitcast.
+    let (ty, encode, positive_infinity, negative_infinity, nan) = match precision {
+        NumericPrecision::F64 => (
+            "f64",
+            "bitcast<vec2<u32>>",
+            "vec2<u32>(0u, 0x7ff00000u)",
+            "vec2<u32>(0u, 0xfff00000u)",
+            "vec2<u32>(0u, 0x7ff80000u)",
+        ),
+        NumericPrecision::F32 => (
+            "f32",
+            "bitcast<u32>",
+            "0x7f800000u",
+            "0xff800000u",
+            "0x7fc00000u",
+        ),
     };
     format!(
         r#"
-if a != a {{ return a; }}
-if a < {ty}(0.0) || a > {ty}(2.0) {{ return {nan}(); }}
-if a == {ty}(0.0) {{ return {positive_infinity}(); }}
-if a == {ty}(2.0) {{ return {negative_infinity}(); }}
-if a == {ty}(1.0) {{ return {ty}(0.0); }}
+if a != a {{ return {encode}(a); }}
+if a < {ty}(0.0) || a > {ty}(2.0) {{ return {nan}; }}
+if a == {ty}(0.0) {{ return {positive_infinity}; }}
+if a == {ty}(2.0) {{ return {negative_infinity}; }}
+if a == {ty}(1.0) {{ return {encode}({ty}(0.0)); }}
 let p = a * {ty}(0.5);
 var normal: {ty};
 if p < {ty}(0.02425) {{
@@ -229,7 +244,7 @@ if p < {ty}(0.02425) {{
     let r = q * q;
     normal = ((((({ty}(-39.69683028665376) * r + {ty}(220.9460984245205)) * r + {ty}(-275.9285104469687)) * r + {ty}(138.3577518672690)) * r + {ty}(-30.66479806614716)) * r + {ty}(2.506628277459239)) * q / ((((({ty}(-54.47609879822406) * r + {ty}(161.5858368580409)) * r + {ty}(-155.6989798598866)) * r + {ty}(66.80131188771972)) * r + {ty}(-13.28068155288572)) * r + {ty}(1.0));
 }}
-return -normal * {ty}(0.7071067811865476);
+return {encode}(-normal * {ty}(0.7071067811865476));
 "#
     )
 }
@@ -248,15 +263,7 @@ pub(crate) fn real_unary_shader(op: UnaryOpCode, precision: NumericPrecision) ->
         .expect("unary WGSL constants must precede expm1");
     let constants = &template[constants_start..constants_end];
     let helper_names: &[&str] = if matches!(op, UnaryOpCode::Gammaln | UnaryOpCode::Erfcinv) {
-        match (op, precision) {
-            (UnaryOpCode::Erfcinv, NumericPrecision::F64) => {
-                &["pos_inf_f64", "neg_inf_f64", "nan_f64"]
-            }
-            (UnaryOpCode::Erfcinv, NumericPrecision::F32) => {
-                &["pos_inf_f32", "neg_inf_f32", "nan_f32"]
-            }
-            _ => &[],
-        }
+        &[]
     } else {
         unary_helper_names(op, precision)
     };
@@ -272,8 +279,13 @@ pub(crate) fn real_unary_shader(op: UnaryOpCode, precision: NumericPrecision) ->
     } else {
         wgsl_switch_case(template, op)
     };
+    let output_ty = match (op, precision) {
+        (UnaryOpCode::Erfcinv, NumericPrecision::F64) => "vec2<u32>",
+        (UnaryOpCode::Erfcinv, NumericPrecision::F32) => "u32",
+        _ => ty,
+    };
     format!(
-        "struct Tensor {{ data: array<{ty}> }};\nstruct Params {{ len: u32, offset: u32, _pad1: u32, _pad2: u32 }};\n{constants}\n@group(0) @binding(0) var<storage, read> A: Tensor;\n@group(0) @binding(1) var<storage, read_write> Out: Tensor;\n@group(0) @binding(2) var<uniform> params: Params;\n{helpers}\nfn apply(a: {ty}) -> {ty} {{ {case_body} }}\n@compute @workgroup_size(@WG@)\nfn main(@builtin(global_invocation_id) gid: vec3<u32>) {{\n    let local = gid.x;\n    if local >= params.len {{ return; }}\n    let idx = params.offset + local;\n    Out.data[idx] = apply(A.data[idx]);\n}}\n"
+        "struct InputTensor {{ data: array<{ty}> }};\nstruct OutputTensor {{ data: array<{output_ty}> }};\nstruct Params {{ len: u32, offset: u32, _pad1: u32, _pad2: u32 }};\n{constants}\n@group(0) @binding(0) var<storage, read> A: InputTensor;\n@group(0) @binding(1) var<storage, read_write> Out: OutputTensor;\n@group(0) @binding(2) var<uniform> params: Params;\n{helpers}\nfn apply(a: {ty}) -> {output_ty} {{ {case_body} }}\n@compute @workgroup_size(@WG@)\nfn main(@builtin(global_invocation_id) gid: vec3<u32>) {{\n    let local = gid.x;\n    if local >= params.len {{ return; }}\n    let idx = params.offset + local;\n    Out.data[idx] = apply(A.data[idx]);\n}}\n"
     )
 }
 
@@ -344,15 +356,18 @@ mod real_unary_tests {
     }
 
     #[test]
-    fn erfcinv_shader_uses_portable_non_finite_value_helpers() {
-        for precision in [NumericPrecision::F32, NumericPrecision::F64] {
-            let shader = real_unary_shader(UnaryOpCode::Erfcinv, precision);
-            assert!(shader.contains("return nan_"));
-            assert!(shader.contains("return pos_inf_"));
-            assert!(shader.contains("return neg_inf_"));
-            assert!(!shader.contains("(0.0) /"));
-            assert!(!shader.contains("(1.0) /"));
-        }
+    fn erfcinv_shader_writes_portable_ieee_storage_bits() {
+        let f32_shader = real_unary_shader(UnaryOpCode::Erfcinv, NumericPrecision::F32);
+        assert!(f32_shader.contains("struct OutputTensor { data: array<u32> }"));
+        assert!(f32_shader.contains("return 0x7f800000u"));
+        assert!(f32_shader.contains("return 0xff800000u"));
+        assert!(f32_shader.contains("return 0x7fc00000u"));
+
+        let f64_shader = real_unary_shader(UnaryOpCode::Erfcinv, NumericPrecision::F64);
+        assert!(f64_shader.contains("struct OutputTensor { data: array<vec2<u32>> }"));
+        assert!(f64_shader.contains("return vec2<u32>(0u, 0x7ff00000u)"));
+        assert!(f64_shader.contains("return vec2<u32>(0u, 0xfff00000u)"));
+        assert!(f64_shader.contains("return vec2<u32>(0u, 0x7ff80000u)"));
     }
 }
 
