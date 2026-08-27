@@ -2,17 +2,10 @@ use super::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tensor {
-    storage: TensorStorage,
+    storage: HostNumericBuffer,
     pub shape: Vec<usize>, // Column-major layout
     pub rows: usize,       // Compatibility for 2D usage
     pub cols: usize,       // Compatibility for 2D usage
-}
-
-#[derive(Debug, Clone, PartialEq)]
-enum TensorStorage {
-    F64(Vec<f64>),
-    F32(Vec<f32>),
-    Integer(IntegerStorage),
 }
 
 impl Tensor {
@@ -33,23 +26,7 @@ impl Tensor {
         } else {
             (0, 0)
         };
-        let storage = match storage {
-            NumericStorage::F64(values) => TensorStorage::F64(values),
-            NumericStorage::F32(values) => TensorStorage::F32(values),
-            storage @ (NumericStorage::I8(_)
-            | NumericStorage::I16(_)
-            | NumericStorage::I32(_)
-            | NumericStorage::I64(_)
-            | NumericStorage::U8(_)
-            | NumericStorage::U16(_)
-            | NumericStorage::U32(_)
-            | NumericStorage::U64(_)) => {
-                let integer_data = storage
-                    .into_integer_storage()
-                    .expect("integer NumericStorage variant");
-                TensorStorage::Integer(integer_data)
-            }
-        };
+        let storage = HostNumericBuffer::from_numeric_storage(storage);
         Ok(Tensor {
             storage,
             shape,
@@ -99,27 +76,47 @@ impl Tensor {
     }
 
     pub fn integer_storage(&self) -> Option<&IntegerStorage> {
-        match &self.storage {
-            TensorStorage::Integer(storage) => Some(storage),
-            TensorStorage::F64(_) | TensorStorage::F32(_) => None,
+        self.storage.integer_storage()
+    }
+
+    pub fn host_buffer(&self) -> &HostNumericBuffer {
+        &self.storage
+    }
+
+    pub fn from_host_buffer(storage: HostNumericBuffer, shape: Vec<usize>) -> Result<Self, String> {
+        let expected = shape
+            .iter()
+            .try_fold(1usize, |count, &dimension| count.checked_mul(dimension));
+        if expected != Some(storage.len()) {
+            return Err(format!(
+                "{} tensor data length {} doesn't match shape {:?}",
+                storage.numeric_dtype().class_name(),
+                storage.len(),
+                shape
+            ));
         }
+        let (rows, cols) = if shape.len() >= 2 {
+            (shape[0], shape[1])
+        } else if shape.len() == 1 {
+            (1, shape[0])
+        } else {
+            (0, 0)
+        };
+        Ok(Self {
+            storage,
+            shape,
+            rows,
+            cols,
+        })
     }
 
     pub fn numeric_dtype(&self) -> NumericDType {
-        match &self.storage {
-            TensorStorage::F64(_) => NumericDType::F64,
-            TensorStorage::F32(_) => NumericDType::F32,
-            TensorStorage::Integer(storage) => storage.numeric_dtype(),
-        }
+        self.storage.numeric_dtype()
     }
 
     /// Returns the authoritative number of stored numeric elements.
     pub fn len(&self) -> usize {
-        match &self.storage {
-            TensorStorage::F64(values) => values.len(),
-            TensorStorage::F32(values) => values.len(),
-            TensorStorage::Integer(storage) => storage.len(),
-        }
+        self.storage.len()
     }
 
     /// Returns whether the authoritative numeric storage contains no elements.
@@ -129,38 +126,24 @@ impl Tensor {
 
     /// Borrows native double storage when this tensor's authoritative class is double.
     pub fn as_f64_slice(&self) -> Option<&[f64]> {
-        match &self.storage {
-            TensorStorage::F64(values) => Some(values),
-            TensorStorage::F32(_) | TensorStorage::Integer(_) => None,
-        }
+        self.storage.as_f64_slice()
     }
 
     /// Borrows native single storage when this tensor's authoritative class is single.
     pub fn as_f32_slice(&self) -> Option<&[f32]> {
-        match &self.storage {
-            TensorStorage::F32(values) => Some(values),
-            TensorStorage::F64(_) | TensorStorage::Integer(_) => None,
-        }
+        self.storage.as_f32_slice()
     }
 
     /// Explicitly materializes this tensor in the `f64` computation domain.
     ///
     /// Integer values outside the exact binary64 range may lose precision.
     pub fn materialize_f64(&self) -> Vec<f64> {
-        match &self.storage {
-            TensorStorage::F64(values) => values.clone(),
-            TensorStorage::F32(values) => values.iter().copied().map(f64::from).collect(),
-            TensorStorage::Integer(storage) => storage.to_f64_vec(),
-        }
+        self.storage.materialize_f64()
     }
 
     /// Read one element without routing an integer through floating-point storage.
     pub fn numeric_value_at(&self, index: usize) -> Option<NumericScalar> {
-        match &self.storage {
-            TensorStorage::F64(values) => values.get(index).copied().map(NumericScalar::F64),
-            TensorStorage::F32(values) => values.get(index).copied().map(NumericScalar::F32),
-            TensorStorage::Integer(storage) => storage.value_at(index).map(NumericScalar::from),
-        }
+        self.storage.value_at(index)
     }
 
     /// Assign one numeric scalar using the destination array's class semantics.
@@ -172,58 +155,12 @@ impl Tensor {
         index: usize,
         value: NumericScalar,
     ) -> Result<(), String> {
-        match &mut self.storage {
-            TensorStorage::F64(values) => {
-                let value = match value {
-                    NumericScalar::F64(value) => value,
-                    NumericScalar::F32(value) => f64::from(value),
-                    value => value
-                        .into_int_value()
-                        .expect("non-floating numeric scalar is integer")
-                        .to_f64(),
-                };
-                let destination = values
-                    .get_mut(index)
-                    .ok_or_else(|| format!("Tensor index {index} out of bounds"))?;
-                *destination = value;
-            }
-            TensorStorage::F32(values) => {
-                let value = match value {
-                    NumericScalar::F64(value) => value as f32,
-                    NumericScalar::F32(value) => value,
-                    value => value
-                        .into_int_value()
-                        .expect("non-floating numeric scalar is integer")
-                        .to_f64() as f32,
-                };
-                let destination = values
-                    .get_mut(index)
-                    .ok_or_else(|| format!("Tensor index {index} out of bounds"))?;
-                *destination = value;
-            }
-            TensorStorage::Integer(storage) => {
-                let exact = match value {
-                    NumericScalar::F64(value) => storage.cast_f64_assignment(value),
-                    NumericScalar::F32(value) => storage.cast_f64_assignment(f64::from(value)),
-                    value => storage.cast_exact_assignment(
-                        &value
-                            .into_int_value()
-                            .expect("non-floating numeric scalar is integer"),
-                    ),
-                };
-                storage.set_value(index, exact)?;
-            }
-        }
-        Ok(())
+        self.storage.set_value(index, value)
     }
 
     /// Consumes this tensor into one public all-class native numeric buffer.
     pub fn into_numeric_storage(self) -> Result<NumericStorage, String> {
-        let storage = match self.storage {
-            TensorStorage::F64(values) => NumericStorage::F64(values),
-            TensorStorage::F32(values) => NumericStorage::F32(values),
-            TensorStorage::Integer(storage) => NumericStorage::from_integer_storage(storage),
-        };
+        let storage = self.storage.into_numeric_storage();
         storage.validate_shape(&self.shape)?;
         Ok(storage)
     }

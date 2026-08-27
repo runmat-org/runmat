@@ -1032,7 +1032,7 @@ fn custom_partition(value: Value) -> BuiltinResult<PartitionSpec> {
     Ok(PartitionSpec {
         kind: PartitionKind::Custom,
         n,
-        test_sets: array.data,
+        test_sets: array.data.into_vec(),
         test_set_count,
         active_rows: vec![1; n],
         is_custom: true,

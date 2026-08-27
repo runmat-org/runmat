@@ -2292,7 +2292,7 @@ async fn bootstat_row(value: Value) -> BuiltinResult<BootstatRow> {
             .into_numeric_storage()
             .map(BootstatRow::Numeric)
             .map_err(|err| sampling_error("bootstrp", format!("bootstrp: {err}"))),
-        Value::LogicalArray(a) => Ok(BootstatRow::Logical(a.data)),
+        Value::LogicalArray(a) => Ok(BootstatRow::Logical(a.data.into_vec())),
         other => Err(sampling_error(
             "bootstrp",
             format!("bootstrp: bootfun must return numeric or logical values, got {other:?}"),

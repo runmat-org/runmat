@@ -485,7 +485,7 @@ fn sort_host(value: Value, args: &SortArgs) -> crate::BuiltinResult<SortEvaluati
 fn sort_logical(logical: LogicalArray, args: &SortArgs) -> crate::BuiltinResult<SortEvaluation> {
     let shape = logical.shape;
     let evaluation = sort_real_tensor(
-        Tensor::new_integer(IntegerStorage::U8(logical.data), shape)
+        Tensor::new_integer(IntegerStorage::U8(logical.data.into_vec()), shape)
             .map_err(|e| sort_internal(format!("sort: {e}")))?,
         args,
     )?;

@@ -559,7 +559,7 @@ fn sortrows_logical_with_args(
     args: &SortRowsArgs,
 ) -> crate::BuiltinResult<SortRowsEvaluation> {
     let shape = logical.shape.clone();
-    let tensor = Tensor::new_integer(IntegerStorage::U8(logical.data), shape)
+    let tensor = Tensor::new_integer(IntegerStorage::U8(logical.data.into_vec()), shape)
         .map_err(|error| sortrows_internal_error(format!("sortrows: {error}")))?;
     let evaluation = sortrows_real_tensor_with_args(tensor, args)?;
     let sorted = match evaluation.sorted {

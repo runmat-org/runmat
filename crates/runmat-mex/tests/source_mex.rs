@@ -11,6 +11,61 @@ use runmat_mex::{
 use runmat_value::Value;
 
 #[test]
+fn dense_numeric_inputs_and_outputs_keep_their_host_allocation() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("allocation_identity.c");
+    fs::write(
+        &source,
+        r#"
+#include "mex.h"
+#include <stdint.h>
+
+void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
+    if (nlhs != 3 || nrhs != 1) mexErrMsgTxt("expected one input and three outputs");
+    plhs[0] = mxCreateNumericMatrix(1, 2, mxINT32_CLASS, mxREAL);
+    mxInt32 *values = mxGetInt32s(plhs[0]);
+    values[0] = 17;
+    values[1] = -9;
+    plhs[1] = mxCreateNumericMatrix(1, 1, mxUINT64_CLASS, mxREAL);
+    mxGetUint64s(plhs[1])[0] = (mxUint64)(uintptr_t)values;
+    plhs[2] = mxCreateNumericMatrix(1, 1, mxUINT64_CLASS, mxREAL);
+    mxGetUint64s(plhs[2])[0] = (mxUint64)(uintptr_t)mxGetData(prhs[0]);
+}
+"#,
+    )
+    .unwrap();
+
+    let input = runmat_value::Tensor::new_integer(
+        runmat_value::IntegerStorage::I32(vec![3, 4]),
+        vec![1, 2],
+    )
+    .unwrap();
+    // SAFETY: only pointer identity is observed, and the source remains alive
+    // through the synchronous module invocation.
+    let input_address = unsafe { input.host_buffer().foreign_data_pointer() } as usize as u64;
+    let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+    let module = MexModule::load(&artifact.module).unwrap();
+    let result = module
+        .invoke(&[Value::Tensor(input)], 3, module.api_mode())
+        .unwrap();
+
+    let Value::Tensor(output) = &result.outputs[0] else {
+        panic!("two-element output must remain a tensor");
+    };
+    // SAFETY: only pointer identity is observed while the output owns its
+    // allocation.
+    let output_address = unsafe { output.host_buffer().foreign_data_pointer() } as usize as u64;
+    let Value::Int(created_address) = &result.outputs[1] else {
+        panic!("created pointer address must remain uint64");
+    };
+    let Value::Int(observed_input_address) = &result.outputs[2] else {
+        panic!("input pointer address must remain uint64");
+    };
+    assert_eq!(created_address.try_to_u64(), Some(output_address));
+    assert_eq!(observed_input_address.try_to_u64(), Some(input_address));
+}
+
+#[test]
 fn documented_matrix_api_helpers_preserve_types_objects_and_ownership() {
     let directory = tempfile::tempdir().unwrap();
     let source = directory.path().join("matrix_api.c");

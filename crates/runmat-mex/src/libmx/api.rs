@@ -102,7 +102,7 @@ impl MxApi {
         logical: bool,
     ) -> Result<*mut MxArray, String> {
         let values = if logical {
-            MxSparseValues::Logical(vec![0; nzmax])
+            MxSparseValues::Logical(vec![0; nzmax].into())
         } else {
             MxSparseValues::Numeric(NumericStorage::F64(vec![0.0; nzmax]))
         };
@@ -130,7 +130,7 @@ impl MxApi {
     }
 
     pub fn duplicate(&mut self, source: *const MxArray) -> Result<*mut MxArray, MxArenaError> {
-        let duplicate = self.arena.get(source)?.clone();
+        let duplicate = self.arena.get(source)?.deep_duplicate();
         Ok(self.arena.allocate(duplicate))
     }
 
@@ -226,9 +226,9 @@ impl MxApi {
             return Err("replacement data pointer is null".into());
         }
         let destination = if imaginary {
-            value.imaginary_pointer()
+            value.imaginary_pointer_for_write()
         } else {
-            value.data_pointer()
+            value.data_pointer_for_write()
         };
         if byte_len > 0 && destination.is_null() {
             return Err("mxArray data storage is unavailable".into());

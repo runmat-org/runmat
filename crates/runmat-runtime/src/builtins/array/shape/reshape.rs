@@ -307,7 +307,7 @@ fn reshape_value(value: Value, dims: &[usize]) -> crate::BuiltinResult<Value> {
         }
         Value::LogicalArray(logical) => {
             let LogicalArray { data, .. } = logical;
-            LogicalArray::new(data, dims.to_vec())
+            LogicalArray::from_host_buffer(data, dims.to_vec())
                 .map(Value::LogicalArray)
                 .map_err(|e| reshape_error(format!("reshape: {e}")))
         }

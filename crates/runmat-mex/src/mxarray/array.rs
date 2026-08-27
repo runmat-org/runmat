@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::ffi::c_void;
 
-use runmat_value::{NumericDType, NumericStorage};
+use runmat_value::{HostLogicalBuffer, HostNumericBuffer, NumericDType, NumericStorage};
 
 use super::{MxClassId, MxInterleavedStorage};
 
@@ -13,8 +13,8 @@ pub enum MxApiMode {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MxNumeric {
-    pub real: NumericStorage,
-    pub imag: Option<NumericStorage>,
+    pub real: HostNumericBuffer,
+    pub imag: Option<HostNumericBuffer>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -25,7 +25,7 @@ pub struct MxInterleaved {
 #[derive(Debug, Clone, PartialEq)]
 pub enum MxSparseValues {
     Numeric(NumericStorage),
-    Logical(Vec<u8>),
+    Logical(HostLogicalBuffer),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -42,7 +42,7 @@ pub struct MxSparse {
 pub enum MxArrayData {
     Numeric(MxNumeric),
     Interleaved(MxInterleaved),
-    Logical(Vec<u8>),
+    Logical(HostLogicalBuffer),
     Char(Vec<u16>),
     Cell(Vec<Option<Box<MxArray>>>),
     Struct {
@@ -70,10 +70,52 @@ pub struct MxArray {
 }
 
 impl MxArray {
+    pub fn deep_duplicate(&self) -> Self {
+        let mut duplicate = self.clone();
+        duplicate.detach_shared_storage();
+        duplicate
+    }
+
+    fn detach_shared_storage(&mut self) {
+        match &mut self.data {
+            MxArrayData::Numeric(value) => {
+                value.real.make_unique();
+                if let Some(imaginary) = &mut value.imag {
+                    imaginary.make_unique();
+                }
+            }
+            MxArrayData::Cell(values)
+            | MxArrayData::Struct { values, .. }
+            | MxArrayData::Object { values, .. } => {
+                for value in values.iter_mut().filter_map(Option::as_deref_mut) {
+                    value.detach_shared_storage();
+                }
+            }
+            MxArrayData::Logical(values) => values.make_unique(),
+            MxArrayData::Sparse(MxSparse {
+                values: MxSparseValues::Logical(values),
+                ..
+            }) => values.make_unique(),
+            MxArrayData::Interleaved(_) | MxArrayData::Char(_) | MxArrayData::Sparse(_) => {}
+        }
+    }
+
     pub fn numeric(
         storage: NumericStorage,
         shape: Vec<usize>,
         complexity: Option<NumericStorage>,
+    ) -> Result<Self, String> {
+        Self::numeric_buffer(
+            HostNumericBuffer::from_numeric_storage(storage),
+            shape,
+            complexity.map(HostNumericBuffer::from_numeric_storage),
+        )
+    }
+
+    pub fn numeric_buffer(
+        storage: HostNumericBuffer,
+        shape: Vec<usize>,
+        complexity: Option<HostNumericBuffer>,
     ) -> Result<Self, String> {
         validate_shape(storage.len(), &shape)?;
         if let Some(imag) = &complexity {
@@ -125,16 +167,15 @@ impl MxArray {
     }
 
     pub fn logical(values: Vec<u8>, shape: Vec<usize>) -> Result<Self, String> {
+        Self::logical_buffer(HostLogicalBuffer::new(values), shape)
+    }
+
+    pub fn logical_buffer(values: HostLogicalBuffer, shape: Vec<usize>) -> Result<Self, String> {
         validate_shape(values.len(), &shape)?;
         Ok(Self {
             class_id: MxClassId::Logical,
             shape,
-            data: MxArrayData::Logical(
-                values
-                    .into_iter()
-                    .map(|value| u8::from(value != 0))
-                    .collect(),
-            ),
+            data: MxArrayData::Logical(values),
             persistent: false,
         })
     }
@@ -316,12 +357,15 @@ impl MxArray {
 
     pub fn data_pointer(&mut self) -> *mut c_void {
         match &mut self.data {
-            MxArrayData::Numeric(value) => numeric_pointer(&mut value.real),
+            MxArrayData::Numeric(value) => numeric_pointer(&value.real),
             MxArrayData::Interleaved(value) => interleaved_pointer(&mut value.values),
-            MxArrayData::Logical(values) => values.as_mut_ptr().cast(),
+            MxArrayData::Logical(values) => {
+                // SAFETY: the mxArray retains the invocation-scoped buffer lease.
+                unsafe { values.foreign_data_pointer() }
+            }
             MxArrayData::Char(values) => values.as_mut_ptr().cast(),
             MxArrayData::Sparse(value) => match &mut value.values {
-                MxSparseValues::Numeric(values) => numeric_pointer(values),
+                MxSparseValues::Numeric(values) => owned_numeric_pointer(values),
                 MxSparseValues::Logical(values) => values.as_mut_ptr().cast(),
             },
             MxArrayData::Cell(_) | MxArrayData::Struct { .. } | MxArrayData::Object { .. } => {
@@ -330,11 +374,39 @@ impl MxArray {
         }
     }
 
+    pub fn data_pointer_for_write(&mut self) -> *mut c_void {
+        match &mut self.data {
+            MxArrayData::Numeric(value) => {
+                // SAFETY: the mutable array borrow is retained for the duration
+                // of the caller's synchronous write and COW has already detached.
+                unsafe { value.real.foreign_data_pointer_mut() }
+            }
+            MxArrayData::Logical(values) => {
+                // SAFETY: the mutable mxArray borrow spans the synchronous write.
+                unsafe { values.foreign_data_pointer_mut() }
+            }
+            _ => self.data_pointer(),
+        }
+    }
+
     pub fn imaginary_pointer(&mut self) -> *mut c_void {
         match &mut self.data {
             MxArrayData::Numeric(MxNumeric {
                 imag: Some(values), ..
             }) => numeric_pointer(values),
+            _ => std::ptr::null_mut(),
+        }
+    }
+
+    pub fn imaginary_pointer_for_write(&mut self) -> *mut c_void {
+        match &mut self.data {
+            MxArrayData::Numeric(MxNumeric {
+                imag: Some(values), ..
+            }) => {
+                // SAFETY: the mutable array borrow is retained for the duration
+                // of the caller's synchronous write and COW has already detached.
+                unsafe { values.foreign_data_pointer_mut() }
+            }
             _ => std::ptr::null_mut(),
         }
     }
@@ -441,7 +513,13 @@ impl MxArray {
     }
 }
 
-fn numeric_pointer(values: &mut NumericStorage) -> *mut c_void {
+fn numeric_pointer(values: &HostNumericBuffer) -> *mut c_void {
+    // SAFETY: MxArray owns an invocation lease for this buffer. The C Matrix
+    // API pointer must not escape the call or mutate a logically read-only input.
+    unsafe { values.foreign_data_pointer() }
+}
+
+fn owned_numeric_pointer(values: &mut NumericStorage) -> *mut c_void {
     match values {
         NumericStorage::F64(values) => values.as_mut_ptr().cast(),
         NumericStorage::F32(values) => values.as_mut_ptr().cast(),
@@ -523,5 +601,36 @@ mod tests {
         let value = MxArray::structure(vec!["x".into(), "y".into()], values, vec![1, 3]).unwrap();
         assert_eq!(value.numel(), 3);
         assert_eq!(value.class_id(), MxClassId::Struct);
+    }
+
+    #[test]
+    fn deep_duplicate_detaches_shared_dense_storage_recursively() {
+        let numeric = HostNumericBuffer::from_numeric_storage(NumericStorage::I32(vec![3, 4]));
+        let logical = HostLogicalBuffer::new(vec![1, 0]);
+        let source = MxArray::cell(
+            vec![
+                Some(Box::new(
+                    MxArray::numeric_buffer(numeric.clone(), vec![1, 2], None).unwrap(),
+                )),
+                Some(Box::new(
+                    MxArray::logical_buffer(logical.clone(), vec![1, 2]).unwrap(),
+                )),
+            ],
+            vec![1, 2],
+        )
+        .unwrap();
+
+        let duplicate = source.deep_duplicate();
+        let MxArrayData::Cell(values) = duplicate.data() else {
+            panic!("duplicate must remain a cell array");
+        };
+        let MxArrayData::Numeric(duplicate_numeric) = values[0].as_deref().unwrap().data() else {
+            panic!("first duplicate element must remain numeric");
+        };
+        let MxArrayData::Logical(duplicate_logical) = values[1].as_deref().unwrap().data() else {
+            panic!("second duplicate element must remain logical");
+        };
+        assert!(!numeric.shares_allocation_with(&duplicate_numeric.real));
+        assert!(!logical.shares_allocation_with(duplicate_logical));
     }
 }

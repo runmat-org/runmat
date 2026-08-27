@@ -601,7 +601,7 @@ fn check_numeric(storage: &NumericStorage, rows: usize, _cols: usize, args: &Arg
 }
 
 fn check_logical(array: &LogicalArray, rows: usize, cols: usize, args: &Args) -> bool {
-    let storage = NumericStorage::from_integer_storage(IntegerStorage::U8(array.data.clone()));
+    let storage = NumericStorage::from_integer_storage(IntegerStorage::U8(array.data.to_vec()));
     check_numeric(&storage, rows, cols, args)
 }
 

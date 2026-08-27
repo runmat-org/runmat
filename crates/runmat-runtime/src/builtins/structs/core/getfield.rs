@@ -503,7 +503,7 @@ fn parse_index_component(value: &Value) -> BuiltinResult<IndexComponent> {
     match value {
         Value::Bool(value) => Ok(IndexComponent::Logical(vec![u8::from(*value)], vec![1, 1])),
         Value::LogicalArray(logical) => Ok(IndexComponent::Logical(
-            logical.data.clone(),
+            logical.data.to_vec(),
             logical.shape.clone(),
         )),
         Value::CharArray(ca) => {

@@ -771,7 +771,7 @@ fn encode_binary_payload(value: &Value) -> BuiltinResult<Vec<u8>> {
         Value::Num(n) => Ok(vec![float_to_byte(*n)?]),
         Value::Int(i) => Ok(vec![int_to_byte(i.to_i64())?]),
         Value::Bool(b) => Ok(vec![if *b { 1 } else { 0 }]),
-        Value::LogicalArray(array) => Ok(array.data.clone()),
+        Value::LogicalArray(array) => Ok(array.data.to_vec()),
         Value::CharArray(ca) => {
             let mut bytes = Vec::with_capacity(ca.data.len());
             for ch in &ca.data {

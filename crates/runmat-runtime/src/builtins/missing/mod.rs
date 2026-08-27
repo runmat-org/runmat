@@ -1448,7 +1448,7 @@ fn logical_array_mask_for_rows(
         }
         Ok(out)
     } else if mask.data.len() == expected_rows {
-        Ok(mask.data.clone())
+        Ok(mask.data.to_vec())
     } else {
         Err(invalid_argument(
             "missing mask shape does not match table height",
@@ -1750,7 +1750,7 @@ fn remove_missing_logical_array(
     let rows = array.shape.first().copied().unwrap_or(array.data.len());
     let cols = array.shape.get(1).copied().unwrap_or(1);
     remove_missing_column_major(
-        array.data,
+        array.data.into_vec(),
         rows,
         cols,
         array.shape.clone(),

@@ -65,7 +65,7 @@ fn compiler_frontend_prepares_c_declarations() {
     .expect("prepared metadata");
 
     assert_eq!(metadata.libraries.len(), 1);
-    assert_eq!(metadata.libraries[0].symbols.len(), 7);
+    assert_eq!(metadata.libraries[0].symbols.len(), 8);
     assert_eq!(metadata.structures.len(), 1);
     assert_eq!(metadata.structures[0].fields.len(), 2);
     assert_eq!(metadata.enumerations.len(), 1);

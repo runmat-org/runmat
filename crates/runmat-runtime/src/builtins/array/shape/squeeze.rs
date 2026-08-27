@@ -247,7 +247,8 @@ fn squeeze_logical_array(logical: LogicalArray) -> crate::BuiltinResult<LogicalA
     if shape == logical.shape {
         return Ok(logical);
     }
-    LogicalArray::new(logical.data, shape).map_err(|e| squeeze_error(format!("squeeze: {e}")))
+    LogicalArray::from_host_buffer(logical.data, shape)
+        .map_err(|e| squeeze_error(format!("squeeze: {e}")))
 }
 
 fn squeeze_string_array(strings: StringArray) -> crate::BuiltinResult<StringArray> {

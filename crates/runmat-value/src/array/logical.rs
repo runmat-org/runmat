@@ -1,6 +1,8 @@
+use super::host_logical_buffer::HostLogicalBuffer;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct LogicalArray {
-    pub data: Vec<u8>, // 0 or 1 values; compact bitset can come later
+    pub data: HostLogicalBuffer,
     pub shape: Vec<usize>,
 }
 
@@ -15,17 +17,29 @@ impl LogicalArray {
                 expected
             ));
         }
-        // Normalize to 0/1
-        let mut d = data;
-        for v in &mut d {
-            *v = if *v != 0 { 1 } else { 0 };
+        Ok(LogicalArray {
+            data: HostLogicalBuffer::new(data),
+            shape,
+        })
+    }
+
+    pub fn from_host_buffer(data: HostLogicalBuffer, shape: Vec<usize>) -> Result<Self, String> {
+        let expected = shape
+            .iter()
+            .try_fold(1usize, |count, &dimension| count.checked_mul(dimension));
+        if expected != Some(data.len()) {
+            return Err(format!(
+                "LogicalArray data length {} doesn't match shape {:?}",
+                data.len(),
+                shape
+            ));
         }
-        Ok(LogicalArray { data: d, shape })
+        Ok(Self { data, shape })
     }
     pub fn zeros(shape: Vec<usize>) -> Self {
         let expected: usize = shape.iter().product();
         LogicalArray {
-            data: vec![0u8; expected],
+            data: HostLogicalBuffer::new(vec![0u8; expected]),
             shape,
         }
     }

@@ -1,9 +1,9 @@
 use std::fmt;
 
 use runmat_value::{
-    CellArray, CharArray, ComplexStorage, ComplexTensor, IntegerComplexStorage, IntegerStorage,
-    LogicalArray, NumericScalar, NumericStorage, ObjectArray, ObjectInstance, SparseTensor,
-    StructValue, Tensor, Value,
+    CellArray, CharArray, ComplexStorage, ComplexTensor, HostNumericBuffer, IntegerComplexStorage,
+    IntegerStorage, LogicalArray, NumericScalar, NumericStorage, ObjectArray, ObjectInstance,
+    SparseTensor, StructValue, Tensor, Value,
 };
 
 use crate::mxarray::{
@@ -47,17 +47,16 @@ pub fn value_to_mx(value: &Value, mode: MxApiMode) -> Result<MxArray, MxConversi
         Value::Bool(value) => {
             MxArray::logical(vec![u8::from(*value)], vec![1, 1]).map_err(MxConversionError::new)
         }
-        Value::LogicalArray(value) => MxArray::logical(value.data.clone(), value.shape.clone())
-            .map_err(MxConversionError::new),
+        Value::LogicalArray(value) => {
+            MxArray::logical_buffer(value.data.clone(), value.shape.clone())
+                .map_err(MxConversionError::new)
+        }
         Value::String(value) => string_to_mx(value),
         Value::CharArray(value) => char_to_mx(value),
-        Value::Tensor(value) => numeric_to_mx(
-            value
-                .clone()
-                .into_numeric_storage()
-                .map_err(MxConversionError::new)?,
-            value.shape.clone(),
-        ),
+        Value::Tensor(value) => {
+            MxArray::numeric_buffer(value.host_buffer().clone(), value.shape.clone(), None)
+                .map_err(MxConversionError::new)
+        }
         Value::ComplexTensor(value) => {
             let (real, imag) = complex_components(value)?;
             complex_to_mx(real, imag, value.shape.clone(), mode)
@@ -98,7 +97,7 @@ pub fn value_from_mx(value: &MxArray) -> Result<Value, MxConversionError> {
             if values.len() == 1 {
                 Ok(Value::Bool(values[0] != 0))
             } else {
-                LogicalArray::new(values.clone(), value.shape().to_vec())
+                LogicalArray::from_host_buffer(values.clone(), value.shape().to_vec())
                     .map(Value::LogicalArray)
                     .map_err(MxConversionError::new)
             }
@@ -175,7 +174,7 @@ fn char_to_mx(value: &CharArray) -> Result<MxArray, MxConversionError> {
 
 fn sparse_to_mx(value: &SparseTensor) -> Result<MxArray, MxConversionError> {
     let values = if value.is_logical() {
-        MxSparseValues::Logical(vec![1; value.nnz()])
+        MxSparseValues::Logical(vec![1; value.nnz()].into())
     } else {
         let dtype = value
             .numeric_dtype()
@@ -302,14 +301,26 @@ fn uniform_struct_fields(values: &[Value]) -> Option<Vec<String>> {
 
 fn numeric_from_mx(value: &MxNumeric, shape: &[usize]) -> Result<Value, MxConversionError> {
     if let Some(imag) = &value.imag {
-        return complex_from_components(value.real.clone(), imag.clone(), shape);
+        return complex_from_host_components(value.real.clone(), imag.clone(), shape);
     }
     if value.real.len() == 1 {
         return scalar_from_numeric(value.real.value_at(0).unwrap(), shape);
     }
-    Tensor::from_numeric_storage(value.real.clone(), shape.to_vec())
+    Tensor::from_host_buffer(value.real.clone(), shape.to_vec())
         .map(Value::Tensor)
         .map_err(MxConversionError::new)
+}
+
+fn complex_from_host_components(
+    real: HostNumericBuffer,
+    imag: HostNumericBuffer,
+    shape: &[usize],
+) -> Result<Value, MxConversionError> {
+    complex_from_components(
+        real.into_numeric_storage(),
+        imag.into_numeric_storage(),
+        shape,
+    )
 }
 
 fn scalar_from_numeric(value: NumericScalar, shape: &[usize]) -> Result<Value, MxConversionError> {
@@ -561,6 +572,26 @@ mod tests {
                 assert_eq!(value_from_mx(&boundary).expect("convert back"), original);
             }
         }
+    }
+
+    #[test]
+    fn dense_numeric_boundary_retains_one_host_allocation() {
+        let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
+        let original = Value::Tensor(tensor.clone());
+        let mut boundary = value_to_mx(&original, MxApiMode::SeparateComplex).unwrap();
+
+        // SAFETY: both addresses are observed without dereferencing and both
+        // owners remain alive for the duration of the comparison.
+        let source_pointer = unsafe { tensor.host_buffer().foreign_data_pointer() };
+        assert_eq!(boundary.data_pointer(), source_pointer);
+
+        let output = value_from_mx(&boundary).unwrap();
+        let Value::Tensor(output) = output else {
+            panic!("dense array should remain a tensor");
+        };
+        assert!(output
+            .host_buffer()
+            .shares_allocation_with(tensor.host_buffer()));
     }
 
     #[test]

@@ -622,7 +622,7 @@ fn axis_from_logical(logical: LogicalArray, index: usize) -> BuiltinResult<AxisD
     let values = logical.data;
     Ok(AxisData {
         len: values.len(),
-        storage: AxisStorage::Logical(values),
+        storage: AxisStorage::Logical(values.into_vec()),
     })
 }
 

@@ -683,7 +683,7 @@ mod tests {
 
     fn logical_data(value: Value) -> Vec<u8> {
         match value {
-            Value::LogicalArray(array) => array.data,
+            Value::LogicalArray(array) => array.data.into_vec(),
             other => panic!("expected logical array, got {other:?}"),
         }
     }

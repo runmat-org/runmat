@@ -625,8 +625,11 @@ fn median_host(value: Value, args: &ParsedArguments) -> BuiltinResult<Value> {
 }
 
 fn median_logical_host(logical: LogicalArray, args: &ParsedArguments) -> BuiltinResult<Value> {
-    let tensor = Tensor::new_integer(IntegerStorage::U8(logical.data), logical.shape.clone())
-        .map_err(|error| median_internal_error(format!("median: {error}")))?;
+    let tensor = Tensor::new_integer(
+        IntegerStorage::U8(logical.data.into_vec()),
+        logical.shape.clone(),
+    )
+    .map_err(|error| median_internal_error(format!("median: {error}")))?;
     let reduced = median_tensor(
         tensor,
         args.axes.clone(),

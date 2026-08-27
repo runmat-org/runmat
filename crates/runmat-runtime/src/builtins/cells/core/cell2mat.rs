@@ -769,7 +769,7 @@ fn parse_cell_entry(value: Value) -> BuiltinResult<CellEntry> {
         Value::LogicalArray(la) => Ok(CellEntry {
             kind: ElementKind::Logical,
             shape: normalize_shape(la.shape.clone()),
-            data: EntryData::Logical(la.data.clone()),
+            data: EntryData::Logical(la.data.to_vec()),
         }),
         Value::Complex(re, im) => Ok(CellEntry {
             kind: ElementKind::Complex,

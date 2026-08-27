@@ -2834,10 +2834,10 @@ impl TripletValues {
 fn triplet_values(value: &Value) -> BuiltinResult<TripletValues> {
     match value {
         Value::Bool(value) => Ok(TripletValues::Logical(vec![u8::from(*value)])),
-        Value::LogicalArray(values) => Ok(TripletValues::Logical(values.data.clone())),
+        Value::LogicalArray(values) => Ok(TripletValues::Logical(values.data.to_vec())),
         Value::SparseTensor(sparse) if sparse.is_logical() => sparse
             .to_dense_logical()
-            .map(|dense| TripletValues::Logical(dense.data))
+            .map(|dense| TripletValues::Logical(dense.data.into_vec()))
             .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}"))),
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => Ok(TripletValues::Integer(
             tensor

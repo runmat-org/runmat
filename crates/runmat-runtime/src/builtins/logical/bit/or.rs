@@ -263,7 +263,10 @@ async fn logical_buffer_from(name: &str, value: Value) -> BuiltinResult<LogicalB
     match value {
         Value::LogicalArray(array) => {
             let LogicalArray { data, shape } = array;
-            Ok(LogicalBuffer { data, shape })
+            Ok(LogicalBuffer {
+                data: data.into_vec(),
+                shape,
+            })
         }
         Value::Bool(flag) => Ok(LogicalBuffer {
             data: vec![if flag { 1 } else { 0 }],
