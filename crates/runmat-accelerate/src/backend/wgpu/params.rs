@@ -645,6 +645,7 @@ pub struct MatmulParams {
 
 pub const MATMUL_FLAG_TRANSPOSE_A: u32 = 1 << 0;
 pub const MATMUL_FLAG_TRANSPOSE_B: u32 = 1 << 1;
+pub const MATMUL_FLAG_ACCUMULATE: u32 = 1 << 2;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
