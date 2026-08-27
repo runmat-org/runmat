@@ -1,7 +1,10 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::Ordering;
+use std::sync::{atomic::Ordering, Arc};
 use std::time::Duration;
 
+use futures::channel::mpsc as async_mpsc;
+use futures::{FutureExt, StreamExt};
 use runmat_mex::{MexApi, MexDiagnostic, MexHostServices, MexInvocation};
 use runmat_process_host::environment::{EnvironmentAllowlist, EnvironmentPolicy};
 use runmat_process_host::ipc::{
@@ -27,14 +30,18 @@ pub struct IsolatedMexClient {
     module: PathBuf,
     child: ChildProcess,
     snapshots: SharedSnapshotStore,
-    reader: tokio::process::ChildStdout,
+    messages: async_mpsc::UnboundedReceiver<Result<HostMessage, MexWireError>>,
     writer: tokio::process::ChildStdin,
     limits: FrameLimits,
     next_request_id: u64,
+    origins: HashMap<u64, RuntimeContext>,
 }
 
 impl IsolatedMexClient {
-    pub async fn spawn(module: PathBuf) -> Result<Self, MexWireError> {
+    pub async fn spawn(
+        module: PathBuf,
+        ready: Arc<tokio::sync::Notify>,
+    ) -> Result<Self, MexWireError> {
         let executable = std::env::current_exe()
             .map_err(|error| wire_error("RunMat:MEX:HostExecutable", error.to_string(), None))?;
         let secret = SessionSecret::generate();
@@ -78,14 +85,30 @@ impl IsolatedMexClient {
         )
         .await
         .map_err(|error| wire_error("RunMat:MEX:HostAuthentication", error.to_string(), None))?;
+        let limits = session.limits;
+        let (message_tx, messages) = async_mpsc::unbounded();
+        tokio::spawn(async move {
+            loop {
+                let message = read_message(&mut reader, limits).await;
+                let terminal = message.is_err();
+                if message_tx.unbounded_send(message).is_err() {
+                    break;
+                }
+                ready.notify_one();
+                if terminal {
+                    break;
+                }
+            }
+        });
         Ok(Self {
             module,
             child,
             snapshots,
-            reader,
+            messages,
             writer,
-            limits: session.limits,
+            limits,
             next_request_id: 1,
+            origins: HashMap::new(),
         })
     }
 
@@ -120,7 +143,11 @@ impl IsolatedMexClient {
                 )
             })?,
         });
-        self.write(&request).await?;
+        self.origins.insert(request_id, runtime.clone());
+        if let Err(error) = self.write(&request).await {
+            self.origins.remove(&request_id);
+            return Err(error);
+        }
         let wait = self.wait_for_invocation(request_id, runtime.clone());
         let outcome = if let Some(timeout) = timeout {
             match tokio::time::timeout(timeout, wait).await {
@@ -165,7 +192,7 @@ impl IsolatedMexClient {
                 ));
             }
             let message = tokio::select! {
-                message = read_message(&mut self.reader, self.limits) => message,
+                message = self.messages.next() => message.unwrap_or_else(|| Err(wire_error("RunMat:MEX:HostTransport", "host message channel closed", None))),
                 _ = tokio::time::sleep(Duration::from_millis(25)) => continue,
             };
             let message = match message {
@@ -193,10 +220,23 @@ impl IsolatedMexClient {
                         console: output.console,
                     });
                 }
-                HostMessage::Callback(callback) if callback.request_id == request_id => {
-                    let response =
-                        handle_callback(callback, runtime.clone(), &self.snapshots).await;
+                HostMessage::Callback(callback) => {
+                    let origin =
+                        self.origins
+                            .get(&callback.request_id)
+                            .cloned()
+                            .ok_or_else(|| {
+                                wire_error(
+                                    "RunMat:MEX:CallbackProtocol",
+                                    "callback origin is no longer active",
+                                    None,
+                                )
+                            })?;
+                    let response = handle_callback(callback, origin, &self.snapshots).await;
                     self.write(&DriverMessage::CallbackResult(response)).await?;
+                }
+                HostMessage::OriginReleased { request_id } => {
+                    self.origins.remove(&request_id);
                 }
                 _ => {
                     return Err(wire_error(
@@ -301,7 +341,7 @@ impl IsolatedMexClient {
                 ));
             }
             let message = tokio::select! {
-                message = read_message(&mut self.reader, self.limits) => message,
+                message = self.messages.next() => message.unwrap_or_else(|| Err(wire_error("RunMat:MEX:HostTransport", "host message channel closed", None))),
                 _ = tokio::time::sleep(Duration::from_millis(25)) => continue,
             };
             let message = match message {
@@ -312,10 +352,17 @@ impl IsolatedMexClient {
                 HostMessage::Lifecycle(result) if result.request_id == request_id => {
                     return result.outcome;
                 }
-                HostMessage::Callback(callback) if callback.request_id == request_id => {
-                    let response =
-                        handle_callback(callback, runtime.clone(), &self.snapshots).await;
+                HostMessage::Callback(callback) => {
+                    let origin = self
+                        .origins
+                        .get(&callback.request_id)
+                        .cloned()
+                        .unwrap_or_else(|| runtime.clone());
+                    let response = handle_callback(callback, origin, &self.snapshots).await;
                     self.write(&DriverMessage::CallbackResult(response)).await?;
+                }
+                HostMessage::OriginReleased { request_id } => {
+                    self.origins.remove(&request_id);
                 }
                 _ => {
                     return Err(wire_error(
@@ -330,6 +377,40 @@ impl IsolatedMexClient {
 
     async fn write(&mut self, message: &DriverMessage) -> Result<(), MexWireError> {
         write_message(&mut self.writer, message, self.limits).await
+    }
+
+    pub async fn service_ready_background(&mut self) -> Result<bool, MexWireError> {
+        let Some(message) = self.messages.next().now_or_never().flatten() else {
+            return Ok(false);
+        };
+        let message = message?;
+        match message {
+            HostMessage::Callback(callback) => {
+                let origin = self
+                    .origins
+                    .get(&callback.request_id)
+                    .cloned()
+                    .ok_or_else(|| {
+                        wire_error(
+                            "RunMat:MEX:CallbackProtocol",
+                            "callback origin is no longer active",
+                            None,
+                        )
+                    })?;
+                let response = handle_callback(callback, origin, &self.snapshots).await;
+                self.write(&DriverMessage::CallbackResult(response)).await?;
+                Ok(true)
+            }
+            HostMessage::OriginReleased { request_id } => {
+                self.origins.remove(&request_id);
+                Ok(true)
+            }
+            HostMessage::Invocation(_) | HostMessage::Lifecycle(_) => Err(wire_error(
+                "RunMat:MEX:HostProtocol",
+                "foreground host result arrived without an active request",
+                None,
+            )),
+        }
     }
 
     fn take_request_id(&mut self) -> Result<u64, MexWireError> {

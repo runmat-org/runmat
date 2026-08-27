@@ -25,7 +25,10 @@ pub(super) struct NativeModuleMetadata {
 #[derive(Debug)]
 pub(super) enum NativeModuleLoadError {
     IsolatedHostRequired,
-    Failed(String),
+    Failed {
+        message: String,
+        dependency: Option<String>,
+    },
 }
 
 impl std::fmt::Display for NativeModuleLoadError {
@@ -34,7 +37,7 @@ impl std::fmt::Display for NativeModuleLoadError {
             Self::IsolatedHostRequired => formatter.write_str(
                 "the MEX module already has an in-process owner and requires an isolated host",
             ),
-            Self::Failed(message) => formatter.write_str(message),
+            Self::Failed { message, .. } => formatter.write_str(message),
         }
     }
 }
@@ -66,6 +69,7 @@ struct OriginServiceEntry {
 enum NativeCommand {
     Load {
         path: PathBuf,
+        compatible_isolated: bool,
         response: oneshot::Sender<Result<NativeModuleMetadata, NativeModuleLoadError>>,
     },
     Invoke {
@@ -323,17 +327,28 @@ impl NativeMexLane {
         &self,
         path: &Path,
     ) -> Result<NativeModuleMetadata, NativeModuleLoadError> {
+        self.load_with_policy(path, false).await
+    }
+
+    pub(super) async fn load_with_policy(
+        &self,
+        path: &Path,
+        compatible_isolated: bool,
+    ) -> Result<NativeModuleMetadata, NativeModuleLoadError> {
         let (response, receiver) = oneshot::channel();
         self.commands
             .send(NativeCommand::Load {
                 path: path.to_path_buf(),
+                compatible_isolated,
                 response,
             })
-            .map_err(|_| NativeModuleLoadError::Failed("the MEX native lane stopped".into()))?;
-        receiver.await.map_err(|_| {
-            NativeModuleLoadError::Failed(
-                "the MEX native lane stopped while loading a module".into(),
-            )
+            .map_err(|_| NativeModuleLoadError::Failed {
+                message: "the MEX native lane stopped".into(),
+                dependency: None,
+            })?;
+        receiver.await.map_err(|_| NativeModuleLoadError::Failed {
+            message: "the MEX native lane stopped while loading a module".into(),
+            dependency: None,
         })?
     }
 
@@ -563,16 +578,24 @@ fn process_next_command(lane: &Rc<NativeLaneState>, wait: bool) -> bool {
 
 fn process_command(lane: &Rc<NativeLaneState>, command: NativeCommand) -> bool {
     match command {
-        NativeCommand::Load { path, response } => {
-            let result = load_module(lane, &path).map(|module| NativeModuleMetadata {
-                mode: module.api_mode(),
-                interface: module.boundary_interface(),
-            });
+        NativeCommand::Load {
+            path,
+            compatible_isolated,
+            response,
+        } => {
+            let result =
+                load_module(lane, &path, compatible_isolated).map(|module| NativeModuleMetadata {
+                    mode: module.api_mode(),
+                    interface: module.boundary_interface(),
+                });
             let _ = response.send(result.map_err(|error| {
                 if error.requires_isolated_host() {
                     NativeModuleLoadError::IsolatedHostRequired
                 } else {
-                    NativeModuleLoadError::Failed(error.to_string())
+                    NativeModuleLoadError::Failed {
+                        message: error.to_string(),
+                        dependency: error.missing_dependency(),
+                    }
                 }
             }));
         }
@@ -587,7 +610,7 @@ fn process_command(lane: &Rc<NativeLaneState>, command: NativeCommand) -> bool {
                 callbacks: lane.callbacks.clone(),
                 service_id,
             });
-            let result = load_module(lane, &path).and_then(|module| {
+            let result = load_module(lane, &path, false).and_then(|module| {
                 module.invoke_native(
                     inputs,
                     requested_outputs,
@@ -658,11 +681,19 @@ fn process_command(lane: &Rc<NativeLaneState>, command: NativeCommand) -> bool {
     true
 }
 
-fn load_module(lane: &NativeLaneState, path: &Path) -> Result<Rc<MexModule>, MexLoadError> {
+fn load_module(
+    lane: &NativeLaneState,
+    path: &Path,
+    compatible_isolated: bool,
+) -> Result<Rc<MexModule>, MexLoadError> {
     if let Some(module) = lane.modules.borrow().get(path) {
         return Ok(Rc::clone(module));
     }
-    let module = Rc::new(MexModule::load(path)?);
+    let module = Rc::new(if compatible_isolated {
+        MexModule::load_compatible_isolated(path)?
+    } else {
+        MexModule::load(path)?
+    });
     lane.modules
         .borrow_mut()
         .insert(path.to_path_buf(), Rc::clone(&module));

@@ -131,6 +131,66 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
 }
 
 #[test]
+fn isolated_cpp_worker_can_finish_an_async_engine_call_after_gateway_return() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("isolated_async_worker.cpp");
+    fs::write(
+        &source,
+        r#"
+#include "mex.hpp"
+#include "mexAdapter.hpp"
+#include <chrono>
+#include <future>
+#include <thread>
+
+class MexFunction : public matlab::mex::Function {
+public:
+    void operator()(matlab::mex::ArgumentList outputs,
+                    matlab::mex::ArgumentList inputs) override {
+        if (!worker_.valid()) {
+            auto engine = getEngine();
+            auto input = inputs[0];
+            mexLock();
+            worker_ = std::async(std::launch::async,
+                [engine, input]() mutable {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+                    return engine
+                        ->fevalAsync<matlab::data::Array>(u"reshape", input, 2,
+                                                          1)
+                        .get();
+                });
+            return;
+        }
+        outputs[0] = worker_.get();
+        mexUnlock();
+    }
+
+private:
+    std::future<matlab::data::Array> worker_;
+};
+"#,
+    )
+    .unwrap();
+    let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
+    fs::remove_file(&artifact.manifest).unwrap();
+    fs::write(
+        directory.path().join("main.m"),
+        "x = [5; 10]; isolated_async_worker(x); y = isolated_async_worker(); disp(y);",
+    )
+    .unwrap();
+
+    let output = run_script(directory.path(), "main.m", "");
+    assert!(
+        output.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.split_whitespace().collect::<Vec<_>>(), ["5", "10"]);
+}
+
+#[test]
 fn session_shutdown_runs_isolated_exit_hooks() {
     let directory = tempfile::tempdir().unwrap();
     let marker_path = directory.path().join("shutdown-complete");
