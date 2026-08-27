@@ -483,7 +483,7 @@ where
     }
     let mapped = values.into_iter().map(map).collect::<Vec<_>>();
     if mapped.iter().any(|(_, imag)| *imag != 0.0) {
-        let tensor = ComplexTensor::from_complex_storage(ComplexStorage::F64(mapped), shape)
+        let tensor = ComplexTensor::from_complex_storage(ComplexStorage::F64(mapped.into()), shape)
             .map_err(|error| {
                 build_runtime_error(format!("{builtin}: {error}"))
                     .with_builtin(builtin)
@@ -522,7 +522,7 @@ where
     }
     let mapped = values.into_iter().map(map).collect::<Vec<_>>();
     if mapped.iter().any(|(_, imag)| *imag != 0.0) {
-        let tensor = ComplexTensor::from_complex_storage(ComplexStorage::F32(mapped), shape)
+        let tensor = ComplexTensor::from_complex_storage(ComplexStorage::F32(mapped.into()), shape)
             .map_err(|error| {
                 build_runtime_error(format!("{builtin}: {error}"))
                     .with_builtin(builtin)

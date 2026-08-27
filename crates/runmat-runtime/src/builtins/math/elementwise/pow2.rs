@@ -496,9 +496,11 @@ fn pow2_host_scale(mantissa: Value, exponent: Value) -> BuiltinResult<Value> {
             })
             .collect::<Vec<_>>();
         if output_is_complex {
-            let tensor =
-                ComplexTensor::from_complex_storage(ComplexStorage::F32(output), output_shape)
-                    .map_err(|e| pow2_error_with_detail(&POW2_ERROR_INTERNAL, e))?;
+            let tensor = ComplexTensor::from_complex_storage(
+                ComplexStorage::F32(output.into()),
+                output_shape,
+            )
+            .map_err(|e| pow2_error_with_detail(&POW2_ERROR_INTERNAL, e))?;
             Ok(complex_tensor_into_value(tensor))
         } else {
             let values = output.into_iter().map(|(real, _)| real).collect();
@@ -519,9 +521,11 @@ fn pow2_host_scale(mantissa: Value, exponent: Value) -> BuiltinResult<Value> {
             })
             .collect::<Vec<_>>();
         if output_is_complex {
-            let tensor =
-                ComplexTensor::from_complex_storage(ComplexStorage::F64(output), output_shape)
-                    .map_err(|e| pow2_error_with_detail(&POW2_ERROR_INTERNAL, e))?;
+            let tensor = ComplexTensor::from_complex_storage(
+                ComplexStorage::F64(output.into()),
+                output_shape,
+            )
+            .map_err(|e| pow2_error_with_detail(&POW2_ERROR_INTERNAL, e))?;
             Ok(complex_tensor_into_value(tensor))
         } else {
             let values = output.into_iter().map(|(real, _)| real).collect();
@@ -545,7 +549,7 @@ fn pow2_array_into_f32_components(array: NumericArray) -> BuiltinResult<Vec<(f32
                 .collect())
         }
         NumericArray::Complex(tensor) => match tensor.into_complex_storage() {
-            ComplexStorage::F32(values) => Ok(values),
+            ComplexStorage::F32(values) => Ok(values.into_iter().collect()),
             ComplexStorage::F64(values) => Ok(values
                 .into_iter()
                 .map(|(real, imag)| (real as f32, imag as f32))
@@ -574,7 +578,7 @@ fn pow2_array_into_f64_components(array: NumericArray) -> BuiltinResult<Vec<(f64
             Ok(values.into_iter().map(|value| (value, 0.0)).collect())
         }
         NumericArray::Complex(tensor) => match tensor.into_complex_storage() {
-            ComplexStorage::F64(values) => Ok(values),
+            ComplexStorage::F64(values) => Ok(values.into_iter().collect()),
             ComplexStorage::F32(_) => {
                 unreachable!("complex single selects the native-single pow2 domain")
             }
@@ -838,10 +842,13 @@ pub(crate) mod tests {
             panic!("complex single scalar must retain tensor class");
         };
         assert_eq!(
-            output.as_f32_slice(),
-            Some(&[pow2_complex_f32(1.0, 0.5)][..])
+            output.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![pow2_complex_f32(1.0, 0.5)])
         );
-
         let empty = ComplexTensor::from_f32(Vec::new(), vec![0, 3]).unwrap();
         let Value::ComplexTensor(output) =
             pow2_builtin(Value::ComplexTensor(empty), vec![]).expect("empty pow2")
@@ -876,8 +883,14 @@ pub(crate) mod tests {
         .expect("complex mixed pow2") else {
             panic!("complex single scalar must retain tensor class");
         };
-        assert_eq!(output.as_f32_slice(), Some(&[(4.0, 4.0)][..]));
-
+        assert_eq!(
+            output.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(4.0, 4.0)])
+        );
         let mantissa = ComplexTensor::from_f32(Vec::new(), vec![0, 2]).unwrap();
         let exponent = Tensor::new(Vec::new(), vec![0, 2]).unwrap();
         let Value::ComplexTensor(output) = pow2_builtin(

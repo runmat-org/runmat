@@ -405,7 +405,7 @@ fn log_real_f64_values(values: Vec<f64>, shape: Vec<usize>) -> BuiltinResult<Val
 
     if has_imag {
         let tensor =
-            ComplexTensor::from_complex_storage(ComplexStorage::F64(complex_values), shape)
+            ComplexTensor::from_complex_storage(ComplexStorage::F64(complex_values.into()), shape)
                 .map_err(|e| builtin_error(format!("log: {e}")))?;
         Ok(complex_tensor_into_value(tensor))
     } else {
@@ -432,7 +432,7 @@ fn log_real_f32_values(values: Vec<f32>, shape: Vec<usize>) -> BuiltinResult<Val
     }
     if has_imag {
         let tensor =
-            ComplexTensor::from_complex_storage(ComplexStorage::F32(complex_values), shape)
+            ComplexTensor::from_complex_storage(ComplexStorage::F32(complex_values.into()), shape)
                 .map_err(|e| builtin_error(format!("log: {e}")))?;
         Ok(complex_tensor_into_value(tensor))
     } else {
@@ -711,13 +711,15 @@ pub(crate) mod tests {
             panic!("expected complex single tensor");
         };
         assert_eq!(
-            output.as_f32_slice(),
-            Some(
-                &[
-                    log_complex_parts_f32(-1.0, 0.0),
-                    log_complex_parts_f32(4.0, 0.0),
-                ][..]
-            )
+            output.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![
+                log_complex_parts_f32(-1.0, 0.0),
+                log_complex_parts_f32(4.0, 0.0),
+            ])
         );
 
         let complex = ComplexTensor::from_f32(vec![(1.0, 1.0)], vec![1, 1]).unwrap();
@@ -726,10 +728,13 @@ pub(crate) mod tests {
             panic!("one-element complex single must retain class");
         };
         assert_eq!(
-            output.as_f32_slice(),
-            Some(&[log_complex_parts_f32(1.0, 1.0)][..])
+            output.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![log_complex_parts_f32(1.0, 1.0)])
         );
-
         let empty = ComplexTensor::from_f32(Vec::new(), vec![0, 3]).unwrap();
         let Value::ComplexTensor(output) = log_builtin(Value::ComplexTensor(empty)).expect("log")
         else {

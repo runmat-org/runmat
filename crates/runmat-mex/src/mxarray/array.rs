@@ -114,7 +114,19 @@ impl MxArray {
                 row_indices.make_unique();
                 values.make_unique();
             }
-            MxArrayData::Interleaved(_) | MxArrayData::Char(_) => {}
+            MxArrayData::Interleaved(value) => match &mut value.values {
+                MxInterleavedStorage::F64(values) => values.make_unique(),
+                MxInterleavedStorage::F32(values) => values.make_unique(),
+                MxInterleavedStorage::I8(_)
+                | MxInterleavedStorage::I16(_)
+                | MxInterleavedStorage::I32(_)
+                | MxInterleavedStorage::I64(_)
+                | MxInterleavedStorage::U8(_)
+                | MxInterleavedStorage::U16(_)
+                | MxInterleavedStorage::U32(_)
+                | MxInterleavedStorage::U64(_) => {}
+            },
+            MxArrayData::Char(_) => {}
         }
     }
 
@@ -555,8 +567,11 @@ fn numeric_pointer(values: &HostNumericBuffer) -> *mut c_void {
 
 fn interleaved_pointer(values: &mut MxInterleavedStorage) -> *mut c_void {
     match values {
-        MxInterleavedStorage::F64(values) => values.as_mut_ptr().cast(),
-        MxInterleavedStorage::F32(values) => values.as_mut_ptr().cast(),
+        // SAFETY: MxArray owns an invocation lease for this buffer. As with
+        // ordinary numeric inputs, foreign code must not mutate a const input.
+        MxInterleavedStorage::F64(values) => unsafe { values.foreign_data_pointer() },
+        // SAFETY: same invocation lease as the double-precision case.
+        MxInterleavedStorage::F32(values) => unsafe { values.foreign_data_pointer() },
         MxInterleavedStorage::I8(values) => values.as_mut_ptr().cast(),
         MxInterleavedStorage::I16(values) => values.as_mut_ptr().cast(),
         MxInterleavedStorage::I32(values) => values.as_mut_ptr().cast(),

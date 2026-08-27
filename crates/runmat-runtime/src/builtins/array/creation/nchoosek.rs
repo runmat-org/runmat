@@ -460,8 +460,12 @@ fn combinations_complex_tensor(tensor: ComplexTensor, k: usize) -> BuiltinResult
     let n = vector_len(&tensor.shape)?;
     let rows = checked_rows(n, k)?;
     let storage = match tensor.into_complex_storage() {
-        ComplexStorage::F64(values) => ComplexStorage::F64(combination_columns(&values, rows, k)?),
-        ComplexStorage::F32(values) => ComplexStorage::F32(combination_columns(&values, rows, k)?),
+        ComplexStorage::F64(values) => {
+            ComplexStorage::F64(combination_columns(&values, rows, k)?.into())
+        }
+        ComplexStorage::F32(values) => {
+            ComplexStorage::F32(combination_columns(&values, rows, k)?.into())
+        }
         ComplexStorage::Integer(storage) => {
             let real = storage
                 .real

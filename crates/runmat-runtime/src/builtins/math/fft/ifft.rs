@@ -1053,7 +1053,7 @@ pub(crate) mod tests {
         let spectrum = || {
             Value::ComplexTensor(
                 HostComplexTensor::from_complex_storage(
-                    runmat_value::ComplexStorage::F32(vec![(1.0, 0.0), (0.0, 0.0)]),
+                    runmat_value::ComplexStorage::F32(vec![(1.0, 0.0), (0.0, 0.0)].into()),
                     vec![1, 2],
                 )
                 .unwrap(),

@@ -1,4 +1,7 @@
-use runmat_value::{HostNumericBuffer, NumericDType, NumericScalar, NumericStorage};
+use runmat_value::{
+    ComplexElement, HostComplexBuffer, HostNumericBuffer, NumericDType, NumericScalar,
+    NumericStorage,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(C)]
@@ -10,12 +13,15 @@ pub struct MxComplex<T> {
 pub type MxComplex64 = MxComplex<f64>;
 pub type MxComplex32 = MxComplex<f32>;
 
-/// Interleaved-complex storage is kept separate from RunMat's canonical
-/// storage because its C layout is part of the `-R2018a` compatibility API.
+/// Storage exposed by the interleaved complex Matrix API.
+///
+/// Floating-point values share RunMat's canonical C-layout-stable host buffer.
+/// Integer complex values remain adapter-owned because the runtime represents
+/// their exact real and imaginary components separately.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MxInterleavedStorage {
-    F64(Vec<MxComplex64>),
-    F32(Vec<MxComplex32>),
+    F64(HostComplexBuffer<f64>),
+    F32(HostComplexBuffer<f32>),
     I8(Vec<MxComplex<i8>>),
     I16(Vec<MxComplex<i16>>),
     I32(Vec<MxComplex<i32>>),
@@ -29,20 +35,8 @@ pub enum MxInterleavedStorage {
 impl MxInterleavedStorage {
     pub fn zeros(dtype: NumericDType, len: usize) -> Self {
         match dtype {
-            NumericDType::F64 => Self::F64(vec![
-                MxComplex64 {
-                    real: 0.0,
-                    imag: 0.0
-                };
-                len
-            ]),
-            NumericDType::F32 => Self::F32(vec![
-                MxComplex32 {
-                    real: 0.0,
-                    imag: 0.0
-                };
-                len
-            ]),
+            NumericDType::F64 => Self::F64(vec![ComplexElement(0.0_f64, 0.0_f64); len].into()),
+            NumericDType::F32 => Self::F32(vec![ComplexElement(0.0_f32, 0.0_f32); len].into()),
             NumericDType::I8 => Self::I8(vec![MxComplex { real: 0, imag: 0 }; len]),
             NumericDType::I16 => Self::I16(vec![MxComplex { real: 0, imag: 0 }; len]),
             NumericDType::I32 => Self::I32(vec![MxComplex { real: 0, imag: 0 }; len]),
@@ -101,12 +95,12 @@ impl MxInterleavedStorage {
         }
         match self {
             Self::F64(values) => (
-                NumericStorage::F64(values.iter().map(|value| value.real).collect()),
-                NumericStorage::F64(values.iter().map(|value| value.imag).collect()),
+                NumericStorage::F64(values.iter().map(|value| value.0).collect()),
+                NumericStorage::F64(values.iter().map(|value| value.1).collect()),
             ),
             Self::F32(values) => (
-                NumericStorage::F32(values.iter().map(|value| value.real).collect()),
-                NumericStorage::F32(values.iter().map(|value| value.imag).collect()),
+                NumericStorage::F32(values.iter().map(|value| value.0).collect()),
+                NumericStorage::F32(values.iter().map(|value| value.1).collect()),
             ),
             Self::I8(values) => split!(values, I8),
             Self::I16(values) => split!(values, I16),
@@ -182,14 +176,14 @@ impl MxInterleavedStorage {
                 let (NumericScalar::F64(real), NumericScalar::F64(imag)) = (real, imag) else {
                     return Err("complex component class mismatch".into());
                 };
-                values[index] = MxComplex64 { real, imag };
+                values[index] = ComplexElement(real, imag);
                 Ok(())
             }
             Self::F32(values) => {
                 let (NumericScalar::F32(real), NumericScalar::F32(imag)) = (real, imag) else {
                     return Err("complex component class mismatch".into());
                 };
-                values[index] = MxComplex32 { real, imag };
+                values[index] = ComplexElement(real, imag);
                 Ok(())
             }
             Self::I8(values) => {

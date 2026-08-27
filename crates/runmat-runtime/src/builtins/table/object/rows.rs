@@ -119,7 +119,8 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
                                 invalid_index("table: complex variable row index out of bounds")
                             })
                         })
-                        .collect::<BuiltinResult<Vec<_>>>()?,
+                        .collect::<BuiltinResult<Vec<_>>>()?
+                        .into(),
                 ),
                 runmat_value::ComplexStorage::F32(values) => runmat_value::ComplexStorage::F32(
                     indices
@@ -129,7 +130,8 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
                                 invalid_index("table: complex variable row index out of bounds")
                             })
                         })
-                        .collect::<BuiltinResult<Vec<_>>>()?,
+                        .collect::<BuiltinResult<Vec<_>>>()?
+                        .into(),
                 ),
                 runmat_value::ComplexStorage::Integer(storage) => {
                     runmat_value::ComplexStorage::Integer(

@@ -254,7 +254,8 @@ pub(crate) fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
             .expect("double complex tensor")
             .first()
             .copied()
-            .expect("scalar complex tensor");
+            .expect("scalar complex tensor")
+            .into();
         Value::Complex(re, im)
     } else {
         Value::ComplexTensor(tensor)

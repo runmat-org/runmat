@@ -14,7 +14,11 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, ComplexTensor, IntValue, StringArray, Tensor, Value};
 
-use super::{float_order::SetFloat, integer_order, type_resolvers::bool_output_type};
+use super::{
+    float_order::{ComplexSequence, SetFloat},
+    integer_order,
+    type_resolvers::bool_output_type,
+};
 use crate::build_runtime_error;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
@@ -950,8 +954,8 @@ fn compare_complex_integer_at(
     )
 }
 
-fn issorted_floating_complex<T: SetFloat>(
-    values: &[(T, T)],
+fn issorted_floating_complex<T: SetFloat, S: ComplexSequence<T> + ?Sized>(
+    values: &S,
     shape: &[usize],
     args: &IssortedArgs,
 ) -> crate::BuiltinResult<bool> {
@@ -1017,8 +1021,8 @@ fn check_real_dimension<T: SetFloat>(
     true
 }
 
-fn check_complex_dimension<T: SetFloat>(
-    values: &[(T, T)],
+fn check_complex_dimension<T: SetFloat, S: ComplexSequence<T> + ?Sized>(
+    values: &S,
     shape: &[usize],
     dim: usize,
     args: &IssortedArgs,
@@ -1043,7 +1047,7 @@ fn check_complex_dimension<T: SetFloat>(
             slice.clear();
             for k in 0..len_dim {
                 let idx = before_idx + k * before + after_idx * before * len_dim;
-                slice.push(values[idx]);
+                slice.push(values.pair_at(idx));
             }
             if !check_complex_slice(&slice, args.direction, effective_comp, args.missing) {
                 return false;
@@ -1109,8 +1113,8 @@ fn check_real_rows<T: SetFloat>(
     Ok(false)
 }
 
-fn check_complex_rows<T: SetFloat>(
-    values: &[(T, T)],
+fn check_complex_rows<T: SetFloat, S: ComplexSequence<T> + ?Sized>(
+    values: &S,
     shape: &[usize],
     args: &IssortedArgs,
 ) -> crate::BuiltinResult<bool> {
@@ -1189,15 +1193,15 @@ fn real_rows_in_order<T: SetFloat>(
     true
 }
 
-fn complex_rows_in_order<T: SetFloat>(
-    values: &[(T, T)],
+fn complex_rows_in_order<T: SetFloat, S: ComplexSequence<T> + ?Sized>(
+    values: &S,
     rows: usize,
     cols: usize,
     order: OrderSpec,
     comparison: ComparisonMethod,
     missing: MissingPlacement,
 ) -> bool {
-    if order.strict && values.iter().any(|v| complex_is_nan(*v)) {
+    if order.strict && (0..values.len()).any(|index| complex_is_nan(values.pair_at(index))) {
         return false;
     }
     let missing_resolved = missing.resolve(order.direction);
@@ -1271,8 +1275,8 @@ fn compare_real_row_pair<T: SetFloat>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn compare_complex_row_pair<T: SetFloat>(
-    values: &[(T, T)],
+fn compare_complex_row_pair<T: SetFloat, S: ComplexSequence<T> + ?Sized>(
+    values: &S,
     rows: usize,
     cols: usize,
     a: usize,
@@ -1284,8 +1288,13 @@ fn compare_complex_row_pair<T: SetFloat>(
     for col in 0..cols {
         let idx_a = a + col * rows;
         let idx_b = b + col * rows;
-        let ord =
-            compare_complex_scalars(values[idx_a], values[idx_b], direction, comparison, missing);
+        let ord = compare_complex_scalars(
+            values.pair_at(idx_a),
+            values.pair_at(idx_b),
+            direction,
+            comparison,
+            missing,
+        );
         if ord != Ordering::Equal {
             return ord;
         }

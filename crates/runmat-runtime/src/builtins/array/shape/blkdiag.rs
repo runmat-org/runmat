@@ -1794,17 +1794,19 @@ mod tests {
                 assert_eq!(out.shape, vec![3, 2]);
                 assert_eq!(out.numeric_dtype(), NumericDType::F32);
                 assert_eq!(
-                    out.as_f32_slice(),
-                    Some(
-                        &[
-                            (9.0, 0.0),
-                            (0.0, 0.0),
-                            (0.0, 0.0),
-                            (0.0, 0.0),
-                            (1.0, 2.0),
-                            (3.0, -4.0),
-                        ][..]
-                    )
+                    out.as_f32_slice().map(|values| values
+                        .iter()
+                        .copied()
+                        .map(<(f32, f32)>::from)
+                        .collect::<Vec<_>>()),
+                    Some(vec![
+                        (9.0, 0.0),
+                        (0.0, 0.0),
+                        (0.0, 0.0),
+                        (0.0, 0.0),
+                        (1.0, 2.0),
+                        (3.0, -4.0),
+                    ])
                 );
             }
             other => panic!("expected complex tensor, got {other:?}"),

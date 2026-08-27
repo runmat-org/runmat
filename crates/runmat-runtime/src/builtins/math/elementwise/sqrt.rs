@@ -289,7 +289,7 @@ fn sqrt_real_f64_values(values: Vec<f64>, shape: Vec<usize>) -> BuiltinResult<Va
                 data.push((real, 0.0));
             }
         }
-        let tensor = ComplexTensor::from_complex_storage(ComplexStorage::F64(data), shape)
+        let tensor = ComplexTensor::from_complex_storage(ComplexStorage::F64(data.into()), shape)
             .map_err(|e| builtin_error(format!("sqrt: {e}")))?;
         Ok(complex_tensor_into_value(tensor))
     }
@@ -665,8 +665,14 @@ pub(crate) mod tests {
         else {
             panic!("expected complex single tensor");
         };
-        assert_eq!(output.as_f32_slice(), Some(&[(0.0, 2.0), (3.0, 0.0)][..]));
-
+        assert_eq!(
+            output.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(0.0, 2.0), (3.0, 0.0)])
+        );
         let complex = ComplexTensor::from_f32(vec![(3.0, 4.0)], vec![1, 1]).unwrap();
         let Value::ComplexTensor(output) =
             sqrt_builtin(Value::ComplexTensor(complex)).expect("sqrt")
@@ -674,10 +680,13 @@ pub(crate) mod tests {
             panic!("one-element complex single must retain class");
         };
         assert_eq!(
-            output.as_f32_slice(),
-            Some(&[sqrt_complex_parts_f32(3.0, 4.0)][..])
+            output.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![sqrt_complex_parts_f32(3.0, 4.0)])
         );
-
         let empty = ComplexTensor::from_f32(Vec::new(), vec![0, 2]).unwrap();
         let Value::ComplexTensor(output) = sqrt_builtin(Value::ComplexTensor(empty)).expect("sqrt")
         else {

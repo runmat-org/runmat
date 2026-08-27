@@ -1771,8 +1771,12 @@ pub(crate) mod tests {
             panic!("expected complex single output");
         };
         assert_eq!(
-            complex.as_f32_slice(),
-            Some(&[(1.25, -2.5), (3.5, 4.75)][..])
+            complex.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(1.25, -2.5), (3.5, 4.75)])
         );
     }
 

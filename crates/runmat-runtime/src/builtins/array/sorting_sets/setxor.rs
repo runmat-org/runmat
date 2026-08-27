@@ -21,7 +21,11 @@ use runmat_value::{
     NumericScalar, NumericStorage, StringArray, Tensor, Value,
 };
 
-use super::{float_order::SetFloat, integer_order, type_resolvers::set_values_output_type};
+use super::{
+    float_order::{ComplexSequence, SetFloat},
+    integer_order,
+    type_resolvers::set_values_output_type,
+};
 use crate::build_runtime_error;
 use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::gpu_helpers;
@@ -1033,10 +1037,10 @@ fn setxor_promoted_complex_f64(
     )
 }
 
-fn setxor_floating_complex<T: SetFloat>(
-    a: Vec<(T, T)>,
+fn setxor_floating_complex<T: SetFloat, A: ComplexSequence<T>, B: ComplexSequence<T>>(
+    a: A,
     a_shape: Vec<usize>,
-    b: Vec<(T, T)>,
+    b: B,
     b_shape: Vec<usize>,
     opts: &SetxorOptions,
 ) -> crate::BuiltinResult<SetxorEvaluation> {
@@ -1047,7 +1051,8 @@ fn setxor_floating_complex<T: SetFloat>(
         let mut entries = Vec::<SymEntry<(T, T)>>::new();
         let mut map: HashMap<ComplexElementKey, usize> = HashMap::new();
         let mut order_counter = 0usize;
-        for (idx, &value) in a.iter().enumerate() {
+        for idx in 0..a.len() {
+            let value = a.pair_at(idx);
             add_sym_entry(
                 &mut entries,
                 &mut map,
@@ -1058,7 +1063,8 @@ fn setxor_floating_complex<T: SetFloat>(
                 &mut order_counter,
             );
         }
-        for (idx, &value) in b.iter().enumerate() {
+        for idx in 0..b.len() {
+            let value = b.pair_at(idx);
             add_sym_entry(
                 &mut entries,
                 &mut map,
@@ -1073,10 +1079,10 @@ fn setxor_floating_complex<T: SetFloat>(
     }
 }
 
-fn setxor_complex_rows<T: SetFloat>(
-    a: Vec<(T, T)>,
+fn setxor_complex_rows<T: SetFloat, A: ComplexSequence<T>, B: ComplexSequence<T>>(
+    a: A,
     a_shape: Vec<usize>,
-    b: Vec<(T, T)>,
+    b: B,
     b_shape: Vec<usize>,
     opts: &SetxorOptions,
 ) -> crate::BuiltinResult<SetxorEvaluation> {
@@ -1752,8 +1758,15 @@ fn numeric_row_from_values<T: Copy>(values: &[T], row: usize, rows: usize, cols:
     (0..cols).map(|col| values[row + col * rows]).collect()
 }
 
-fn complex_row<T: Copy>(values: &[(T, T)], row: usize, rows: usize, cols: usize) -> Vec<(T, T)> {
-    (0..cols).map(|col| values[row + col * rows]).collect()
+fn complex_row<T: Copy, S: ComplexSequence<T> + ?Sized>(
+    values: &S,
+    row: usize,
+    rows: usize,
+    cols: usize,
+) -> Vec<(T, T)> {
+    (0..cols)
+        .map(|col| values.pair_at(row + col * rows))
+        .collect()
 }
 
 fn char_row(array: &CharArray, row: usize) -> Vec<char> {
@@ -2137,8 +2150,14 @@ mod tests {
         let Value::ComplexTensor(values) = values else {
             panic!("expected native complex single value");
         };
-        assert_eq!(values.as_f32_slice(), Some(&[(1.0, 1.0)][..]));
-
+        assert_eq!(
+            values.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(1.0, 1.0)])
+        );
         let a = ComplexTensor::from_f32(
             vec![(1.0, 0.0), (3.0, 0.0), (2.0, 1.0), (4.0, 1.0)],
             vec![2, 2],
@@ -2161,8 +2180,12 @@ mod tests {
         };
         assert_eq!(values.shape, vec![2, 2]);
         assert_eq!(
-            values.as_f32_slice(),
-            Some(&[(1.0, 0.0), (5.0, 0.0), (2.0, 1.0), (6.0, 1.0),][..])
+            values.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(1.0, 0.0), (5.0, 0.0), (2.0, 1.0), (6.0, 1.0),])
         );
     }
 

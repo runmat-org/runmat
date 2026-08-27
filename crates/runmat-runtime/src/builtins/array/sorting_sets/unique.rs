@@ -25,7 +25,11 @@ use runmat_value::{
     NumericStorage, StringArray, Tensor, Value,
 };
 
-use super::{float_order::SetFloat, integer_order, type_resolvers::unique_values_output_type};
+use super::{
+    float_order::{ComplexSequence, SetFloat},
+    integer_order,
+    type_resolvers::unique_values_output_type,
+};
 use crate::build_runtime_error;
 use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::gpu_helpers;
@@ -1097,8 +1101,8 @@ fn unique_complex_from_tensor(
     }
 }
 
-fn unique_floating_complex<T: SetFloat>(
-    values: Vec<(T, T)>,
+fn unique_floating_complex<T: SetFloat, S: ComplexSequence<T>>(
+    values: S,
     shape: Vec<usize>,
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
@@ -1109,8 +1113,8 @@ fn unique_floating_complex<T: SetFloat>(
     }
 }
 
-fn unique_complex_elements<T: SetFloat>(
-    input: Vec<(T, T)>,
+fn unique_complex_elements<T: SetFloat, S: ComplexSequence<T>>(
+    input: S,
     shape: Vec<usize>,
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
@@ -1136,7 +1140,8 @@ fn unique_complex_elements<T: SetFloat>(
     let mut map: HashMap<ComplexKey, usize> = HashMap::new();
     let mut element_entry_index = Vec::with_capacity(len);
 
-    for (idx, &value) in input.iter().enumerate() {
+    for idx in 0..input.len() {
+        let value = input.pair_at(idx);
         if opts.treat_missing_as_distinct && (value.0.is_nan() || value.1.is_nan()) {
             let entry_idx = entries.len();
             entries.push(ComplexElementEntry {
@@ -1211,8 +1216,8 @@ fn unique_complex_elements<T: SetFloat>(
     ))
 }
 
-fn unique_complex_rows<T: SetFloat>(
-    input: Vec<(T, T)>,
+fn unique_complex_rows<T: SetFloat, S: ComplexSequence<T>>(
+    input: S,
     shape: Vec<usize>,
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
@@ -1249,7 +1254,7 @@ fn unique_complex_rows<T: SetFloat>(
         let mut key_row = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows;
-            let value = input[idx];
+            let value = input.pair_at(idx);
             row_values.push(value);
             key_row.push(ComplexKey::new(value));
         }
@@ -2431,10 +2436,13 @@ pub(crate) mod tests {
             panic!("expected native complex single values");
         };
         assert_eq!(
-            values.as_f32_slice(),
-            Some(&[(1.0, -1.0), (1.0, 1.0), (0.0, 2.0)][..])
+            values.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(1.0, -1.0), (1.0, 1.0), (0.0, 2.0)])
         );
-
         let rows = ComplexTensor::from_f32(
             vec![
                 (2.0, 0.0),
@@ -2458,8 +2466,12 @@ pub(crate) mod tests {
         };
         assert_eq!(values.shape, vec![2, 2]);
         assert_eq!(
-            values.as_f32_slice(),
-            Some(&[(2.0, 0.0), (1.0, 1.0), (20.0, 0.0), (10.0, -1.0),][..])
+            values.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(2.0, 0.0), (1.0, 1.0), (20.0, 0.0), (10.0, -1.0),])
         );
     }
 

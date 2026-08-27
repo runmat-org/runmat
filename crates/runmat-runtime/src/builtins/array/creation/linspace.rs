@@ -1201,7 +1201,14 @@ pub(crate) mod tests {
             panic!("expected complex single tensor")
         };
         assert_eq!(result.numeric_dtype(), NumericDType::F32);
-        assert_eq!(result.as_f32_slice(), Some(&[(0.0, 0.0), (1.0, 0.0)][..]));
+        assert_eq!(
+            result.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(0.0, 0.0), (1.0, 0.0)])
+        );
     }
 
     #[test]

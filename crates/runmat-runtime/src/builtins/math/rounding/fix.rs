@@ -599,7 +599,7 @@ pub(crate) mod tests {
     #[test]
     fn fix_complex_tensor_preserves_native_single_storage() {
         let input = ComplexTensor::from_complex_storage(
-            ComplexStorage::F32(vec![(1.9, -2.6), (-3.4, 0.2)]),
+            ComplexStorage::F32(vec![(1.9, -2.6), (-3.4, 0.2)].into()),
             vec![2, 1],
         )
         .unwrap();
@@ -608,7 +608,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             output.into_complex_storage(),
-            ComplexStorage::F32(vec![(1.0, -2.0), (-3.0, 0.0)])
+            ComplexStorage::F32(vec![(1.0, -2.0), (-3.0, 0.0)].into())
         );
     }
 

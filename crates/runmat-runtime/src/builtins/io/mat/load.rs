@@ -2002,8 +2002,12 @@ pub(crate) mod tests {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.numeric_dtype(), NumericDType::F32);
                 assert_eq!(
-                    t.as_f32_slice(),
-                    Some(&[(0.1_f32, -0.2_f32), (3.5_f32, 4.25_f32)][..])
+                    t.as_f32_slice().map(|values| values
+                        .iter()
+                        .copied()
+                        .map(<(f32, f32)>::from)
+                        .collect::<Vec<_>>()),
+                    Some(vec![(0.1_f32, -0.2_f32), (3.5_f32, 4.25_f32)])
                 );
             }
             other => panic!("expected complex single tensor, got {other:?}"),

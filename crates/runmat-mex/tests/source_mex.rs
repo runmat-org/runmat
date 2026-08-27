@@ -66,6 +66,73 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
 }
 
 #[test]
+fn interleaved_complex_inputs_and_outputs_keep_their_host_allocation() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("complex_allocation_identity.c");
+    fs::write(
+        &source,
+        r#"
+#include "mex.h"
+#include <stdint.h>
+
+static mxArray *address_of(const void *pointer) {
+    mxArray *value = mxCreateNumericMatrix(1, 1, mxUINT64_CLASS, mxREAL);
+    mxGetUint64s(value)[0] = (mxUint64)(uintptr_t)pointer;
+    return value;
+}
+
+void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
+    if (nlhs != 3 || nrhs != 1 || !mxIsComplex(prhs[0])) {
+        mexErrMsgTxt("expected one complex input and three outputs");
+    }
+    plhs[0] = mxCreateDoubleMatrix(1, 2, mxCOMPLEX);
+    mxComplexDouble *values = mxGetComplexDoubles(plhs[0]);
+    values[0].real = 17.0;
+    values[0].imag = -9.0;
+    values[1].real = 4.0;
+    values[1].imag = 3.0;
+    plhs[1] = address_of(values);
+    plhs[2] = address_of(mxGetComplexDoubles(prhs[0]));
+}
+"#,
+    )
+    .unwrap();
+
+    let input =
+        runmat_value::ComplexTensor::new(vec![(3.0, 4.0), (5.0, 12.0)], vec![1, 2]).unwrap();
+    let runmat_value::ComplexStorage::F64(input_values) = input.complex_storage() else {
+        unreachable!("constructor creates double complex storage")
+    };
+    // SAFETY: only pointer identity is observed during the synchronous call.
+    let input_address = unsafe { input_values.foreign_data_pointer() } as usize as u64;
+    let artifact = MexBuild::new(&source, directory.path())
+        .api(MexApi::R2018a)
+        .compile()
+        .unwrap();
+    let module = MexModule::load(&artifact.module).unwrap();
+    let result = module
+        .invoke(&[Value::ComplexTensor(input)], 3, module.api_mode())
+        .unwrap();
+
+    let Value::ComplexTensor(output) = &result.outputs[0] else {
+        panic!("two-element output must remain a complex tensor");
+    };
+    let runmat_value::ComplexStorage::F64(output_values) = output.complex_storage() else {
+        panic!("double complex output must retain its class");
+    };
+    // SAFETY: only pointer identity is observed while the output owns its allocation.
+    let output_address = unsafe { output_values.foreign_data_pointer() } as usize as u64;
+    let Value::Int(created_address) = &result.outputs[1] else {
+        panic!("created pointer address must remain uint64");
+    };
+    let Value::Int(observed_input_address) = &result.outputs[2] else {
+        panic!("input pointer address must remain uint64");
+    };
+    assert_eq!(created_address.try_to_u64(), Some(output_address));
+    assert_eq!(observed_input_address.try_to_u64(), Some(input_address));
+}
+
+#[test]
 fn sparse_numeric_inputs_and_outputs_keep_compatible_host_allocations() {
     let directory = tempfile::tempdir().unwrap();
     let source = directory.path().join("sparse_allocation_identity.c");

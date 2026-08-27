@@ -460,7 +460,7 @@ fn power_real_pair_mixed(base: f64, exponent: f64) -> (f32, f32) {
 
 fn finish_real_power_f64(output: Vec<(f64, f64)>, shape: Vec<usize>) -> BuiltinResult<Value> {
     if output.iter().any(|value| value.1.abs() > 1e-12) {
-        let tensor = ComplexTensor::from_complex_storage(ComplexStorage::F64(output), shape)
+        let tensor = ComplexTensor::from_complex_storage(ComplexStorage::F64(output.into()), shape)
             .map_err(|e| builtin_error(format!("power: {e}")))?;
         Ok(complex_tensor_into_value(tensor))
     } else {
@@ -473,7 +473,7 @@ fn finish_real_power_f64(output: Vec<(f64, f64)>, shape: Vec<usize>) -> BuiltinR
 
 fn finish_real_power_f32(output: Vec<(f32, f32)>, shape: Vec<usize>) -> BuiltinResult<Value> {
     if output.iter().any(|value| value.1.abs() > 1e-6) {
-        let tensor = ComplexTensor::from_complex_storage(ComplexStorage::F32(output), shape)
+        let tensor = ComplexTensor::from_complex_storage(ComplexStorage::F32(output.into()), shape)
             .map_err(|e| builtin_error(format!("power: {e}")))?;
         Ok(complex_tensor_into_value(tensor))
     } else {
@@ -491,40 +491,40 @@ fn power_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinRes
         (ComplexStorage::F64(lhs), ComplexStorage::F64(rhs)) => {
             let mut output = vec![(0.0f64, 0.0f64); plan.len()];
             for (output_index, lhs_index, rhs_index) in plan.iter() {
-                let (br, bi) = lhs[lhs_index];
-                let (er, ei) = rhs[rhs_index];
+                let (br, bi) = lhs[lhs_index].into();
+                let (er, ei) = rhs[rhs_index].into();
                 output[output_index] = complex_pow_scalar(br, bi, er, ei);
             }
-            ComplexStorage::F64(output)
+            ComplexStorage::F64(output.into())
         }
         (ComplexStorage::F32(lhs), ComplexStorage::F32(rhs)) => {
             let mut output = vec![(0.0f32, 0.0f32); plan.len()];
             for (output_index, lhs_index, rhs_index) in plan.iter() {
-                let (br, bi) = lhs[lhs_index];
-                let (er, ei) = rhs[rhs_index];
+                let (br, bi) = lhs[lhs_index].into();
+                let (er, ei) = rhs[rhs_index].into();
                 output[output_index] = complex_pow_scalar_f32(br, bi, er, ei);
             }
-            ComplexStorage::F32(output)
+            ComplexStorage::F32(output.into())
         }
         (ComplexStorage::F32(lhs), ComplexStorage::F64(rhs)) => {
             let mut output = vec![(0.0f32, 0.0f32); plan.len()];
             for (output_index, lhs_index, rhs_index) in plan.iter() {
-                let (br, bi) = lhs[lhs_index];
-                let (er, ei) = rhs[rhs_index];
+                let (br, bi) = lhs[lhs_index].into();
+                let (er, ei) = rhs[rhs_index].into();
                 let value = complex_pow_scalar(f64::from(br), f64::from(bi), er, ei);
                 output[output_index] = (value.0 as f32, value.1 as f32);
             }
-            ComplexStorage::F32(output)
+            ComplexStorage::F32(output.into())
         }
         (ComplexStorage::F64(lhs), ComplexStorage::F32(rhs)) => {
             let mut output = vec![(0.0f32, 0.0f32); plan.len()];
             for (output_index, lhs_index, rhs_index) in plan.iter() {
-                let (br, bi) = lhs[lhs_index];
-                let (er, ei) = rhs[rhs_index];
+                let (br, bi) = lhs[lhs_index].into();
+                let (er, ei) = rhs[rhs_index].into();
                 let value = complex_pow_scalar(br, bi, f64::from(er), f64::from(ei));
                 output[output_index] = (value.0 as f32, value.1 as f32);
             }
-            ComplexStorage::F32(output)
+            ComplexStorage::F32(output.into())
         }
         _ => {
             return Err(builtin_error(
@@ -572,38 +572,38 @@ fn power_complex_real_storage(
         (ComplexStorage::F64(base), NumericStorage::F64(exponent)) => {
             let mut output = vec![(0.0f64, 0.0f64); plan.len()];
             for (output_index, base_index, exponent_index) in plan.iter() {
-                let (br, bi) = base[base_index];
+                let (br, bi) = base[base_index].into();
                 output[output_index] = complex_pow_scalar(br, bi, exponent[exponent_index], 0.0);
             }
-            ComplexStorage::F64(output)
+            ComplexStorage::F64(output.into())
         }
         (ComplexStorage::F32(base), NumericStorage::F32(exponent)) => {
             let mut output = vec![(0.0f32, 0.0f32); plan.len()];
             for (output_index, base_index, exponent_index) in plan.iter() {
-                let (br, bi) = base[base_index];
+                let (br, bi) = base[base_index].into();
                 output[output_index] =
                     complex_pow_scalar_f32(br, bi, exponent[exponent_index], 0.0);
             }
-            ComplexStorage::F32(output)
+            ComplexStorage::F32(output.into())
         }
         (ComplexStorage::F32(base), NumericStorage::F64(exponent)) => {
             let mut output = vec![(0.0f32, 0.0f32); plan.len()];
             for (output_index, base_index, exponent_index) in plan.iter() {
-                let (br, bi) = base[base_index];
+                let (br, bi) = base[base_index].into();
                 let value =
                     complex_pow_scalar(f64::from(br), f64::from(bi), exponent[exponent_index], 0.0);
                 output[output_index] = (value.0 as f32, value.1 as f32);
             }
-            ComplexStorage::F32(output)
+            ComplexStorage::F32(output.into())
         }
         (ComplexStorage::F64(base), NumericStorage::F32(exponent)) => {
             let mut output = vec![(0.0f32, 0.0f32); plan.len()];
             for (output_index, base_index, exponent_index) in plan.iter() {
-                let (br, bi) = base[base_index];
+                let (br, bi) = base[base_index].into();
                 let value = complex_pow_scalar(br, bi, f64::from(exponent[exponent_index]), 0.0);
                 output[output_index] = (value.0 as f32, value.1 as f32);
             }
-            ComplexStorage::F32(output)
+            ComplexStorage::F32(output.into())
         }
         _ => {
             return Err(builtin_error(
@@ -622,36 +622,36 @@ fn power_real_complex_storage(
         (NumericStorage::F64(base), ComplexStorage::F64(exponent)) => {
             let mut output = vec![(0.0f64, 0.0f64); plan.len()];
             for (output_index, base_index, exponent_index) in plan.iter() {
-                let (er, ei) = exponent[exponent_index];
+                let (er, ei) = exponent[exponent_index].into();
                 output[output_index] = complex_pow_scalar(base[base_index], 0.0, er, ei);
             }
-            ComplexStorage::F64(output)
+            ComplexStorage::F64(output.into())
         }
         (NumericStorage::F32(base), ComplexStorage::F32(exponent)) => {
             let mut output = vec![(0.0f32, 0.0f32); plan.len()];
             for (output_index, base_index, exponent_index) in plan.iter() {
-                let (er, ei) = exponent[exponent_index];
+                let (er, ei) = exponent[exponent_index].into();
                 output[output_index] = complex_pow_scalar_f32(base[base_index], 0.0, er, ei);
             }
-            ComplexStorage::F32(output)
+            ComplexStorage::F32(output.into())
         }
         (NumericStorage::F32(base), ComplexStorage::F64(exponent)) => {
             let mut output = vec![(0.0f32, 0.0f32); plan.len()];
             for (output_index, base_index, exponent_index) in plan.iter() {
-                let (er, ei) = exponent[exponent_index];
+                let (er, ei) = exponent[exponent_index].into();
                 let value = complex_pow_scalar(f64::from(base[base_index]), 0.0, er, ei);
                 output[output_index] = (value.0 as f32, value.1 as f32);
             }
-            ComplexStorage::F32(output)
+            ComplexStorage::F32(output.into())
         }
         (NumericStorage::F64(base), ComplexStorage::F32(exponent)) => {
             let mut output = vec![(0.0f32, 0.0f32); plan.len()];
             for (output_index, base_index, exponent_index) in plan.iter() {
-                let (er, ei) = exponent[exponent_index];
+                let (er, ei) = exponent[exponent_index].into();
                 let value = complex_pow_scalar(base[base_index], 0.0, f64::from(er), f64::from(ei));
                 output[output_index] = (value.0 as f32, value.1 as f32);
             }
-            ComplexStorage::F32(output)
+            ComplexStorage::F32(output.into())
         }
         _ => {
             return Err(builtin_error(
@@ -1533,7 +1533,14 @@ pub(crate) mod tests {
         let Value::ComplexTensor(result) = result else {
             panic!("expected complex single tensor");
         };
-        assert_eq!(result.as_f32_slice(), Some(&[(-4.0, 0.0), (5.0, 0.0)][..]));
+        assert_eq!(
+            result.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(-4.0, 0.0), (5.0, 0.0)])
+        );
     }
 
     #[test]
@@ -1741,7 +1748,14 @@ pub(crate) mod tests {
         let Value::ComplexTensor(result) = result else {
             panic!("expected complex single tensor");
         };
-        assert_eq!(result.as_f32_slice(), Some(&[(16.0, 0.0), (8.0, 0.0)][..]));
+        assert_eq!(
+            result.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(16.0, 0.0), (8.0, 0.0)])
+        );
     }
 
     #[test]

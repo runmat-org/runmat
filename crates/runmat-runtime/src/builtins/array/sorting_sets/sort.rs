@@ -19,7 +19,11 @@ use runmat_value::{
     Value,
 };
 
-use super::{float_order::SetFloat, integer_order, type_resolvers::tensor_output_type};
+use super::{
+    float_order::{ComplexSequence, SetFloat},
+    integer_order,
+    type_resolvers::tensor_output_type,
+};
 use crate::build_runtime_error;
 use crate::builtins::common::arg_tokens::{tokens_from_values, ArgToken};
 use crate::builtins::common::gpu_helpers;
@@ -812,8 +816,8 @@ fn complex_integer_sort_permutation(
     (source_indices, indices)
 }
 
-fn complex_sort_permutation<T: SetFloat>(
-    values: &[(T, T)],
+fn complex_sort_permutation<T: SetFloat, S: ComplexSequence<T> + ?Sized>(
+    values: &S,
     shape: &[usize],
     dim: usize,
     args: &SortArgs,
@@ -830,7 +834,7 @@ fn complex_sort_permutation<T: SetFloat>(
             buffer.clear();
             for k in 0..dim_len {
                 let source = before + k * stride_before + after * stride_before * dim_len;
-                buffer.push((k, source, values[source]));
+                buffer.push((k, source, values.pair_at(source)));
             }
             buffer.sort_by(|a, b| compare_complex_values(a.2, b.2, args));
             for (position, (original_index, source, _)) in buffer.iter().enumerate() {
@@ -1725,8 +1729,12 @@ pub(crate) mod tests {
             panic!("expected complex single tensor");
         };
         assert_eq!(
-            sorted.as_f32_slice(),
-            Some(&[(1.0, 0.0), (0.0, 2.0), (3.0, 4.0)][..])
+            sorted.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(1.0, 0.0), (0.0, 2.0), (3.0, 4.0)])
         );
         let Value::Tensor(indices) = indices else {
             panic!("expected index tensor");
@@ -1743,7 +1751,14 @@ pub(crate) mod tests {
         let Value::ComplexTensor(sorted) = sorted else {
             panic!("expected complex single tensor");
         };
-        assert_eq!(sorted.as_f32_slice(), Some(&[(1.25, -2.5)][..]));
+        assert_eq!(
+            sorted.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(1.25, -2.5)])
+        );
     }
 
     #[test]

@@ -870,7 +870,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             values.complex_storage(),
-            &runmat_value::ComplexStorage::F32(vec![(1.0, 0.0), (1.0, 0.0), (1.0, 0.0)])
+            &runmat_value::ComplexStorage::F32(vec![(1.0, 0.0), (1.0, 0.0), (1.0, 0.0)].into())
         );
     }
 

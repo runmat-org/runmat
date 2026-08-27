@@ -1,10 +1,10 @@
 use std::fmt;
 
 use runmat_value::{
-    record_host_copy, CellArray, CharArray, ComplexStorage, ComplexTensor, HostCopyReason,
-    HostIndexBuffer, HostNumericBuffer, IntegerComplexStorage, IntegerStorage, LogicalArray,
-    NumericScalar, NumericStorage, ObjectArray, ObjectInstance, SparseTensor, StructValue, Tensor,
-    Value,
+    record_host_copy, CellArray, CharArray, ComplexElement, ComplexStorage, ComplexTensor,
+    HostCopyReason, HostIndexBuffer, HostNumericBuffer, IntegerComplexStorage, IntegerStorage,
+    LogicalArray, NumericScalar, NumericStorage, ObjectArray, ObjectInstance, SparseTensor,
+    StructValue, Tensor, Value,
 };
 
 use crate::mxarray::{
@@ -58,10 +58,7 @@ pub fn value_to_mx(value: &Value, mode: MxApiMode) -> Result<MxArray, MxConversi
             MxArray::numeric_buffer(value.host_buffer().clone(), value.shape.clone(), None)
                 .map_err(MxConversionError::new)
         }
-        Value::ComplexTensor(value) => {
-            let (real, imag) = complex_components(value)?;
-            complex_to_mx(real, imag, value.shape.clone(), mode)
-        }
+        Value::ComplexTensor(value) => complex_tensor_to_mx(value, mode),
         Value::SparseTensor(value) => sparse_to_mx(value),
         Value::Cell(value) => cell_to_mx(value, mode),
         Value::Struct(value) => struct_to_mx(value, mode),
@@ -90,10 +87,27 @@ pub fn value_to_mx(value: &Value, mode: MxApiMode) -> Result<MxArray, MxConversi
 pub fn value_from_mx(value: &MxArray) -> Result<Value, MxConversionError> {
     match value.data() {
         MxArrayData::Numeric(numeric) => numeric_from_mx(numeric, value.shape()),
-        MxArrayData::Interleaved(interleaved) => {
-            let (real, imag) = interleaved.values.components();
-            complex_from_components(real, imag, value.shape())
-        }
+        MxArrayData::Interleaved(interleaved) => match &interleaved.values {
+            MxInterleavedStorage::F64(values) if values.len() == 1 => {
+                Ok(Value::Complex(values[0].0, values[0].1))
+            }
+            MxInterleavedStorage::F64(values) => ComplexTensor::from_complex_storage(
+                ComplexStorage::F64(values.clone()),
+                value.shape().to_vec(),
+            )
+            .map(Value::ComplexTensor)
+            .map_err(MxConversionError::new),
+            MxInterleavedStorage::F32(values) => ComplexTensor::from_complex_storage(
+                ComplexStorage::F32(values.clone()),
+                value.shape().to_vec(),
+            )
+            .map(Value::ComplexTensor)
+            .map_err(MxConversionError::new),
+            _ => {
+                let (real, imag) = interleaved.values.components();
+                complex_from_components(real, imag, value.shape())
+            }
+        },
         MxArrayData::Logical(values) => {
             if values.len() == 1 {
                 Ok(Value::Bool(values[0] != 0))
@@ -133,6 +147,26 @@ fn complex_to_mx(
             .and_then(|values| MxArray::interleaved(values, shape))
             .map_err(MxConversionError::new),
     }
+}
+
+fn complex_tensor_to_mx(
+    value: &ComplexTensor,
+    mode: MxApiMode,
+) -> Result<MxArray, MxConversionError> {
+    if mode == MxApiMode::InterleavedComplex {
+        let values = match value.complex_storage() {
+            ComplexStorage::F64(values) => MxInterleavedStorage::F64(values.clone()),
+            ComplexStorage::F32(values) => MxInterleavedStorage::F32(values.clone()),
+            ComplexStorage::Integer(_) => {
+                let (real, imag) = complex_components(value)?;
+                return complex_to_mx(real, imag, value.shape.clone(), mode);
+            }
+        };
+        return MxArray::interleaved(values, value.shape.clone()).map_err(MxConversionError::new);
+    }
+
+    let (real, imag) = complex_components(value)?;
+    complex_to_mx(real, imag, value.shape.clone(), mode)
 }
 
 fn complex_components(
@@ -350,12 +384,18 @@ fn complex_from_components(
         return Ok(Value::Complex(real, imag));
     }
     let storage = match (real, imag) {
-        (NumericStorage::F64(real), NumericStorage::F64(imag)) => {
-            ComplexStorage::F64(real.into_iter().zip(imag).collect())
-        }
-        (NumericStorage::F32(real), NumericStorage::F32(imag)) => {
-            ComplexStorage::F32(real.into_iter().zip(imag).collect())
-        }
+        (NumericStorage::F64(real), NumericStorage::F64(imag)) => ComplexStorage::F64(
+            real.into_iter()
+                .zip(imag)
+                .map(ComplexElement::from)
+                .collect(),
+        ),
+        (NumericStorage::F32(real), NumericStorage::F32(imag)) => ComplexStorage::F32(
+            real.into_iter()
+                .zip(imag)
+                .map(ComplexElement::from)
+                .collect(),
+        ),
         (real, imag) => ComplexStorage::Integer(
             IntegerComplexStorage::new(
                 real.into_integer_storage()
@@ -592,6 +632,38 @@ mod tests {
         assert!(output
             .host_buffer()
             .shares_allocation_with(tensor.host_buffer()));
+    }
+
+    #[test]
+    fn interleaved_complex_boundary_retains_one_host_allocation() {
+        let tensor = ComplexTensor::new(vec![(1.0, -2.0), (3.0, -4.0)], vec![2, 1]).unwrap();
+        let ComplexStorage::F64(source) = tensor.complex_storage() else {
+            unreachable!("constructor creates double complex storage")
+        };
+        let original = Value::ComplexTensor(tensor.clone());
+        let mut boundary = value_to_mx(&original, MxApiMode::InterleavedComplex).unwrap();
+
+        let MxArrayData::Interleaved(interleaved) = boundary.data() else {
+            panic!("interleaved mode must use interleaved storage");
+        };
+        let MxInterleavedStorage::F64(boundary_values) = &interleaved.values else {
+            panic!("double complex input must retain its class");
+        };
+        assert!(source.shares_allocation_with(boundary_values));
+
+        // SAFETY: both addresses are observed without dereferencing and the
+        // owners remain alive for the duration of the comparison.
+        let source_pointer = unsafe { source.foreign_data_pointer() };
+        assert_eq!(boundary.data_pointer(), source_pointer);
+
+        let output = value_from_mx(&boundary).unwrap();
+        let Value::ComplexTensor(output) = output else {
+            panic!("non-scalar complex array must remain a tensor");
+        };
+        let ComplexStorage::F64(output_values) = output.complex_storage() else {
+            panic!("double complex output must retain its class");
+        };
+        assert!(source.shares_allocation_with(output_values));
     }
 
     #[test]
