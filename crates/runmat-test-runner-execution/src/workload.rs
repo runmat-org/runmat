@@ -2,7 +2,7 @@ use runmat_execution::value::{DenseValue, ElementType, InlineValue, ValuePayload
 use runmat_execution::OutputContract;
 use runmat_execution_artifact::{
     ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
 };
 use runmat_test::identity::TestId;
 use runmat_test_runner::worker::{RunSubmission, WorkerExecution};
@@ -72,10 +72,13 @@ impl TestAttemptWorkload {
         let artifact = ProgramArtifact::materialize(&recipe, ExecutableForm::TestAttemptV1, bytes)
             .map_err(|error| error.to_string())?;
         let request = ProgramExecutionRequest {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
             recipe,
             artifact,
-            function: 0,
+            callable: runmat_execution::ProgramCallable::semantic(
+                runmat_execution::ProgramFunctionId(0),
+                None,
+            ),
             arguments: Vec::new(),
             requested_outputs: 1,
         };

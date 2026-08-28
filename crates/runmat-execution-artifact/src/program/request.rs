@@ -1,12 +1,13 @@
 use std::collections::BTreeSet;
 
 use runmat_execution::value::{ValueLimits, ValuePayload, ValueRef, ValueRefKind};
+use runmat_execution::ProgramCallable;
 use serde::{Deserialize, Serialize};
 
 use super::{ExecutableForm, ProgramArtifact, ProgramBuildRecipe};
 use crate::{ArtifactError, ArtifactResult};
 
-pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_V1: u16 = 1;
+pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_V2: u16 = 2;
 pub const MAX_PROGRAM_EXECUTION_ARGUMENTS: usize = 4096;
 pub const MAX_PROGRAM_EXECUTION_RESULT_OBJECTS: usize = 65_538;
 
@@ -16,15 +17,16 @@ pub struct ProgramExecutionDescriptor {
     pub schema_version: u16,
     pub recipe: ProgramBuildRecipe,
     pub artifact: ProgramArtifact,
-    pub function: usize,
+    pub callable: ProgramCallable,
     pub requested_outputs: u16,
 }
 
 impl ProgramExecutionDescriptor {
     pub fn validate(&self) -> ArtifactResult<()> {
         self.artifact.validate_against(&self.recipe)?;
-        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V1
-            || !entrypoint_matches(self.artifact.form, self.function, &self.recipe.entrypoint)
+        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V2
+            || self.callable.validate().is_err()
+            || !entrypoint_matches(self.artifact.form, &self.callable, &self.recipe.entrypoint)
             || self.requested_outputs != self.recipe.outputs.requested_outputs
         {
             return Err(ArtifactError::Invalid(
@@ -49,7 +51,7 @@ pub struct ProgramExecutionInputs {
 
 impl ProgramExecutionInputs {
     pub fn validate(&self) -> ArtifactResult<()> {
-        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V1
+        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V2
             || self.arguments.len() > MAX_PROGRAM_EXECUTION_ARGUMENTS
         {
             return Err(ArtifactError::Invalid(
@@ -71,7 +73,7 @@ pub struct ProgramExecutionRequest {
     pub schema_version: u16,
     pub recipe: ProgramBuildRecipe,
     pub artifact: ProgramArtifact,
-    pub function: usize,
+    pub callable: ProgramCallable,
     pub arguments: Vec<ValuePayload>,
     pub requested_outputs: u16,
 }
@@ -84,10 +86,10 @@ impl ProgramExecutionRequest {
         descriptor.validate()?;
         inputs.validate()?;
         let request = Self {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
             recipe: descriptor.recipe,
             artifact: descriptor.artifact,
-            function: descriptor.function,
+            callable: descriptor.callable,
             arguments: inputs.arguments,
             requested_outputs: descriptor.requested_outputs,
         };
@@ -96,13 +98,14 @@ impl ProgramExecutionRequest {
     }
 
     pub fn validate(&self) -> ArtifactResult<()> {
-        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V1 {
+        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V2 {
             return Err(ArtifactError::Invalid(
                 "unsupported program execution request schema".into(),
             ));
         }
         self.artifact.validate_against(&self.recipe)?;
-        if !entrypoint_matches(self.artifact.form, self.function, &self.recipe.entrypoint)
+        if self.callable.validate().is_err()
+            || !entrypoint_matches(self.artifact.form, &self.callable, &self.recipe.entrypoint)
             || self.requested_outputs != self.recipe.outputs.requested_outputs
             || self.arguments.len() > MAX_PROGRAM_EXECUTION_ARGUMENTS
             || (matches!(
@@ -119,8 +122,8 @@ impl ProgramExecutionRequest {
                 .artifact
                 .executable_unit()?
                 .expect("executable-unit form returns its validated envelope");
-            if usize::try_from(envelope.manifest.identity.entrypoint_function.0).ok()
-                != Some(self.function)
+            if self.callable.semantic_function()
+                != Some(envelope.manifest.identity.entrypoint_function)
                 || (envelope.manifest.identity.entrypoint_kind
                     == runmat_execution::ExecutableEntrypointKind::Script
                     && !self.arguments.is_empty())
@@ -144,14 +147,30 @@ impl ProgramExecutionRequest {
     }
 }
 
-fn entrypoint_matches(form: ExecutableForm, function: usize, entrypoint: &str) -> bool {
+fn entrypoint_matches(form: ExecutableForm, callable: &ProgramCallable, entrypoint: &str) -> bool {
     match form {
-        ExecutableForm::InterpreterBytecodeV1 => function.to_string() == entrypoint,
-        ExecutableForm::InterpreterScriptV1 => function == 0 && entrypoint == "script",
-        ExecutableForm::TestAttemptV1 => function == 0 && entrypoint == "test_attempt",
-        ExecutableForm::MeshingWorkload => function == 0 && entrypoint == "meshing_workload",
-        ExecutableForm::ExecutableUnitV3 => function.to_string() == entrypoint,
-        ExecutableForm::NativeObjectV1 => function.to_string() == entrypoint,
+        ExecutableForm::InterpreterBytecodeV1 => callable.recipe_entrypoint() == entrypoint,
+        ExecutableForm::InterpreterScriptV1 => {
+            callable
+                .semantic_function()
+                .is_some_and(|function| function.0 == 0)
+                && entrypoint == "script"
+        }
+        ExecutableForm::TestAttemptV1 => {
+            callable
+                .semantic_function()
+                .is_some_and(|function| function.0 == 0)
+                && entrypoint == "test_attempt"
+        }
+        ExecutableForm::MeshingWorkload => {
+            callable
+                .semantic_function()
+                .is_some_and(|function| function.0 == 0)
+                && entrypoint == "meshing_workload"
+        }
+        ExecutableForm::ExecutableUnitV3 | ExecutableForm::NativeObjectV1 => {
+            callable.recipe_entrypoint() == entrypoint
+        }
     }
 }
 
@@ -251,7 +270,9 @@ fn validate_externalized_success(
 mod tests {
     use runmat_execution::identity::ValueId;
     use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1;
-    use runmat_execution::{Digest, OutputContract, ProgramEnvironment, ProgramRevision};
+    use runmat_execution::{
+        Digest, OutputContract, ProgramEnvironment, ProgramFunctionId, ProgramRevision,
+    };
 
     use super::*;
     use crate::ExecutableForm;
@@ -291,10 +312,10 @@ mod tests {
         )
         .unwrap();
         ProgramExecutionRequest {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
             recipe,
             artifact,
-            function: 7,
+            callable: ProgramCallable::semantic(ProgramFunctionId(7), Some("test_function".into())),
             arguments: Vec::new(),
             requested_outputs: 1,
         }
@@ -320,7 +341,7 @@ mod tests {
     fn exact_program_request_validates_every_identity_boundary() {
         request().validate().unwrap();
         let mut mismatched = request();
-        mismatched.function = 8;
+        mismatched.callable = ProgramCallable::semantic(ProgramFunctionId(8), None);
         assert!(mismatched.validate().is_err());
         let mut tampered = request();
         tampered.artifact.executable_bytes.push(0);
@@ -341,7 +362,7 @@ mod tests {
     fn script_form_has_an_explicit_argument_free_entrypoint() {
         let mut script = request();
         script.recipe.entrypoint = "script".into();
-        script.function = 0;
+        script.callable = ProgramCallable::semantic(ProgramFunctionId(0), None);
         script.artifact = ProgramArtifact::materialize(
             &script.recipe,
             ExecutableForm::InterpreterScriptV1,

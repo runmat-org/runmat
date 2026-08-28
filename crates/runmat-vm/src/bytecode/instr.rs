@@ -236,10 +236,31 @@ pub enum Instr {
     // Create a lazy semantic-future descriptor from call arguments.
     CreateSemanticFuture(FunctionId, usize, usize),
     CreateSemanticFutureExpandMultiOutput(FunctionId, Vec<ArgumentSpec>, usize),
+    // Resolve the pool/no-pool overload and schedule a MATLAB-facing invocation.
+    ScheduleFeval {
+        arg_count: usize,
+        on_all: bool,
+    },
     // Explicit async spawn boundary.
     Spawn,
+    // Explicit async spawn on a validated pool handle.
+    SpawnOn,
     // Explicit await boundary.
     Await,
+    // Retrieve and combine outputs from a scalar or array of parallel futures.
+    FetchOutputs {
+        arg_count: usize,
+        requested_outputs: usize,
+    },
+    // Atomically retrieve the next completed unread task in completion order.
+    FetchNext {
+        has_timeout: bool,
+        requested_outputs: usize,
+    },
+    // Resolve or create the active execution pool from MATLAB-facing arguments.
+    EnsurePool(usize),
+    // Return the active pool, optionally creating it, from MATLAB-facing arguments.
+    CurrentPool(usize),
 
     // Stack and exception-control operations.
     Swap,
@@ -475,6 +496,9 @@ impl Instr {
             Instr::CallFevalMulti(argc, _) => effect(argc + 1, 1),
             Instr::CallFevalMultiUsingOutputSlot(argc, _) => effect(argc + 1, 1),
             Instr::CreateSemanticFuture(_, arg_count, _) => effect(*arg_count, 1),
+            Instr::ScheduleFeval { arg_count, .. } => effect(*arg_count, 1),
+            Instr::FetchNext { has_timeout, .. } => effect(if *has_timeout { 2 } else { 1 }, 1),
+            Instr::FetchOutputs { arg_count, .. } => effect(*arg_count, 1),
             Instr::CreateMatrix(rows, cols) | Instr::CreateCell2D(rows, cols) => {
                 effect(rows * cols, 1)
             }
@@ -574,7 +598,9 @@ impl Instr {
             | Instr::DeclareGlobalNamed(_, _)
             | Instr::DeclarePersistentNamed(_, _) => effect(0, 0),
             Instr::Spawn => effect(1, 1),
+            Instr::SpawnOn => effect(2, 1),
             Instr::Await => effect(1, 1),
+            Instr::EnsurePool(arg_count) | Instr::CurrentPool(arg_count) => effect(*arg_count, 1),
             Instr::EmitStackTop { .. } => effect(1, 1),
             Instr::EmitVar { .. } => effect(0, 0),
             Instr::StochasticEvolution => None,

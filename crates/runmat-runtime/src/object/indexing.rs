@@ -232,6 +232,7 @@ fn matlab_index_type(kind: ObjectIndexKind) -> &'static str {
 pub fn class_name_from_base(base: &Value) -> Option<&str> {
     match base {
         Value::Object(obj) => Some(obj.class_name.as_str()),
+        Value::ObjectArray(array) => Some(array.class_name()),
         Value::HandleObject(handle) => Some(handle.class_name.as_str()),
         _ => None,
     }

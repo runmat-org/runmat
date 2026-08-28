@@ -1038,8 +1038,14 @@ async fn run_interpreter_inner(
             | Instr::CallFevalExpandMultiOutputUsingOutputSlot(_, _)
             | Instr::CreateSemanticFuture(_, _, _)
             | Instr::CreateSemanticFutureExpandMultiOutput(_, _, _)
+            | Instr::ScheduleFeval { .. }
             | Instr::Spawn
+            | Instr::SpawnOn
             | Instr::Await
+            | Instr::FetchOutputs { .. }
+            | Instr::FetchNext { .. }
+            | Instr::EnsurePool(_)
+            | Instr::CurrentPool(_)
             | Instr::CallBuiltinMulti(_, _, _)
             | Instr::CallBuiltinMultiUsingOutputSlot(_, _, _)
             | Instr::CallSuperConstructorMulti { .. }

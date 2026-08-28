@@ -10,7 +10,7 @@ use tokio::io::BufReader;
 use super::{LocalDriver, TaskCompletion, TransferResult, NATIVE_OBJECT_STORE_ROOT_ENV};
 use crate::protocol::{
     StoredProgram, WorkerProcessMessage, WorkerRequest, WorkerResponse,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
 };
 
 pub(super) fn execute_attempt(
@@ -24,22 +24,11 @@ pub(super) fn execute_attempt(
         .map_err(|error| error.to_string())?;
     let stored: StoredProgram =
         serde_json::from_slice(&stored).map_err(|error| error.to_string())?;
-    let function = match stored.artifact.form {
-        runmat_execution_artifact::ExecutableForm::InterpreterScriptV1
-        | runmat_execution_artifact::ExecutableForm::TestAttemptV1
-        | runmat_execution_artifact::ExecutableForm::MeshingWorkload => 0,
-        _ => request
-            .task
-            .callable
-            .qualified_name
-            .parse::<usize>()
-            .map_err(|error| format!("invalid callable identity: {error}"))?,
-    };
     let worker_request = WorkerRequest {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
         recipe: stored.recipe,
         artifact: stored.artifact,
-        function,
+        callable: stored.callable,
         arguments: request.task.inputs.clone(),
         requested_outputs: request.task.outputs.requested_outputs,
     };

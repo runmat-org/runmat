@@ -1,7 +1,9 @@
 use std::os::unix::fs::PermissionsExt as _;
 use std::time::Duration;
 
-use runmat_execution::{Digest, OutputContract, ProgramEnvironment, ProgramRevision};
+use runmat_execution::{
+    Digest, OutputContract, ProgramCallable, ProgramEnvironment, ProgramFunctionId, ProgramRevision,
+};
 use runmat_execution_artifact::{
     ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionResponse,
 };
@@ -204,7 +206,7 @@ fn exact_program_submission_round_trips_through_durable_storage() {
     let submission = ProgramBatchSubmission {
         recipe,
         artifact,
-        function: 7,
+        callable: ProgramCallable::semantic(ProgramFunctionId(7), None),
         arguments: Vec::new(),
         requested_outputs: 1,
         idempotency_key: Some("program-key".into()),
@@ -220,7 +222,7 @@ fn exact_program_submission_round_trips_through_durable_storage() {
     else {
         panic!("expected an exact program invocation");
     };
-    assert_eq!(recovered.function, submission.function);
+    assert_eq!(recovered.callable, submission.callable);
     assert_eq!(recovered.artifact, submission.artifact);
     let (duplicate, created) = store.create_program(submission, 2).unwrap();
     assert!(!created);

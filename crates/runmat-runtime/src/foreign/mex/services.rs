@@ -108,12 +108,16 @@ impl MexHostServices for RuntimeMexHostServices {
     }
 
     fn get_object_property(&self, object: Value, name: &str) -> Result<Value, MexDiagnostic> {
-        pollster::block_on(self.runtime.scope(crate::object::resolve::load_member(
-            object,
-            name.to_string(),
-            false,
-            None,
-        )))
+        pollster::block_on(
+            self.runtime
+                .scope(crate::object::resolve::load_member_with_context(
+                    Some(&self.runtime),
+                    object,
+                    name.to_string(),
+                    false,
+                    None,
+                )),
+        )
         .map_err(runtime_diagnostic)
     }
 

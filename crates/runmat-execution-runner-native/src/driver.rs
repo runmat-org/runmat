@@ -1,5 +1,5 @@
 use std::collections::{BTreeSet, HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use runmat_execution::identity::{ArtifactId, WorkerId};
@@ -8,9 +8,12 @@ use runmat_execution::state::{PoolState, TaskState};
 use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
 use runmat_execution::value::ValuePayload;
 use runmat_execution::{
-    CancellationReason, Digest, ExecutionScopeId, OutputContract, PoolId, TaskId,
+    CancellationReason, ExecutionScopeId, OutputContract, PoolId, ProgramCallable, TaskId,
 };
-use runmat_execution_artifact::{ProgramArtifact, ProgramBuildRecipe};
+use runmat_execution_artifact::{
+    ProgramArtifact, ProgramBuildRecipe, ProgramExecutionDescriptor,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+};
 use runmat_execution_runner::port::BackendReport;
 use runmat_execution_runner::{
     AttemptFailureKind, AttemptReport, AttemptRequest, AttemptSuccess, Driver, DriverAction,
@@ -27,6 +30,12 @@ use crate::{
 
 pub const NATIVE_OBJECT_STORE_ROOT_ENV: &str = "RUNMAT_EXECUTION_OBJECT_STORE_ROOT";
 const MAX_BUFFERED_PROGRESS: usize = 256;
+const NO_COMPLETION_ORDER: u64 = u64::MAX;
+static NEXT_TASK_COMPLETION_ORDER: AtomicU64 = AtomicU64::new(0);
+
+pub(crate) fn next_task_completion_order() -> u64 {
+    NEXT_TASK_COMPLETION_ORDER.fetch_add(1, Ordering::Relaxed)
+}
 
 pub(crate) type TransferResult = Result<AttemptSuccess, String>;
 
@@ -34,6 +43,7 @@ pub(crate) struct TaskCompletion {
     value: Mutex<Option<TransferResult>>,
     progress: Mutex<VecDeque<crate::protocol::ProgramProgress>>,
     cancelled: AtomicBool,
+    completion_order: AtomicU64,
 }
 
 impl TaskCompletion {
@@ -42,6 +52,7 @@ impl TaskCompletion {
             value: Mutex::new(None),
             progress: Mutex::new(VecDeque::new()),
             cancelled: AtomicBool::new(false),
+            completion_order: AtomicU64::new(NO_COMPLETION_ORDER),
         }
     }
 
@@ -51,6 +62,12 @@ impl TaskCompletion {
 
     pub(crate) fn cancel(&self) {
         self.cancelled.store(true, Ordering::Release);
+        self.mark_completed();
+    }
+
+    pub(crate) fn completion_order(&self) -> Option<u64> {
+        let order = self.completion_order.load(Ordering::Acquire);
+        (order != NO_COMPLETION_ORDER).then_some(order)
     }
 
     pub(crate) fn record_progress(&self, progress: crate::protocol::ProgramProgress) {
@@ -73,7 +90,17 @@ impl TaskCompletion {
         let mut result = self.value.lock().expect("task completion poisoned");
         if result.is_none() {
             *result = Some(value);
+            self.mark_completed();
         }
+    }
+
+    fn mark_completed(&self) {
+        let _ = self.completion_order.compare_exchange(
+            NO_COMPLETION_ORDER,
+            next_task_completion_order(),
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
     }
 }
 
@@ -171,10 +198,14 @@ impl LocalDriver {
         self.pool_id
     }
 
+    pub(crate) const fn max_workers(&self) -> u32 {
+        self.config.max_workers
+    }
+
     pub(crate) fn submit(
         self: &Arc<Self>,
         task_id: TaskId,
-        function: usize,
+        callable: ProgramCallable,
         recipe: ProgramBuildRecipe,
         artifact: ProgramArtifact,
         inputs: Vec<ValuePayload>,
@@ -186,11 +217,7 @@ impl LocalDriver {
             scope_id: self.scope_id,
             pool_id: self.pool_id,
             program_artifact_id: artifact_id,
-            callable: Callable {
-                owner_identity: "local-session".into(),
-                qualified_name: function.to_string(),
-                entrypoint_digest: Digest::sha256(function.to_be_bytes()),
-            },
+            callable: Callable::for_program("local-session", &callable),
             inputs,
             outputs,
             resources: ResourceRequest {
@@ -213,6 +240,7 @@ impl LocalDriver {
                 dependencies: BTreeSet::new(),
                 priority: 0,
             },
+            callable,
             recipe,
             artifact,
         )
@@ -221,26 +249,43 @@ impl LocalDriver {
     pub(crate) fn submit_task(
         self: &Arc<Self>,
         submission: TaskSubmission,
+        callable: ProgramCallable,
         recipe: ProgramBuildRecipe,
         artifact: ProgramArtifact,
     ) -> NativeExecutionResult<Arc<TaskCompletion>> {
-        artifact.validate_against(&recipe).map_err(|error| {
+        ProgramExecutionDescriptor {
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+            recipe: recipe.clone(),
+            artifact: artifact.clone(),
+            callable: callable.clone(),
+            requested_outputs: submission.request.outputs.requested_outputs,
+        }
+        .validate_for_portable_host()
+        .map_err(|error| {
             NativeExecutionError::Protocol(format!(
-                "local program artifact failed validation: {error}"
+                "local program descriptor failed validation: {error}"
             ))
         })?;
         let artifact_id = ArtifactId::derive(&[artifact.id.0.bytes()]);
         if submission.request.scope_id != self.scope_id
             || submission.request.pool_id != self.pool_id
             || submission.request.program_artifact_id != artifact_id
+            || !submission.request.callable.identifies_program(&callable)
         {
             return Err(NativeExecutionError::Protocol(
                 "local task submission differs from its session or program artifact".into(),
             ));
         }
         let task_id = submission.request.id;
-        let stored = serde_json::to_vec(&StoredProgram { recipe, artifact })
+        callable
+            .validate()
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+        let stored = serde_json::to_vec(&StoredProgram {
+            callable,
+            recipe,
+            artifact,
+        })
+        .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
         self.artifacts.put(artifact_id, &stored)?;
         let completion = Arc::new(TaskCompletion::new());
         self.completions

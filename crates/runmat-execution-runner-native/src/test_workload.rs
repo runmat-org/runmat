@@ -273,11 +273,11 @@ mod tests {
     use std::process::Command;
 
     use runmat_execution::value::{InlineValue, ValuePayload};
-    use runmat_execution::Digest;
+    use runmat_execution::{Digest, ProgramCallable, ProgramFunctionId};
     use runmat_execution_artifact::{
         ExecutableForm, ExecutionBundleBuilder, LogicalObject, ObjectNamespace, ProgramArtifact,
         ProgramBuildRecipe, ProgramExecutionRequest, ProgramExecutionResponse, ProgramTarget,
-        PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
     };
     use runmat_test::descriptor::TestSelector;
     use runmat_test::discovery::{FrozenTestRunSnapshot, SavedRunSource};
@@ -380,10 +380,13 @@ mod tests {
         )
         .unwrap();
         let response = execute_host_program_request(ProgramExecutionRequest {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
             recipe,
             artifact,
-            function,
+            callable: ProgramCallable::semantic(
+                ProgramFunctionId(u32::try_from(function).expect("portable function id")),
+                None,
+            ),
             arguments: Vec::new(),
             requested_outputs: 1,
         })
@@ -516,10 +519,13 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         let artifact = bundle.manifest.artifacts.first().cloned().unwrap();
         let response = execute_host_program_request_with_project(
             ProgramExecutionRequest {
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
                 recipe,
                 artifact,
-                function,
+                callable: ProgramCallable::semantic(
+                    ProgramFunctionId(u32::try_from(function).expect("portable function id")),
+                    None,
+                ),
                 arguments: Vec::new(),
                 requested_outputs: 1,
             },
@@ -668,10 +674,13 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         let artifact = bundle.manifest.artifacts.first().cloned().unwrap();
         let response = execute_host_program_request_with_project(
             ProgramExecutionRequest {
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
                 recipe,
                 artifact,
-                function,
+                callable: ProgramCallable::semantic(
+                    ProgramFunctionId(u32::try_from(function).expect("portable function id")),
+                    None,
+                ),
                 arguments: Vec::new(),
                 requested_outputs: 1,
             },

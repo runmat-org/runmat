@@ -57,9 +57,12 @@ impl NativeProgramSession {
                 "native task inputs or outputs differ from its exact program request".into(),
             ));
         }
-        let completion = self
-            .driver
-            .submit_task(submission, program.recipe, program.artifact)?;
+        let completion = self.driver.submit_task(
+            submission,
+            program.callable,
+            program.recipe,
+            program.artifact,
+        )?;
         Ok(NativeProgramTask { completion })
     }
 

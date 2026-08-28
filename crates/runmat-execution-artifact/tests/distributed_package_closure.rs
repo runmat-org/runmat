@@ -109,6 +109,7 @@ fn every_source_kind_converges_into_one_portable_credential_free_closure() {
         native_interfaces: Vec::new(),
         mex_artifacts: Vec::new(),
         java_artifacts: Vec::new(),
+        python_artifacts: Vec::new(),
     };
     let handoff = FrozenProjectHandoff::new(project.clone());
     handoff.validate().unwrap();

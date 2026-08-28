@@ -24,6 +24,7 @@ pub mod io;
 pub mod logical;
 pub mod math;
 pub mod missing;
+pub mod parallel;
 #[cfg(feature = "plot-core")]
 pub mod plotting;
 pub mod stats;

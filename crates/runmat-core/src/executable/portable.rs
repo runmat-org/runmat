@@ -140,7 +140,7 @@ impl ExecutableUnit {
                 .map(|region| region.contract.clone())
                 .collect(),
             interop,
-            parallel: runmat_types::ParallelManifest::empty(),
+            parallel: self.analysis().parallel.clone(),
             optional_sections: Vec::new(),
         };
         runmat_execution::ExecutableUnitEnvelope::new(manifest, payloads)

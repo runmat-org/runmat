@@ -2,13 +2,15 @@ use runmat_mir::{MirIndexComponent, MirIndexing, MirOperand};
 use runmat_native_codegen::{NativeIndexBound, NativeIndexExpressionKind, NativeRangeExpression};
 use runmat_runtime::indexing::plan::{build_index_plan, IndexPlan};
 use runmat_runtime::indexing::read_slice;
-use runmat_runtime::indexing::selectors::build_slice_selectors;
+use runmat_runtime::indexing::selectors::{build_slice_selectors, index_scalar_from_value};
 use runmat_runtime::indexing::write_slice;
-use runmat_runtime::object::dispatch::call_object_index_descriptor_method;
-use runmat_runtime::object::indexing::ObjectIndexDescriptor;
+use runmat_runtime::object::dispatch::{
+    call_object_index_descriptor_method, value_defines_index_overload,
+};
+use runmat_runtime::object::indexing::{ObjectIndexDescriptor, ObjectIndexOp};
 use runmat_runtime::RuntimeError;
 use runmat_types::{IndexKind, IndexResultContext};
-use runmat_value::{CharArray, LogicalArray, ObjectArray, SymbolicArray, Value};
+use runmat_value::{CharArray, LogicalArray, SymbolicArray, Value};
 
 use crate::{NativeExecutorError, NativeExecutorResult};
 
@@ -49,7 +51,11 @@ pub(super) fn assign(
     if indexing.kind == IndexKind::Brace {
         return assign_brace(base, selectors, rhs, delete);
     }
-    if matches!(base, Value::Object(_) | Value::HandleObject(_)) {
+    if matches!(
+        base,
+        Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)
+    ) && value_defines_index_overload(&base, ObjectIndexOp::Subsasgn)
+    {
         let descriptor = ObjectIndexDescriptor::subsasgn_paren_from_slice(
             base,
             selectors.dims,
@@ -63,6 +69,17 @@ pub(super) fn assign(
             call_object_index_descriptor_method(descriptor),
             "object indexed assignment",
         );
+    }
+    if matches!(
+        base,
+        Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)
+    ) {
+        if let Some(indices) = object_scalar_indices(state, &selectors)? {
+            return runmat_runtime::indexing::object::assign_scalar_indices(
+                base, &indices, rhs, delete,
+            )
+            .map_err(NativeExecutorError::from);
+        }
     }
     let plan = super::sync::complete(
         &state.runtime,
@@ -132,6 +149,10 @@ pub(super) fn assign(
             )
             .map_err(NativeExecutorError::from)
         }
+        value @ (Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)) => {
+            runmat_runtime::indexing::object::assign_with_plan(value, &plan, rhs, delete)
+                .map_err(NativeExecutorError::from)
+        }
         Value::StringArray(mut value) if !delete => {
             if !plan.indices.is_empty() {
                 let rhs = write_slice::build_string_rhs_view(&rhs, &plan.selection_lengths)
@@ -148,6 +169,34 @@ pub(super) fn assign(
         ))),
     }?;
     Ok(updated)
+}
+
+fn object_scalar_indices(
+    state: &HostState,
+    selectors: &MaterializedSelectors,
+) -> NativeExecutorResult<Option<Vec<usize>>> {
+    if selectors.colon_mask != 0 || selectors.end_mask != 0 {
+        return Ok(None);
+    }
+    let mut indices = Vec::with_capacity(selectors.positional.len());
+    for selector in &selectors.positional {
+        let Some(index) = super::sync::complete(
+            &state.runtime,
+            index_scalar_from_value(selector),
+            "object scalar index decoding",
+        )?
+        else {
+            return Ok(None);
+        };
+        let index = index.positive_usize().ok_or_else(|| {
+            NativeExecutorError::from(semantic_error(
+                "IndexOutOfBounds",
+                "Object array index is out of bounds",
+            ))
+        })?;
+        indices.push(index);
+    }
+    Ok(Some(indices))
 }
 
 struct MaterializedSelectors {
@@ -356,7 +405,11 @@ fn read_paren(
         )?;
         return normalize_outputs(value, requested_outputs);
     }
-    if matches!(base, Value::Object(_) | Value::HandleObject(_)) {
+    if matches!(
+        base,
+        Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)
+    ) && value_defines_index_overload(&base, ObjectIndexOp::Subsref)
+    {
         let descriptor = ObjectIndexDescriptor::subsref_paren_from_slice(
             base,
             selectors.dims,
@@ -559,7 +612,10 @@ fn read_with_plan(base: Value, plan: &IndexPlan) -> NativeExecutorResult<Value> 
             )
             .map_err(NativeExecutorError::from)
         }
-        Value::ObjectArray(value) => gather_object(&value, plan),
+        value @ (Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)) => {
+            runmat_runtime::indexing::object::read_with_plan(&value, plan)
+                .map_err(NativeExecutorError::from)
+        }
         Value::SymbolicArray(value) => gather_symbolic(&value, plan),
         value => read_scalar(value, plan),
     }
@@ -579,23 +635,6 @@ fn gather_char(value: &CharArray, plan: &IndexPlan) -> NativeExecutorResult<Valu
     let values = gather(&value.to_column_major(), plan, "character")?;
     CharArray::from_column_major(values, plan.output_shape.clone())
         .map(Value::CharArray)
-        .map_err(|error| NativeExecutorError::from(shape_error(error)))
-}
-
-fn gather_object(value: &ObjectArray, plan: &IndexPlan) -> NativeExecutorResult<Value> {
-    if let [index] = plan.indices.as_slice() {
-        return value.get_linear(*index as usize).cloned().ok_or_else(|| {
-            NativeExecutorError::from(semantic_error("IndexOutOfBounds", "Index out of bounds"))
-        });
-    }
-    let indices = plan
-        .indices
-        .iter()
-        .map(|index| *index as usize)
-        .collect::<Vec<_>>();
-    value
-        .select_linear(&indices, plan.output_shape.clone())
-        .map(Value::ObjectArray)
         .map_err(|error| NativeExecutorError::from(shape_error(error)))
 }
 

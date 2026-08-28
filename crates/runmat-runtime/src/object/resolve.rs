@@ -141,12 +141,28 @@ pub async fn load_member(
     allow_init: bool,
     caller_function_name: Option<&str>,
 ) -> Result<Value, RuntimeError> {
+    load_member_with_context(None, base, field, allow_init, caller_function_name).await
+}
+
+pub async fn load_member_with_context(
+    context: Option<&crate::context::RuntimeContext>,
+    base: Value,
+    field: String,
+    allow_init: bool,
+    caller_function_name: Option<&str>,
+) -> Result<Value, RuntimeError> {
+    if let Some(result) = context
+        .and_then(|context| crate::parallel::introspection::load_member(context, &base, &field))
+    {
+        return result;
+    }
     match base {
         Value::ObjectArray(array) => {
             let mut values = Vec::with_capacity(array.len());
             for value in array.data() {
                 values.push(
-                    Box::pin(load_member(
+                    Box::pin(load_member_with_context(
+                        context,
                         value.clone(),
                         field.clone(),
                         allow_init,
@@ -325,6 +341,16 @@ pub async fn load_member_dynamic(
     caller_function_name: Option<&str>,
 ) -> Result<Value, RuntimeError> {
     load_member(base, name, allow_init, caller_function_name).await
+}
+
+pub async fn load_member_dynamic_with_context(
+    context: Option<&crate::context::RuntimeContext>,
+    base: Value,
+    name: String,
+    allow_init: bool,
+    caller_function_name: Option<&str>,
+) -> Result<Value, RuntimeError> {
+    load_member_with_context(context, base, name, allow_init, caller_function_name).await
 }
 
 pub fn load_static_member(

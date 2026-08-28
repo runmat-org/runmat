@@ -27,7 +27,7 @@ enum AwaitWork {
     Poll(Value),
     Execute {
         handle: runmat_execution::FutureHandle,
-        call: DeferredCall,
+        call: Box<DeferredCall>,
     },
 }
 
@@ -110,21 +110,15 @@ pub(super) async fn complete(
                 }
             }
             AwaitWork::Execute { handle, call } => {
-                let descriptor = runmat_runtime::call::descriptor::CallableDescriptor::resolved(
-                    runmat_hir::CallableIdentity::BoundFunction(runmat_hir::FunctionId(
-                        call.function,
-                    )),
-                    call.arguments,
-                    call.requested_outputs,
-                    runmat_hir::CallableFallbackPolicy::None,
-                    runmat_runtime::call::descriptor::CallableCallKind::Direct,
-                );
+                let requested_outputs = call.descriptor.requested_outputs;
                 let result = runtime
                     .scope(
-                        runmat_runtime::call::descriptor::execute_callable_descriptor(descriptor),
+                        runmat_runtime::call::descriptor::execute_callable_descriptor(
+                            call.descriptor,
+                        ),
                     )
                     .await
-                    .map(|value| normalize_outputs(value, call.requested_outputs));
+                    .map(|value| normalize_outputs(value, requested_outputs));
                 let stored = result
                     .as_ref()
                     .map(Clone::clone)

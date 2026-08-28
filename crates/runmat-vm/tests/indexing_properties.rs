@@ -431,25 +431,31 @@ fn cell_expansion_into_slice_with_degenerate_dims() {
 }
 
 #[test]
-fn oop_negative_missing_subsref_mex() {
+fn object_without_subsref_uses_default_parenthesis_indexing() {
     let program = r#"
         __register_test_classes();
         o = new_object('NoIdx'); % class without subsref
         x = o(1);
     "#;
-    let err = execute_source(program).expect_err("missing subsref should fail");
-    assert_eq!(err.identifier(), Some("RunMat:MissingSubsref"));
+    let values = execute_source(program).expect("default object indexing");
+    assert!(values.iter().any(
+        |value| matches!(value, runmat_value::Value::Object(object) if object.class_name == "NoIdx")
+    ));
 }
 
 #[test]
-fn oop_negative_missing_subsasgn_mex() {
+fn object_without_subsasgn_uses_default_homogeneous_array_assignment() {
     let program = r#"
         __register_test_classes();
         o = new_object('NoIdx'); % class without subsasgn
-        o(1) = 5;
+        other = new_object('NoIdx');
+        o(2) = other;
+        n = numel(o);
     "#;
-    let err = execute_source(program).expect_err("missing subsasgn should fail");
-    assert_eq!(err.identifier(), Some("RunMat:MissingSubsasgn"));
+    let values = execute_source(program).expect("default object-array assignment");
+    assert!(values
+        .iter()
+        .any(|value| matches!(value, runmat_value::Value::Num(number) if *number == 2.0)));
 }
 
 #[test]

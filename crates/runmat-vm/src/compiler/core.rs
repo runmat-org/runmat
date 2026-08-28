@@ -193,7 +193,7 @@ fn mir_operand_is_one(operand: &MirOperand) -> bool {
     }
 }
 
-fn call_name(call: &MirCall) -> Option<&str> {
+pub(super) fn call_name(call: &MirCall) -> Option<&str> {
     match &call.callee {
         MirCallee::Static(CallableIdentity::Builtin(id)) => Some(id.0.as_str()),
         MirCallee::Static(CallableIdentity::ExternalName(name)) if name.0.len() == 1 => {
@@ -775,7 +775,27 @@ impl Compiler {
                         &mut pending_jumps,
                     )?;
                 }
-                MirTerminatorKind::ParFor { .. } | MirTerminatorKind::Spmd { .. } => {
+                MirTerminatorKind::ParFor {
+                    binding,
+                    iterable,
+                    body_block,
+                    exit_block,
+                    ..
+                } => {
+                    // The serial scheduler is the correctness fallback for a
+                    // structured parallel loop. Parallel-capable hosts may
+                    // replace this region using the executable manifest; the
+                    // VM still preserves exact loop semantics when no worker
+                    // budget is available.
+                    self.compile_mir_for_terminator(
+                        *binding,
+                        iterable,
+                        *body_block,
+                        *exit_block,
+                        &mut pending_jumps,
+                    )?;
+                }
+                MirTerminatorKind::Spmd { .. } => {
                     return Err(CompileError::new(
                         "parallel-region MIR requires the structured scheduler lowering capability",
                     )
@@ -1431,6 +1451,9 @@ impl Compiler {
                     .compile_error("MIR multi-assign call output count does not match targets")
                     .with_identifier(IDENT_MIR_MULTI_ASSIGN_OUTPUT_COUNT_MISMATCH));
             }
+        }
+        if self.try_compile_parallel_call(call)? {
+            return Ok(());
         }
         let (specs, has_expansion) = self.mir_call_arg_specs(&call.args);
         if matches!(call.syntax, CallSyntax::Method | CallSyntax::DottedInvoke) {
@@ -2437,6 +2460,9 @@ impl Compiler {
     }
 
     fn compile_mir_call(&mut self, call: &MirCall) -> Result<(), CompileError> {
+        if self.try_compile_parallel_call(call)? {
+            return Ok(());
+        }
         let requested_outputs = self.resolved_call_output_count(call)?;
 
         let (specs, has_expansion) = self.mir_call_arg_specs(&call.args);
@@ -3105,7 +3131,7 @@ impl Compiler {
         (specs, has_expansion)
     }
 
-    fn compile_mir_call_arg(&mut self, arg: &MirCallArg) -> Result<(), CompileError> {
+    pub(super) fn compile_mir_call_arg(&mut self, arg: &MirCallArg) -> Result<(), CompileError> {
         match arg {
             MirCallArg::Single(operand) => self.compile_mir_operand(operand),
             MirCallArg::Expansion { base, indices, .. } => {

@@ -97,7 +97,8 @@ pub(super) fn evaluate_rvalue(
             let base = materialize_operand(state, base)?;
             let value = super::sync::complete(
                 &state.runtime,
-                runmat_runtime::object::resolve::load_member(
+                runmat_runtime::object::resolve::load_member_with_context(
+                    Some(&state.runtime),
                     base,
                     member.0.clone(),
                     false,
@@ -118,7 +119,8 @@ pub(super) fn evaluate_rvalue(
             })?;
             let value = super::sync::complete(
                 &state.runtime,
-                runmat_runtime::object::resolve::load_member_dynamic(
+                runmat_runtime::object::resolve::load_member_dynamic_with_context(
+                    Some(&state.runtime),
                     base,
                     member,
                     false,
@@ -188,9 +190,13 @@ pub(super) fn evaluate_rvalue(
                 .runtime
                 .execution()
                 .create_future(runmat_runtime::execution::DeferredCall {
-                    function: function.0,
-                    arguments,
-                    requested_outputs: requested_outputs.fixed_count(),
+                    descriptor: runmat_runtime::call::descriptor::CallableDescriptor::resolved(
+                        runmat_hir::CallableIdentity::BoundFunction(*function),
+                        arguments,
+                        requested_outputs.fixed_count(),
+                        runmat_hir::CallableFallbackPolicy::None,
+                        runmat_runtime::call::descriptor::CallableCallKind::Direct,
+                    ),
                     program_revision: state.runtime.program_revision().cloned(),
                     program,
                 })

@@ -149,7 +149,8 @@ fn read_segment(
     match segment {
         PlaceSegment::Member(member) => super::sync::complete(
             &state.runtime,
-            runmat_runtime::object::resolve::load_member(
+            runmat_runtime::object::resolve::load_member_with_context(
+                Some(&state.runtime),
                 base,
                 member.clone(),
                 false,
@@ -167,7 +168,8 @@ fn read_segment(
             })?;
             super::sync::complete(
                 &state.runtime,
-                runmat_runtime::object::resolve::load_member_dynamic(
+                runmat_runtime::object::resolve::load_member_dynamic_with_context(
+                    Some(&state.runtime),
                     base,
                     member,
                     false,
